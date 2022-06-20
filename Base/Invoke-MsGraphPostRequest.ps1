@@ -17,6 +17,13 @@ function Invoke-MsGraphPostRequest {
     
     $Body = $Body | ConvertTo-Json -Depth 10
 
+    If ($Global:DebugMode.Contains('P')) {
+        Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
+        Write-Host "Invoke-MsGraphPostRequest" -ForegroundColor Blue
+        Write-Host $URI -ForegroundColor Blue
+        Write-Host $Body -ForegroundColor Blue
+    }
+
     Try {
         $Result = Invoke-RestMethod -Method Post -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" } -Body $Body -ContentType "application/json"
     }

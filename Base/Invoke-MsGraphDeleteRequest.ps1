@@ -13,6 +13,12 @@ function Invoke-MsGraphDeleteRequest {
         $AccessToken = $Global:AccessToken
     }
 
+    If ($Global:DebugMode.Contains('D')) {
+        Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
+        Write-Host "Invoke-MsGraphDeleteRequest" -ForegroundColor Blue
+        Write-Host $URI -ForegroundColor Blue
+    }
+
     Try {
         $Result = Invoke-RestMethod -Method DELETE -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
         $Result

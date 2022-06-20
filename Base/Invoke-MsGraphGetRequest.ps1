@@ -13,6 +13,12 @@ function Invoke-MsGraphGetRequest {
         $AccessToken = $Global:AccessToken
     }
     
+    If ($Global:DebugMode.Contains('G')) {
+        Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
+        Write-Host "Invoke-MsGraphGetRequest" -ForegroundColor Blue
+        Write-Host $URI -ForegroundColor Blue
+    }
+
     $ReturnValue = $Null
     Try {
         $Result = Invoke-RestMethod -Method Get -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
