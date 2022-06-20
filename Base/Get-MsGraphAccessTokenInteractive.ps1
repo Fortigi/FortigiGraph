@@ -12,7 +12,7 @@ function Get-MsGraphAccessTokenInteractive {
     #Source: https://blog.simonw.se/getting-an-access-token-for-azuread-using-powershell-and-device-login-flow/
     #Some minor adjustments
 
-    If ($Null -eq $ClientId) {
+    If (!($ClientId)) {
         $ClientId = '1950a258-227b-4e31-a9cf-717495945fc2' #Micrsooft Azure PowerShell
         #$ClientId = 'd3590ed6-52b3-4102-aeff-aad2292ab01c' #Office...
     }
