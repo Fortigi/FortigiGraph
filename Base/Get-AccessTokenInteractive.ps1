@@ -26,15 +26,32 @@ function Get-AccessTokenInteractive {
     
     $DeviceCodeRequest = Invoke-RestMethod -Method Post -Uri $URI -Body $Body
     Write-Host $DeviceCodeRequest.message -ForegroundColor Yellow
-    pause
-
+    
     $Uri = "https://login.microsoftonline.com/$TenantId/oauth2/token"
     $Body = @{
         grant_type = "urn:ietf:params:oauth:grant-type:device_code"
         code       = $DeviceCodeRequest.device_code
         client_id  = $ClientId
     }
-    $TokenRequest = Invoke-RestMethod -Method Post -Uri $URI -Body $Body
+
+    $Timeout = 300
+    $TimeoutTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    while ([string]::IsNullOrEmpty($TokenRequest.access_token)) {
+        if ($TimeoutTimer.Elapsed.TotalSeconds -gt $Timeout) {
+            throw 'Login timed out, please try again.'
+        }
+        $TokenRequest = try {
+            Invoke-RestMethod -Method Post -Uri $URI -Body $Body -ErrorAction Stop
+        }
+        catch {
+            $Message = $_.ErrorDetails.Message | ConvertFrom-Json
+            if ($Message.error -ne "authorization_pending") {
+                throw
+            }
+            Start-Sleep -Seconds 1
+        }
+    }
+    
     $AccessToken = $TokenRequest.access_token
     
     If ($AccessToken) {
