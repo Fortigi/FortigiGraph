@@ -28,7 +28,7 @@ function Invoke-PatchRequest {
     }
     
     #Check if Access token is expired, if so get new one.
-    $TokenIsStillValid = Confirm-AccessTokenIsStillValid
+    $TokenIsStillValid = Confirm-AccessTokenValidity
     if (!($TokenIsStillValid)) {
         
         If ($Global:DebugMode.Contains('P')) {
