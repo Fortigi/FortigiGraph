@@ -6,29 +6,16 @@ function Confirm-AccessTokenValidity {
     
     $TokenDecoded = Get-AccessTokenDetail
 
-    [Int64]$Ctime=$TokenDecoded.exp
+    [Int64]$Ctime = $TokenDecoded.exp
     [datetime]$Epoch = '1970-01-01 00:00:00'
     [datetime]$ResultUTC = $epoch.AddSeconds($Ctime)
-    [datetime]$NowUTC = Get-Date -AsUTC
+    [datetime]$NowUTC = (Get-Date).ToUniversalTime()
 
 
     If ($ResultUTC -gt $NowUTC) {
-
-        If ($Global:DebugMode.Contains('T')) {
-            $ValidUntil = $ResultUTC - $NowUTC
-            Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
-            Write-Host "Get-AccessTokenDetail" -ForegroundColor Blue
-            Write-Host ("Access token: valid for: " + $ValidUntil.Minutes) -ForegroundColor Blue
-        }
         return $true
     }
     else {
-        If ($Global:DebugMode.Contains('T')) {
-            $ValidUntil = $ResultUTC - $NowUTC
-            Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
-            Write-Host "Get-AccessTokenDetail" -ForegroundColor Blue
-            Write-Host "Access token no longer valid."  -ForegroundColor Blue
-        }
         return $false
     }
 
