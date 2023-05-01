@@ -19,7 +19,11 @@ function Get-User {
 
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
-        [bool]$IncludeManager
+        [bool]$IncludeManager,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [bool]$IncludeExtensions
     )
 
     $URI = 'https://graph.microsoft.com/beta/users'
@@ -55,6 +59,14 @@ function Get-User {
         }
     }
 
+    If ($IncludeExtensions) {
+        if ($URI.Contains("?")) {
+            $URI = $URI + '&$expand=extensions'
+        }
+        else {
+            $URI = $URI + '?$expand=extensions'
+        }
+    }
     $ReturnValue = Invoke-GetRequest -URi $URI
     return $ReturnValue
 
