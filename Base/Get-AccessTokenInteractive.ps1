@@ -59,6 +59,7 @@ function Get-AccessTokenInteractive {
         $global:RefreshToken = $TokenRequest.refresh_token
         $global:ClientId = $ClientId
         $global:TenantId = $TenantId
+        $global:FullToken = $TokenRequest
     }
     If (!$AccessToken) { 
         Throw "Error retrieving Graph Access Token. Check API permissions of the (App Registration) in AzureAD" 
