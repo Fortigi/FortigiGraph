@@ -1,4 +1,5 @@
-function Use-ExistingMSALToken {
+function Use-FGExistingMSALToken {
+    [alias("Use-ExistingMSALToken")]
     Param(
         [Parameter(Mandatory = $True)]
         $Token            
