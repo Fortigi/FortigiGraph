@@ -12,13 +12,13 @@
 RootModule = '.\FortigiGraph.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.0'
+ModuleVersion = '1.0.20231228'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
 
 # ID used to uniquely identify this module
-GUID = 'f5c37d57-0695-4d37-b885-781a6a03d5a0'
+GUID = '59aee1c6-ac4d-4af2-86b3-e558d6e1da34'
 
 # Author of this module
 Author = 'Wim van den Heijkant'
@@ -30,7 +30,7 @@ CompanyName = 'Fortigi'
 Copyright = '(c) Wim van den Heijkant. All rights reserved.'
 
 # Description of the functionality provided by this module
-Description = 'PowerShell Module to assist with scripting against the Microsoft Graph.'
+Description = 'PowerShell Module to assist with scripting against the Microsoft Graph. The sources for this module, including versioning can be found on GitHub: https://github.com/Fortigi/FortigiGraph'
 
 # Minimum version of the PowerShell engine required by this module
 # PowerShellVersion = ''
@@ -107,7 +107,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'The sources for this module, including versioning can be found on GitHub: https://github.com/Fortigi/FortigiGraph'
+        # ReleaseNotes = ''
 
         # Prerelease string of this module
         # Prerelease = ''
