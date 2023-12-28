@@ -4,7 +4,7 @@ $Description = "PowerShell Module to assist with scripting against the Microsoft
 
 $VersionMajor = "1"
 $VersionMinor = "0"
-$Version = $VersionMajor + "." + $VersionMinor + "." + (Get-Date -Format "yyyyMMdd")
+$Version = $VersionMajor + "." + $VersionMinor + "." + (Get-Date -Format "yyyyMMdd") + "." + (Get-Date -Format "HHmm")
 
 $Path = "C:\Source\Fortigi\GitHub\FortigiGraph"
 

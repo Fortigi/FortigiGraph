@@ -1,6 +1,5 @@
 function Invoke-FGGetRequest {
-    [alias("Invoke-FGGetRequest")]
-    [cmdletbinding()]
+    [alias("Invoke-GetRequest")]
     Param
     (
         [Parameter(Mandatory = $true)]

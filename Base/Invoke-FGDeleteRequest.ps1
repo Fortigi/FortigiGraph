@@ -1,5 +1,5 @@
 function Invoke-FGDeleteRequest {
-    [alias("Invoke-FGDeleteRequest")]
+    [alias("Invoke-DeleteRequest")]
     [cmdletbinding()]
     
     Param

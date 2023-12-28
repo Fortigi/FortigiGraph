@@ -1,5 +1,5 @@
 function Invoke-FGPatchRequest {
-    [alias("Invoke-FGPatchRequest")]
+    [alias("Invoke-PatchRequest")]
     [cmdletbinding()]
     Param
     (

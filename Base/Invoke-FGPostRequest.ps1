@@ -1,5 +1,5 @@
 function Invoke-FGPostRequest {
-    [alias("Invoke-FGPostRequest")]
+    [alias("Invoke-PostRequest")]
     [cmdletbinding()]
     Param
     (

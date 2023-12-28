@@ -1,5 +1,5 @@
 function Invoke-FGPutRequest {
-    [alias("Invoke-FGPutRequest")]
+    [alias("Invoke-PutRequest")]
     [cmdletbinding()]
     Param
     (

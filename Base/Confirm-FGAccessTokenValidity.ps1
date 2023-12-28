@@ -6,7 +6,7 @@ function Confirm-FGAccessTokenValidity {
         Throw "No Access Token found. Please run Get-AccessToken or Get-AccessTokenInteractive before running this function."
     }
     
-    $TokenDecoded = Get-AccessTokenDetail
+    $TokenDecoded = Get-FGAccessTokenDetail
 
     [Int64]$Ctime = $TokenDecoded.exp
     [datetime]$Epoch = '1970-01-01 00:00:00'

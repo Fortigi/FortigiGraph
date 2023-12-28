@@ -1,5 +1,5 @@
 function Read-FGToken {
-    [alias("ABC")]
+    [alias("Read-Token")]
     [cmdletbinding()]
     Param
     (
