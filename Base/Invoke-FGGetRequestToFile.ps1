@@ -4,9 +4,7 @@ function Invoke-FGGetRequestToFile {
         [Parameter(Mandatory = $true)]
         [string]$URI,
         [Parameter(Mandatory = $true)]
-        [string]$FilePath,
-        [Parameter(Mandatory = $true)]
-        [string]$FileName
+        [string]$File
     )
 
     If (!($Global:AccessToken)) {
@@ -60,9 +58,8 @@ function Invoke-FGGetRequestToFile {
     else {
         $ReturnValue = $Result
     }
-    $Count = 0
-    $File = ($FilePath + "\" + $Count + "." + $FileName)
-    Write-Host $File
+
+    #Add results to file
     $ReturnValue | ConvertTo-Json -Depth 10 | Out-File $File -Force
 
     #By default you only get 100 results... its paged
@@ -81,11 +78,54 @@ function Invoke-FGGetRequestToFile {
         else {
             $ReturnValue = $Result
         }
-        $Count = $Count + 1
-        $File = ($FilePath + "\" + $Count + "." + $FileName)
-        Write-Host $File
-        $ReturnValue | ConvertTo-Json -Depth 10 | Out-File $File -Force
+
+        #Add results to file, this will add a seperate JSON to the file.. breaking the JSON format
+        $ReturnValue | ConvertTo-Json -Depth 10 | Out-File $File -Append
         
     }
+
+    #We now have a file with multiple jsons not a single one. We need to make it a single JSON again.
+    $FileObject = Get-Item -Path $File
+    $FilePath = $FileObject.Directory.FullName
+    Rename-Item -Path $File -NewName "Input.json"
+    
+    # Define the input and output file paths
+    $InputFilePath = $FilePath + "\Input.json"
+    $OutputFilePath = $File
+
+    # Create a StreamReader to read the input file
+    $Reader = [System.IO.StreamReader]::new($InputFilePath)
+
+    # Create a StreamWriter to write to the output file
+    $Writer = [System.IO.StreamWriter]::new($OutputFilePath)
+
+    # Read the first line from the file
+    $PreviousLine = $reader.ReadLine()
+
+    # Write the first line to the output file
+    $Writer.WriteLine($PreviousLine)
+
+    # Read subsequent lines and check for consecutive lines containing ']' and '['
+    while (-not $Reader.EndOfStream) {
+        # Read the next line
+        $CurrentLine = $Reader.ReadLine()
+
+        # Check if the current line and the previous line contain ']' and '[' respectively
+        if ($PreviousLine -eq ']' -and $CurrentLine -eq '[') {
+            # Skip writing the current line since it matches the condition
+        } else {
+            # Write the current line to the output file
+            $Writer.WriteLine($CurrentLine)
+        }
+
+        # Update the previous line
+        $PreviousLine = $CurrentLine
+    }
+
+    # Close the StreamReader and StreamWriter
+    $Reader.Close()
+    $Writer.Close()
+    
+    Remove-Item $InputFilePath -Force
 
 }
