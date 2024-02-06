@@ -12,13 +12,13 @@
 RootModule = '.\FortigiGraph.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.20240206.1231'
+ModuleVersion = '1.0.20240206.1453'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
 
 # ID used to uniquely identify this module
-GUID = 'aa589af8-1dff-48e1-9f84-3c2817407236'
+GUID = '2c19d4c7-8666-4413-afc7-39f5a3daf517'
 
 # Author of this module
 Author = 'Wim van den Heijkant'
