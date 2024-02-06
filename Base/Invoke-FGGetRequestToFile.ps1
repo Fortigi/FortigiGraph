@@ -100,10 +100,13 @@ function Invoke-FGGetRequestToFile {
     $Writer = [System.IO.StreamWriter]::new($OutputFilePath)
 
     # Read the first line from the file
-    $PreviousLine = $reader.ReadLine()
+    $PreviousLine = $Reader.ReadLine()
 
     # Write the first line to the output file
     $Writer.WriteLine($PreviousLine)
+
+    # Read the next line from the file
+    $PreviousLine = $Reader.ReadLine()
 
     # Read subsequent lines and check for consecutive lines containing ']' and '['
     while (-not $Reader.EndOfStream) {
@@ -112,20 +115,26 @@ function Invoke-FGGetRequestToFile {
 
         # Check if the current line and the previous line contain ']' and '[' respectively
         if ($PreviousLine -eq ']' -and $CurrentLine -eq '[') {
-            # Skip writing the current line since it matches the condition
-        } else {
-            # Write the current line to the output file
-            $Writer.WriteLine($CurrentLine)
+            # Skip writing both lines since they match the condition
+            # Read the next line and update the previous line
+            $Writer.WriteLine(',')
+            $PreviousLine = $Reader.ReadLine()
         }
-
-        # Update the previous line
-        $PreviousLine = $CurrentLine
+        else {
+            # Write the previous line to the output file
+            $Writer.WriteLine($PreviousLine)
+            # Update the previous line with the current line
+            $PreviousLine = $CurrentLine
+        }
     }
+
+    # Write the last line if it doesn't match the condition
+    $Writer.WriteLine($PreviousLine)
 
     # Close the StreamReader and StreamWriter
     $Reader.Close()
-    $Writer.Close()
-    
+    $Writer.Close() 
+
     Remove-Item $InputFilePath -Force
 
 }
