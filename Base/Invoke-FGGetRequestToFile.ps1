@@ -26,8 +26,10 @@ function Invoke-FGGetRequestToFile {
     $TokenIsStillValid = Confirm-FGAccessTokenValidity
     if (!($TokenIsStillValid)) {
         
-        If ($Global:DebugMode.Contains('G')) {
-            Write-Host "Access Token Expired, getting new one" -ForegroundColor Blue
+        If ($Global:DebugMode) {
+            If ($Global:DebugMode.Contains('G')) {
+                Write-Host "Access Token Expired, getting new one" -ForegroundColor Blue
+            }
         }
     
         If ($global:ClientSecret) {

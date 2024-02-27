@@ -27,8 +27,10 @@ function Invoke-FGDeleteRequest {
     $TokenIsStillValid = Confirm-FGAccessTokenValidity
     if (!($TokenIsStillValid)) {
         
-        If ($Global:DebugMode.Contains('G')) {
-            Write-Host "Token Expired, getting new one" -ForegroundColor Blue
+        If ($Global:DebugMode) {
+            If ($Global:DebugMode.Contains('G')) {
+                Write-Host "Token Expired, getting new one" -ForegroundColor Blue
+            }
         }
     
         If ($global:ClientSecret) {
