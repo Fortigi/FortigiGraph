@@ -22,10 +22,11 @@ function Get-FGGroupMemberAllToFile {
         Remove-Item $File -Force
     }
 
+
+    "[" | Out-File $File -Append
     #Export Group Memberships
     Foreach ($Group in $Groups) {
         
-        [array]$GroupMembership = $null
         $Count++
         $Completed = ($Count/$GroupCount) * 100
         Write-Progress -Activity "Getting All Group Members" -Status "Progress:" -PercentComplete $Completed
@@ -40,14 +41,14 @@ function Get-FGGroupMemberAllToFile {
                 "memberId"   = $Member.id
                 "memberType" = $Member.'@odata.type'
             }
-            $GroupMembership += $Row
-        }
-
-        If ($GroupMembership -ne $null) {
-            $GroupMembership | ConvertTo-Json | Out-File $File -Append
+            
+            $Row | ConvertTo-Json | Out-File $File -Append
+            "," | Out-File $File -Append
         }
     }
 
+    "]" | Out-File $File -Append
+    
     #We now have a file with multiple jsons not a single one. We need to make it a single JSON again.
     $FileObject = Get-Item -Path $File
     $FilePath = $FileObject.Directory.FullName
@@ -72,16 +73,16 @@ function Get-FGGroupMemberAllToFile {
     # Read the next line from the file
     $PreviousLine = $Reader.ReadLine()
 
-    # Read subsequent lines and check for consecutive lines containing ']' and '['
+    # Read subsequent lines and check for consecutive lines containing ',' and ']'
     while (-not $Reader.EndOfStream) {
         # Read the next line
         $CurrentLine = $Reader.ReadLine()
 
-        # Check if the current line and the previous line contain ']' and '[' respectively
-        if ($PreviousLine -eq ']' -and $CurrentLine -eq '[') {
+        # Check if the current line and the previous line contain ',' and ']' respectively
+        if ($PreviousLine -eq ',' -and $CurrentLine -eq ']') {
             # Skip writing both lines since they match the condition
             # Read the next line and update the previous line
-            $Writer.WriteLine(',')
+            $Writer.WriteLine(']')
             $PreviousLine = $Reader.ReadLine()
         }
         else {

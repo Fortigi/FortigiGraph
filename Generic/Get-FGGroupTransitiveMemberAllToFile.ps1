@@ -7,9 +7,10 @@ function Get-FGGroupTransitiveMemberAll {
     )
 
     #Get Groups
+    
     $GraphURI = 'https://graph.microsoft.com/beta'
     $URI = $GraphURI + '/groups?$select=id'
-
+    
     Write-Host "Getting Groups..."
     [array]$Groups = Invoke-FGGetRequest -URI $URI
 
@@ -21,17 +22,17 @@ function Get-FGGroupTransitiveMemberAll {
         Remove-Item $File -Force
     }
 
-    
-    Foreach ($Group in $Groups) {
-    
-        #Export Group Memberships
-        [array]$GroupMembership = $null
 
+    "[" | Out-File $File -Append
+    #Export Group Memberships
+    Foreach ($Group in $Groups) {
+        
         $Count++
-        $Completed = ($Count / $GroupCount) * 100
-        Write-Progress -Activity "Getting All Group Transitive Members" -Status "Progress:" -PercentComplete $Completed
+        $Completed = ($Count/$GroupCount) * 100
+        Write-Progress -Activity "Getting All Group Members" -Status "Progress:" -PercentComplete $Completed
 
         $URI = $GraphURI + "/groups/" + $Group.id + '/transitiveMembers?$select=id'
+        
         [array]$Members = Invoke-FGGetRequest -URI $URI
 
         Foreach ($Member in $Members) {
@@ -40,15 +41,14 @@ function Get-FGGroupTransitiveMemberAll {
                 "memberId"   = $Member.id
                 "memberType" = $Member.'@odata.type'
             }
-            $GroupMembership += $Row
+            
+            $Row | ConvertTo-Json | Out-File $File -Append
+            "," | Out-File $File -Append
         }
-
-        If ($GroupMembership -ne $null) {
-            $GroupMembership | ConvertTo-Json | Out-File $File -Append
-        }
-    
     }
 
+    "]" | Out-File $File -Append
+    
     #We now have a file with multiple jsons not a single one. We need to make it a single JSON again.
     $FileObject = Get-Item -Path $File
     $FilePath = $FileObject.Directory.FullName
@@ -73,16 +73,16 @@ function Get-FGGroupTransitiveMemberAll {
     # Read the next line from the file
     $PreviousLine = $Reader.ReadLine()
 
-    # Read subsequent lines and check for consecutive lines containing ']' and '['
+    # Read subsequent lines and check for consecutive lines containing ',' and ']'
     while (-not $Reader.EndOfStream) {
         # Read the next line
         $CurrentLine = $Reader.ReadLine()
 
-        # Check if the current line and the previous line contain ']' and '[' respectively
-        if ($PreviousLine -eq ']' -and $CurrentLine -eq '[') {
+        # Check if the current line and the previous line contain ',' and ']' respectively
+        if ($PreviousLine -eq ',' -and $CurrentLine -eq ']') {
             # Skip writing both lines since they match the condition
             # Read the next line and update the previous line
-            $Writer.WriteLine(',')
+            $Writer.WriteLine(']')
             $PreviousLine = $Reader.ReadLine()
         }
         else {
