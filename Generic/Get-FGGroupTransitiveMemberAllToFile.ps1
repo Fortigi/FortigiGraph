@@ -1,5 +1,5 @@
-function Get-FGGroupTransitiveMemberAll {
-    [alias("Get-GroupTransitiveMemberAll")]
+function Get-FGGroupTransitiveMemberAllToFile {
+    [alias("Get-GroupTransitiveMemberAllToFile")]
     Param
     (
         [Parameter(Mandatory = $true)]
