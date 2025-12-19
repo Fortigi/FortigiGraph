@@ -44,7 +44,7 @@ function Invoke-FGGetRequestToFile {
     
     }
 
-    $ReturnValue = $Null
+    [array]$ReturnValue = $Null
     Try {
         #Run request
         $Result = Invoke-RestMethod -Method Get -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
@@ -55,14 +55,14 @@ function Invoke-FGGetRequestToFile {
 
     #Most get requests will return results in .value but not all.. grr... watch out.. having the propery .value doesn't mean it has a value
     if ($Result.PSobject.Properties.name -match "value") {
-        $ReturnValue = $Result.value
+        [array]$ReturnValue = $Result.value
     }
     else {
-        $ReturnValue = $Result
+        [array]$ReturnValue = $Result
     }
 
     #Add results to file
-    $ReturnValue | ConvertTo-Json -Depth 10 | Out-File $File -Force
+    ConvertTo-Json -Depth 10 -InputObject ([array]$ReturnValue) | Out-File $File -Force
 
     #By default you only get 100 results... its paged
     While ($Result.'@odata.nextLink') {
@@ -75,14 +75,14 @@ function Invoke-FGGetRequestToFile {
 
         #Most get requests will return results in .value but not all.. grr... watch out.. having the propery .value doesn't mean it has a value
         if ($Result.PSobject.Properties.name -match "value") {
-            $ReturnValue = $Result.value
+            [array]$ReturnValue = $Result.value
         }
         else {
-            $ReturnValue = $Result
+            [array]$ReturnValue = $Result
         }
 
-        #Add results to file, this will add a seperate JSON to the file.. breaking the JSON format
-        $ReturnValue | ConvertTo-Json -Depth 10 | Out-File $File -Append
+        #Add results to file
+        ConvertTo-Json -Depth 10 -InputObject ([array]$ReturnValue) | Out-File $File -Append
         
     }
 
@@ -131,7 +131,9 @@ function Invoke-FGGetRequestToFile {
     }
 
     # Write the last line if it doesn't match the condition
-    $Writer.WriteLine($PreviousLine)
+    If ($PreviousLine.Length -gt 0) {
+        $Writer.WriteLine($PreviousLine)
+    }
 
     # Close the StreamReader and StreamWriter
     $Reader.Close()
