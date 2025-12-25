@@ -25,12 +25,12 @@ function Test-FGSQLConnection {
     }
 
     try {
-        $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-        $connection.Open()
+        $info = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
 
-        # Get SQL Server version and database info
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = @"
+            # Get SQL Server version and database info
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = @"
 SELECT
     SERVERPROPERTY('ProductVersion') AS Version,
     SERVERPROPERTY('Edition') AS Edition,
@@ -38,17 +38,25 @@ SELECT
     GETDATE() AS CurrentTime
 "@
 
-        $reader = $cmd.ExecuteReader()
-        if ($reader.Read()) {
-            $info = @{
-                Server = $global:FGSQLServerName
-                Database = $reader["DatabaseName"]
-                Version = $reader["Version"]
-                Edition = $reader["Edition"]
-                CurrentTime = $reader["CurrentTime"]
-                ConnectionStatus = "Connected"
+            $reader = $cmd.ExecuteReader()
+            try {
+                if ($reader.Read()) {
+                    return @{
+                        Server = $global:FGSQLServerName
+                        Database = $reader["DatabaseName"]
+                        Version = $reader["Version"]
+                        Edition = $reader["Edition"]
+                        CurrentTime = $reader["CurrentTime"]
+                        ConnectionStatus = "Connected"
+                    }
+                }
             }
+            finally {
+                $reader.Close()
+            }
+        }
 
+        if ($info) {
             Write-Host "SQL Connection Test: SUCCESS" -ForegroundColor Green
             Write-Host "  Server: $($info.Server)" -ForegroundColor Cyan
             Write-Host "  Database: $($info.Database)" -ForegroundColor Cyan
@@ -56,19 +64,13 @@ SELECT
             Write-Host "  Edition: $($info.Edition)" -ForegroundColor Cyan
             Write-Host "  Server Time: $($info.CurrentTime)" -ForegroundColor Cyan
 
-            $reader.Close()
-            $connection.Close()
-            $connection.Dispose()
-
             return $info
         }
+
+        return $false
     }
     catch {
         Write-Error "SQL Connection Test: FAILED - $_"
-        if ($connection.State -eq 'Open') {
-            $connection.Close()
-            $connection.Dispose()
-        }
         return $false
     }
 }

@@ -165,15 +165,14 @@ function Connect-FGSQLServerFromAzure {
 
         # Check if already connected (verify connection actually works)
         if ($global:FGSQLServerName -eq $sqlServer.FullyQualifiedDomainName -and $global:FGSQLDatabaseName -eq $DatabaseName -and -not $Force) {
-            # Test if connection actually works
+            # Test if connection actually works by calling Test-FGSQLConnection
             if ($global:FGSQLConnectionString) {
                 try {
-                    $testConnection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-                    $testConnection.Open()
-                    $testConnection.Close()
-                    $testConnection.Dispose()
-                    Write-Host "Already connected to $($sqlServer.FullyQualifiedDomainName) / $DatabaseName" -ForegroundColor Green
-                    return Test-FGSQLConnection
+                    $testResult = Test-FGSQLConnection
+                    if ($testResult) {
+                        Write-Host "Already connected to $($sqlServer.FullyQualifiedDomainName) / $DatabaseName" -ForegroundColor Green
+                        return $testResult
+                    }
                 }
                 catch {
                     Write-Verbose "Existing connection is invalid, reconnecting..."

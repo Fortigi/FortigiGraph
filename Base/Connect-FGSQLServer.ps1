@@ -106,16 +106,18 @@ function Connect-FGSQLServer {
         $global:FGSQLServerName = $ServerName
         $global:FGSQLDatabaseName = $DatabaseName
 
-        # Test the connection
-        $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-        $connection.Open()
+        # Test the connection using the helper
+        $testResult = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            # Connection is already open, just verify it works
+            return $true
+        }
 
-        Write-Host "Successfully connected to SQL Server: $ServerName, Database: $DatabaseName" -ForegroundColor Green
+        if ($testResult) {
+            Write-Host "Successfully connected to SQL Server: $ServerName, Database: $DatabaseName" -ForegroundColor Green
+        }
 
-        $connection.Close()
-        $connection.Dispose()
-
-        return $true
+        return $testResult
     }
     catch {
         Write-Error "Failed to connect to SQL Server: $_"

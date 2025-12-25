@@ -73,15 +73,28 @@ function Initialize-FGSQLTable {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
     }
 
-    try {
-        $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-        $connection.Open()
+    # Build column definitions
+    $columnDefs = @()
+    foreach ($col in $Columns.GetEnumerator()) {
+        $columnDefs += "    $($col.Key) $($col.Value)"
+    }
 
-        # Drop table if requested
-        if ($DropIfExists) {
-            Write-Verbose "Checking if table exists..."
-            $dropCmd = $connection.CreateCommand()
-            $dropCmd.CommandText = @"
+    # Handle composite or single primary key
+    if ($PrimaryKey -is [array]) {
+        $pkColumns = $PrimaryKey -join ", "
+    } else {
+        $pkColumns = $PrimaryKey
+    }
+
+    try {
+        $result = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+
+            # Drop table if requested
+            if ($DropIfExists) {
+                Write-Verbose "Checking if table exists..."
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = @"
 IF EXISTS (SELECT * FROM sys.tables WHERE name = '$TableName')
 BEGIN
     ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = OFF);
@@ -90,25 +103,12 @@ BEGIN
     PRINT 'Dropped existing table: $TableName';
 END
 "@
-            $dropCmd.ExecuteNonQuery() | Out-Null
-            Write-Host "Dropped existing table: $TableName" -ForegroundColor Yellow
-        }
+                $dropCmd.ExecuteNonQuery() | Out-Null
+                Write-Host "Dropped existing table: $TableName" -ForegroundColor Yellow
+            }
 
-        # Build column definitions
-        $columnDefs = @()
-        foreach ($col in $Columns.GetEnumerator()) {
-            $columnDefs += "    $($col.Key) $($col.Value)"
-        }
-
-        # Handle composite or single primary key
-        if ($PrimaryKey -is [array]) {
-            $pkColumns = $PrimaryKey -join ", "
-        } else {
-            $pkColumns = $PrimaryKey
-        }
-
-        # Build CREATE TABLE statement with temporal table configuration
-        $createTableSQL = @"
+            # Build CREATE TABLE statement with temporal table configuration
+            $createTableSQL = @"
 CREATE TABLE dbo.$TableName (
 $($columnDefs -join ",`n"),
 
@@ -123,24 +123,24 @@ $($columnDefs -join ",`n"),
 WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));
 "@
 
-        Write-Verbose "Creating temporal table with SQL:`n$createTableSQL"
+            Write-Verbose "Creating temporal table with SQL:`n$createTableSQL"
 
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = $createTableSQL
-        $cmd.ExecuteNonQuery() | Out-Null
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = $createTableSQL
+            $cmd.ExecuteNonQuery() | Out-Null
 
-        Write-Host "Successfully created temporal table: dbo.$TableName" -ForegroundColor Green
-        Write-Host "  History table: dbo.${TableName}History" -ForegroundColor Green
-        Write-Host "  Primary Key: $pkColumns" -ForegroundColor Green
-        Write-Host "  Columns: $($Columns.Count)" -ForegroundColor Green
+            Write-Host "Successfully created temporal table: dbo.$TableName" -ForegroundColor Green
+            Write-Host "  History table: dbo.${TableName}History" -ForegroundColor Green
+            Write-Host "  Primary Key: $pkColumns" -ForegroundColor Green
+            Write-Host "  Columns: $($Columns.Count)" -ForegroundColor Green
 
-        # Create a helpful view for seeing all changes (drop first if exists)
-        try {
-            $dropViewCmd = $connection.CreateCommand()
-            $dropViewCmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_${TableName}_AllHistory') DROP VIEW dbo.vw_${TableName}_AllHistory;"
-            $dropViewCmd.ExecuteNonQuery() | Out-Null
+            # Create a helpful view for seeing all changes (drop first if exists)
+            try {
+                $dropViewCmd = $connection.CreateCommand()
+                $dropViewCmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_${TableName}_AllHistory') DROP VIEW dbo.vw_${TableName}_AllHistory;"
+                $dropViewCmd.ExecuteNonQuery() | Out-Null
 
-            $viewSQL = @"
+                $viewSQL = @"
 CREATE VIEW dbo.vw_${TableName}_AllHistory AS
 SELECT
     *,
@@ -151,25 +151,21 @@ SELECT
 FROM dbo.$TableName FOR SYSTEM_TIME ALL;
 "@
 
-            $viewCmd = $connection.CreateCommand()
-            $viewCmd.CommandText = $viewSQL
-            $viewCmd.ExecuteNonQuery() | Out-Null
-            Write-Host "  Created helper view: vw_${TableName}_AllHistory" -ForegroundColor Green
-        } catch {
-            Write-Warning "Could not create helper view (this is optional): $_"
+                $viewCmd = $connection.CreateCommand()
+                $viewCmd.CommandText = $viewSQL
+                $viewCmd.ExecuteNonQuery() | Out-Null
+                Write-Host "  Created helper view: vw_${TableName}_AllHistory" -ForegroundColor Green
+            } catch {
+                Write-Warning "Could not create helper view (this is optional): $_"
+            }
+
+            return $true
         }
 
-        $connection.Close()
-        $connection.Dispose()
-
-        return $true
+        return $result
     }
     catch {
         Write-Error "Failed to create temporal table: $_"
-        if ($connection.State -eq 'Open') {
-            $connection.Close()
-            $connection.Dispose()
-        }
         return $false
     }
 }

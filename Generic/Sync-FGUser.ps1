@@ -197,96 +197,107 @@ function Sync-FGUser {
 
     # Check if table exists
     try {
-        $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-        $connection.Open()
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
 
-        $checkTableCmd = $connection.CreateCommand()
-        $checkTableCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$TableName'"
-        $tableExists = [int]$checkTableCmd.ExecuteScalar() -gt 0
+            $checkTableCmd = $connection.CreateCommand()
+            $checkTableCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$TableName'"
+            $tableExists = [int]$checkTableCmd.ExecuteScalar() -gt 0
 
-        if ($tableExists -and -not $RecreateTable) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists. Checking schema..." -ForegroundColor Cyan
+            if ($tableExists -and -not $RecreateTable) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists. Checking schema..." -ForegroundColor Cyan
 
-            # Get existing columns from the table
-            $getColumnsCmd = $connection.CreateCommand()
-            $getColumnsCmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$TableName' AND TABLE_SCHEMA = 'dbo'"
-            $reader = $getColumnsCmd.ExecuteReader()
-            $existingColumns = @()
-            while ($reader.Read()) {
-                $existingColumns += $reader.GetString(0)
-            }
-            $reader.Close()
-
-            # Find missing columns (exclude system columns ValidFrom, ValidTo)
-            $missingColumns = @()
-            foreach ($attr in $Attributes) {
-                if ($existingColumns -notcontains $attr) {
-                    $missingColumns += $attr
+                # Get existing columns from the table
+                $getColumnsCmd = $connection.CreateCommand()
+                $getColumnsCmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$TableName' AND TABLE_SCHEMA = 'dbo'"
+                $reader = $getColumnsCmd.ExecuteReader()
+                try {
+                    $existingColumns = @()
+                    while ($reader.Read()) {
+                        $existingColumns += $reader.GetString(0)
+                    }
                 }
-            }
-
-            if ($missingColumns.Count -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Found $($missingColumns.Count) new attribute(s) to add: $($missingColumns -join ', ')" -ForegroundColor Yellow
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Adding columns to existing table..." -ForegroundColor Cyan
-
-                # Need to disable system versioning to alter the table
-                $disableVersioningCmd = $connection.CreateCommand()
-                $disableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = OFF);"
-                $disableVersioningCmd.ExecuteNonQuery() | Out-Null
-
-                # Add each missing column
-                foreach ($attr in $missingColumns) {
-                    $sqlType = $columns[$attr]
-                    Write-Host "    [$(Get-Date -Format 'HH:mm:ss')] Adding column: $attr ($sqlType)" -ForegroundColor Gray
-
-                    $addColumnCmd = $connection.CreateCommand()
-                    $addColumnCmd.CommandText = "ALTER TABLE dbo.$TableName ADD $attr $sqlType NULL;"
-                    $addColumnCmd.ExecuteNonQuery() | Out-Null
-
-                    # Also add to history table
-                    $addHistoryColumnCmd = $connection.CreateCommand()
-                    $addHistoryColumnCmd.CommandText = "ALTER TABLE dbo.${TableName}History ADD $attr $sqlType NULL;"
-                    $addHistoryColumnCmd.ExecuteNonQuery() | Out-Null
+                finally {
+                    $reader.Close()
                 }
 
-                # Re-enable system versioning
-                $enableVersioningCmd = $connection.CreateCommand()
-                $enableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));"
-                $enableVersioningCmd.ExecuteNonQuery() | Out-Null
+                # Find missing columns (exclude system columns ValidFrom, ValidTo)
+                $missingColumns = @()
+                foreach ($attr in $Attributes) {
+                    if ($existingColumns -notcontains $attr) {
+                        $missingColumns += $attr
+                    }
+                }
 
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Schema updated successfully" -ForegroundColor Green
+                if ($missingColumns.Count -gt 0) {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Found $($missingColumns.Count) new attribute(s) to add: $($missingColumns -join ', ')" -ForegroundColor Yellow
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Adding columns to existing table..." -ForegroundColor Cyan
+
+                    # Need to disable system versioning to alter the table
+                    $disableVersioningCmd = $connection.CreateCommand()
+                    $disableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = OFF);"
+                    $disableVersioningCmd.ExecuteNonQuery() | Out-Null
+
+                    # Add each missing column
+                    foreach ($attr in $missingColumns) {
+                        $sqlType = $columns[$attr]
+                        Write-Host "    [$(Get-Date -Format 'HH:mm:ss')] Adding column: $attr ($sqlType)" -ForegroundColor Gray
+
+                        $addColumnCmd = $connection.CreateCommand()
+                        $addColumnCmd.CommandText = "ALTER TABLE dbo.$TableName ADD $attr $sqlType NULL;"
+                        $addColumnCmd.ExecuteNonQuery() | Out-Null
+
+                        # Also add to history table
+                        $addHistoryColumnCmd = $connection.CreateCommand()
+                        $addHistoryColumnCmd.CommandText = "ALTER TABLE dbo.${TableName}History ADD $attr $sqlType NULL;"
+                        $addHistoryColumnCmd.ExecuteNonQuery() | Out-Null
+                    }
+
+                    # Re-enable system versioning
+                    $enableVersioningCmd = $connection.CreateCommand()
+                    $enableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));"
+                    $enableVersioningCmd.ExecuteNonQuery() | Out-Null
+
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Schema updated successfully" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Schema is up to date" -ForegroundColor Green
+                }
+            }
+            elseif ($tableExists -and $RecreateTable) {
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Recreating table '$TableName' - all history will be lost!"
+                $confirm = Read-Host "Are you sure? (Y/N)"
+                if ($confirm -notmatch '^[Yy]') {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Operation cancelled." -ForegroundColor Yellow
+                    throw "Operation cancelled by user"
+                }
             }
             else {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Schema is up to date" -ForegroundColor Green
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' does not exist. Will be created..." -ForegroundColor Cyan
             }
-        }
-        elseif ($tableExists -and $RecreateTable) {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Recreating table '$TableName' - all history will be lost!"
-            $confirm = Read-Host "Are you sure? (Y/N)"
-            if ($confirm -notmatch '^[Yy]') {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Operation cancelled." -ForegroundColor Yellow
-                $connection.Close()
-                return
-            }
-            $connection.Close()
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey 'id' -DropIfExists
-            $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-            $connection.Open()
-        }
-        else {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Creating new table '$TableName' with temporal versioning..." -ForegroundColor Cyan
-            $connection.Close()
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey 'id'
-            $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-            $connection.Open()
         }
 
-        $connection.Close()
+        # Create table if needed (outside the SQL command since Initialize-FGSQLTable manages its own connection)
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $checkTableCmd = $connection.CreateCommand()
+            $checkTableCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$TableName'"
+            $tableExists = [int]$checkTableCmd.ExecuteScalar() -gt 0
+            return $tableExists
+        } | Out-Null
+
+        $tableStillExists = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $checkTableCmd = $connection.CreateCommand()
+            $checkTableCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$TableName'"
+            return ([int]$checkTableCmd.ExecuteScalar() -gt 0)
+        }
+
+        if (-not $tableStillExists -or $RecreateTable) {
+            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey 'id' -DropIfExists:$RecreateTable
+        }
     }
     catch {
-        if ($connection.State -eq 'Open') {
-            $connection.Close()
-        }
         throw "Failed to check/create table: $_"
     }
 
@@ -347,18 +358,6 @@ function Sync-FGUser {
     # Sync to SQL
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing users to SQL Server..." -ForegroundColor Cyan
 
-    $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
-    $connection.Open()
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Database connection established" -ForegroundColor Gray
-
-    # Start a transaction for better performance
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
-    $transaction = $connection.BeginTransaction()
-
-    $syncedCount = 0
-    $errorCount = 0
-    $syncStartTime = Get-Date
-
     # Build MERGE statement once (outside the loop for performance)
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing MERGE statement..." -ForegroundColor Gray
     $columnList = $Attributes -join ', '
@@ -402,140 +401,167 @@ WHEN NOT MATCHED THEN
     VALUES ($insertValues);
 "@
 
-    # Create command once and reuse it
-    $cmd = $connection.CreateCommand()
-    $cmd.Transaction = $transaction
-    $cmd.CommandText = $mergeSQL
+    $syncResult = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allUsers.Count) users..." -ForegroundColor Cyan
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Database connection established" -ForegroundColor Gray
 
-    foreach ($user in $allUsers) {
+        # Start a transaction for better performance
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
+        $transaction = $connection.BeginTransaction()
+
+        $syncedCount = 0
+        $errorCount = 0
+        $syncStartTime = Get-Date
+
         try {
-            # Clear parameters from previous iteration
-            $cmd.Parameters.Clear()
+            # Create command once and reuse it
+            $cmd = $connection.CreateCommand()
+            $cmd.Transaction = $transaction
+            $cmd.CommandText = $mergeSQL
 
-            # Add parameters
-            foreach ($attr in $Attributes) {
-                # Handle special attributes that come from different Graph properties
-                if ($attr -eq 'managerId') {
-                    # Manager ID comes from expanded manager object
-                    if ($user.manager -and $user.manager.id) {
-                        $cmd.Parameters.AddWithValue("@$attr", [Guid]$user.manager.id) | Out-Null
-                    }
-                    else {
-                        $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                    }
-                    continue
-                }
-                elseif ($attr -eq 'lastSignInDateTime') {
-                    # Last sign-in comes from signInActivity object
-                    if ($user.signInActivity -and $user.signInActivity.lastSignInDateTime) {
-                        $cmd.Parameters.AddWithValue("@$attr", [DateTime]$user.signInActivity.lastSignInDateTime) | Out-Null
-                    }
-                    else {
-                        $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                    }
-                    continue
-                }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allUsers.Count) users..." -ForegroundColor Cyan
 
-                # Regular attributes
-                $value = $user.$attr
+            foreach ($user in $allUsers) {
+                try {
+                    # Clear parameters from previous iteration
+                    $cmd.Parameters.Clear()
 
-                # Handle standard data type conversions
-                if ($null -eq $value) {
-                    $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                }
-                elseif ($attr -eq 'id') {
-                    # Only 'id' is a GUID (managerId is handled separately above)
-                    $cmd.Parameters.AddWithValue("@$attr", [Guid]$value) | Out-Null
-                }
-                elseif ($attr -like '*Enabled' -or $attr -like '*Synced') {
-                    # Convert boolean
-                    if ($null -ne $value) {
-                        $cmd.Parameters.AddWithValue("@$attr", [bool]$value) | Out-Null
+                    # Add parameters
+                    foreach ($attr in $Attributes) {
+                        # Handle special attributes that come from different Graph properties
+                        if ($attr -eq 'managerId') {
+                            # Manager ID comes from expanded manager object
+                            if ($user.manager -and $user.manager.id) {
+                                $cmd.Parameters.AddWithValue("@$attr", [Guid]$user.manager.id) | Out-Null
+                            }
+                            else {
+                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+                            }
+                            continue
+                        }
+                        elseif ($attr -eq 'lastSignInDateTime') {
+                            # Last sign-in comes from signInActivity object
+                            if ($user.signInActivity -and $user.signInActivity.lastSignInDateTime) {
+                                $cmd.Parameters.AddWithValue("@$attr", [DateTime]$user.signInActivity.lastSignInDateTime) | Out-Null
+                            }
+                            else {
+                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+                            }
+                            continue
+                        }
+
+                        # Regular attributes
+                        $value = $user.$attr
+
+                        # Handle standard data type conversions
+                        if ($null -eq $value) {
+                            $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+                        }
+                        elseif ($attr -eq 'id') {
+                            # Only 'id' is a GUID (managerId is handled separately above)
+                            $cmd.Parameters.AddWithValue("@$attr", [Guid]$value) | Out-Null
+                        }
+                        elseif ($attr -like '*Enabled' -or $attr -like '*Synced') {
+                            # Convert boolean
+                            if ($null -ne $value) {
+                                $cmd.Parameters.AddWithValue("@$attr", [bool]$value) | Out-Null
+                            }
+                            else {
+                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+                            }
+                        }
+                        elseif ($attr -like '*DateTime') {
+                            # Convert datetime
+                            if ($value) {
+                                $cmd.Parameters.AddWithValue("@$attr", [DateTime]$value) | Out-Null
+                            }
+                            else {
+                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+                            }
+                        }
+                        elseif ($attr -eq 'businessPhones' -and $value -is [array]) {
+                            # Convert array to comma-separated string
+                            $cmd.Parameters.AddWithValue("@$attr", ($value -join ', ')) | Out-Null
+                        }
+                        else {
+                            $cmd.Parameters.AddWithValue("@$attr", $value.ToString()) | Out-Null
+                        }
                     }
-                    else {
-                        $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
+
+                    $cmd.ExecuteNonQuery() | Out-Null
+                    $syncedCount++
+
+                    if ($syncedCount % 100 -eq 0) {
+                        $elapsed = (Get-Date) - $syncStartTime
+                        $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allUsers.Count) users ($rate users/sec)" -ForegroundColor Gray
                     }
                 }
-                elseif ($attr -like '*DateTime') {
-                    # Convert datetime
-                    if ($value) {
-                        $cmd.Parameters.AddWithValue("@$attr", [DateTime]$value) | Out-Null
-                    }
-                    else {
-                        $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                    }
-                }
-                elseif ($attr -eq 'businessPhones' -and $value -is [array]) {
-                    # Convert array to comma-separated string
-                    $cmd.Parameters.AddWithValue("@$attr", ($value -join ', ')) | Out-Null
-                }
-                else {
-                    $cmd.Parameters.AddWithValue("@$attr", $value.ToString()) | Out-Null
+                catch {
+                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync user $($user.userPrincipalName): $_"
+                    $errorCount++
                 }
             }
 
-            $cmd.ExecuteNonQuery() | Out-Null
-            $syncedCount++
+            # Commit the transaction
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
+            $transaction.Commit()
+            $syncElapsed = (Get-Date) - $syncStartTime
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($syncElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-            if ($syncedCount % 100 -eq 0) {
-                $elapsed = (Get-Date) - $syncStartTime
-                $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allUsers.Count) users ($rate users/sec)" -ForegroundColor Gray
-            }
-        }
-        catch {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync user $($user.userPrincipalName): $_"
-            $errorCount++
-        }
-    }
+            # Handle deletions - remove users from SQL that no longer exist in Graph
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted users..." -ForegroundColor Cyan
+            $graphUserIds = ($allUsers | ForEach-Object { "'$($_.id)'" }) -join ','
 
-    # Commit the transaction
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
-    try {
-        $transaction.Commit()
-        $syncElapsed = (Get-Date) - $syncStartTime
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($syncElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
-    }
-    catch {
-        Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed to commit transaction: $_"
-        $transaction.Rollback()
-        $connection.Close()
-        $connection.Dispose()
-        throw
-    }
-
-    # Handle deletions - remove users from SQL that no longer exist in Graph
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted users..." -ForegroundColor Cyan
-    $graphUserIds = ($allUsers | ForEach-Object { "'$($_.id)'" }) -join ','
-
-    $deleteSQL = @"
+            $deleteSQL = @"
 DELETE FROM dbo.$TableName
 WHERE id NOT IN ($graphUserIds)
 "@
 
-    try {
-        $deleteCmd = $connection.CreateCommand()
-        $deleteCmd.CommandText = $deleteSQL
-        $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deletedCount = 0
+            try {
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.CommandText = $deleteSQL
+                $deletedCount = $deleteCmd.ExecuteNonQuery()
 
-        if ($deletedCount -gt 0) {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount users that no longer exist in Graph" -ForegroundColor Yellow
+                if ($deletedCount -gt 0) {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount users that no longer exist in Graph" -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted users found" -ForegroundColor Green
+                }
+            }
+            catch {
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed users: $_"
+            }
+
+            # Cleanup
+            $cmd.Dispose()
+            $transaction.Dispose()
+
+            return @{
+                SyncedCount = $syncedCount
+                ErrorCount = $errorCount
+                DeletedCount = $deletedCount
+            }
         }
-        else {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted users found" -ForegroundColor Green
+        catch {
+            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during sync: $_"
+            if ($transaction) {
+                $transaction.Rollback()
+                $transaction.Dispose()
+            }
+            if ($cmd) {
+                $cmd.Dispose()
+            }
+            throw
         }
     }
-    catch {
-        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed users: $_"
-        $deletedCount = 0
-    }
 
-    $cmd.Dispose()
-    $transaction.Dispose()
-    $connection.Close()
-    $connection.Dispose()
+    $syncedCount = $syncResult.SyncedCount
+    $errorCount = $syncResult.ErrorCount
+    $deletedCount = $syncResult.DeletedCount
 
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host "Sync Complete!" -ForegroundColor Green
