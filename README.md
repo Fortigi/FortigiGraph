@@ -166,6 +166,35 @@ Test-FGSQLConnection
 
 ---
 
+### Invoke-FGSQLQuery
+
+Executes SQL queries from PowerShell and returns results as PowerShell objects.
+
+**Parameters:**
+- `Query` - The SQL query to execute
+
+**Examples:**
+```powershell
+# Query current data
+Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers"
+
+# Query with filter
+Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers WHERE accountEnabled = 1"
+
+# Query history
+Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers FOR SYSTEM_TIME AS OF '2024-01-15 10:00:00'"
+
+# Export to CSV
+Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers" | Export-Csv -Path "users.csv"
+
+# Display in grid
+Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers" | Out-GridView
+```
+
+**Note:** This is a simple wrapper around SQL commands. For complex queries, consider using SQL Server Management Studio or Azure Data Studio.
+
+---
+
 ### Initialize-FGSQLTable
 
 Creates a temporal table in SQL Server with automatic version history.
@@ -444,6 +473,73 @@ FROM GraphUsers FOR SYSTEM_TIME ALL
 WHERE userPrincipalName = 'john.doe@contoso.com'
 ORDER BY ValidFrom DESC;
 ```
+
+---
+
+## Architecture & Design
+
+### Code Reuse and Separation of Concerns
+
+The FortigiGraph module follows a clean architecture with proper separation of concerns to ensure maintainability and code reuse.
+
+#### Invoke-FGSQLCommand (Internal Helper)
+
+All SQL functions use a centralized helper function `Invoke-FGSQLCommand` that manages the SQL connection lifecycle:
+
+```powershell
+# Internal pattern used by all SQL functions
+Invoke-FGSQLCommand -ScriptBlock {
+    param($connection)
+
+    # Your SQL operations here
+    # Connection is already open and will be automatically closed
+    $cmd = $connection.CreateCommand()
+    $cmd.CommandText = "SELECT ..."
+    return $cmd.ExecuteScalar()
+}
+```
+
+**Benefits:**
+- **Automatic Resource Management**: Connection open/close/dispose handled automatically
+- **Consistent Error Handling**: All SQL operations have the same error handling pattern
+- **No Code Duplication**: Connection lifecycle code written once, used everywhere
+- **Focus on Business Logic**: Functions focus on what they do, not how to manage connections
+
+#### Function Responsibilities
+
+Each function has a single, clear responsibility:
+
+**Connect-FGSQLServer**
+- Builds connection strings
+- Validates credentials
+- Stores connection details
+- Uses helper to test connection
+
+**Connect-FGSQLServerFromAzure** (Wrapper)
+- Retrieves Azure SQL Server details
+- Manages firewall rules
+- Prepares credentials
+- **Delegates to** `Connect-FGSQLServer` for actual connection
+- **Delegates to** `Test-FGSQLConnection` for validation
+
+**Test-FGSQLConnection**
+- Queries server information
+- Formats and displays results
+- Uses helper for connection management
+
+**Initialize-FGSQLTable**
+- Builds CREATE TABLE statements
+- Creates temporal tables and history tables
+- Creates helper views
+- Uses helper for all SQL operations
+
+**Sync-FGUser**
+- Fetches data from Microsoft Graph
+- Builds MERGE statements
+- Manages sync transactions
+- Uses helper for schema checks and sync operations
+
+This architecture follows the **DRY (Don't Repeat Yourself)** principle and ensures that each function does one thing well while leveraging shared functionality.
 
 ---
 
