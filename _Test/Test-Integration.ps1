@@ -7,8 +7,6 @@
 # - Microsoft Graph app registration with appropriate permissions
 # - Test configuration file (config.test.json)
 
-#Requires -Modules Az
-
 param(
     [Parameter(Mandatory = $true)]
     [string]$ConfigFile,
@@ -20,13 +18,20 @@ param(
 # Set error action preference
 $ErrorActionPreference = "Stop"
 
-# Import the module
-$moduleRoot = Split-Path -Parent $PSScriptRoot
-$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
-
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "FortigiGraph Integration Test Suite" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+# Start transcript to capture all console output (unique per config file)
+$configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
+$transcriptFile = Join-Path $PSScriptRoot "integration-test-$configBaseName.log"
+Write-Host "Starting transcript logging..." -ForegroundColor Gray
+Start-Transcript -Path $transcriptFile -Force | Out-Null
+Write-Host "Transcript logging to: $transcriptFile`n" -ForegroundColor Cyan
+
+# Import the module
+$moduleRoot = Split-Path -Parent $PSScriptRoot
+$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
 
 # Test tracking
 $script:TestResults = @()
@@ -93,6 +98,10 @@ function Register-Resource {
     }
 }
 
+# Load secure configuration helper
+$secureConfigPath = Join-Path $PSScriptRoot "SecureConfig.ps1"
+. $secureConfigPath
+
 # Load configuration
 Write-TestHeader "Loading Test Configuration"
 
@@ -127,6 +136,29 @@ if (-not $configValid) {
 }
 
 Write-TestSuccess "Configuration validated"
+
+# Load secure credentials
+Write-TestStep "Loading secure credentials..."
+try {
+    # Get SQL Admin Password (required)
+    $SecurePassword = Get-SecureConfigValue `
+        -ConfigPath $ConfigFile `
+        -PropertyPath "Azure.AdminUserPassword" `
+        -PromptMessage "Enter SQL Server Admin Password" `
+        -AsSecureString
+
+    # Get Graph Client Secret (optional - can be empty for interactive auth)
+    $clientSecret = Get-SecureConfigValue `
+        -ConfigPath $ConfigFile `
+        -PropertyPath "Graph.ClientSecret" `
+        -PromptMessage "Enter Graph Client Secret (or press Enter for interactive auth)" `
+        -AllowEmpty
+
+    Write-TestSuccess "Secure credentials loaded"
+} catch {
+    Write-TestFailure "Failed to load credentials: $($_.Exception.Message)"
+    exit 1
+}
 
 # Import module
 Write-TestHeader "Test 1: Module Import"
@@ -217,10 +249,10 @@ try {
         Write-TestStep "Getting new Graph access token..."
         Write-TestStep "TenantId: $($config.Graph.TenantId)"
         Write-TestStep "ClientId: $($config.Graph.ClientId)"
-        Write-TestStep "Using ClientSecret: $($config.Graph.ClientSecret -ne $null -and $config.Graph.ClientSecret -ne '')"
+        Write-TestStep "Using ClientSecret: $($clientSecret -ne $null -and $clientSecret -ne '')"
 
-        if ($config.Graph.ClientSecret -and $config.Graph.ClientSecret -ne "") {
-            Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId -ClientSecret $config.Graph.ClientSecret
+        if ($clientSecret -and $clientSecret -ne "") {
+            Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId -ClientSecret $clientSecret
         } else {
             Write-TestStep "No client secret provided, using interactive auth..."
             Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId
@@ -231,7 +263,7 @@ try {
     }
 
     Add-TestResult -Category "Graph" -TestName "Graph access token obtained" -Passed $true
-    Add-TestResult -Category "Graph" -TestName "Graph API connection verified" -Passed $true -Data "$($testUsers.Count) users retrieved"
+    Add-TestResult -Category "Graph" -TestName "Graph API connection verified" -Passed $true -Data "$(if ($testUsers.Count) { $testUsers.Count } else { 'Unknown' }) users retrieved"
 } catch {
     $errorDetails = $_.Exception.Message
     if ($_.ErrorDetails.Message) {
@@ -268,13 +300,15 @@ Write-TestHeader "Test 5: SQL Server Creation"
 try {
     Write-TestStep "Creating SQL Server: $($config.Azure.SQLServerName)..."
 
+    # $SecurePassword was already loaded from secure config earlier
+
     $serverInfo = New-FGAzureSQLServer `
         -SubscriptionId $config.Azure.SubscriptionId `
         -ResourceGroupName $config.Azure.ResourceGroupName `
         -ServerName $config.Azure.SQLServerName `
         -DatabaseName $config.Azure.DatabaseName `
         -AdminUsername $config.Azure.AdminUsername `
-        -AdminPassword $config.Azure.AdminUserPassword `
+        -AdminPassword $SecurePassword `
         -Location $config.Azure.Location `
         -AllowCurrentIP `
         -AutoConnect
@@ -510,9 +544,37 @@ try {
     Add-TestResult -Category "Query" -TestName "Temporal table features" -Passed $false -Message $_.Exception.Message
 }
 
+# Test 15: Simple Query with Invoke-FGSQLQuery
+Write-TestHeader "Test 15: Simple Query Test (Invoke-FGSQLQuery)"
+
+try {
+    Write-TestStep "Testing Invoke-FGSQLQuery with sample user data..."
+
+    # Query a few users using the simple query function
+    $sampleUsers = Invoke-FGSQLQuery -Query "SELECT TOP 5 userPrincipalName, displayName, mail, accountEnabled FROM dbo.GraphUsers_DefaultTest ORDER BY displayName"
+
+    if ($sampleUsers -and $sampleUsers.Rows.Count -gt 0) {
+        Write-Host "`n  Sample Users Retrieved:" -ForegroundColor Cyan
+        $sampleUsers | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+
+        Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery execution" -Passed $true -Data "$($sampleUsers.Rows.Count) users retrieved"
+
+        # Also test scalar query
+        Write-TestStep "Testing scalar query (user count)..."
+        $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphUsers_DefaultTest" -AsScalar
+        Write-Host "  → Total users in database: $userCount" -ForegroundColor Cyan
+
+        Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery scalar execution" -Passed $true -Data "$userCount users"
+    } else {
+        Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery execution" -Passed $false -Message "No users found"
+    }
+} catch {
+    Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery execution" -Passed $false -Message $_.Exception.Message
+}
+
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 15: Cleanup Test Resources"
+    Write-TestHeader "Test 16: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."
@@ -557,19 +619,18 @@ if ($failedTests -gt 0) {
     }
 }
 
-# Save detailed results
-Write-Host "`nSaving detailed test results to JSON file..." -ForegroundColor Cyan
-$resultFile = Join-Path $PSScriptRoot "integration-test-results.json"
-$script:TestResults | ConvertTo-Json -Depth 20 | Out-File $resultFile -Encoding UTF8
-Write-Host "`nDetailed results saved to: $resultFile" -ForegroundColor Cyan
-
 Write-Host "`n========================================`n" -ForegroundColor Cyan
+
+# Stop transcript
+Stop-Transcript
 
 # Exit code
 if ($failedTests -eq 0) {
-    Write-Host "All integration tests passed! ✓" -ForegroundColor Green
+    Write-Host "`nAll integration tests passed! ✓" -ForegroundColor Green
+    Write-Host "Full test log saved to: $transcriptFile" -ForegroundColor Cyan
     exit 0
 } else {
-    Write-Host "Some integration tests failed." -ForegroundColor Red
+    Write-Host "`nSome integration tests failed." -ForegroundColor Red
+    Write-Host "Full test log saved to: $transcriptFile" -ForegroundColor Cyan
     exit 1
 }

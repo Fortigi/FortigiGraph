@@ -10,6 +10,9 @@ A PowerShell module for working with Microsoft Graph API and syncing data to Azu
 - **User Sync**: Sync Microsoft Graph users to SQL with automatic schema detection
 - **Point-in-Time Queries**: Query data as it existed at any point in time
 - **Performance Optimized**: Transaction-based syncing with progress tracking
+- **SQL Management Tools**: Query, list, clear, and manage SQL tables and servers
+- **Secure Credentials**: Encrypted credential storage using Windows DPAPI
+- **Comprehensive Testing**: Integration tests with parallel execution support
 
 ## Installation
 
@@ -351,6 +354,102 @@ Output:
 
 ---
 
+## SQL Management Functions
+
+### Invoke-FGSQLQuery
+
+Executes SQL queries with a simple, easy-to-use syntax.
+
+**Parameters:**
+- `Query` - The SQL query to execute
+- `AsScalar` (switch) - Returns a single scalar value (for COUNT, SUM, etc.)
+- `AsNonQuery` (switch) - Returns rows affected (for INSERT, UPDATE, DELETE)
+
+**Examples:**
+```powershell
+# Get all users
+Invoke-FGSQLQuery -Query "SELECT * FROM dbo.GraphUsers"
+
+# Get user count
+$count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphUsers" -AsScalar
+
+# Update a user
+Invoke-FGSQLQuery -Query "UPDATE dbo.GraphUsers SET department = 'IT' WHERE id = '123'" -AsNonQuery
+```
+
+---
+
+### Get-FGSQLTable
+
+Lists all tables in the database with details like row counts, temporal status, and creation dates.
+
+**Parameters:**
+- `Schema` (optional) - Filter by schema name
+- `Pattern` (optional) - Filter table names with wildcard pattern
+- `IncludeSystemTables` (switch) - Include system temporal history tables
+
+**Examples:**
+```powershell
+# List all tables
+Get-FGSQLTable
+
+# Filter by pattern
+Get-FGSQLTable -Pattern "GraphUsers*"
+
+# Filter by schema
+Get-FGSQLTable -Schema "dbo"
+```
+
+---
+
+### Clear-FGSQLTable
+
+Clears all data from a table while preserving the table structure.
+
+**Parameters:**
+- `TableName` - Name of the table to clear
+- `DeleteHistory` (switch) - Also clear the history table for temporal tables
+- `Force` (switch) - Skip confirmation prompts
+
+**Examples:**
+```powershell
+# Clear table (preserves history)
+Clear-FGSQLTable -TableName "GraphUsers_Test"
+
+# Clear table and history
+Clear-FGSQLTable -TableName "GraphUsers_Test" -DeleteHistory -Force
+```
+
+**Note:** For temporal tables, this function automatically disables versioning, clears the data, and re-enables versioning.
+
+---
+
+### Remove-FGAzureSQLServer
+
+**⚠️ DANGEROUS** - Permanently deletes an Azure SQL Server and all its databases.
+
+**Parameters:**
+- `SubscriptionId` - Azure Subscription ID
+- `ResourceGroupName` - Resource Group name
+- `ServerName` - SQL Server name to remove
+- `Force` (switch) - Skip confirmation prompts (use with extreme caution!)
+
+**Example:**
+```powershell
+Remove-FGAzureSQLServer `
+    -SubscriptionId "12345..." `
+    -ResourceGroupName "rg-test" `
+    -ServerName "fg-test-sql-123"
+```
+
+**Safety Features:**
+- Requires confirmation unless `-Force` is used
+- Extra confirmation for production-sounding servers
+- Shows all databases that will be deleted
+- Automatically closes active connections
+
+---
+
 ## Querying Temporal Data
 
 After syncing, you can query your data in several ways:
@@ -358,6 +457,16 @@ After syncing, you can query your data in several ways:
 ### Running SQL Queries from PowerShell
 
 You can query your data using SQL Server Management Studio, Azure Data Studio, or any SQL client.
+
+Alternatively, use the `Invoke-FGSQLQuery` function for quick queries:
+
+```powershell
+# Simple query
+Invoke-FGSQLQuery -Query "SELECT * FROM GraphUsers WHERE department = 'IT'"
+
+# Get count
+$userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphUsers" -AsScalar
+```
 
 ### Current Data (Latest State)
 
@@ -607,6 +716,39 @@ $Global:DebugMode = 'P'   # PATCH and POST requests
 $Global:DebugMode = 'D'   # DELETE requests
 $Global:DebugMode = 'PD'  # Combination
 ```
+
+---
+
+## Testing and Security
+
+### Integration Tests
+
+The module includes comprehensive integration tests that validate all functionality end-to-end. See [_Test/README-Integration-Tests.md](_Test/README-Integration-Tests.md) for details on:
+- Running integration tests
+- Test configuration
+- What each test validates
+- Parallel testing
+
+### Secure Credential Storage
+
+The test scripts support encrypted credential storage using Windows DPAPI. See [_Test/README-Secure-Credentials.md](_Test/README-Secure-Credentials.md) for:
+- How secure credentials work
+- Setting up encrypted credentials
+- Managing stored credentials
+- Security considerations
+
+### SQL Management
+
+Additional SQL management utilities are available for testing and database administration. See [_Test/README-SQL-Management.md](_Test/README-SQL-Management.md) for detailed documentation on:
+- `Get-FGSQLTable` - List all tables with details
+- `Clear-FGSQLTable` - Clear table data for testing
+- `Remove-FGAzureSQLServer` - Remove test SQL Servers
+- `Invoke-FGSQLQuery` - Simple query execution
+- Common workflows and best practices
+
+### Quick Start Guide
+
+For a quick overview of all features and getting started, see [_Test/QUICK-START.md](_Test/QUICK-START.md).
 
 ---
 

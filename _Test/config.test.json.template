@@ -1,15 +1,19 @@
 {
+  "_SECURITY_INFO": "Passwords are now stored encrypted! The test script will prompt for credentials on first run.",
+  "_NOTE": "Credentials are encrypted using Windows DPAPI and can only be decrypted by you on this machine.",
   "Azure": {
     "SubscriptionId": "YOUR-SUBSCRIPTION-ID",
     "ResourceGroupName": "rg-fortigraph-test",
     "Location": "northeurope",
     "SQLServerName": "fg-test-sql-CHANGEME",
     "DatabaseName": "GraphDataTest",
-    "AdminUsername": "sqladmin"
+    "AdminUsername": "sqladmin",
+    "AdminUserPassword": ""
   },
   "Graph": {
     "TenantId": "YOUR-TENANT-ID",
     "ClientId": "YOUR-CLIENT-ID",
     "ClientSecret": ""
-  }
+  },
+  "_CREDENTIAL_NOTE": "Leave AdminUserPassword and ClientSecret empty. The test script will prompt for them and store them encrypted."
 }

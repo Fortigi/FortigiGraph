@@ -6,9 +6,19 @@ param(
     [string]$ConfigFile = (Join-Path $PSScriptRoot "config.iidemo.json")
 )
 
+# Load secure configuration helper
+$secureConfigPath = Join-Path $PSScriptRoot "SecureConfig.ps1"
+. $secureConfigPath
+
+# Start transcript (unique per config file)
+$configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
+$transcriptFile = Join-Path $PSScriptRoot "simple-test-$configBaseName.log"
+Start-Transcript -Path $transcriptFile -Force
+
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "FortigiGraph Simple Diagnostic Test" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
+Write-Host "Transcript logging to: $transcriptFile`n" -ForegroundColor Gray
 
 # Test 1: Check config file exists
 Write-Host "[1/5] Checking config file..." -ForegroundColor Yellow
@@ -120,7 +130,11 @@ $functions = @(
     "Test-FGSQLConnection",
     "Initialize-FGSQLTable",
     "Invoke-FGSQLCommand",
-    "New-FGAzureSQLServer"
+    "Invoke-FGSQLQuery",
+    "New-FGAzureSQLServer",
+    "Remove-FGAzureSQLServer",
+    "Get-FGSQLTable",
+    "Clear-FGSQLTable"
 )
 
 $missing = @()
@@ -145,3 +159,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "`nYou're ready to run the full integration test:" -ForegroundColor White
 Write-Host "  pwsh -File _Test\Test-Integration.ps1 -ConfigFile $ConfigFile" -ForegroundColor Cyan
 Write-Host ""
+
+# Stop transcript
+Stop-Transcript
+Write-Host "Diagnostic log saved to: $transcriptFile" -ForegroundColor Cyan

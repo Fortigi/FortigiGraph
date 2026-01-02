@@ -31,6 +31,13 @@ cd _Test
 cp config.test.json.template config.test.json
 ```
 
+**⚠️ SECURITY WARNING:**
+- **NEVER commit config files to Git** - They contain sensitive credentials
+- The `.gitignore` already excludes `_Test/*.json` to protect you
+- Use unique, strong passwords for test SQL servers
+- Consider using Azure Key Vault for production scenarios
+- Rotate secrets regularly, especially after testing
+
 Edit `config.test.json`:
 
 ```json
@@ -54,7 +61,10 @@ Edit `config.test.json`:
 }
 ```
 
-**Important:** Use a **unique SQL server name** (must be globally unique in Azure).
+**Important:**
+- Use a **unique SQL server name** (must be globally unique in Azure)
+- **DO NOT use production credentials** - Create dedicated test credentials
+- Store passwords securely - Consider environment variables instead of config files
 
 ### Step 2: Login to Azure
 
@@ -252,13 +262,49 @@ Run tests in your pipeline:
     GRAPH_CLIENT_SECRET: $(GraphClientSecret)
 ```
 
-## Best Practices
+## Security Best Practices
+
+### Credential Management
+
+**⚠️ CRITICAL SECURITY WARNINGS:**
+
+1. **Config Files Contain Plaintext Secrets**
+   - SQL admin passwords stored in plaintext
+   - Graph client secrets stored in plaintext
+   - **NEVER commit config files to version control**
+   - The `.gitignore` protects `_Test/*.json` but verify before committing
+
+2. **Alternative: Use Environment Variables**
+   ```powershell
+   # Instead of storing in config, use environment variables:
+   $env:SQL_ADMIN_PASSWORD = "YourPassword"
+
+   # Then modify the test to read from env vars instead of config
+   ```
+
+3. **Alternative: Leave ClientSecret Empty**
+   - Set `"ClientSecret": ""` in config
+   - Test will prompt for interactive browser login
+   - No secrets stored on disk
+
+4. **Test Environment Isolation**
+   - Use dedicated test tenant/subscription
+   - Never use production credentials
+   - Create service principals specifically for testing
+   - Delete test resources after use
+
+5. **Secret Rotation**
+   - Rotate all test secrets after sharing or exposure
+   - Use short-lived secrets (30-90 days)
+   - Delete SQL servers immediately after testing
+
+### Azure Best Practices
 
 1. **Use a dedicated test subscription** - Avoid production environments
-2. **Rotate secrets** - Don't commit config.test.json to git (it's in .gitignore)
+2. **Enable Azure Defender** - Monitor for security issues
 3. **Run before commits** - Catch breaking changes early
 4. **Monitor costs** - Basic SQL tier is cheap but verify after tests
-5. **Review results.json** - Contains detailed information for debugging
+5. **Review transcript logs** - Full console output saved to `integration-test-<configname>.log` (unique per config file for parallel testing)
 
 ## Support
 
