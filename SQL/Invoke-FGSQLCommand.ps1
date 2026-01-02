@@ -53,7 +53,7 @@ function Invoke-FGSQLCommand {
 
     # Check if connected
     if ($RequireConnection -and -not $global:FGSQLConnectionString) {
-        throw "Not connected to SQL Server. Please run Connect-FGSQLServer or Connect-FGSQLServerFromAzure first."
+        throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
     }
 
     $connection = $null

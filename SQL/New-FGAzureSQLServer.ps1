@@ -317,12 +317,13 @@ function New-FGAzureSQLServer {
         # Auto-connect if requested
         if ($AutoConnect) {
             Write-Host "Auto-connecting to SQL Server..." -ForegroundColor Cyan
-            if ($EnableAzureADAuth) {
-                Connect-FGSQLServer -ServerName $fullyQualifiedServerName -DatabaseName $DatabaseName
-            }
-            else {
-                Connect-FGSQLServer -ServerName $fullyQualifiedServerName -DatabaseName $DatabaseName -Credential $credential
-            }
+            Connect-FGSQLServer `
+                -SubscriptionId $SubscriptionId `
+                -ResourceGroupName $ResourceGroupName `
+                -ServerName $ServerName `
+                -DatabaseName $DatabaseName `
+                -AdminUsername $AdminUsername `
+                -AdminPassword $AdminPassword
         }
 
         # Return deployment info

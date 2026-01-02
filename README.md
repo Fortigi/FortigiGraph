@@ -111,24 +111,7 @@ New-FGAzureSQLServer `
 
 ### Connect-FGSQLServer
 
-Establishes a connection to an Azure SQL Server.
-
-**Parameters:**
-- `ServerName` - SQL Server name (e.g., "myserver.database.windows.net")
-- `DatabaseName` - Database name
-- `Credential` (optional) - PSCredential for SQL Authentication
-
-**Example:**
-```powershell
-$cred = Get-Credential
-Connect-FGSQLServer -ServerName "myserver.database.windows.net" -DatabaseName "GraphData" -Credential $cred
-```
-
----
-
-### Connect-FGSQLServerFromAzure
-
-Smart wrapper that retrieves SQL Server details from Azure and manages firewall rules.
+Connects to an Azure SQL Server with automatic firewall management and Azure integration.
 
 **Parameters:**
 - `SubscriptionId` - Azure Subscription ID
@@ -140,7 +123,7 @@ Smart wrapper that retrieves SQL Server details from Azure and manages firewall 
 
 **Example:**
 ```powershell
-Connect-FGSQLServerFromAzure `
+Connect-FGSQLServer `
     -SubscriptionId "12345678-1234-1234-1234-123456789012" `
     -ResourceGroupName "rg-graph-data" `
     -ServerName "contosographsql" `
@@ -163,35 +146,6 @@ Tests the current SQL connection and displays server information.
 ```powershell
 Test-FGSQLConnection
 ```
-
----
-
-### Invoke-FGSQLQuery
-
-Executes SQL queries from PowerShell and returns results as PowerShell objects.
-
-**Parameters:**
-- `Query` - The SQL query to execute
-
-**Examples:**
-```powershell
-# Query current data
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers"
-
-# Query with filter
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers WHERE accountEnabled = 1"
-
-# Query history
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers FOR SYSTEM_TIME AS OF '2024-01-15 10:00:00'"
-
-# Export to CSV
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers" | Export-Csv -Path "users.csv"
-
-# Display in grid
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers" | Out-GridView
-```
-
-**Note:** This is a simple wrapper around SQL commands. For complex queries, consider using SQL Server Management Studio or Azure Data Studio.
 
 ---
 
@@ -403,24 +357,7 @@ After syncing, you can query your data in several ways:
 
 ### Running SQL Queries from PowerShell
 
-You don't need SQL Management Studio to query your data. You can run SQL queries directly from PowerShell:
-
-```powershell
-# Query and display in grid view
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers" | Out-GridView
-
-# Query and export to CSV
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers WHERE accountEnabled = 1" | Export-Csv -Path "ActiveUsers.csv" -NoTypeInformation
-
-# Query and format as table
-Invoke-FGSQLQuery "SELECT userPrincipalName, displayName, department FROM dbo.GraphUsers" | Format-Table
-
-# Query history data
-Invoke-FGSQLQuery "SELECT * FROM dbo.vw_GraphUsers_AllHistory WHERE userPrincipalName = 'john.doe@contoso.com'" | Out-GridView
-
-# Point-in-time query
-Invoke-FGSQLQuery "SELECT * FROM dbo.GraphUsers FOR SYSTEM_TIME AS OF '2024-01-15 10:00:00'" | Out-GridView
-```
+You can query your data using SQL Server Management Studio, Azure Data Studio, or any SQL client.
 
 ### Current Data (Latest State)
 
@@ -510,17 +447,17 @@ Invoke-FGSQLCommand -ScriptBlock {
 Each function has a single, clear responsibility:
 
 **Connect-FGSQLServer**
+- Retrieves Azure SQL Server details
+- Manages firewall rules
+- Prepares credentials
+- **Delegates to** `New-FGSQLConnection` for actual connection
+- **Delegates to** `Test-FGSQLConnection` for validation
+
+**New-FGSQLConnection** (Low-level)
 - Builds connection strings
 - Validates credentials
 - Stores connection details
 - Uses helper to test connection
-
-**Connect-FGSQLServerFromAzure** (Wrapper)
-- Retrieves Azure SQL Server details
-- Manages firewall rules
-- Prepares credentials
-- **Delegates to** `Connect-FGSQLServer` for actual connection
-- **Delegates to** `Test-FGSQLConnection` for validation
 
 **Test-FGSQLConnection**
 - Queries server information
@@ -586,10 +523,10 @@ Any attribute not in the list above will use `NVARCHAR(MAX)` as the SQL data typ
 If you can't connect to SQL Server:
 ```powershell
 # Check firewall
-Connect-FGSQLServerFromAzure -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server -UpdateFirewall
+Connect-FGSQLServer -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server -UpdateFirewall
 
 # Force reconnect
-Connect-FGSQLServerFromAzure -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server -Force
+Connect-FGSQLServer -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server -Force
 ```
 
 ### Expired Token
@@ -617,7 +554,7 @@ Set up a scheduled task to sync regularly:
 ```powershell
 # Daily sync script
 Get-FGAccessToken -TenantId $tenantId -ClientId $clientId
-Connect-FGSQLServerFromAzure -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server
+Connect-FGSQLServer -SubscriptionId $sub -ResourceGroupName $rg -ServerName $server
 Sync-FGUser
 ```
 

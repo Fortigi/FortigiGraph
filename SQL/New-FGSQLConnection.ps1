@@ -1,12 +1,14 @@
-function Connect-FGSQLServer {
+function New-FGSQLConnection {
     <#
     .SYNOPSIS
-    Establishes a connection to an Azure SQL Server and stores connection details.
+    Establishes a direct connection to an Azure SQL Server and stores connection details.
 
     .DESCRIPTION
-    Similar to Get-FGAccessToken, this function establishes a connection to an Azure SQL Server
+    Low-level function that establishes a connection to an Azure SQL Server
     and stores the connection string in a global variable for use by other FG SQL functions.
     Supports both SQL Authentication and Azure AD authentication.
+
+    For most scenarios, use Connect-FGSQLServer instead, which provides Azure integration and firewall management.
 
     .PARAMETER ServerName
     The SQL Server name (e.g., "myserver.database.windows.net")
@@ -24,18 +26,18 @@ function Connect-FGSQLServer {
     Optional. Provide a complete connection string directly instead of individual parameters.
 
     .EXAMPLE
-    Connect-FGSQLServer -ServerName "myserver.database.windows.net" -DatabaseName "GraphData"
+    New-FGSQLConnection -ServerName "myserver.database.windows.net" -DatabaseName "GraphData"
 
     Connects using Azure AD Integrated Authentication
 
     .EXAMPLE
     $cred = Get-Credential
-    Connect-FGSQLServer -ServerName "myserver.database.windows.net" -DatabaseName "GraphData" -Credential $cred
+    New-FGSQLConnection -ServerName "myserver.database.windows.net" -DatabaseName "GraphData" -Credential $cred
 
     Connects using SQL Authentication with provided credentials
 
     .EXAMPLE
-    Connect-FGSQLServer -ServerName "myserver.database.windows.net" -DatabaseName "GraphData" -UseManagedIdentity
+    New-FGSQLConnection -ServerName "myserver.database.windows.net" -DatabaseName "GraphData" -UseManagedIdentity
 
     Connects using Azure Managed Identity (useful for Azure VMs/Functions)
 

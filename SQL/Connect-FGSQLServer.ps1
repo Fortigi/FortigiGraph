@@ -1,14 +1,16 @@
-function Connect-FGSQLServerFromAzure {
+function Connect-FGSQLServer {
     <#
     .SYNOPSIS
-    Intelligently connects to an Azure SQL Server by managing firewall rules and retrieving connection details from Azure.
+    Connects to an Azure SQL Server with automatic firewall management and Azure integration.
 
     .DESCRIPTION
-    This is a smart wrapper around Connect-FGSQLServer that:
+    This is the main connection function that provides a user-friendly experience:
     1. Retrieves SQL Server details from Azure
     2. Checks and updates firewall rules with your current IP
     3. Automatically handles connection with stored credentials
-    4. Makes the connection process user-friendly
+    4. Provides helpful error messages and troubleshooting guidance
+
+    This function calls New-FGSQLConnection internally to establish the actual connection.
 
     .PARAMETER SubscriptionId
     The Azure Subscription ID where the SQL Server exists.
@@ -35,12 +37,12 @@ function Connect-FGSQLServerFromAzure {
     If specified, forces a new connection even if already connected.
 
     .EXAMPLE
-    Connect-FGSQLServerFromAzure -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -UpdateFirewall
+    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -UpdateFirewall
 
     Connects to the SQL Server and updates firewall with your current IP
 
     .EXAMPLE
-    Connect-FGSQLServerFromAzure -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -DatabaseName "GraphData"
+    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -DatabaseName "GraphData"
 
     Connects to a specific database
 
@@ -205,7 +207,7 @@ function Connect-FGSQLServerFromAzure {
 
         # Connect
         Write-Host "Connecting to SQL Server..." -ForegroundColor Cyan
-        $result = Connect-FGSQLServer -ServerName $sqlServer.FullyQualifiedDomainName -DatabaseName $DatabaseName -Credential $credential
+        $result = New-FGSQLConnection -ServerName $sqlServer.FullyQualifiedDomainName -DatabaseName $DatabaseName -Credential $credential
 
         if ($result) {
             Write-Host "`nConnection successful!" -ForegroundColor Green
