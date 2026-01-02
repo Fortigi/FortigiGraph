@@ -1,0 +1,545 @@
+# Integration Test Suite for FortigiGraph
+# Tests the complete workflow from Azure connection to data sync
+#
+# Prerequisites:
+# - Az PowerShell module installed
+# - Logged in to Azure (Connect-AzAccount)
+# - Microsoft Graph app registration with appropriate permissions
+# - Test configuration file (config.test.json)
+
+#Requires -Modules Az
+
+param(
+    [Parameter(Mandatory = $false)]
+    [string]$ConfigFile = (Join-Path $PSScriptRoot "config.test.json"),
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipCleanup,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Verbose
+)
+
+# Set error action preference
+$ErrorActionPreference = "Stop"
+if ($Verbose) { $VerbosePreference = "Continue" }
+
+# Import the module
+$moduleRoot = Split-Path -Parent $PSScriptRoot
+$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "FortigiGraph Integration Test Suite" -ForegroundColor Cyan
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+# Test tracking
+$script:TestResults = @()
+$script:CreatedResources = @()
+
+function Write-TestHeader {
+    param([string]$Message)
+    Write-Host "`n$Message" -ForegroundColor Yellow
+    Write-Host ("=" * $Message.Length) -ForegroundColor Yellow
+}
+
+function Write-TestStep {
+    param([string]$Message)
+    Write-Host "  → $Message" -ForegroundColor Cyan
+}
+
+function Write-TestSuccess {
+    param([string]$Message)
+    Write-Host "  ✓ $Message" -ForegroundColor Green
+}
+
+function Write-TestFailure {
+    param([string]$Message)
+    Write-Host "  ✗ $Message" -ForegroundColor Red
+}
+
+function Add-TestResult {
+    param(
+        [string]$Category,
+        [string]$TestName,
+        [bool]$Passed,
+        [string]$Message = "",
+        [object]$Data = $null
+    )
+
+    $script:TestResults += [PSCustomObject]@{
+        Category = $Category
+        TestName = $TestName
+        Passed = $Passed
+        Message = $Message
+        Data = $Data
+        Timestamp = Get-Date
+    }
+
+    if ($Passed) {
+        Write-TestSuccess $TestName
+    } else {
+        Write-TestFailure "$TestName - $Message"
+    }
+}
+
+function Register-Resource {
+    param(
+        [string]$Type,
+        [string]$Name,
+        [hashtable]$Details
+    )
+
+    $script:CreatedResources += [PSCustomObject]@{
+        Type = $Type
+        Name = $Name
+        Details = $Details
+        CreatedAt = Get-Date
+    }
+}
+
+# Load configuration
+Write-TestHeader "Loading Test Configuration"
+
+if (-not (Test-Path $ConfigFile)) {
+    Write-Host "Configuration file not found. Creating template: $ConfigFile" -ForegroundColor Yellow
+
+    $templateConfig = @{
+        Azure = @{
+            SubscriptionId = "YOUR-SUBSCRIPTION-ID"
+            ResourceGroupName = "rg-fortigraph-test"
+            Location = "northeurope"
+            SQLServerName = "fg-test-sql-$([guid]::NewGuid().ToString().Substring(0,8))"
+            DatabaseName = "GraphDataTest"
+            AdminUsername = "sqladmin"
+        }
+        Graph = @{
+            TenantId = "YOUR-TENANT-ID"
+            ClientId = "YOUR-CLIENT-ID"
+            ClientSecret = "YOUR-CLIENT-SECRET"  # Optional - will prompt if not provided
+        }
+        TestData = @{
+            MaxUsersToSync = 10  # Limit for testing
+        }
+    }
+
+    $templateConfig | ConvertTo-Json -Depth 10 | Out-File $ConfigFile -Encoding UTF8
+    Write-Host "Please edit $ConfigFile with your test environment details and run again." -ForegroundColor Yellow
+    exit 1
+}
+
+$config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+Write-TestSuccess "Configuration loaded from $ConfigFile"
+
+# Validate configuration
+Write-TestStep "Validating configuration..."
+$requiredFields = @(
+    @{ Path = "Azure.SubscriptionId"; Value = $config.Azure.SubscriptionId },
+    @{ Path = "Azure.ResourceGroupName"; Value = $config.Azure.ResourceGroupName },
+    @{ Path = "Graph.TenantId"; Value = $config.Graph.TenantId },
+    @{ Path = "Graph.ClientId"; Value = $config.Graph.ClientId }
+)
+
+$configValid = $true
+foreach ($field in $requiredFields) {
+    if ([string]::IsNullOrWhiteSpace($field.Value) -or $field.Value -like "YOUR-*") {
+        Write-TestFailure "Missing configuration: $($field.Path)"
+        $configValid = $false
+    }
+}
+
+if (-not $configValid) {
+    Write-Host "`nPlease update $ConfigFile with valid values." -ForegroundColor Red
+    exit 1
+}
+
+Write-TestSuccess "Configuration validated"
+
+# Import module
+Write-TestHeader "Test 1: Module Import"
+
+try {
+    Import-Module $modulePath -Force
+    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $true
+} catch {
+    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
+
+# Test Azure connection
+Write-TestHeader "Test 2: Azure Connection"
+
+try {
+    Write-TestStep "Checking Azure connection..."
+    $azContext = Get-AzContext
+    if (-not $azContext) {
+        Write-TestStep "Not connected to Azure. Connecting..."
+        Connect-AzAccount
+        $azContext = Get-AzContext
+    }
+
+    Add-TestResult -Category "Azure" -TestName "Azure connection established" -Passed $true -Data $azContext.Account.Id
+
+    Write-TestStep "Setting subscription context..."
+    Set-AzContext -SubscriptionId $config.Azure.SubscriptionId | Out-Null
+    Add-TestResult -Category "Azure" -TestName "Subscription context set" -Passed $true -Data $config.Azure.SubscriptionId
+} catch {
+    Add-TestResult -Category "Azure" -TestName "Azure connection" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
+
+# Test Graph connection
+Write-TestHeader "Test 3: Microsoft Graph Connection"
+
+try {
+    Write-TestStep "Getting Graph access token..."
+
+    if ($config.Graph.ClientSecret) {
+        $secureSecret = ConvertTo-SecureString $config.Graph.ClientSecret -AsPlainText -Force
+        Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId -ClientSecret $secureSecret
+    } else {
+        Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId
+    }
+
+    Add-TestResult -Category "Graph" -TestName "Graph access token obtained" -Passed $true
+
+    # Test Graph connection by fetching a user
+    Write-TestStep "Testing Graph API access (fetching users)..."
+    $testUsers = Get-FGUser -Top 1
+    Add-TestResult -Category "Graph" -TestName "Graph API connection verified" -Passed $true -Data $testUsers.Count
+} catch {
+    Add-TestResult -Category "Graph" -TestName "Graph connection" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
+
+# Cleanup existing test resources
+Write-TestHeader "Test 4: Cleanup Existing Test Resources"
+
+try {
+    Write-TestStep "Checking for existing SQL Server..."
+    $existingServer = Get-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -ErrorAction SilentlyContinue
+
+    if ($existingServer) {
+        Write-TestStep "Found existing SQL Server. Removing..."
+        Remove-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -Force
+        Start-Sleep -Seconds 10  # Wait for deletion to complete
+        Add-TestResult -Category "Cleanup" -TestName "Existing SQL Server removed" -Passed $true
+    } else {
+        Add-TestResult -Category "Cleanup" -TestName "No existing SQL Server to remove" -Passed $true
+    }
+} catch {
+    Write-Warning "Cleanup warning: $($_.Exception.Message)"
+    Add-TestResult -Category "Cleanup" -TestName "Cleanup existing resources" -Passed $true -Message "Warning: $($_.Exception.Message)"
+}
+
+# Create SQL Server
+Write-TestHeader "Test 5: SQL Server Creation"
+
+try {
+    Write-TestStep "Creating SQL Server: $($config.Azure.SQLServerName)..."
+
+    $sqlPassword = Read-Host "Enter SQL admin password for test server" -AsSecureString
+
+    $serverInfo = New-FGAzureSQLServer `
+        -SubscriptionId $config.Azure.SubscriptionId `
+        -ResourceGroupName $config.Azure.ResourceGroupName `
+        -ServerName $config.Azure.SQLServerName `
+        -DatabaseName $config.Azure.DatabaseName `
+        -AdminUsername $config.Azure.AdminUsername `
+        -AdminPassword $sqlPassword `
+        -Location $config.Azure.Location `
+        -AllowCurrentIP `
+        -AutoConnect
+
+    Register-Resource -Type "SQLServer" -Name $config.Azure.SQLServerName -Details @{
+        ResourceGroup = $config.Azure.ResourceGroupName
+        Database = $config.Azure.DatabaseName
+    }
+
+    Add-TestResult -Category "SQL" -TestName "SQL Server created" -Passed $true -Data $serverInfo
+    Add-TestResult -Category "SQL" -TestName "SQL Server auto-connected" -Passed ($null -ne $global:FGSQLConnectionString)
+} catch {
+    Add-TestResult -Category "SQL" -TestName "SQL Server creation" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
+
+# Test SQL Connection
+Write-TestHeader "Test 6: SQL Connection Verification"
+
+try {
+    Write-TestStep "Testing SQL connection..."
+    $connectionInfo = Test-FGSQLConnection
+    Add-TestResult -Category "SQL" -TestName "SQL connection verified" -Passed $true -Data $connectionInfo
+} catch {
+    Add-TestResult -Category "SQL" -TestName "SQL connection test" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
+
+# Test 7: Table Creation - Default Properties
+Write-TestHeader "Test 7: Table Creation (Default Properties)"
+
+try {
+    Write-TestStep "Creating table with default user properties..."
+
+    $defaultColumns = @{
+        "id" = "NVARCHAR(255)"
+        "userPrincipalName" = "NVARCHAR(255)"
+        "displayName" = "NVARCHAR(255)"
+        "mail" = "NVARCHAR(255)"
+        "accountEnabled" = "BIT"
+    }
+
+    Initialize-FGSQLTable -TableName "GraphUsers_DefaultTest" -Columns $defaultColumns -PrimaryKey "id"
+    Add-TestResult -Category "SQL" -TestName "Table created with default properties" -Passed $true
+
+    Register-Resource -Type "SQLTable" -Name "GraphUsers_DefaultTest" -Details @{ Columns = $defaultColumns }
+} catch {
+    Add-TestResult -Category "SQL" -TestName "Table creation (default)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 8: Table Creation - Extended Properties
+Write-TestHeader "Test 8: Table Creation (Extended Properties)"
+
+try {
+    Write-TestStep "Creating table with extended user properties..."
+
+    $extendedColumns = @{
+        "id" = "NVARCHAR(255)"
+        "userPrincipalName" = "NVARCHAR(255)"
+        "displayName" = "NVARCHAR(255)"
+        "mail" = "NVARCHAR(255)"
+        "accountEnabled" = "BIT"
+        "jobTitle" = "NVARCHAR(255)"  # Extra property
+        "department" = "NVARCHAR(255)"  # Extra property
+    }
+
+    Initialize-FGSQLTable -TableName "GraphUsers_ExtendedTest" -Columns $extendedColumns -PrimaryKey "id"
+    Add-TestResult -Category "SQL" -TestName "Table created with extended properties" -Passed $true
+
+    Register-Resource -Type "SQLTable" -Name "GraphUsers_ExtendedTest" -Details @{ Columns = $extendedColumns }
+} catch {
+    Add-TestResult -Category "SQL" -TestName "Table creation (extended)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 9: Table Creation - Custom Properties
+Write-TestHeader "Test 9: Table Creation (Custom Properties)"
+
+try {
+    Write-TestStep "Creating table with custom user properties..."
+
+    $customColumns = @{
+        "id" = "NVARCHAR(255)"
+        "userPrincipalName" = "NVARCHAR(255)"
+        "displayName" = "NVARCHAR(255)"
+        "givenName" = "NVARCHAR(255)"
+        "surname" = "NVARCHAR(255)"
+        "officeLocation" = "NVARCHAR(255)"
+        "mobilePhone" = "NVARCHAR(50)"
+    }
+
+    Initialize-FGSQLTable -TableName "GraphUsers_CustomTest" -Columns $customColumns -PrimaryKey "id"
+    Add-TestResult -Category "SQL" -TestName "Table created with custom properties" -Passed $true
+
+    Register-Resource -Type "SQLTable" -Name "GraphUsers_CustomTest" -Details @{ Columns = $customColumns }
+} catch {
+    Add-TestResult -Category "SQL" -TestName "Table creation (custom)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 10: Data Sync - Default Properties
+Write-TestHeader "Test 10: Data Sync (Default Properties)"
+
+try {
+    Write-TestStep "Syncing users with default properties..."
+
+    Sync-FGUser -TableName "GraphUsers_DefaultTest" -Top $config.TestData.MaxUsersToSync
+    Add-TestResult -Category "Sync" -TestName "User sync completed (default properties)" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced data..."
+    $syncedCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers_DefaultTest"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Data verification (default)" -Passed ($syncedCount -gt 0) -Data "Synced $syncedCount users"
+} catch {
+    Add-TestResult -Category "Sync" -TestName "User sync (default)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 11: Data Sync - Extended Properties
+Write-TestHeader "Test 11: Data Sync (Extended Properties)"
+
+try {
+    Write-TestStep "Syncing users with extended properties..."
+
+    $extendedProps = @("userPrincipalName", "displayName", "mail", "accountEnabled", "jobTitle", "department")
+    Sync-FGUser -TableName "GraphUsers_ExtendedTest" -Properties $extendedProps -Top $config.TestData.MaxUsersToSync
+    Add-TestResult -Category "Sync" -TestName "User sync completed (extended properties)" -Passed $true
+
+    # Verify data
+    $syncedCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers_ExtendedTest"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Data verification (extended)" -Passed ($syncedCount -gt 0) -Data "Synced $syncedCount users"
+} catch {
+    Add-TestResult -Category "Sync" -TestName "User sync (extended)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 12: Data Sync - Custom Properties
+Write-TestHeader "Test 12: Data Sync (Custom Properties)"
+
+try {
+    Write-TestStep "Syncing users with custom properties..."
+
+    $customProps = @("userPrincipalName", "displayName", "givenName", "surname", "officeLocation", "mobilePhone")
+    Sync-FGUser -TableName "GraphUsers_CustomTest" -Properties $customProps -Top $config.TestData.MaxUsersToSync
+    Add-TestResult -Category "Sync" -TestName "User sync completed (custom properties)" -Passed $true
+
+    # Verify data
+    $syncedCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers_CustomTest"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Data verification (custom)" -Passed ($syncedCount -gt 0) -Data "Synced $syncedCount users"
+} catch {
+    Add-TestResult -Category "Sync" -TestName "User sync (custom)" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 13: Query Results
+Write-TestHeader "Test 13: Query and Verify Results"
+
+try {
+    Write-TestStep "Querying synced data..."
+
+    $queryResults = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT
+    'GraphUsers_DefaultTest' as TableName,
+    COUNT(*) as RecordCount,
+    MIN(ValidFrom) as FirstSync,
+    MAX(ValidFrom) as LastSync
+FROM dbo.GraphUsers_DefaultTest
+UNION ALL
+SELECT
+    'GraphUsers_ExtendedTest',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphUsers_ExtendedTest
+UNION ALL
+SELECT
+    'GraphUsers_CustomTest',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphUsers_CustomTest
+"@
+
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $dataset = New-Object System.Data.DataSet
+        $adapter.Fill($dataset) | Out-Null
+        return $dataset.Tables[0]
+    }
+
+    Write-Host "`n  Query Results:" -ForegroundColor Cyan
+    $queryResults | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+
+    Add-TestResult -Category "Query" -TestName "Query execution successful" -Passed $true -Data $queryResults
+} catch {
+    Add-TestResult -Category "Query" -TestName "Query execution" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 14: Temporal Table Features
+Write-TestHeader "Test 14: Temporal Table Features"
+
+try {
+    Write-TestStep "Testing temporal table history views..."
+
+    $historyQuery = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT TOP 5 * FROM dbo.vw_GraphUsers_DefaultTest_AllHistory ORDER BY ValidFrom DESC"
+
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $dataset = New-Object System.Data.DataSet
+        $adapter.Fill($dataset) | Out-Null
+        return $dataset.Tables[0]
+    }
+
+    Add-TestResult -Category "Query" -TestName "Temporal history view accessible" -Passed ($historyQuery.Rows.Count -gt 0) -Data "$($historyQuery.Rows.Count) history records"
+} catch {
+    Add-TestResult -Category "Query" -TestName "Temporal table features" -Passed $false -Message $_.Exception.Message
+}
+
+# Cleanup
+if (-not $SkipCleanup) {
+    Write-TestHeader "Test 15: Cleanup Test Resources"
+
+    try {
+        Write-TestStep "Removing test SQL Server and resources..."
+        Remove-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -Force
+        Add-TestResult -Category "Cleanup" -TestName "Test resources cleaned up" -Passed $true
+    } catch {
+        Add-TestResult -Category "Cleanup" -TestName "Cleanup" -Passed $false -Message $_.Exception.Message
+    }
+} else {
+    Write-Host "`nSkipping cleanup (use -SkipCleanup to keep resources)" -ForegroundColor Yellow
+}
+
+# Print Summary
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "Integration Test Summary" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+
+$totalTests = $script:TestResults.Count
+$passedTests = ($script:TestResults | Where-Object { $_.Passed }).Count
+$failedTests = $totalTests - $passedTests
+
+Write-Host "`nTotal Tests:  $totalTests" -ForegroundColor White
+Write-Host "Passed:       $passedTests" -ForegroundColor Green
+Write-Host "Failed:       $failedTests" -ForegroundColor $(if ($failedTests -eq 0) { "Green" } else { "Red" })
+
+# Category breakdown
+Write-Host "`nResults by Category:" -ForegroundColor Cyan
+$script:TestResults | Group-Object Category | ForEach-Object {
+    $categoryPassed = ($_.Group | Where-Object { $_.Passed }).Count
+    $categoryTotal = $_.Count
+    $status = if ($categoryPassed -eq $categoryTotal) { "✓" } else { "✗" }
+    Write-Host "  $status $($_.Name): $categoryPassed/$categoryTotal passed" -ForegroundColor $(if ($categoryPassed -eq $categoryTotal) { "Green" } else { "Yellow" })
+}
+
+if ($failedTests -gt 0) {
+    Write-Host "`nFailed Tests:" -ForegroundColor Red
+    $script:TestResults | Where-Object { -not $_.Passed } | ForEach-Object {
+        Write-Host "  ✗ [$($_.Category)] $($_.TestName)" -ForegroundColor Yellow
+        if ($_.Message) {
+            Write-Host "    $($_.Message)" -ForegroundColor Gray
+        }
+    }
+}
+
+# Save detailed results
+$resultFile = Join-Path $PSScriptRoot "integration-test-results.json"
+$script:TestResults | ConvertTo-Json -Depth 10 | Out-File $resultFile -Encoding UTF8
+Write-Host "`nDetailed results saved to: $resultFile" -ForegroundColor Cyan
+
+Write-Host "`n========================================`n" -ForegroundColor Cyan
+
+# Exit code
+if ($failedTests -eq 0) {
+    Write-Host "All integration tests passed! ✓" -ForegroundColor Green
+    exit 0
+} else {
+    Write-Host "Some integration tests failed." -ForegroundColor Red
+    exit 1
+}

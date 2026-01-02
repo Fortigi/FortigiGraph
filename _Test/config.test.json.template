@@ -1,0 +1,18 @@
+{
+  "Azure": {
+    "SubscriptionId": "YOUR-SUBSCRIPTION-ID",
+    "ResourceGroupName": "rg-fortigraph-test",
+    "Location": "northeurope",
+    "SQLServerName": "fg-test-sql-CHANGEME",
+    "DatabaseName": "GraphDataTest",
+    "AdminUsername": "sqladmin"
+  },
+  "Graph": {
+    "TenantId": "YOUR-TENANT-ID",
+    "ClientId": "YOUR-CLIENT-ID",
+    "ClientSecret": ""
+  },
+  "TestData": {
+    "MaxUsersToSync": 10
+  }
+}

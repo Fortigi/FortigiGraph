@@ -5,9 +5,10 @@
 $base    = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'base') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $generic = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'generic') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $specific = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'specific') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$SQL = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'SQL') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 
 # Dot source base & generic function files
-foreach ($import in @($base + $generic + $specific)) {
+foreach ($import in @($base + $generic + $specific + $SQL)) {
     try {
         . $import.fullname
     }
