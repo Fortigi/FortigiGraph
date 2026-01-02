@@ -11,8 +11,5 @@
     "TenantId": "YOUR-TENANT-ID",
     "ClientId": "YOUR-CLIENT-ID",
     "ClientSecret": ""
-  },
-  "TestData": {
-    "MaxUsersToSync": 10
   }
 }

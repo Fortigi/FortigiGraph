@@ -10,19 +10,15 @@
 #Requires -Modules Az
 
 param(
-    [Parameter(Mandatory = $false)]
-    [string]$ConfigFile = (Join-Path $PSScriptRoot "config.test.json"),
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigFile,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipCleanup,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$Verbose
+    [switch]$SkipCleanup
 )
 
 # Set error action preference
 $ErrorActionPreference = "Stop"
-if ($Verbose) { $VerbosePreference = "Continue" }
 
 # Import the module
 $moduleRoot = Split-Path -Parent $PSScriptRoot
@@ -101,29 +97,7 @@ function Register-Resource {
 Write-TestHeader "Loading Test Configuration"
 
 if (-not (Test-Path $ConfigFile)) {
-    Write-Host "Configuration file not found. Creating template: $ConfigFile" -ForegroundColor Yellow
-
-    $templateConfig = @{
-        Azure = @{
-            SubscriptionId = "YOUR-SUBSCRIPTION-ID"
-            ResourceGroupName = "rg-fortigraph-test"
-            Location = "northeurope"
-            SQLServerName = "fg-test-sql-$([guid]::NewGuid().ToString().Substring(0,8))"
-            DatabaseName = "GraphDataTest"
-            AdminUsername = "sqladmin"
-        }
-        Graph = @{
-            TenantId = "YOUR-TENANT-ID"
-            ClientId = "YOUR-CLIENT-ID"
-            ClientSecret = "YOUR-CLIENT-SECRET"  # Optional - will prompt if not provided
-        }
-        TestData = @{
-            MaxUsersToSync = 10  # Limit for testing
-        }
-    }
-
-    $templateConfig | ConvertTo-Json -Depth 10 | Out-File $ConfigFile -Encoding UTF8
-    Write-Host "Please edit $ConfigFile with your test environment details and run again." -ForegroundColor Yellow
+    Write-Host "Configuration file not found. Please read the readme file." -ForegroundColor Yellow
     exit 1
 }
 
@@ -170,18 +144,48 @@ Write-TestHeader "Test 2: Azure Connection"
 
 try {
     Write-TestStep "Checking Azure connection..."
-    $azContext = Get-AzContext
+    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+
+    # Check if we have a context at all
     if (-not $azContext) {
-        Write-TestStep "Not connected to Azure. Connecting..."
-        Connect-AzAccount
+        Write-TestStep "Not connected to Azure. Connecting to tenant..."
+        Connect-AzAccount -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId
         $azContext = Get-AzContext
+    } else {
+        # We have a context, but is it the right tenant and subscription?
+        $correctTenant = $azContext.Tenant.Id -eq $config.Graph.TenantId
+        $correctSubscription = $azContext.Subscription.Id -eq $config.Azure.SubscriptionId
+
+        if (-not $correctTenant -or -not $correctSubscription) {
+            Write-TestStep "Switching to correct tenant/subscription..."
+            Write-TestStep "Current: Tenant=$($azContext.Tenant.Id), Sub=$($azContext.Subscription.Id)"
+            Write-TestStep "Target: Tenant=$($config.Graph.TenantId), Sub=$($config.Azure.SubscriptionId)"
+
+            # Try to switch context
+            try {
+                Set-AzContext -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId -ErrorAction Stop | Out-Null
+                $azContext = Get-AzContext
+                Write-TestStep "Context switched successfully"
+            } catch {
+                # Context doesn't exist for this tenant/subscription, need to reconnect
+                Write-TestStep "Context not found. Connecting to tenant..."
+                Connect-AzAccount -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId
+                $azContext = Get-AzContext
+            }
+        } else {
+            Write-TestStep "Already connected to correct tenant and subscription"
+        }
     }
 
-    Add-TestResult -Category "Azure" -TestName "Azure connection established" -Passed $true -Data $azContext.Account.Id
+    Add-TestResult -Category "Azure" -TestName "Azure connection established" -Passed $true -Data "$($azContext.Account.Id) (Tenant: $($azContext.Tenant.Id))"
 
-    Write-TestStep "Setting subscription context..."
-    Set-AzContext -SubscriptionId $config.Azure.SubscriptionId | Out-Null
-    Add-TestResult -Category "Azure" -TestName "Subscription context set" -Passed $true -Data $config.Azure.SubscriptionId
+    Write-TestStep "Verifying subscription context..."
+    $currentContext = Get-AzContext
+    if ($currentContext.Subscription.Id -eq $config.Azure.SubscriptionId) {
+        Add-TestResult -Category "Azure" -TestName "Subscription context verified" -Passed $true -Data "$($currentContext.Subscription.Name)"
+    } else {
+        throw "Subscription context mismatch. Expected: $($config.Azure.SubscriptionId), Got: $($currentContext.Subscription.Id)"
+    }
 } catch {
     Add-TestResult -Category "Azure" -TestName "Azure connection" -Passed $false -Message $_.Exception.Message
     exit 1
@@ -191,23 +195,50 @@ try {
 Write-TestHeader "Test 3: Microsoft Graph Connection"
 
 try {
-    Write-TestStep "Getting Graph access token..."
+    Write-TestStep "Checking for existing Graph token..."
 
-    if ($config.Graph.ClientSecret) {
-        $secureSecret = ConvertTo-SecureString $config.Graph.ClientSecret -AsPlainText -Force
-        Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId -ClientSecret $secureSecret
-    } else {
-        Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId
+    # Check if there's already a valid token
+    $hasValidToken = $false
+    if ($global:FGAccessToken) {
+        try {
+            # Try to use existing token
+            Write-TestStep "Found existing token, testing validity..."
+            $testUsers = Get-FGUser
+            $hasValidToken = $true
+            Write-TestStep "Existing token is valid"
+        } catch {
+            Write-TestStep "Existing token is invalid or expired, getting new token..."
+            $hasValidToken = $false
+        }
+    }
+
+    # Get new token if needed
+    if (-not $hasValidToken) {
+        Write-TestStep "Getting new Graph access token..."
+        Write-TestStep "TenantId: $($config.Graph.TenantId)"
+        Write-TestStep "ClientId: $($config.Graph.ClientId)"
+        Write-TestStep "Using ClientSecret: $($config.Graph.ClientSecret -ne $null -and $config.Graph.ClientSecret -ne '')"
+
+        if ($config.Graph.ClientSecret -and $config.Graph.ClientSecret -ne "") {
+            Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId -ClientSecret $config.Graph.ClientSecret
+        } else {
+            Write-TestStep "No client secret provided, using interactive auth..."
+            Get-FGAccessToken -TenantId $config.Graph.TenantId -ClientId $config.Graph.ClientId
+        }
+
+        Write-TestStep "Token obtained, testing Graph API access..."
+        $testUsers = Get-FGUser
     }
 
     Add-TestResult -Category "Graph" -TestName "Graph access token obtained" -Passed $true
-
-    # Test Graph connection by fetching a user
-    Write-TestStep "Testing Graph API access (fetching users)..."
-    $testUsers = Get-FGUser -Top 1
-    Add-TestResult -Category "Graph" -TestName "Graph API connection verified" -Passed $true -Data $testUsers.Count
+    Add-TestResult -Category "Graph" -TestName "Graph API connection verified" -Passed $true -Data "$($testUsers.Count) users retrieved"
 } catch {
-    Add-TestResult -Category "Graph" -TestName "Graph connection" -Passed $false -Message $_.Exception.Message
+    $errorDetails = $_.Exception.Message
+    if ($_.ErrorDetails.Message) {
+        $errorDetails += " | Details: $($_.ErrorDetails.Message)"
+    }
+    Write-TestFailure "Graph connection failed: $errorDetails"
+    Add-TestResult -Category "Graph" -TestName "Graph connection" -Passed $false -Message $errorDetails
     exit 1
 }
 
@@ -237,15 +268,13 @@ Write-TestHeader "Test 5: SQL Server Creation"
 try {
     Write-TestStep "Creating SQL Server: $($config.Azure.SQLServerName)..."
 
-    $sqlPassword = Read-Host "Enter SQL admin password for test server" -AsSecureString
-
     $serverInfo = New-FGAzureSQLServer `
         -SubscriptionId $config.Azure.SubscriptionId `
         -ResourceGroupName $config.Azure.ResourceGroupName `
         -ServerName $config.Azure.SQLServerName `
         -DatabaseName $config.Azure.DatabaseName `
         -AdminUsername $config.Azure.AdminUsername `
-        -AdminPassword $sqlPassword `
+        -AdminPassword $config.Azure.AdminUserPassword `
         -Location $config.Azure.Location `
         -AllowCurrentIP `
         -AutoConnect
@@ -350,7 +379,7 @@ Write-TestHeader "Test 10: Data Sync (Default Properties)"
 try {
     Write-TestStep "Syncing users with default properties..."
 
-    Sync-FGUser -TableName "GraphUsers_DefaultTest" -Top $config.TestData.MaxUsersToSync
+    Sync-FGUser -TableName "GraphUsers_DefaultTest"
     Add-TestResult -Category "Sync" -TestName "User sync completed (default properties)" -Passed $true
 
     # Verify data was synced
@@ -374,7 +403,7 @@ try {
     Write-TestStep "Syncing users with extended properties..."
 
     $extendedProps = @("userPrincipalName", "displayName", "mail", "accountEnabled", "jobTitle", "department")
-    Sync-FGUser -TableName "GraphUsers_ExtendedTest" -Properties $extendedProps -Top $config.TestData.MaxUsersToSync
+    Sync-FGUser -TableName "GraphUsers_ExtendedTest" -Attributes $extendedProps
     Add-TestResult -Category "Sync" -TestName "User sync completed (extended properties)" -Passed $true
 
     # Verify data
@@ -397,7 +426,7 @@ try {
     Write-TestStep "Syncing users with custom properties..."
 
     $customProps = @("userPrincipalName", "displayName", "givenName", "surname", "officeLocation", "mobilePhone")
-    Sync-FGUser -TableName "GraphUsers_CustomTest" -Properties $customProps -Top $config.TestData.MaxUsersToSync
+    Sync-FGUser -TableName "GraphUsers_CustomTest" -Attributes $customProps
     Add-TestResult -Category "Sync" -TestName "User sync completed (custom properties)" -Passed $true
 
     # Verify data
@@ -529,8 +558,9 @@ if ($failedTests -gt 0) {
 }
 
 # Save detailed results
+Write-Host "`nSaving detailed test results to JSON file..." -ForegroundColor Cyan
 $resultFile = Join-Path $PSScriptRoot "integration-test-results.json"
-$script:TestResults | ConvertTo-Json -Depth 10 | Out-File $resultFile -Encoding UTF8
+$script:TestResults | ConvertTo-Json -Depth 20 | Out-File $resultFile -Encoding UTF8
 Write-Host "`nDetailed results saved to: $resultFile" -ForegroundColor Cyan
 
 Write-Host "`n========================================`n" -ForegroundColor Cyan
