@@ -17,13 +17,17 @@ function New-FGSQLMergeStatement {
     Hashtable mapping attribute names to SQL data types
 
     .PARAMETER PrimaryKey
-    Name of the primary key column. Default: 'id'
+    Name of the primary key column(s). Can be a single string or array of strings for composite keys. Default: 'id'
 
     .EXAMPLE
     $mergeSQL = New-FGSQLMergeStatement -TableName "GraphUsers" -Attributes @('id', 'displayName', 'mail') -TypeMap $typeMap
 
+    .EXAMPLE
+    $mergeSQL = New-FGSQLMergeStatement -TableName "GroupMembers" -Attributes @('groupId', 'memberId', 'memberType') -TypeMap $typeMap -PrimaryKey @('groupId', 'memberId')
+
     .NOTES
-    The MERGE statement uses proper NULL handling and type-aware comparisons
+    The MERGE statement uses proper NULL handling and type-aware comparisons.
+    Supports both single and composite primary keys.
     #>
 
     [CmdletBinding()]
@@ -38,21 +42,31 @@ function New-FGSQLMergeStatement {
         [hashtable]$TypeMap,
 
         [Parameter(Mandatory = $false)]
-        [string]$PrimaryKey = 'id'
+        $PrimaryKey = 'id'
     )
+
+    # Handle composite or single primary key
+    if ($PrimaryKey -is [array]) {
+        $pkArray = $PrimaryKey
+    } else {
+        $pkArray = @($PrimaryKey)
+    }
 
     # Build source columns (e.g., "@id AS id, @displayName AS displayName")
     $sourceColumns = ($Attributes | ForEach-Object { "@$_ AS [$_]" }) -join ', '
 
-    # Build UPDATE SET statements (exclude primary key)
-    $updateSetStatements = ($Attributes | Where-Object { $_ -ne $PrimaryKey } | ForEach-Object { "[$_] = source.[$_]" }) -join ', '
+    # Build UPDATE SET statements (exclude primary key columns)
+    $updateSetStatements = ($Attributes | Where-Object { $_ -notin $pkArray } | ForEach-Object { "[$_] = source.[$_]" }) -join ', '
 
     # Build INSERT columns and values
     $insertColumns = ($Attributes | ForEach-Object { "[$_]" }) -join ', '
     $insertValues = ($Attributes | ForEach-Object { "source.[$_]" }) -join ', '
 
-    # Build change detection conditions (only update if something changed)
-    $changeConditions = ($Attributes | Where-Object { $_ -ne $PrimaryKey } | ForEach-Object {
+    # Build ON clause for primary key matching (supports composite keys)
+    $onConditions = ($pkArray | ForEach-Object { "target.[$_] = source.[$_]" }) -join ' AND '
+
+    # Build change detection conditions (only update if something changed, exclude PK columns)
+    $changeConditions = ($Attributes | Where-Object { $_ -notin $pkArray } | ForEach-Object {
         $attr = $_
         $sqlType = $TypeMap[$attr]
 
@@ -64,7 +78,7 @@ function New-FGSQLMergeStatement {
     $mergeSQL = @"
 MERGE dbo.$TableName AS target
 USING (SELECT $sourceColumns) AS source
-ON target.[$PrimaryKey] = source.[$PrimaryKey]
+ON $onConditions
 WHEN MATCHED AND ($changeConditions) THEN
     UPDATE SET $updateSetStatements
 WHEN NOT MATCHED THEN
