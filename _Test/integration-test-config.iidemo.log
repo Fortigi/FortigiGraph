@@ -1,0 +1,617 @@
+**********************
+PowerShell transcript start
+Start time: 20260104092428
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -noexit -command try { . "c:\Users\WimvandenHeijkant\AppData\Local\Programs\Microsoft VS Code\resources\app\out\vs\workbench\contrib\terminal\common\scripts\shellIntegration.ps1" } catch {}
+Process ID: 21756
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\integration-test-config.iidemo.log
+
+Loading Test Configuration
+==========================
+  ✓ Configuration loaded from .\config.iidemo.json
+  → Validating configuration...
+  ✓ Configuration validated
+  → Loading secure credentials...
+  ✓ Secure credentials loaded
+
+Test 1: Module Import
+=====================
+  ✓ Import FortigiGraph module
+
+Test 2: Azure Connection
+========================
+  → Checking Azure connection...
+  → Already connected to correct tenant and subscription
+  ✓ Azure connection established
+  → Verifying subscription context...
+  ✓ Subscription context verified
+
+Test 3: Microsoft Graph Connection
+==================================
+  → Checking for existing Graph token...
+  → Getting new Graph access token...
+  → TenantId: 10b6a2c8-41f9-400d-8020-4ca96606899f
+  → ClientId: ebb35403-0068-4cd2-bb80-73a19b3d9c7e
+  → Using ClientSecret: True
+  → Token obtained, testing Graph API access...
+  ✓ Graph access token obtained
+  ✓ Graph API connection verified
+
+Test 4: Cleanup Existing Test Resources
+=======================================
+  → Checking for existing SQL Server...
+  ✓ No existing SQL Server to remove
+
+Test 5: SQL Server Creation
+===========================
+  → Creating SQL Server: iisqlserver...
+
+========================================
+Current Azure Context:
+========================================
+Account:      wim@iidemos.onmicrosoft.com
+Subscription: IIDemos
+Tenant:       10b6a2c8-41f9-400d-8020-4ca96606899f
+========================================
+Azure context confirmed for this session.
+Setting Azure subscription context...
+Checking resource group: SQLServer...
+  Creating resource group: SQLServer in northeurope...
+  Resource group created successfully
+Checking SQL Server: iisqlserver...
+  Creating SQL Server: iisqlserver in northeurope...
+    This may take a few minutes...
+  SQL Server created successfully
+Configuring firewall rules...
+  Getting your current public IP...
+    Your IP: 143.178.133.160
+    Your IP added to firewall
+Checking database: GraphData...
+  Creating database: GraphData with SKU: Basic...
+    This may take a few minutes...
+  Database created successfully
+
+========================================
+Azure SQL Server Deployment Complete!
+========================================
+Server Name:    iisqlserver.database.windows.net
+Database Name:  GraphData
+Admin Username: sqladmin
+Location:       northeurope
+SKU:            Basic
+Auth Method:    SQL Authentication
+
+Connection String (SQL Auth):
+Server=iisqlserver.database.windows.net;Database=GraphData;User Id=sqladmin;Password=<your-password>;Encrypt=True;
+
+========================================
+Auto-connecting to SQL Server...
+Setting Azure subscription context...
+Retrieving SQL Server details from Azure...
+  Found server: iisqlserver
+  Location: northeurope
+  FQDN: iisqlserver.database.windows.net
+Connecting to SQL Server...
+Successfully connected to SQL Server: iisqlserver.database.windows.net, Database: GraphData
+
+Connection successful!
+You can now use Initialize-FGSQLTable and other SQL functions.
+SQL Connection Test: SUCCESS
+  Server: iisqlserver.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/04/2026 08:27:00
+  ✓ SQL Server created
+  ✓ SQL Server auto-connected
+
+Test 6: SQL Connection Verification
+===================================
+  → Testing SQL connection...
+SQL Connection Test: SUCCESS
+  Server: iisqlserver.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/04/2026 08:27:00
+  ✓ SQL connection verified
+
+Test 7: Table Creation (Default Properties)
+===========================================
+  → Creating table with default user properties...
+Successfully created temporal table: dbo.GraphUsers_DefaultTest
+  History table: dbo.GraphUsers_DefaultTestHistory
+  Primary Key: id
+  Columns: 5
+  Created helper view: vw_GraphUsers_DefaultTest_AllHistory
+True
+  ✓ Table created with default properties
+
+Test 8: Table Creation (Extended Properties)
+============================================
+  → Creating table with extended user properties...
+Successfully created temporal table: dbo.GraphUsers_ExtendedTest
+  History table: dbo.GraphUsers_ExtendedTestHistory
+  Primary Key: id
+  Columns: 7
+  Created helper view: vw_GraphUsers_ExtendedTest_AllHistory
+True
+  ✓ Table created with extended properties
+
+Test 9: Table Creation (Custom Properties)
+==========================================
+  → Creating table with custom user properties...
+Successfully created temporal table: dbo.GraphUsers_CustomTest
+  History table: dbo.GraphUsers_CustomTestHistory
+  Primary Key: id
+  Columns: 7
+  Created helper view: vw_GraphUsers_CustomTest_AllHistory
+True
+  ✓ Table created with custom properties
+
+Test 10: Data Sync (Default Properties)
+=======================================
+  → Syncing users with default properties...
+[09:27:04] Using default attributes: 18 attributes
+[09:27:04] Table 'GraphUsers_DefaultTest' already exists. Checking schema...
+  [09:27:05] Found 13 new attribute(s) to add: managerId, onPremisesSyncEnabled, userType, employeeHireDate, givenName, onPremisesSamAccountName, lastSignInDateTime, department, employeeId, jobTitle, companyName, surname, createdDateTime
+  [09:27:05] Adding 13 column(s) to table 'GraphUsers_DefaultTest'...
+    [09:27:05] Adding column: managerId (UNIQUEIDENTIFIER)
+    [09:27:05] Adding column: onPremisesSyncEnabled (BIT)
+    [09:27:05] Adding column: userType (NVARCHAR(50))
+    [09:27:05] Adding column: employeeHireDate (DATETIME2)
+    [09:27:05] Adding column: givenName (NVARCHAR(255))
+    [09:27:05] Adding column: onPremisesSamAccountName (NVARCHAR(255))
+    [09:27:05] Adding column: lastSignInDateTime (DATETIME2)
+    [09:27:05] Adding column: department (NVARCHAR(255))
+    [09:27:05] Adding column: employeeId (NVARCHAR(255))
+    [09:27:05] Adding column: jobTitle (NVARCHAR(255))
+    [09:27:06] Adding column: companyName (NVARCHAR(255))
+    [09:27:06] Adding column: surname (NVARCHAR(255))
+    [09:27:06] Adding column: createdDateTime (DATETIME2)
+  [09:27:06] Schema updated successfully
+
+[09:27:06] Fetching users from Microsoft Graph...
+  [09:27:07] Fetched 34 users...
+[09:27:07] Total users fetched: 34 (took 0.6s)
+
+[09:27:07] Syncing users to SQL Server...
+[09:27:07] Preparing MERGE statement...
+[09:27:07] Database connection established
+[09:27:07] Starting transaction...
+[09:27:07] Inserting/updating 34 users...
+[09:27:16] Committing transaction...
+[09:27:16] Transaction committed successfully (took 9.5s)
+[09:27:16] Checking for deleted users...
+  [09:27:16] No deleted users found
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphUsers_DefaultTest
+Total Users:     34
+Synced:          34
+Deleted:         0
+Errors:          0
+Attributes:      18
+
+All changes are automatically tracked in GraphUsers_DefaultTestHistory
+========================================
+
+Name                           Value
+----                           -----
+ErrorCount                     0
+DeletedCount                   0
+SyncedCount                    34
+TotalUsers                     34
+TableName                      GraphUsers_DefaultTest
+Attributes                     {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
+  ✓ User sync completed (default properties)
+  → Verifying synced data...
+  ✓ Data verification (default)
+
+Test 11: Data Sync (Extended Properties)
+========================================
+  → Syncing users with extended properties...
+[09:27:17] Using custom attributes: 6 attributes
+[09:27:17] Table 'GraphUsers_ExtendedTest' already exists. Checking schema...
+  [09:27:17] Schema is up to date
+
+[09:27:17] Fetching users from Microsoft Graph...
+  [09:27:17] Fetched 34 users...
+[09:27:17] Total users fetched: 34 (took 0.1s)
+
+[09:27:17] Syncing users to SQL Server...
+[09:27:17] Preparing MERGE statement...
+[09:27:17] Database connection established
+[09:27:17] Starting transaction...
+[09:27:17] Inserting/updating 34 users...
+[09:27:22] Committing transaction...
+[09:27:22] Transaction committed successfully (took 5s)
+[09:27:22] Checking for deleted users...
+  [09:27:22] No deleted users found
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphUsers_ExtendedTest
+Total Users:     34
+Synced:          34
+Deleted:         0
+Errors:          0
+Attributes:      7
+
+All changes are automatically tracked in GraphUsers_ExtendedTestHistory
+========================================
+ErrorCount                     0
+DeletedCount                   0
+SyncedCount                    34
+TotalUsers                     34
+TableName                      GraphUsers_ExtendedTest
+Attributes                     {id, userPrincipalName, displayName, mail…}
+  ✓ User sync completed (extended properties)
+  ✓ Data verification (extended)
+
+Test 12: Data Sync (Custom Properties)
+======================================
+  → Syncing users with custom properties...
+[09:27:22] Using custom attributes: 6 attributes
+[09:27:22] Table 'GraphUsers_CustomTest' already exists. Checking schema...
+  [09:27:23] Schema is up to date
+
+[09:27:23] Fetching users from Microsoft Graph...
+  [09:27:23] Fetched 34 users...
+[09:27:23] Total users fetched: 34 (took 0.2s)
+
+[09:27:23] Syncing users to SQL Server...
+[09:27:23] Preparing MERGE statement...
+[09:27:23] Database connection established
+[09:27:23] Starting transaction...
+[09:27:23] Inserting/updating 34 users...
+[09:27:26] Committing transaction...
+[09:27:26] Transaction committed successfully (took 3.3s)
+[09:27:26] Checking for deleted users...
+  [09:27:26] No deleted users found
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphUsers_CustomTest
+Total Users:     34
+Synced:          34
+Deleted:         0
+Errors:          0
+Attributes:      7
+
+All changes are automatically tracked in GraphUsers_CustomTestHistory
+========================================
+ErrorCount                     0
+DeletedCount                   0
+SyncedCount                    34
+TotalUsers                     34
+TableName                      GraphUsers_CustomTest
+Attributes                     {id, userPrincipalName, displayName, givenName…}
+  ✓ User sync completed (custom properties)
+  ✓ Data verification (custom)
+
+Test 13: Query and Verify Results
+=================================
+  → Querying synced data...
+
+  Query Results:
+
+TableName               RecordCount FirstSync           LastSync
+---------               ----------- ---------           --------
+GraphUsers_DefaultTest           34 04/01/2026 08:27:04 04/01/2026 08:27:04
+GraphUsers_ExtendedTest          34 04/01/2026 08:27:14 04/01/2026 08:27:14
+GraphUsers_CustomTest            34 04/01/2026 08:27:20 04/01/2026 08:27:20
+  ✓ Query execution successful
+
+Test 14: Temporal Table Features
+================================
+  → Testing temporal table history views...
+  ✓ Temporal history view accessible
+
+Test 15: Simple Query Test (Invoke-FGSQLQuery)
+==============================================
+  → Testing Invoke-FGSQLQuery with sample user data...
+
+  Sample Users Retrieved:
+
+userPrincipalName                                        displayName    mail                        accountEnabled
+-----------------                                        -----------    ----                        --------------
+Alice@iidemos.onmicrosoft.com                            Alice Heron                                          True
+bob@iidemos.onmicrosoft.com                              Bob Lorcan                                           True
+y.boiko_portofrotterdam.com#EXT#@iidemos.onmicrosoft.com Boiko, Yurii   y.boiko@portofrotterdam.com           True
+Carla@iidemos.onmicrosoft.com                            Carla Cash                                           True
+David@iidemos.onmicrosoft.com                            David Marquess                                       True
+  ✓ Invoke-FGSQLQuery execution
+  → Testing scalar query (user count)...
+  → Total users in database: 34
+  ✓ Invoke-FGSQLQuery scalar execution
+
+Test 16: Group Sync (Default Properties)
+========================================
+  → Syncing groups with default properties...
+[09:27:27] Using default attributes: 20 attributes
+[09:27:27] Table 'GraphGroups_Test' does not exist. Will be created...
+Successfully created temporal table: dbo.GraphGroups_Test
+  History table: dbo.GraphGroups_TestHistory
+  Primary Key: id
+  Columns: 20
+  Created helper view: vw_GraphGroups_Test_AllHistory
+True
+
+[09:27:27] Fetching groups from Microsoft Graph...
+  [09:27:27] Fetched 68 groups...
+[09:27:27] Total groups fetched: 68 (took 0.1s)
+
+[09:27:27] Syncing groups to SQL Server...
+[09:27:27] Preparing MERGE statement...
+[09:27:27] Database connection established
+[09:27:27] Starting transaction...
+[09:27:27] Inserting/updating 68 groups...
+[09:27:34] Committing transaction...
+[09:27:34] Transaction committed successfully (took 6.8s)
+[09:27:34] Checking for deleted groups...
+  [09:27:34] No deleted groups found
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphGroups_Test
+Total Groups:    68
+Synced:          68
+Deleted:         0
+Errors:          0
+Attributes:      20
+
+All changes are automatically tracked in GraphGroups_TestHistory
+========================================
+ErrorCount                     0
+DeletedCount                   0
+Attributes                     {id, displayName, description, mail…}
+SyncedCount                    68
+TableName                      GraphGroups_Test
+TotalGroups                    68
+  ✓ Group sync completed (default properties)
+  → Verifying synced group data...
+  ✓ Group data verification
+
+Test 17: Group Member Sync (Direct Memberships)
+===============================================
+  → Syncing direct group memberships...
+[09:27:34] Starting group membership sync...
+[09:27:34] Table 'GraphGroupMembers_Test' does not exist. Will be created...
+Successfully created temporal table: dbo.GraphGroupMembers_Test
+  History table: dbo.GraphGroupMembers_TestHistory
+  Primary Key: groupId, memberId
+  Columns: 3
+  Created helper view: vw_GraphGroupMembers_Test_AllHistory
+True
+
+[09:27:34] Fetching groups from Microsoft Graph...
+  [09:27:35] Fetched 68 groups...
+[09:27:35] Total groups to process: 68
+
+[09:27:35] Fetching group memberships...
+  This may take a while for tenants with many groups and members...
+  [09:27:36] Progress: 10/68 groups, 109 memberships (9.2 groups/sec)
+  [09:27:37] Progress: 20/68 groups, 269 memberships (9.2 groups/sec)
+  [09:27:38] Progress: 30/68 groups, 384 memberships (8.3 groups/sec)
+  [09:27:40] Progress: 40/68 groups, 488 memberships (8.1 groups/sec)
+  [09:27:41] Progress: 50/68 groups, 629 memberships (8 groups/sec)
+  [09:27:42] Progress: 60/68 groups, 738 memberships (7.7 groups/sec)
+[09:27:43] Total memberships fetched: 853 from 68 groups (took 8.6s)
+
+[09:27:43] Syncing memberships to SQL Server...
+[09:27:43] Preparing MERGE statement...
+[09:27:43] Database connection established
+[09:27:43] Starting transaction...
+[09:27:43] Inserting/updating 853 memberships...
+[09:28:06] Committing transaction...
+[09:28:06] Transaction committed successfully (took 22.2s)
+[09:28:06] Checking for deleted memberships...
+  [09:28:06] No deleted memberships found
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphGroupMembers_Test
+Groups:          68
+Memberships:     853
+Synced:          853
+Deleted:         0
+Errors:          0
+
+All changes are automatically tracked in GraphGroupMembers_TestHistory
+========================================
+ErrorCount                     0
+DeletedCount                   0
+SyncedCount                    853
+TotalMemberships               853
+TableName                      GraphGroupMembers_Test
+TotalGroups                    68
+  ✓ Direct group membership sync completed
+  → Verifying synced membership data...
+  ✓ Direct membership data verification
+  → Verifying composite primary key...
+  ✓ Composite primary key verification
+
+Test 18: Group Transitive Member Sync (Nested Memberships)
+==========================================================
+  → Syncing transitive/nested group memberships...
+[09:28:08] Starting transitive group membership sync...
+[09:28:08] Table 'GraphGroupTransitiveMembers_Test' does not exist. Will be created...
+Successfully created temporal table: dbo.GraphGroupTransitiveMembers_Test
+  History table: dbo.GraphGroupTransitiveMembers_TestHistory
+  Primary Key: groupId, memberId
+  Columns: 3
+  Created helper view: vw_GraphGroupTransitiveMembers_Test_AllHistory
+True
+
+[09:28:08] Fetching groups from Microsoft Graph...
+  [09:28:08] Fetched 68 groups...
+[09:28:08] Total groups to process: 68
+
+[09:28:08] Fetching transitive group memberships...
+  This may take a while for tenants with many groups and nested structures...
+  [09:28:09] Progress: 10/68 groups, 109 memberships (9.3 groups/sec)
+  [09:28:10] Progress: 20/68 groups, 269 memberships (8.9 groups/sec)
+  [09:28:11] Progress: 30/68 groups, 384 memberships (9 groups/sec)
+  [09:28:13] Progress: 40/68 groups, 488 memberships (9.2 groups/sec)
+  [09:28:14] Progress: 50/68 groups, 629 memberships (9.1 groups/sec)
+  [09:28:15] Progress: 60/68 groups, 738 memberships (8.8 groups/sec)
+[09:28:16] Total transitive memberships fetched: 853 from 68 groups (took 7.7s)
+
+[09:28:16] Syncing transitive memberships to SQL Server...
+[09:28:16] Preparing MERGE statement...
+[09:28:16] Database connection established
+[09:28:16] Starting transaction...
+[09:28:16] Inserting/updating 853 transitive memberships...
+[09:28:38] Committing transaction...
+[09:28:38] Transaction committed successfully (took 22.4s)
+[09:28:38] Checking for deleted transitive memberships...
+  [09:28:40] No deleted transitive memberships found
+
+========================================
+Sync Complete!
+========================================
+Table:                      GraphGroupTransitiveMembers_Test
+Groups:                     68
+Transitive Memberships:     853
+Synced:                     853
+Deleted:                    0
+Errors:                     0
+
+All changes are automatically tracked in GraphGroupTransitiveMembers_TestHistory
+========================================
+ErrorCount                     0
+DeletedCount                   0
+SyncedCount                    853
+TotalMemberships               853
+TableName                      GraphGroupTransitiveMembers_Test
+TotalGroups                    68
+  ✓ Transitive group membership sync completed
+  → Verifying synced transitive membership data...
+  ✓ Transitive membership data verification
+  → Comparing direct vs transitive membership counts...
+  → Direct memberships: 853
+  → Transitive memberships: 853
+  → Additional nested members: 0
+
+Test 19: Group Eligible Member Sync (PIM Memberships)
+=====================================================
+  → Checking for PIM-enabled groups...
+  → No PIM-enabled groups found in tenant. Skipping eligible membership sync.
+  ✓ Eligible membership sync
+
+Test 20: Group Membership Analysis Views
+========================================
+  → Creating group membership analysis views...
+[09:28:40] Creating group membership analysis views...
+WARNING: Table 'GraphGroupEligibleMembers_Test' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional).
+WARNING: Table 'GraphGroupOwners' does not exist. Run Sync-FGGroupOwner to include owners in views (optional).
+
+[09:28:40] Creating view: vw_GraphGroupNestedMembers
+  Purpose: Shows only members with indirect/nested access (not direct members)
+  ✅ Created: vw_GraphGroupNestedMembers
+
+[09:28:41] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)
+
+[09:28:41] Creating view: vw_GraphGroupMembershipType
+  Purpose: Shows all members with Direct/Indirect indicator
+PS>TerminatingError(): "Exception calling "ExecuteNonQuery" with "0" argument(s): "The multi-part identifier "o.ownerId" could not be bound.""
+>> TerminatingError(): "SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "The multi-part identifier "o.ownerId" could not be bound.""
+>> TerminatingError(): "SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "The multi-part identifier "o.ownerId" could not be bound.""
+  ✗ Group membership views - SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "The multi-part identifier "o.ownerId" could not be bound."
+
+Test 21: Query Group Membership Views
+=====================================
+  → Querying nested members view...
+  → Nested members (indirect only): 0
+  ✓ Nested members view query
+  → Querying membership type view...
+PS>TerminatingError(): "Exception calling "Fill" with "1" argument(s): "Invalid object name 'dbo.vw_GraphGroupMembershipType'.""
+>> TerminatingError(): "SQL command execution failed: Exception calling "Fill" with "1" argument(s): "Invalid object name 'dbo.vw_GraphGroupMembershipType'.""
+  ✗ Group membership view queries - SQL command execution failed: Exception calling "Fill" with "1" argument(s): "Invalid object name 'dbo.vw_GraphGroupMembershipType'."
+
+Test 22: Group Sync Summary
+===========================
+  → Generating comprehensive group sync summary...
+
+  Group Sync Summary:
+
+EntityType             TotalCount FirstSync           LastSync
+----------             ---------- ---------           --------
+Groups                         68 04/01/2026 08:27:24 04/01/2026 08:27:24
+Direct Memberships            853 04/01/2026 08:27:41 04/01/2026 08:27:41
+Transitive Memberships        853 04/01/2026 08:28:13 04/01/2026 08:28:13
+  ✓ Group sync summary
+
+Test 23: Cleanup Test Resources
+===============================
+  → Removing test SQL Server and resources...
+
+ResourceGroupName             : SQLServer
+ServerName                    : iisqlserver
+Location                      : northeurope
+SqlAdministratorLogin         : sqladmin
+SqlAdministratorPassword      : 
+ServerVersion                 : 12.0
+Tags                          : 
+Identity                      : 
+FullyQualifiedDomainName      : iisqlserver.database.windows.net
+ResourceId                    : /subscriptions/6af08f87-5594-49ed-a029-976707a2a70b/resourceGroups/SQLServer/provi
+                                ders/Microsoft.Sql/servers/iisqlserver
+MinimalTlsVersion             : 1.2
+PublicNetworkAccess           : Enabled
+RestrictOutboundNetworkAccess : Disabled
+Administrators                : 
+PrimaryUserAssignedIdentityId : 
+KeyId                         : 
+FederatedClientId             : 
+
+  ✓ Test resources cleaned up
+
+========================================
+Integration Test Summary
+========================================
+
+Total Tests:  35
+Passed:       33
+Failed:       2
+
+Results by Category:
+  ✓ Azure: 2/2 passed
+  ✓ Cleanup: 2/2 passed
+  ✓ Graph: 2/2 passed
+  ✗ Query: 6/8 passed
+  ✓ Setup: 1/1 passed
+  ✓ SQL: 6/6 passed
+  ✓ Sync: 14/14 passed
+
+Failed Tests:
+  ✗ [Query] Group membership views
+    SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "The multi-part identifier "o.ownerId" could not be bound."
+  ✗ [Query] Group membership view queries
+    SQL command execution failed: Exception calling "Fill" with "1" argument(s): "Invalid object name 'dbo.vw_GraphGroupMembershipType'."
+
+========================================
+**********************
+PowerShell transcript end
+End time: 20260104092858
+**********************
