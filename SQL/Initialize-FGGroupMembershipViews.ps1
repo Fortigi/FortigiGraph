@@ -1,7 +1,7 @@
 function Initialize-FGGroupMembershipViews {
     <#
     .SYNOPSIS
-    Creates helpful SQL views for analyzing group memberships (direct, indirect, and eligible).
+    Creates helpful SQL views for analyzing group memberships (direct, indirect, eligible, and owners).
 
     .DESCRIPTION
     Creates views that make it easy to work with group membership data:
@@ -15,8 +15,8 @@ function Initialize-FGGroupMembershipViews {
        - Useful for finding who can activate membership
 
     3. vw_GraphGroupMembershipType
-       - Shows ALL members with an indicator of Direct, Indirect, or Eligible membership
-       - Combines data from Direct, Transitive, and Eligible members tables
+       - Shows ALL members with an indicator of Owner, Direct, Indirect, or Eligible membership
+       - Combines data from Owners, Direct, Transitive, and Eligible members tables
        - Includes memberType for filtering by user/group/device/etc
 
     .PARAMETER DirectMembersTable
@@ -27,6 +27,9 @@ function Initialize-FGGroupMembershipViews {
 
     .PARAMETER EligibleMembersTable
     Name of the table containing eligible group memberships (PIM). Default: "GraphGroupEligibleMembers"
+
+    .PARAMETER OwnersTable
+    Name of the table containing group ownership relationships. Default: "GraphGroupOwners"
 
     .PARAMETER DropIfExists
     If specified, drops existing views before creating new ones
@@ -46,12 +49,13 @@ function Initialize-FGGroupMembershipViews {
     - Connect-FGSQLServer to be called first
     - GraphGroupMembers table to exist (run Sync-FGGroupMember first)
     - GraphGroupTransitiveMembers table to exist (run Sync-FGGroupTransitiveMember first)
-    - GraphGroupEligibleMembers table (optional, run Sync-FGGroupEligibleMember)
+    - GraphGroupOwners table (optional, run Sync-FGGroupOwner for owner tracking)
+    - GraphGroupEligibleMembers table (optional, run Sync-FGGroupEligibleMember for PIM)
 
     Views Created:
     - vw_GraphGroupNestedMembers: Only indirect/nested members
-    - vw_GraphGroupEligibleMembers: Only eligible members (PIM)
-    - vw_GraphGroupMembershipType: All members with Direct/Indirect/Eligible indicator
+    - vw_GraphGroupEligibleMembers: Only eligible members (PIM - if table exists)
+    - vw_GraphGroupMembershipType: All members with Owner/Direct/Indirect/Eligible indicator
     #>
 
     [CmdletBinding()]
@@ -64,6 +68,9 @@ function Initialize-FGGroupMembershipViews {
 
         [Parameter(Mandatory = $false)]
         [string]$EligibleMembersTable = "GraphGroupEligibleMembers",
+
+        [Parameter(Mandatory = $false)]
+        [string]$OwnersTable = "GraphGroupOwners",
 
         [Parameter(Mandatory = $false)]
         [switch]$DropIfExists
@@ -85,13 +92,15 @@ function Initialize-FGGroupMembershipViews {
 SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$DirectMembersTable') THEN 1 ELSE 0 END AS DirectExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$TransitiveMembersTable') THEN 1 ELSE 0 END AS TransitiveExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$EligibleMembersTable') THEN 1 ELSE 0 END AS EligibleExists
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$EligibleMembersTable') THEN 1 ELSE 0 END AS EligibleExists,
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists
 "@
         $reader = $checkTablesCmd.ExecuteReader()
         $reader.Read()
         $directExists = $reader.GetInt32(0) -eq 1
         $transitiveExists = $reader.GetInt32(1) -eq 1
         $eligibleExists = $reader.GetInt32(2) -eq 1
+        $ownersExists = $reader.GetInt32(3) -eq 1
         $reader.Close()
 
         if (-not $directExists) {
@@ -102,6 +111,9 @@ SELECT
         }
         if (-not $eligibleExists) {
             Write-Warning "Table '$EligibleMembersTable' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional)."
+        }
+        if (-not $ownersExists) {
+            Write-Warning "Table '$OwnersTable' does not exist. Run Sync-FGGroupOwner to include owners in views (optional)."
         }
 
         if (-not $directExists -or -not $transitiveExists) {
@@ -174,12 +186,12 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
 
         # View 3: All Members with Membership Type Indicator
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
-        if ($eligibleExists) {
-            Write-Host "  Purpose: Shows all members with Direct/Indirect/Eligible indicator" -ForegroundColor Gray
-        }
-        else {
-            Write-Host "  Purpose: Shows all members with Direct/Indirect indicator" -ForegroundColor Gray
-        }
+        $types = @()
+        if ($ownersExists) { $types += "Owner" }
+        $types += "Direct"
+        if ($eligibleExists) { $types += "Eligible" }
+        $types += "Indirect"
+        Write-Host "  Purpose: Shows all members with $($types -join '/') indicator" -ForegroundColor Gray
 
         if ($DropIfExists) {
             $dropView3Cmd = $connection.CreateCommand()
@@ -187,17 +199,27 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
             $dropView3Cmd.ExecuteNonQuery() | Out-Null
         }
 
-        # Build the view SQL based on whether eligible table exists
-        if ($eligibleExists) {
-            $createView3SQL = @"
+        # Build the view SQL based on which optional tables exist
+        $createView3SQL = @"
 CREATE VIEW dbo.vw_GraphGroupMembershipType AS
 SELECT
     t.groupId,
     t.memberId,
     t.memberType,
     CASE
+        WHEN o.ownerId IS NOT NULL THEN 'Owner'
         WHEN d.memberId IS NOT NULL THEN 'Direct'
+"@
+
+        if ($eligibleExists) {
+            $createView3SQL += @"
+
         WHEN e.memberId IS NOT NULL THEN 'Eligible'
+"@
+        }
+
+        $createView3SQL += @"
+
         ELSE 'Indirect'
     END AS membershipType,
     t.ValidFrom,
@@ -207,11 +229,37 @@ LEFT JOIN dbo.$DirectMembersTable d
     ON t.groupId = d.groupId
     AND t.memberId = d.memberId
     AND d.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current direct members
+"@
+
+        if ($ownersExists) {
+            $createView3SQL += @"
+
+LEFT JOIN dbo.$OwnersTable o
+    ON t.groupId = o.groupId
+    AND t.memberId = o.ownerId
+    AND o.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current owners
+"@
+        }
+
+        if ($eligibleExists) {
+            $createView3SQL += @"
+
 LEFT JOIN dbo.$EligibleMembersTable e
     ON t.groupId = e.groupId
     AND t.memberId = e.memberId
     AND e.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current eligible members
+"@
+        }
+
+        $createView3SQL += @"
+
 WHERE t.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current records
+"@
+
+        # Add UNION for eligible members not in transitive if eligible exists
+        if ($eligibleExists) {
+            $createView3SQL += @"
+
 
 UNION
 
@@ -229,30 +277,36 @@ LEFT JOIN dbo.$TransitiveMembersTable t
     AND e.memberId = t.memberId
     AND t.ValidTo = '9999-12-31 23:59:59.9999999'
 WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
-    AND t.memberId IS NULL;  -- Not in active members
+    AND t.memberId IS NULL  -- Not in active members
+"@
+        }
+
+        # Add UNION for owners not in transitive if owners exists
+        if ($ownersExists) {
+            $createView3SQL += @"
+
+
+UNION
+
+-- Add owners who are not in transitive members (owner but not member)
+SELECT
+    o.groupId,
+    o.ownerId AS memberId,
+    '#microsoft.graph.user' AS memberType,  -- Owners are typically users
+    'Owner' AS membershipType,
+    o.ValidFrom,
+    o.ValidTo
+FROM dbo.$OwnersTable o
+LEFT JOIN dbo.$TransitiveMembersTable t
+    ON o.groupId = t.groupId
+    AND o.ownerId = t.memberId
+    AND t.ValidTo = '9999-12-31 23:59:59.9999999'
+WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'
+    AND t.memberId IS NULL;  -- Not in members
 "@
         }
         else {
-            # Fallback without eligible members
-            $createView3SQL = @"
-CREATE VIEW dbo.vw_GraphGroupMembershipType AS
-SELECT
-    t.groupId,
-    t.memberId,
-    t.memberType,
-    CASE
-        WHEN d.memberId IS NOT NULL THEN 'Direct'
-        ELSE 'Indirect'
-    END AS membershipType,
-    t.ValidFrom,
-    t.ValidTo
-FROM dbo.$TransitiveMembersTable t
-LEFT JOIN dbo.$DirectMembersTable d
-    ON t.groupId = d.groupId
-    AND t.memberId = d.memberId
-    AND d.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current direct members
-WHERE t.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
-"@
+            $createView3SQL += ";"
         }
 
         $createView3Cmd = $connection.CreateCommand()
@@ -274,14 +328,15 @@ WHERE t.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
         }
 
         Write-Host "`nView 3: vw_GraphGroupMembershipType" -ForegroundColor White
-        if ($eligibleExists) {
-            Write-Host "  - Shows all members (direct + indirect + eligible)" -ForegroundColor Gray
-            Write-Host "  - Includes membershipType column (Direct/Indirect/Eligible)" -ForegroundColor Gray
-        }
-        else {
-            Write-Host "  - Shows all members (direct + indirect)" -ForegroundColor Gray
-            Write-Host "  - Includes membershipType column (Direct/Indirect)" -ForegroundColor Gray
-        }
+        $desc = @("direct", "indirect")
+        if ($ownersExists) { $desc = @("owner") + $desc }
+        if ($eligibleExists) { $desc += "eligible" }
+        Write-Host "  - Shows all members ($($desc -join ' + '))" -ForegroundColor Gray
+
+        $types = @("Direct", "Indirect")
+        if ($ownersExists) { $types = @("Owner") + $types }
+        if ($eligibleExists) { $types += "Eligible" }
+        Write-Host "  - Includes membershipType column ($($types -join '/'))" -ForegroundColor Gray
         Write-Host "========================================`n" -ForegroundColor Green
 
         return $true

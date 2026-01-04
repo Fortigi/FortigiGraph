@@ -116,9 +116,6 @@ function Sync-FGGroup {
         'onPremisesSecurityIdentifier'
         'onPremisesNetBiosName'
         'onPremisesDomainName'
-
-        # Special - needs expand
-        'ownerId'  # We'll fetch from owners collection (first owner)
     )
 
     # Determine which attributes to use
@@ -177,7 +174,6 @@ function Sync-FGGroup {
         'onPremisesDomainName' = 'NVARCHAR(255)'
         'onPremisesProvisioningErrors' = 'NVARCHAR(MAX)'
         'proxyAddresses' = 'NVARCHAR(MAX)'
-        'ownerId' = 'UNIQUEIDENTIFIER'
     }
 
     # Build column definitions
@@ -243,17 +239,8 @@ function Sync-FGGroup {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching groups from Microsoft Graph..." -ForegroundColor Cyan
 
-    # Separate regular attributes from special ones that need expand
-    $regularAttributes = $Attributes | Where-Object { $_ -ne 'ownerId' }
-    $needsOwner = $Attributes -contains 'ownerId'
-
-    $selectProperties = $regularAttributes -join ','
+    $selectProperties = $Attributes -join ','
     $uri = "https://graph.microsoft.com/v1.0/groups?`$select=$selectProperties"
-
-    # Add expand for owner
-    if ($needsOwner) {
-        $uri += "&`$expand=owners(`$select=id)"
-    }
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"
@@ -320,17 +307,6 @@ function Sync-FGGroup {
                     # Add parameters for each attribute
                     foreach ($attr in $Attributes) {
                         # Handle special attributes
-                        if ($attr -eq 'ownerId') {
-                            # Owner ID comes from expanded owners collection (first owner)
-                            if ($group.owners -and $group.owners.Count -gt 0) {
-                                ConvertTo-FGSQLParameter -Value $group.owners[0].id -AttributeName $attr -SqlCommand $cmd
-                            }
-                            else {
-                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                            }
-                            continue
-                        }
-
                         # Regular attributes - use helper for type conversion
                         $value = $group.$attr
                         ConvertTo-FGSQLParameter -Value $value -AttributeName $attr -SqlCommand $cmd
