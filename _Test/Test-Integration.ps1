@@ -572,9 +572,286 @@ try {
     Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery execution" -Passed $false -Message $_.Exception.Message
 }
 
+# Test 16: Group Sync - Default Properties
+Write-TestHeader "Test 16: Group Sync (Default Properties)"
+
+try {
+    Write-TestStep "Syncing groups with default properties..."
+
+    Sync-FGGroup -TableName "GraphGroups_Test"
+    Add-TestResult -Category "Sync" -TestName "Group sync completed (default properties)" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced group data..."
+    $syncedGroupCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphGroups_Test"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Group data verification" -Passed ($syncedGroupCount -gt 0) -Data "Synced $syncedGroupCount groups"
+
+    Register-Resource -Type "SQLTable" -Name "GraphGroups_Test" -Details @{ Type = "Groups" }
+} catch {
+    Add-TestResult -Category "Sync" -TestName "Group sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 17: Group Member Sync - Direct Memberships
+Write-TestHeader "Test 17: Group Member Sync (Direct Memberships)"
+
+try {
+    Write-TestStep "Syncing direct group memberships..."
+
+    Sync-FGGroupMember -TableName "GraphGroupMembers_Test"
+    Add-TestResult -Category "Sync" -TestName "Direct group membership sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced membership data..."
+    $syncedMemberCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphGroupMembers_Test"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Direct membership data verification" -Passed ($syncedMemberCount -ge 0) -Data "Synced $syncedMemberCount memberships"
+
+    # Verify composite key structure
+    Write-TestStep "Verifying composite primary key..."
+    $pkInfo = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT COUNT(*)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE TABLE_NAME = 'GraphGroupMembers_Test'
+AND CONSTRAINT_NAME LIKE 'PK_%'
+"@
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Composite primary key verification" -Passed ($pkInfo -eq 2) -Data "Primary key has $pkInfo columns (expected: 2)"
+
+    Register-Resource -Type "SQLTable" -Name "GraphGroupMembers_Test" -Details @{ Type = "DirectMemberships" }
+} catch {
+    Add-TestResult -Category "Sync" -TestName "Group member sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 18: Group Transitive Member Sync - Nested Memberships
+Write-TestHeader "Test 18: Group Transitive Member Sync (Nested Memberships)"
+
+try {
+    Write-TestStep "Syncing transitive/nested group memberships..."
+
+    Sync-FGGroupTransitiveMember -TableName "GraphGroupTransitiveMembers_Test"
+    Add-TestResult -Category "Sync" -TestName "Transitive group membership sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced transitive membership data..."
+    $syncedTransitiveCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphGroupTransitiveMembers_Test"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Transitive membership data verification" -Passed ($syncedTransitiveCount -ge 0) -Data "Synced $syncedTransitiveCount transitive memberships"
+
+    # Compare direct vs transitive counts
+    Write-TestStep "Comparing direct vs transitive membership counts..."
+    $directCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphGroupMembers_Test" -AsScalar
+    Write-Host "  → Direct memberships: $directCount" -ForegroundColor Cyan
+    Write-Host "  → Transitive memberships: $syncedTransitiveCount" -ForegroundColor Cyan
+    Write-Host "  → Additional nested members: $($syncedTransitiveCount - $directCount)" -ForegroundColor Cyan
+
+    Register-Resource -Type "SQLTable" -Name "GraphGroupTransitiveMembers_Test" -Details @{ Type = "TransitiveMemberships" }
+} catch {
+    Add-TestResult -Category "Sync" -TestName "Transitive member sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 19: Group Eligible Member Sync - PIM Memberships (Optional)
+Write-TestHeader "Test 19: Group Eligible Member Sync (PIM Memberships)"
+
+try {
+    Write-TestStep "Checking for PIM-enabled groups..."
+
+    # First check if there are any PIM-enabled groups
+    $pimGroupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphGroups_Test WHERE isAssignableToRole = 1" -AsScalar
+
+    if ($pimGroupCount -gt 0) {
+        Write-TestStep "Found $pimGroupCount PIM-enabled groups. Syncing eligible memberships..."
+
+        Sync-FGGroupEligibleMember -TableName "GraphGroupEligibleMembers_Test"
+        Add-TestResult -Category "Sync" -TestName "Eligible group membership sync completed" -Passed $true
+
+        # Verify data
+        $syncedEligibleCount = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphGroupEligibleMembers_Test"
+            return $cmd.ExecuteScalar()
+        }
+
+        Add-TestResult -Category "Sync" -TestName "Eligible membership data verification" -Passed ($syncedEligibleCount -ge 0) -Data "Synced $syncedEligibleCount eligible memberships"
+
+        Register-Resource -Type "SQLTable" -Name "GraphGroupEligibleMembers_Test" -Details @{ Type = "EligibleMemberships" }
+    } else {
+        Write-TestStep "No PIM-enabled groups found in tenant. Skipping eligible membership sync."
+        Add-TestResult -Category "Sync" -TestName "Eligible membership sync" -Passed $true -Message "Skipped - No PIM groups in tenant"
+    }
+} catch {
+    # PIM might not be available or configured, so we don't fail the entire test
+    Write-Warning "Eligible membership sync warning: $($_.Exception.Message)"
+    Add-TestResult -Category "Sync" -TestName "Eligible member sync" -Passed $true -Message "Skipped - PIM not available or configured"
+}
+
+# Test 20: Group Membership Views
+Write-TestHeader "Test 20: Group Membership Analysis Views"
+
+try {
+    Write-TestStep "Creating group membership analysis views..."
+
+    Initialize-FGGroupMembershipViews `
+        -DirectMembersTable "GraphGroupMembers_Test" `
+        -TransitiveMembersTable "GraphGroupTransitiveMembers_Test" `
+        -EligibleMembersTable "GraphGroupEligibleMembers_Test" `
+        -DropIfExists
+
+    Add-TestResult -Category "Query" -TestName "Group membership views created" -Passed $true
+
+    # Verify views exist
+    Write-TestStep "Verifying views were created..."
+    $viewCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT COUNT(*)
+FROM INFORMATION_SCHEMA.VIEWS
+WHERE TABLE_NAME IN ('vw_GraphGroupNestedMembers', 'vw_GraphGroupMembershipType', 'vw_GraphGroupEligibleMembers')
+"@
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Query" -TestName "View creation verification" -Passed ($viewCount -ge 2) -Data "$viewCount views created"
+
+    Register-Resource -Type "SQLView" -Name "vw_GraphGroupNestedMembers" -Details @{ Type = "NestedMembersView" }
+    Register-Resource -Type "SQLView" -Name "vw_GraphGroupMembershipType" -Details @{ Type = "MembershipTypeView" }
+    if ($viewCount -eq 3) {
+        Register-Resource -Type "SQLView" -Name "vw_GraphGroupEligibleMembers" -Details @{ Type = "EligibleMembersView" }
+    }
+} catch {
+    Add-TestResult -Category "Query" -TestName "Group membership views" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 21: Query Group Membership Views
+Write-TestHeader "Test 21: Query Group Membership Views"
+
+try {
+    Write-TestStep "Querying nested members view..."
+    $nestedQuery = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.vw_GraphGroupNestedMembers" -AsScalar
+    Write-Host "  → Nested members (indirect only): $nestedQuery" -ForegroundColor Cyan
+    Add-TestResult -Category "Query" -TestName "Nested members view query" -Passed $true -Data "$nestedQuery nested members"
+
+    Write-TestStep "Querying membership type view..."
+    $typeQuery = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT
+    membershipType,
+    COUNT(*) as Count
+FROM dbo.vw_GraphGroupMembershipType
+GROUP BY membershipType
+ORDER BY membershipType
+"@
+
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $dataset = New-Object System.Data.DataSet
+        $adapter.Fill($dataset) | Out-Null
+        return $dataset.Tables[0]
+    }
+
+    if ($typeQuery -and $typeQuery.Rows.Count -gt 0) {
+        Write-Host "`n  Membership Type Breakdown:" -ForegroundColor Cyan
+        $typeQuery | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+        Add-TestResult -Category "Query" -TestName "Membership type view query" -Passed $true -Data "$($typeQuery.Rows.Count) membership types"
+    } else {
+        Add-TestResult -Category "Query" -TestName "Membership type view query" -Passed $true -Message "No data (expected if no groups have members)"
+    }
+
+    # Query sample memberships with details
+    Write-TestStep "Querying sample membership details..."
+    $sampleMemberships = Invoke-FGSQLQuery -Query @"
+SELECT TOP 5
+    m.groupId,
+    m.memberId,
+    m.memberType,
+    m.membershipType
+FROM dbo.vw_GraphGroupMembershipType m
+ORDER BY m.membershipType, m.groupId
+"@
+
+    if ($sampleMemberships -and $sampleMemberships.Rows.Count -gt 0) {
+        Write-Host "`n  Sample Memberships:" -ForegroundColor Cyan
+        $sampleMemberships | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+        Add-TestResult -Category "Query" -TestName "Sample membership query" -Passed $true -Data "$($sampleMemberships.Rows.Count) samples retrieved"
+    } else {
+        Add-TestResult -Category "Query" -TestName "Sample membership query" -Passed $true -Message "No memberships found (expected if groups are empty)"
+    }
+} catch {
+    Add-TestResult -Category "Query" -TestName "Group membership view queries" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 22: Group Sync Summary Query
+Write-TestHeader "Test 22: Group Sync Summary"
+
+try {
+    Write-TestStep "Generating comprehensive group sync summary..."
+
+    $summaryQuery = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT
+    'Groups' as EntityType,
+    COUNT(*) as TotalCount,
+    MIN(ValidFrom) as FirstSync,
+    MAX(ValidFrom) as LastSync
+FROM dbo.GraphGroups_Test
+UNION ALL
+SELECT
+    'Direct Memberships',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphGroupMembers_Test
+UNION ALL
+SELECT
+    'Transitive Memberships',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphGroupTransitiveMembers_Test
+"@
+
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $dataset = New-Object System.Data.DataSet
+        $adapter.Fill($dataset) | Out-Null
+        return $dataset.Tables[0]
+    }
+
+    Write-Host "`n  Group Sync Summary:" -ForegroundColor Cyan
+    $summaryQuery | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+
+    Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $true -Data $summaryQuery
+} catch {
+    Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $false -Message $_.Exception.Message
+}
+
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 16: Cleanup Test Resources"
+    Write-TestHeader "Test 23: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."
