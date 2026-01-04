@@ -207,10 +207,23 @@ SELECT
     t.memberId,
     t.memberType,
     CASE
+"@
+
+        # Add owner check first if owners table exists
+        if ($ownersExists) {
+            $createView3SQL += @"
+
         WHEN o.ownerId IS NOT NULL THEN 'Owner'
+"@
+        }
+
+        # Always check for direct membership
+        $createView3SQL += @"
+
         WHEN d.memberId IS NOT NULL THEN 'Direct'
 "@
 
+        # Add eligible check if eligible table exists
         if ($eligibleExists) {
             $createView3SQL += @"
 
