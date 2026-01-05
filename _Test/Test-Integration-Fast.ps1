@@ -412,109 +412,14 @@ WHERE name = '$table' AND schema_id = SCHEMA_ID('dbo')
         Add-TestResult -Category "Cleanup" -TestName "Clear existing tables" -Passed $true -Data "Cleared $($tables.Count) table(s)"
     }
 
-    # Also drop all views
-    Write-TestStep "Dropping existing views..."
-    $views = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = 'dbo'"
-        $reader = $cmd.ExecuteReader()
-        $viewList = @()
-        while ($reader.Read()) {
-            $viewList += $reader.GetString(0)
-        }
-        $reader.Close()
-        return $viewList
-    }
-
-    if ($views.Count -gt 0) {
-        foreach ($view in $views) {
-            Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandText = "DROP VIEW dbo.[$view]"
-                $cmd.ExecuteNonQuery() | Out-Null
-            }
-        }
-        Write-TestStep "Dropped $($views.Count) view(s)"
-    }
-
 } catch {
     Add-TestResult -Category "Cleanup" -TestName "Clear existing tables" -Passed $false -Message $_.Exception.Message
 }
 
-# From here, run all the same tests as Test-Integration.ps1 (Tests 7-22)
-# Copy from the original file starting at Test 7
-
-# Test 7: Table Creation - Default Properties
-Write-TestHeader "Test 7: Table Creation (Default Properties)"
-
-try {
-    Write-TestStep "Creating table with default user properties..."
-
-    $defaultColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "mail" = "NVARCHAR(255)"
-        "accountEnabled" = "BIT"
-    }
-
-    Initialize-FGSQLTable -TableName "GraphUsers_DefaultTest" -Columns $defaultColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with default properties" -Passed $true
-
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_DefaultTest" -Details @{ Columns = $defaultColumns }
-} catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (default)" -Passed $false -Message $_.Exception.Message
-}
-
-# Test 8: Table Creation - Extended Properties
-Write-TestHeader "Test 8: Table Creation (Extended Properties)"
-
-try {
-    Write-TestStep "Creating table with extended user properties..."
-
-    $extendedColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "mail" = "NVARCHAR(255)"
-        "accountEnabled" = "BIT"
-        "jobTitle" = "NVARCHAR(255)"  # Extra property
-        "department" = "NVARCHAR(255)"  # Extra property
-    }
-
-    Initialize-FGSQLTable -TableName "GraphUsers_ExtendedTest" -Columns $extendedColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with extended properties" -Passed $true
-
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_ExtendedTest" -Details @{ Columns = $extendedColumns }
-} catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (extended)" -Passed $false -Message $_.Exception.Message
-}
-
-# Test 9: Table Creation - Custom Properties
-Write-TestHeader "Test 9: Table Creation (Custom Properties)"
-
-try {
-    Write-TestStep "Creating table with custom user properties..."
-
-    $customColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "givenName" = "NVARCHAR(255)"
-        "surname" = "NVARCHAR(255)"
-        "officeLocation" = "NVARCHAR(255)"
-        "mobilePhone" = "NVARCHAR(50)"
-    }
-
-    Initialize-FGSQLTable -TableName "GraphUsers_CustomTest" -Columns $customColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with custom properties" -Passed $true
-
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_CustomTest" -Details @{ Columns = $customColumns }
-} catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (custom)" -Passed $false -Message $_.Exception.Message
-}
+# Note: Tests 7-9 (Table Creation) are SKIPPED in the fast test
+# The tables already exist from previous test runs - we only cleared their data in Test 6
+# We jump directly to the sync tests (Tests 10-12) which will populate the existing tables
+# The helper views will be automatically recreated by the sync functions as needed
 
 # Test 10: Data Sync - Default Properties
 Write-TestHeader "Test 10: Data Sync (Default Properties)"
