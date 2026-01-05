@@ -246,23 +246,18 @@ function Sync-FGGroup {
         $uri += "&`$filter=$Filter"
     }
 
-    # Fetch all groups
-    $allGroups = @()
-    $groupCount = 0
+    # Fetch all groups using Invoke-FGGetRequest (handles token validation and pagination)
     $graphStartTime = Get-Date
 
-    do {
-        try {
-            $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-            $allGroups += $response.value
-            $groupCount += $response.value.Count
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Fetched $groupCount groups..." -ForegroundColor Gray
-            $uri = $response.'@odata.nextLink'
+    try {
+        $allGroups = Invoke-FGGetRequest -URI $uri
+        if (-not $allGroups) {
+            $allGroups = @()
         }
-        catch {
-            throw "Failed to fetch groups from Graph: $_"
-        }
-    } while ($uri)
+    }
+    catch {
+        throw "Failed to fetch groups from Graph: $_"
+    }
 
     $graphElapsed = (Get-Date) - $graphStartTime
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total groups fetched: $($allGroups.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green

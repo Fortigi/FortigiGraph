@@ -130,7 +130,7 @@ function Sync-FGGroupOwner {
         foreach ($groupId in $GroupIds) {
             try {
                 $uri = "$graphUri/groups/$groupId`?`$select=id,displayName"
-                $group = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
+                $group = Invoke-FGGetRequest -URI $uri
                 $groups += $group
             }
             catch {
@@ -139,24 +139,21 @@ function Sync-FGGroupOwner {
         }
     }
     else {
-        # Fetch all groups (or filtered groups)
+        # Fetch all groups (or filtered groups) using Invoke-FGGetRequest (handles token validation and pagination)
         $uri = "$graphUri/groups?`$select=id,displayName"
         if ($Filter) {
             $uri += "&`$filter=$Filter"
         }
 
-        $groups = @()
-        do {
-            try {
-                $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-                $groups += $response.value
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Fetched $($groups.Count) groups..." -ForegroundColor Gray
-                $uri = $response.'@odata.nextLink'
+        try {
+            $groups = Invoke-FGGetRequest -URI $uri
+            if (-not $groups) {
+                $groups = @()
             }
-            catch {
-                throw "Failed to fetch groups: $_"
-            }
-        } while ($uri)
+        }
+        catch {
+            throw "Failed to fetch groups: $_"
+        }
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total groups to process: $($groups.Count)" -ForegroundColor Cyan
@@ -175,29 +172,21 @@ function Sync-FGGroupOwner {
         }
 
         try {
-            # Fetch owners for this group
+            # Fetch owners for this group using Invoke-FGGetRequest (handles token validation and pagination)
             $ownerUri = "$graphUri/groups/$($group.id)/owners?`$select=id"
+            $owners = Invoke-FGGetRequest -URI $ownerUri
+            if (-not $owners) {
+                $owners = @()
+            }
 
-            do {
-                try {
-                    $ownerResponse = Invoke-RestMethod -Uri $ownerUri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-
-                    # Add each owner to the collection
-                    foreach ($owner in $ownerResponse.value) {
-                        $ownership = [PSCustomObject]@{
-                            groupId = $group.id
-                            ownerId = $owner.id
-                        }
-                        $allOwnerships += $ownership
-                    }
-
-                    $ownerUri = $ownerResponse.'@odata.nextLink'
+            # Add each owner to the collection
+            foreach ($owner in $owners) {
+                $ownership = [PSCustomObject]@{
+                    groupId = $group.id
+                    ownerId = $owner.id
                 }
-                catch {
-                    Write-Warning "Failed to fetch owners for group $($group.displayName): $_"
-                    break
-                }
-            } while ($ownerUri)
+                $allOwnerships += $ownership
+            }
         }
         catch {
             Write-Warning "Error processing group $($group.displayName): $_"

@@ -131,7 +131,7 @@ function Sync-FGGroupEligibleMember {
         foreach ($groupId in $GroupIds) {
             try {
                 $uri = "$graphUri/groups/$groupId`?`$select=id,displayName,isAssignableToRole,groupTypes"
-                $group = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
+                $group = Invoke-FGGetRequest -URI $uri
 
                 # Only include if PIM-eligible
                 if ($group.isAssignableToRole -eq $true -and $group.groupTypes -notcontains "DynamicMembership") {
@@ -147,26 +147,21 @@ function Sync-FGGroupEligibleMember {
         }
     }
     else {
-        # Fetch all groups with PIM properties
+        # Fetch all groups with PIM properties using Invoke-FGGetRequest (handles token validation and pagination)
         $uri = "$graphUri/groups?`$select=id,displayName,isAssignableToRole,groupTypes"
         if ($Filter) {
             $uri += "&`$filter=$Filter"
         }
 
-        $allGroups = @()
-        $groupCount = 0
-        do {
-            try {
-                $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-                $allGroups += $response.value
-                $groupCount += $response.value.Count
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Fetched $groupCount groups..." -ForegroundColor Gray
-                $uri = $response.'@odata.nextLink'
+        try {
+            $allGroups = Invoke-FGGetRequest -URI $uri
+            if (-not $allGroups) {
+                $allGroups = @()
             }
-            catch {
-                throw "Failed to fetch groups from Graph: $_"
-            }
-        } while ($uri)
+        }
+        catch {
+            throw "Failed to fetch groups from Graph: $_"
+        }
 
         # Filter for PIM-enabled groups only
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Filtering for PIM-enabled groups (isAssignableToRole = true, not dynamic)..." -ForegroundColor Cyan
@@ -199,20 +194,18 @@ function Sync-FGGroupEligibleMember {
         $eligibilityUri = "$graphUri/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($group.id)'"
 
         try {
-            # Fetch all eligible members for this group
-            $eligibilities = @()
-            do {
-                $eligibilityResponse = Invoke-RestMethod -Uri $eligibilityUri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-                $eligibilities += $eligibilityResponse.value
-                $eligibilityUri = $eligibilityResponse.'@odata.nextLink'
-            } while ($eligibilityUri)
+            # Fetch all eligible members for this group using Invoke-FGGetRequest (handles token validation and pagination)
+            $eligibilities = Invoke-FGGetRequest -URI $eligibilityUri
+            if (-not $eligibilities) {
+                $eligibilities = @()
+            }
 
             # For each eligibility, we need to get the principal details to determine type
             foreach ($eligibility in $eligibilities) {
                 try {
-                    # Get principal details to determine memberType
+                    # Get principal details to determine memberType using Invoke-FGGetRequest (handles token validation)
                     $principalUri = "$graphUri/directoryObjects/$($eligibility.principalId)?`$select=id"
-                    $principal = Invoke-RestMethod -Uri $principalUri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
+                    $principal = Invoke-FGGetRequest -URI $principalUri
 
                     $membership = [PSCustomObject]@{
                         groupId = $eligibility.groupId

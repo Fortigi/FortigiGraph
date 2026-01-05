@@ -269,23 +269,18 @@ function Sync-FGUser {
         $uri += "&`$filter=$Filter"
     }
 
-    # Fetch all users
-    $allUsers = @()
-    $userCount = 0
+    # Fetch all users using Invoke-FGGetRequest (handles token validation and pagination)
     $graphStartTime = Get-Date
 
-    do {
-        try {
-            $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-            $allUsers += $response.value
-            $userCount += $response.value.Count
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Fetched $userCount users..." -ForegroundColor Gray
-            $uri = $response.'@odata.nextLink'
+    try {
+        $allUsers = Invoke-FGGetRequest -URI $uri
+        if (-not $allUsers) {
+            $allUsers = @()
         }
-        catch {
-            throw "Failed to fetch users from Graph: $_"
-        }
-    } while ($uri)
+    }
+    catch {
+        throw "Failed to fetch users from Graph: $_"
+    }
 
     $graphElapsed = (Get-Date) - $graphStartTime
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total users fetched: $($allUsers.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green

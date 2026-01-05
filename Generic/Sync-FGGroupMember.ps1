@@ -140,7 +140,7 @@ function Sync-FGGroupMember {
         foreach ($groupId in $GroupIds) {
             try {
                 $uri = "$graphUri/groups/$groupId`?`$select=id,displayName"
-                $group = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
+                $group = Invoke-FGGetRequest -URI $uri
                 $groups += $group
             }
             catch {
@@ -149,26 +149,21 @@ function Sync-FGGroupMember {
         }
     }
     else {
-        # Fetch all groups (or filtered)
+        # Fetch all groups (or filtered) using Invoke-FGGetRequest (handles token validation and pagination)
         $uri = "$graphUri/groups?`$select=id,displayName"
         if ($Filter) {
             $uri += "&`$filter=$Filter"
         }
 
-        $groups = @()
-        $groupCount = 0
-        do {
-            try {
-                $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-                $groups += $response.value
-                $groupCount += $response.value.Count
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Fetched $groupCount groups..." -ForegroundColor Gray
-                $uri = $response.'@odata.nextLink'
+        try {
+            $groups = Invoke-FGGetRequest -URI $uri
+            if (-not $groups) {
+                $groups = @()
             }
-            catch {
-                throw "Failed to fetch groups from Graph: $_"
-            }
-        } while ($uri)
+        }
+        catch {
+            throw "Failed to fetch groups from Graph: $_"
+        }
     }
 
     $totalGroups = $groups.Count
@@ -202,13 +197,11 @@ function Sync-FGGroupMember {
         }
 
         try {
-            # Fetch all members for this group (handles pagination)
-            $members = @()
-            do {
-                $memberResponse = Invoke-RestMethod -Uri $memberUri -Headers @{Authorization = "Bearer $global:AccessToken"} -Method Get
-                $members += $memberResponse.value
-                $memberUri = $memberResponse.'@odata.nextLink'
-            } while ($memberUri)
+            # Fetch all members for this group using Invoke-FGGetRequest (handles token validation and pagination)
+            $members = Invoke-FGGetRequest -URI $memberUri
+            if (-not $members) {
+                $members = @()
+            }
 
             # Create membership records
             foreach ($member in $members) {
