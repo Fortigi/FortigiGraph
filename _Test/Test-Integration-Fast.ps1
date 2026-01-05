@@ -536,27 +536,11 @@ FROM dbo.GraphUsers_CustomTest
     Add-TestResult -Category "Query" -TestName "Query execution" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 14: Temporal Table Features
-Write-TestHeader "Test 14: Temporal Table Features"
-
-try {
-    Write-TestStep "Testing temporal table history views..."
-
-    $historyQuery = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = "SELECT TOP 5 * FROM dbo.vw_GraphUsers_DefaultTest_AllHistory ORDER BY ValidFrom DESC"
-
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $dataset = New-Object System.Data.DataSet
-        $adapter.Fill($dataset) | Out-Null
-        return $dataset.Tables[0]
-    }
-
-    Add-TestResult -Category "Query" -TestName "Temporal history view accessible" -Passed ($historyQuery.Rows.Count -gt 0) -Data "$($historyQuery.Rows.Count) history records"
-} catch {
-    Add-TestResult -Category "Query" -TestName "Temporal table features" -Passed $false -Message $_.Exception.Message
-}
+# Note: Test 14 (Temporal Table Features) is SKIPPED in the fast test
+# The helper views (vw_*_AllHistory) are only created by Initialize-FGSQLTable
+# which we don't call in the fast test. This test validates SQL Server temporal
+# features which are already tested in the full integration test.
+# The fast test focuses on sync functionality, not SQL Server features.
 
 # Test 15: Simple Query with Invoke-FGSQLQuery
 Write-TestHeader "Test 15: Simple Query Test (Invoke-FGSQLQuery)"
