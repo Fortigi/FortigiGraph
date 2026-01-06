@@ -430,27 +430,27 @@ try {
     Add-TestResult -Category "Sync" -TestName "User sync (default)" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 11: Data Sync - Extended Properties
-Write-TestHeader "Test 11: Data Sync (Extended Properties)"
+# Test 11: Data Sync - AdditionalAttributes Properties
+Write-TestHeader "Test 11: Data Sync (Additional Attributes)"
 
 try {
-    Write-TestStep "Syncing users with extended properties..."
+    Write-TestStep "Syncing users with Additional Attributes..."
 
-    $extendedProps = @("userPrincipalName", "displayName", "mail", "accountEnabled", "jobTitle", "department")
-    Sync-FGUser -TableName "GraphUsers_ExtendedTest" -Attributes $extendedProps
-    Add-TestResult -Category "Sync" -TestName "User sync completed (extended properties)" -Passed $true
+    $extendedProps = @("extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfEmploymentUserID", "employeeType", "extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfTeamID")
+    Sync-FGUser -TableName "GraphUsers_AdditionalAttributes" -AdditionalAttributes $extendedProps
+    Add-TestResult -Category "Sync" -TestName "User sync completed (Additional Attributes)" -Passed $true
 
     # Verify data
     $syncedCount = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
         $cmd = $connection.CreateCommand()
-        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers_ExtendedTest"
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers_AdditionalAttributes"
         return $cmd.ExecuteScalar()
     }
 
-    Add-TestResult -Category "Sync" -TestName "Data verification (extended)" -Passed ($syncedCount -gt 0) -Data "Synced $syncedCount users"
+    Add-TestResult -Category "Sync" -TestName "Data verification (Additional Attributes)" -Passed ($syncedCount -gt 0) -Data "Synced $syncedCount users"
 } catch {
-    Add-TestResult -Category "Sync" -TestName "User sync (extended)" -Passed $false -Message $_.Exception.Message
+    Add-TestResult -Category "Sync" -TestName "User sync (Additional Attributes)" -Passed $false -Message $_.Exception.Message
 }
 
 # Test 12: Data Sync - Custom Properties
