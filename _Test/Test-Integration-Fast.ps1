@@ -126,6 +126,16 @@ $requiredFields = @(
     @{ Path = "Graph.ClientId"; Value = $config.Graph.ClientId }
 )
 
+# Determine which tenant ID to use for Azure operations
+# If Azure.TenantId is specified, use it; otherwise fall back to Graph.TenantId (for backward compatibility)
+if ($config.Azure.TenantId -and $config.Azure.TenantId -notlike "YOUR-*" -and -not [string]::IsNullOrWhiteSpace($config.Azure.TenantId)) {
+    $azureTenantId = $config.Azure.TenantId
+    Write-TestStep "Using separate Azure TenantId: $azureTenantId"
+} else {
+    $azureTenantId = $config.Graph.TenantId
+    Write-TestStep "Using Graph TenantId for Azure operations: $azureTenantId"
+}
+
 $configValid = $true
 foreach ($field in $requiredFields) {
     if ([string]::IsNullOrWhiteSpace($field.Value) -or $field.Value -like "YOUR-*") {
@@ -185,27 +195,27 @@ try {
     # Check if we have a context at all
     if (-not $azContext) {
         Write-TestStep "Not connected to Azure. Connecting to tenant..."
-        Connect-AzAccount -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId
+        Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId
         $azContext = Get-AzContext
     } else {
         # We have a context, but is it the right tenant and subscription?
-        $correctTenant = $azContext.Tenant.Id -eq $config.Graph.TenantId
+        $correctTenant = $azContext.Tenant.Id -eq $azureTenantId
         $correctSubscription = $azContext.Subscription.Id -eq $config.Azure.SubscriptionId
 
         if (-not $correctTenant -or -not $correctSubscription) {
             Write-TestStep "Switching to correct tenant/subscription..."
             Write-TestStep "Current: Tenant=$($azContext.Tenant.Id), Sub=$($azContext.Subscription.Id)"
-            Write-TestStep "Target: Tenant=$($config.Graph.TenantId), Sub=$($config.Azure.SubscriptionId)"
+            Write-TestStep "Target: Tenant=$azureTenantId, Sub=$($config.Azure.SubscriptionId)"
 
             # Try to switch context
             try {
-                Set-AzContext -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId -ErrorAction Stop | Out-Null
+                Set-AzContext -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId -ErrorAction Stop | Out-Null
                 $azContext = Get-AzContext
                 Write-TestStep "Context switched successfully"
             } catch {
                 # Context doesn't exist for this tenant/subscription, need to reconnect
                 Write-TestStep "Context not found. Connecting to tenant..."
-                Connect-AzAccount -TenantId $config.Graph.TenantId -SubscriptionId $config.Azure.SubscriptionId
+                Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId
                 $azContext = Get-AzContext
             }
         } else {
