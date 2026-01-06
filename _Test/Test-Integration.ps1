@@ -811,8 +811,9 @@ try {
 
     $summaryQuery = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = @"
+
+        # Build dynamic query based on which tables exist
+        $query = @"
 SELECT
     'Groups' as EntityType,
     COUNT(*) as TotalCount,
@@ -834,6 +835,45 @@ SELECT
     MAX(ValidFrom)
 FROM dbo.GraphGroupTransitiveMembers_Test
 "@
+
+        # Check if eligible members table exists and add to query
+        $checkEligibleCmd = $connection.CreateCommand()
+        $checkEligibleCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupEligibleMembers_Test' AND TABLE_SCHEMA = 'dbo'"
+        $eligibleTableExists = $checkEligibleCmd.ExecuteScalar() -gt 0
+
+        if ($eligibleTableExists) {
+            $query += @"
+
+UNION ALL
+SELECT
+    'Eligible Memberships (PIM)',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphGroupEligibleMembers_Test
+"@
+        }
+
+        # Check if owners table exists and add to query
+        $checkOwnersCmd = $connection.CreateCommand()
+        $checkOwnersCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupOwners_Test' AND TABLE_SCHEMA = 'dbo'"
+        $ownersTableExists = $checkOwnersCmd.ExecuteScalar() -gt 0
+
+        if ($ownersTableExists) {
+            $query += @"
+
+UNION ALL
+SELECT
+    'Group Ownerships',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphGroupOwners_Test
+"@
+        }
+
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = $query
 
         $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
         $dataset = New-Object System.Data.DataSet
