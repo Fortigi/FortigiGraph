@@ -8,6 +8,8 @@ A PowerShell module for working with Microsoft Graph API and syncing data to Azu
 - **Azure SQL Integration**: Provision and connect to Azure SQL databases
 - **Temporal Tables**: Automatic version history tracking for all data changes
 - **User Sync**: Sync Microsoft Graph users to SQL with automatic schema detection
+- **Group Sync**: Sync groups, memberships, nested groups, and PIM eligible members
+- **Membership Analysis**: SQL views for analyzing direct, indirect, and eligible memberships
 - **Point-in-Time Queries**: Query data as it existed at any point in time
 - **Performance Optimized**: Transaction-based syncing with progress tracking
 - **SQL Management Tools**: Query, list, clear, and manage SQL tables and servers
@@ -51,6 +53,25 @@ Sync-FGUser -AdditionalAttributes @('officeLocation', 'city', 'employeeType')
 
 # Sync only enabled users
 Sync-FGUser -Filter "accountEnabled eq true"
+```
+
+### 4. Sync Groups and Memberships
+
+```powershell
+# Sync group details
+Sync-FGGroup
+
+# Sync direct group memberships
+Sync-FGGroupMember
+
+# Sync nested/transitive memberships (includes indirect access)
+Sync-FGGroupTransitiveMember
+
+# Sync PIM eligible memberships
+Sync-FGGroupEligibleMember
+
+# Create helpful views for membership analysis
+Initialize-FGGroupMembershipViews
 ```
 
 ---
@@ -350,6 +371,374 @@ Output:
 [14:25:10]   Adding column: employeeType (NVARCHAR(255))
 [14:25:10]   Adding column: officeLocation (NVARCHAR(255))
 [14:25:11] Schema updated successfully
+```
+
+---
+
+## Group Sync Functions
+
+FortigiGraph provides comprehensive group synchronization capabilities, including group details, memberships, nested memberships, and PIM eligible memberships.
+
+### Sync-FGGroup
+
+Syncs Microsoft Graph group details to Azure SQL with automatic schema detection and temporal versioning.
+
+#### Default Attributes (20+ properties)
+
+When called without parameters, syncs these attributes:
+
+**Identity:**
+- `id` - Group's unique identifier (GUID)
+- `displayName` - Group display name
+- `description` - Group description
+- `mail` - Group email address
+- `mailNickname` - Mail alias
+
+**Type & Security:**
+- `mailEnabled` - Whether mail is enabled
+- `securityEnabled` - Whether it's a security group
+- `groupTypes` - Array of group types (Unified, DynamicMembership, etc.)
+- `visibility` - Public/Private visibility
+- `isAssignableToRole` - Whether assignable to Azure AD roles (PIM)
+
+**Organization:**
+- `ownerId` - Owner's unique ID (first owner)
+- `classification` - Data classification
+- `membershipRule` - Dynamic membership rule (if dynamic)
+- `membershipRuleProcessingState` - Dynamic membership state
+
+**Metadata:**
+- `createdDateTime` - When group was created
+- `renewedDateTime` - Last renewal date
+- `expirationDateTime` - Expiration date (if set)
+- `onPremisesSyncEnabled` - Whether synced from on-premises
+- `onPremisesLastSyncDateTime` - Last on-premises sync
+
+#### Parameters
+
+- `Attributes` - Custom array of attributes (overrides defaults)
+- `AdditionalAttributes` - Attributes to add on top of defaults
+- `Filter` - OData filter (e.g., "securityEnabled eq true")
+- `TableName` (optional) - Table name (default: "GraphGroups")
+- `RecreateTable` (switch) - Drop and recreate table (loses history!)
+
+#### Examples
+
+**Basic sync with defaults:**
+```powershell
+Sync-FGGroup
+```
+
+**Add extra attributes:**
+```powershell
+Sync-FGGroup -AdditionalAttributes @('theme', 'resourceProvisioningOptions')
+```
+
+**Filter groups:**
+```powershell
+# Only security groups
+Sync-FGGroup -Filter "securityEnabled eq true"
+
+# Only Microsoft 365 groups
+Sync-FGGroup -Filter "groupTypes/any(c:c eq 'Unified')"
+
+# Only role-assignable groups
+Sync-FGGroup -Filter "isAssignableToRole eq true"
+```
+
+---
+
+### Sync-FGGroupMember
+
+Syncs **direct** group memberships to SQL with composite primary key (groupId + memberId).
+
+**Table Structure:**
+- `groupId` (UNIQUEIDENTIFIER) - Group's ID
+- `memberId` (UNIQUEIDENTIFIER) - Member's ID
+- `memberType` (NVARCHAR) - Type of member (#microsoft.graph.user, #microsoft.graph.group, etc.)
+- Primary Key: **(groupId, memberId)** - Composite key for many-to-many relationship
+
+#### Parameters
+
+- `Filter` - OData filter to limit which groups to process
+- `GroupIds` - Array of specific group IDs to sync
+- `TableName` (optional) - Table name (default: "GraphGroupMembers")
+- `RecreateTable` (switch) - Drop and recreate table (loses history!)
+
+#### Examples
+
+**Sync all direct memberships:**
+```powershell
+Sync-FGGroupMember
+```
+
+**Sync specific groups:**
+```powershell
+$groupIds = @('group-id-1', 'group-id-2', 'group-id-3')
+Sync-FGGroupMember -GroupIds $groupIds
+```
+
+**Filter groups:**
+```powershell
+Sync-FGGroupMember -Filter "securityEnabled eq true"
+```
+
+#### How It Works
+
+The function iterates through each group individually to fetch members because bulk queries have Graph API limitations:
+
+1. Fetches all groups (or filtered subset)
+2. For each group, calls `/groups/{id}/members` endpoint
+3. Stores membership relationships in SQL
+4. Uses composite key (groupId, memberId) for proper many-to-many handling
+5. Tracks changes over time with temporal versioning
+
+---
+
+### Sync-FGGroupTransitiveMember
+
+Syncs **transitive/nested** group memberships - includes all members through nested groups.
+
+**Table Structure:** Same as `Sync-FGGroupMember`
+- `groupId`, `memberId`, `memberType`
+- Primary Key: **(groupId, memberId)**
+- Default table: **GraphGroupTransitiveMembers**
+
+#### Difference from Sync-FGGroupMember
+
+- **Direct members**: Only users/groups explicitly added to the group
+- **Transitive members**: All users including those from nested groups
+
+**Example:**
+- Group A contains User1 and Group B
+- Group B contains User2
+- Direct members of Group A: User1, Group B
+- Transitive members of Group A: User1, Group B, User2
+
+#### Parameters
+
+Same as `Sync-FGGroupMember`:
+- `Filter`, `GroupIds`, `TableName`, `RecreateTable`
+
+#### Examples
+
+**Sync all transitive memberships:**
+```powershell
+Sync-FGGroupTransitiveMember
+```
+
+**Sync specific groups:**
+```powershell
+Sync-FGGroupTransitiveMember -GroupIds @('group-id-1', 'group-id-2')
+```
+
+#### Use Case
+
+Use this to answer: "Who has access to this group through any path (including nested groups)?"
+
+---
+
+### Sync-FGGroupEligibleMember
+
+Syncs **PIM eligible** group memberships - members who can activate access but don't currently have it.
+
+**Table Structure:** Same as other membership tables
+- `groupId`, `memberId`, `memberType`
+- Primary Key: **(groupId, memberId)**
+- Default table: **GraphGroupEligibleMembers**
+
+#### PIM Integration
+
+Only processes **PIM-enabled groups**:
+- `isAssignableToRole` must be `true`
+- Group must not be a dynamic membership group
+- Uses `/identityGovernance/privilegedAccess/group/eligibilitySchedules` endpoint
+
+#### Parameters
+
+- `Filter` - OData filter (applied before PIM filtering)
+- `GroupIds` - Array of specific group IDs to sync
+- `TableName` (optional) - Table name (default: "GraphGroupEligibleMembers")
+- `RecreateTable` (switch) - Drop and recreate table
+
+#### Examples
+
+**Sync all eligible memberships:**
+```powershell
+Sync-FGGroupEligibleMember
+```
+
+**Sync specific PIM groups:**
+```powershell
+$pimGroupIds = @('pim-group-1', 'pim-group-2')
+Sync-FGGroupEligibleMember -GroupIds $pimGroupIds
+```
+
+#### Use Case
+
+Use this to answer:
+- "Who is eligible to activate membership in this group?"
+- "Which users have PIM eligibility but haven't activated?"
+- "Track changes to PIM eligibility over time"
+
+#### Notes
+
+- If a group is not PIM-enabled, the function will skip it with a warning
+- Eligible members may or may not be active members
+- Use `Initialize-FGGroupMembershipViews` to combine eligible + active data
+
+---
+
+## Group Membership Analysis
+
+### Initialize-FGGroupMembershipViews
+
+Creates SQL views that simplify analyzing group membership relationships.
+
+#### Prerequisites
+
+- `GraphGroupMembers` table (run `Sync-FGGroupMember` first)
+- `GraphGroupTransitiveMembers` table (run `Sync-FGGroupTransitiveMember` first)
+- `GraphGroupEligibleMembers` table (optional - run `Sync-FGGroupEligibleMember` for PIM support)
+
+#### Parameters
+
+- `DirectMembersTable` (optional) - Direct members table name (default: "GraphGroupMembers")
+- `TransitiveMembersTable` (optional) - Transitive members table name (default: "GraphGroupTransitiveMembers")
+- `EligibleMembersTable` (optional) - Eligible members table name (default: "GraphGroupEligibleMembers")
+- `DropIfExists` (switch) - Recreate views if they already exist
+
+#### Views Created
+
+**1. vw_GraphGroupNestedMembers**
+Shows only members who have **indirect access** (not direct members):
+
+```sql
+SELECT * FROM vw_GraphGroupNestedMembers
+WHERE groupId = 'group-guid-here';
+```
+
+**Use case:** "Show me users who have access only through nested groups"
+
+**2. vw_GraphGroupEligibleMembers** (if PIM table exists)
+Shows only **PIM eligible** members:
+
+```sql
+SELECT * FROM vw_GraphGroupEligibleMembers
+WHERE groupId = 'group-guid-here';
+```
+
+**Use case:** "Show me who can activate membership"
+
+**3. vw_GraphGroupMembershipType**
+Shows **all members** with a `membershipType` indicator:
+- `'Direct'` - Explicitly added to the group
+- `'Indirect'` - Access through nested groups only
+- `'Eligible'` - PIM eligible (can activate)
+
+```sql
+-- See all membership types for a group
+SELECT groupId, memberId, memberType, membershipType
+FROM vw_GraphGroupMembershipType
+WHERE groupId = 'group-guid-here';
+
+-- Find all indirect members across all groups
+SELECT * FROM vw_GraphGroupMembershipType
+WHERE membershipType = 'Indirect';
+
+-- Find eligible-but-not-active members
+SELECT * FROM vw_GraphGroupMembershipType
+WHERE membershipType = 'Eligible';
+```
+
+#### Examples
+
+**Create views with defaults:**
+```powershell
+Initialize-FGGroupMembershipViews
+```
+
+**Recreate existing views:**
+```powershell
+Initialize-FGGroupMembershipViews -DropIfExists
+```
+
+**Custom table names:**
+```powershell
+Initialize-FGGroupMembershipViews `
+    -DirectMembersTable "CustomDirectMembers" `
+    -TransitiveMembersTable "CustomTransitiveMembers" `
+    -EligibleMembersTable "CustomEligibleMembers"
+```
+
+#### Output Example
+
+```
+[14:45:10] Creating group membership analysis views...
+
+[14:45:10] Creating view: vw_GraphGroupNestedMembers
+  Purpose: Shows only members with indirect/nested access (not direct members)
+  ✅ Created: vw_GraphGroupNestedMembers
+
+[14:45:10] Creating view: vw_GraphGroupEligibleMembers
+  Purpose: Shows only eligible members (PIM - can activate membership)
+  ✅ Created: vw_GraphGroupEligibleMembers
+
+[14:45:11] Creating view: vw_GraphGroupMembershipType
+  Purpose: Shows all members with Direct/Indirect/Eligible indicator
+  ✅ Created: vw_GraphGroupMembershipType
+
+========================================
+Views Created Successfully!
+========================================
+View 1: vw_GraphGroupNestedMembers
+  - Shows only indirect/nested members
+  - Excludes direct members
+
+View 2: vw_GraphGroupEligibleMembers
+  - Shows only eligible members (PIM)
+  - Members who can activate access
+
+View 3: vw_GraphGroupMembershipType
+  - Shows all members (direct + indirect + eligible)
+  - Includes membershipType column (Direct/Indirect/Eligible)
+========================================
+```
+
+#### Query Examples
+
+**Find users with indirect access only:**
+```sql
+SELECT u.displayName, u.userPrincipalName, g.displayName AS GroupName
+FROM vw_GraphGroupNestedMembers m
+JOIN GraphUsers u ON m.memberId = u.id
+JOIN GraphGroups g ON m.groupId = g.id
+WHERE u.accountEnabled = 1;
+```
+
+**Audit all membership types for a specific user:**
+```sql
+SELECT
+    g.displayName AS GroupName,
+    m.membershipType,
+    m.ValidFrom,
+    m.ValidTo
+FROM vw_GraphGroupMembershipType m
+JOIN GraphGroups g ON m.groupId = g.id
+WHERE m.memberId = 'user-guid-here'
+ORDER BY g.displayName, m.membershipType;
+```
+
+**Find groups where users are eligible but not active:**
+```sql
+SELECT
+    g.displayName AS GroupName,
+    COUNT(*) AS EligibleButInactiveCount
+FROM vw_GraphGroupMembershipType m
+JOIN GraphGroups g ON m.groupId = g.id
+WHERE m.membershipType = 'Eligible'
+GROUP BY g.displayName
+ORDER BY EligibleButInactiveCount DESC;
 ```
 
 ---

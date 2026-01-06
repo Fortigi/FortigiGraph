@@ -2,6 +2,8 @@
   "_SECURITY_INFO": "Passwords are now stored encrypted! The test script will prompt for credentials on first run.",
   "_NOTE": "Credentials are encrypted using Windows DPAPI and can only be decrypted by you on this machine.",
   "Azure": {
+    "TenantId": "",
+    "_TenantIdNote": "Optional: Only needed if Azure resources are in a different tenant than Graph API. If omitted, uses Graph.TenantId",
     "SubscriptionId": "YOUR-SUBSCRIPTION-ID",
     "ResourceGroupName": "rg-fortigraph-test",
     "Location": "northeurope",

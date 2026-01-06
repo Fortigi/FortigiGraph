@@ -9,10 +9,7 @@ function Invoke-FGGetRequest {
     If (!($Global:AccessToken)) {
         Throw "No Access Token found. Please run Get-AccessToken or Get-AccessTokenInteractive before running this function."
     }
-    Else {
-        $AccessToken = $Global:AccessToken
-    }
-    
+
     If ($Global:DebugMode) {
         If ($Global:DebugMode.Contains('G')) {
             Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
@@ -24,24 +21,27 @@ function Invoke-FGGetRequest {
     #Check if Access token is expired, if so get new one.
     $TokenIsStillValid = Confirm-FGAccessTokenValidity
     if (!($TokenIsStillValid)) {
-        
+
         If ($Global:DebugMode) {
             If ($Global:DebugMode.Contains('G')) {
                 Write-Host "Access Token Expired, getting new one" -ForegroundColor Blue
             }
         }
-    
+
         If ($global:ClientSecret) {
             Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
         }
         Elseif ($global:RefreshToken) {
             Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
-        } 
-        Else {
-            Throw "Access Token expired."   
         }
-    
+        Else {
+            Throw "Access Token expired."
+        }
+
     }
+
+    # Get the current (potentially refreshed) access token
+    $AccessToken = $Global:AccessToken
 
     $ReturnValue = $Null
     Try {
@@ -62,6 +62,27 @@ function Invoke-FGGetRequest {
 
     #By default you only get 100 results... its paged
     While ($Result.'@odata.nextLink') {
+        # Check token validity before fetching next page (token may expire during long pagination)
+        $TokenIsStillValid = Confirm-FGAccessTokenValidity
+        if (!($TokenIsStillValid)) {
+            If ($Global:DebugMode -and $Global:DebugMode.Contains('G')) {
+                Write-Host "Access Token Expired during pagination, getting new one" -ForegroundColor Blue
+            }
+
+            If ($global:ClientSecret) {
+                Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
+            }
+            Elseif ($global:RefreshToken) {
+                Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
+            }
+            Else {
+                Throw "Access Token expired during pagination."
+            }
+
+            # Update local token variable with refreshed token
+            $AccessToken = $Global:AccessToken
+        }
+
         Try {
             $Result = Invoke-RestMethod -Method Get -Uri $Result.'@odata.nextLink' -Headers @{"Authorization" = "Bearer $AccessToken" }
         }

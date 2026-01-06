@@ -1,30 +1,34 @@
-# Integration Test Suite for FortigiGraph
-# Tests the complete workflow from Azure connection to data sync
+# Fast Integration Test Suite for FortigiGraph
+# Reuses existing SQL Server to speed up testing
 #
 # Prerequisites:
-# - Az PowerShell module installed
-# - Logged in to Azure (Connect-AzAccount)
-# - Microsoft Graph app registration with appropriate permissions
-# - Test configuration file (config.test.json)
+# - Run Test-Integration.ps1 with -SkipCleanup first to create the SQL Server
+# - Or have an existing SQL Server from previous test runs
+#
+# This test:
+# - Validates SQL Server exists
+# - Clears all existing tables
+# - Runs all sync and query tests
+# - By default, keeps the SQL Server for next run
 
 param(
     [Parameter(Mandatory = $true)]
     [string]$ConfigFile,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipCleanup
+    [switch]$RemoveServer
 )
 
 # Set error action preference
 $ErrorActionPreference = "Stop"
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "FortigiGraph Integration Test Suite" -ForegroundColor Cyan
+Write-Host "FortigiGraph Fast Integration Test" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # Start transcript to capture all console output (unique per config file)
 $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
-$transcriptFile = Join-Path $PSScriptRoot "integration-test-$configBaseName.log"
+$transcriptFile = Join-Path $PSScriptRoot "integration-test-fast-$configBaseName.log"
 Write-Host "Starting transcript logging..." -ForegroundColor Gray
 Start-Transcript -Path $transcriptFile -Force | Out-Null
 Write-Host "Transcript logging to: $transcriptFile`n" -ForegroundColor Cyan
@@ -284,138 +288,148 @@ try {
     exit 1
 }
 
-# Cleanup existing test resources
-Write-TestHeader "Test 4: Cleanup Existing Test Resources"
+# Validate existing SQL Server
+Write-TestHeader "Test 4: Validate Existing SQL Server"
 
 try {
     Write-TestStep "Checking for existing SQL Server..."
     $existingServer = Get-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -ErrorAction SilentlyContinue
 
-    if ($existingServer) {
-        Write-TestStep "Found existing SQL Server. Removing..."
-        Remove-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -Force
-        Start-Sleep -Seconds 10  # Wait for deletion to complete
-        Add-TestResult -Category "Cleanup" -TestName "Existing SQL Server removed" -Passed $true
-    } else {
-        Add-TestResult -Category "Cleanup" -TestName "No existing SQL Server to remove" -Passed $true
+    if (-not $existingServer) {
+        throw "SQL Server '$($config.Azure.SQLServerName)' not found in resource group '$($config.Azure.ResourceGroupName)'. Please run Test-Integration.ps1 with -SkipCleanup first to create it."
     }
+
+    Write-TestStep "Found SQL Server: $($existingServer.ServerName)"
+    Add-TestResult -Category "SQL" -TestName "SQL Server exists" -Passed $true -Data "$($existingServer.ServerName) in $($existingServer.Location)"
+
+    # Check database exists
+    Write-TestStep "Checking for database..."
+    $existingDb = Get-AzSqlDatabase -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -DatabaseName $config.Azure.DatabaseName -ErrorAction SilentlyContinue
+
+    if (-not $existingDb) {
+        throw "Database '$($config.Azure.DatabaseName)' not found on server '$($config.Azure.SQLServerName)'. Please run Test-Integration.ps1 with -SkipCleanup first."
+    }
+
+    Write-TestStep "Found database: $($existingDb.DatabaseName)"
+    Add-TestResult -Category "SQL" -TestName "Database exists" -Passed $true -Data "$($existingDb.DatabaseName) ($($existingDb.SkuName))"
 } catch {
-    Write-Warning "Cleanup warning: $($_.Exception.Message)"
-    Add-TestResult -Category "Cleanup" -TestName "Cleanup existing resources" -Passed $true -Message "Warning: $($_.Exception.Message)"
+    Add-TestResult -Category "SQL" -TestName "Validate existing SQL Server" -Passed $false -Message $_.Exception.Message
+    Write-Host "`nTIP: Run Test-Integration.ps1 with -SkipCleanup first to create the SQL Server and database." -ForegroundColor Yellow
+    exit 1
 }
 
-# Create SQL Server
-Write-TestHeader "Test 5: SQL Server Creation"
+# Connect to SQL Server
+Write-TestHeader "Test 5: SQL Server Connection"
 
 try {
-    Write-TestStep "Creating SQL Server: $($config.Azure.SQLServerName)..."
+    Write-TestStep "Connecting to existing SQL Server..."
 
-    # $SecurePassword was already loaded from secure config earlier
-
-    $serverInfo = New-FGAzureSQLServer `
+    Connect-FGSQLServer `
         -SubscriptionId $config.Azure.SubscriptionId `
         -ResourceGroupName $config.Azure.ResourceGroupName `
         -ServerName $config.Azure.SQLServerName `
         -DatabaseName $config.Azure.DatabaseName `
-        -AdminUsername $config.Azure.AdminUsername `
-        -AdminPassword $SecurePassword `
-        -Location $config.Azure.Location `
-        -AllowCurrentIP `
-        -AutoConnect
+        -UpdateFirewall
 
-    Register-Resource -Type "SQLServer" -Name $config.Azure.SQLServerName -Details @{
-        ResourceGroup = $config.Azure.ResourceGroupName
-        Database = $config.Azure.DatabaseName
-    }
+    Add-TestResult -Category "SQL" -TestName "Connected to SQL Server" -Passed $true
 
-    Add-TestResult -Category "SQL" -TestName "SQL Server created" -Passed $true -Data $serverInfo
-    Add-TestResult -Category "SQL" -TestName "SQL Server auto-connected" -Passed ($null -ne $global:FGSQLConnectionString)
-} catch {
-    Add-TestResult -Category "SQL" -TestName "SQL Server creation" -Passed $false -Message $_.Exception.Message
-    exit 1
-}
-
-# Test SQL Connection
-Write-TestHeader "Test 6: SQL Connection Verification"
-
-try {
-    Write-TestStep "Testing SQL connection..."
+    Write-TestStep "Testing connection..."
     $connectionInfo = Test-FGSQLConnection
     Add-TestResult -Category "SQL" -TestName "SQL connection verified" -Passed $true -Data $connectionInfo
 } catch {
-    Add-TestResult -Category "SQL" -TestName "SQL connection test" -Passed $false -Message $_.Exception.Message
+    Add-TestResult -Category "SQL" -TestName "SQL connection" -Passed $false -Message $_.Exception.Message
     exit 1
 }
 
-# Test 7: Table Creation - Default Properties
-Write-TestHeader "Test 7: Table Creation (Default Properties)"
+# Clear existing tables
+Write-TestHeader "Test 6: Clear Existing Tables"
 
 try {
-    Write-TestStep "Creating table with default user properties..."
+    Write-TestStep "Getting list of existing tables..."
 
-    $defaultColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "mail" = "NVARCHAR(255)"
-        "accountEnabled" = "BIT"
+    $tables = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_SCHEMA = 'dbo'
+AND TABLE_NAME NOT LIKE '%History'
+ORDER BY TABLE_NAME
+"@
+        $reader = $cmd.ExecuteReader()
+        $tableList = @()
+        while ($reader.Read()) {
+            $tableList += $reader.GetString(0)
+        }
+        $reader.Close()
+        return $tableList
     }
 
-    Initialize-FGSQLTable -TableName "GraphUsers_DefaultTest" -Columns $defaultColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with default properties" -Passed $true
+    if ($tables.Count -eq 0) {
+        Write-TestStep "No tables found to clear"
+        Add-TestResult -Category "Cleanup" -TestName "Clear existing tables" -Passed $true -Message "No tables to clear"
+    } else {
+        Write-TestStep "Found $($tables.Count) table(s) to clear"
 
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_DefaultTest" -Details @{ Columns = $defaultColumns }
-} catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (default)" -Passed $false -Message $_.Exception.Message
-}
+        foreach ($table in $tables) {
+            Write-TestStep "Clearing table: $table"
 
-# Test 8: Table Creation - Extended Properties
-Write-TestHeader "Test 8: Table Creation (Extended Properties)"
+            # Clear the table
+            Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
 
-try {
-    Write-TestStep "Creating table with extended user properties..."
+                # First, disable system versioning if it's a temporal table
+                $checkCmd = $connection.CreateCommand()
+                $checkCmd.CommandText = @"
+SELECT temporal_type
+FROM sys.tables
+WHERE name = '$table' AND schema_id = SCHEMA_ID('dbo')
+"@
+                $temporalType = $checkCmd.ExecuteScalar()
 
-    $extendedColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "mail" = "NVARCHAR(255)"
-        "accountEnabled" = "BIT"
-        "jobTitle" = "NVARCHAR(255)"  # Extra property
-        "department" = "NVARCHAR(255)"  # Extra property
+                if ($temporalType -eq 2) {
+                    # It's a temporal table, disable versioning
+                    $disableCmd = $connection.CreateCommand()
+                    $disableCmd.CommandText = "ALTER TABLE dbo.[$table] SET (SYSTEM_VERSIONING = OFF)"
+                    $disableCmd.ExecuteNonQuery() | Out-Null
+
+                    # Delete from history table
+                    $historyTable = "${table}History"
+                    $deleteHistCmd = $connection.CreateCommand()
+                    $deleteHistCmd.CommandText = "IF OBJECT_ID('dbo.[$historyTable]', 'U') IS NOT NULL DELETE FROM dbo.[$historyTable]"
+                    $deleteHistCmd.ExecuteNonQuery() | Out-Null
+
+                    # Delete from main table
+                    $deleteCmd = $connection.CreateCommand()
+                    $deleteCmd.CommandText = "DELETE FROM dbo.[$table]"
+                    $deleteCmd.ExecuteNonQuery() | Out-Null
+
+                    # Re-enable versioning
+                    $enableCmd = $connection.CreateCommand()
+                    $enableCmd.CommandText = "ALTER TABLE dbo.[$table] SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.[$historyTable]))"
+                    $enableCmd.ExecuteNonQuery() | Out-Null
+                } else {
+                    # Regular table, just delete
+                    $deleteCmd = $connection.CreateCommand()
+                    $deleteCmd.CommandText = "DELETE FROM dbo.[$table]"
+                    $deleteCmd.ExecuteNonQuery() | Out-Null
+                }
+            }
+        }
+
+        Add-TestResult -Category "Cleanup" -TestName "Clear existing tables" -Passed $true -Data "Cleared $($tables.Count) table(s)"
     }
 
-    Initialize-FGSQLTable -TableName "GraphUsers_ExtendedTest" -Columns $extendedColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with extended properties" -Passed $true
-
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_ExtendedTest" -Details @{ Columns = $extendedColumns }
 } catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (extended)" -Passed $false -Message $_.Exception.Message
+    Add-TestResult -Category "Cleanup" -TestName "Clear existing tables" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 9: Table Creation - Custom Properties
-Write-TestHeader "Test 9: Table Creation (Custom Properties)"
-
-try {
-    Write-TestStep "Creating table with custom user properties..."
-
-    $customColumns = @{
-        "id" = "NVARCHAR(255)"
-        "userPrincipalName" = "NVARCHAR(255)"
-        "displayName" = "NVARCHAR(255)"
-        "givenName" = "NVARCHAR(255)"
-        "surname" = "NVARCHAR(255)"
-        "officeLocation" = "NVARCHAR(255)"
-        "mobilePhone" = "NVARCHAR(50)"
-    }
-
-    Initialize-FGSQLTable -TableName "GraphUsers_CustomTest" -Columns $customColumns -PrimaryKey "id"
-    Add-TestResult -Category "SQL" -TestName "Table created with custom properties" -Passed $true
-
-    Register-Resource -Type "SQLTable" -Name "GraphUsers_CustomTest" -Details @{ Columns = $customColumns }
-} catch {
-    Add-TestResult -Category "SQL" -TestName "Table creation (custom)" -Passed $false -Message $_.Exception.Message
-}
+# Note: Tests 7-9 (Table Creation) are SKIPPED in the fast test
+# The tables already exist from previous test runs - we only cleared their data in Test 6
+# We jump directly to the sync tests (Tests 10-12) which will populate the existing tables
+# The helper views will be automatically recreated by the sync functions as needed
 
 # Test 10: Data Sync - Default Properties
 Write-TestHeader "Test 10: Data Sync (Default Properties)"
@@ -486,7 +500,7 @@ try {
     Add-TestResult -Category "Sync" -TestName "User sync (custom)" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 13: Query Results
+# Test 13: Query and Verify Results
 Write-TestHeader "Test 13: Query and Verify Results"
 
 try {
@@ -532,27 +546,11 @@ FROM dbo.GraphUsers_CustomTest
     Add-TestResult -Category "Query" -TestName "Query execution" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 14: Temporal Table Features
-Write-TestHeader "Test 14: Temporal Table Features"
-
-try {
-    Write-TestStep "Testing temporal table history views..."
-
-    $historyQuery = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandText = "SELECT TOP 5 * FROM dbo.vw_GraphUsers_DefaultTest_AllHistory ORDER BY ValidFrom DESC"
-
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $dataset = New-Object System.Data.DataSet
-        $adapter.Fill($dataset) | Out-Null
-        return $dataset.Tables[0]
-    }
-
-    Add-TestResult -Category "Query" -TestName "Temporal history view accessible" -Passed ($historyQuery.Rows.Count -gt 0) -Data "$($historyQuery.Rows.Count) history records"
-} catch {
-    Add-TestResult -Category "Query" -TestName "Temporal table features" -Passed $false -Message $_.Exception.Message
-}
+# Note: Test 14 (Temporal Table Features) is SKIPPED in the fast test
+# The helper views (vw_*_AllHistory) are only created by Initialize-FGSQLTable
+# which we don't call in the fast test. This test validates SQL Server temporal
+# features which are already tested in the full integration test.
+# The fast test focuses on sync functionality, not SQL Server features.
 
 # Test 15: Simple Query with Invoke-FGSQLQuery
 Write-TestHeader "Test 15: Simple Query Test (Invoke-FGSQLQuery)"
@@ -581,6 +579,9 @@ try {
 } catch {
     Add-TestResult -Category "Query" -TestName "Invoke-FGSQLQuery execution" -Passed $false -Message $_.Exception.Message
 }
+
+# Include all group sync tests (Tests 16-22) from Test-Integration.ps1
+# These are the same tests, just running on the cleared database
 
 # Test 16: Group Sync - Default Properties
 Write-TestHeader "Test 16: Group Sync (Default Properties)"
@@ -899,24 +900,31 @@ FROM dbo.GraphGroupOwners_Test
     Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $false -Message $_.Exception.Message
 }
 
-# Cleanup
-if (-not $SkipCleanup) {
-    Write-TestHeader "Test 23: Cleanup Test Resources"
+# Optional: Remove server if requested
+if ($RemoveServer) {
+    Write-TestHeader "Test 23: Remove SQL Server"
 
     try {
-        Write-TestStep "Removing test SQL Server and resources..."
+        Write-TestStep "Removing SQL Server and resources..."
         Remove-AzSqlServer -ResourceGroupName $config.Azure.ResourceGroupName -ServerName $config.Azure.SQLServerName -Force
-        Add-TestResult -Category "Cleanup" -TestName "Test resources cleaned up" -Passed $true
+        Add-TestResult -Category "Cleanup" -TestName "SQL Server removed" -Passed $true
     } catch {
-        Add-TestResult -Category "Cleanup" -TestName "Cleanup" -Passed $false -Message $_.Exception.Message
+        Add-TestResult -Category "Cleanup" -TestName "Remove SQL Server" -Passed $false -Message $_.Exception.Message
     }
 } else {
-    Write-Host "`nSkipping cleanup (use -SkipCleanup to keep resources)" -ForegroundColor Yellow
+    Write-Host "`n" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "SQL Server Preserved for Next Run" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "Server:   $($config.Azure.SQLServerName)" -ForegroundColor White
+    Write-Host "Database: $($config.Azure.DatabaseName)" -ForegroundColor White
+    Write-Host "`nTo remove the server, run with -RemoveServer" -ForegroundColor Gray
+    Write-Host "========================================`n" -ForegroundColor Green
 }
 
 # Print Summary
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Integration Test Summary" -ForegroundColor Cyan
+Write-Host "Fast Integration Test Summary" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 $totalTests = $script:TestResults.Count
@@ -953,11 +961,11 @@ Stop-Transcript
 
 # Exit code
 if ($failedTests -eq 0) {
-    Write-Host "`nAll integration tests passed! ✓" -ForegroundColor Green
+    Write-Host "`nAll tests passed! ✓" -ForegroundColor Green
     Write-Host "Full test log saved to: $transcriptFile" -ForegroundColor Cyan
     exit 0
 } else {
-    Write-Host "`nSome integration tests failed." -ForegroundColor Red
+    Write-Host "`nSome tests failed." -ForegroundColor Red
     Write-Host "Full test log saved to: $transcriptFile" -ForegroundColor Cyan
     exit 1
 }

@@ -43,6 +43,7 @@ Edit `config.test.json`:
 ```json
 {
   "Azure": {
+    "TenantId": "optional-azure-tenant-id",
     "SubscriptionId": "12345678-1234-1234-1234-123456789012",
     "ResourceGroupName": "rg-fortigraph-test",
     "Location": "northeurope",
@@ -60,6 +61,13 @@ Edit `config.test.json`:
   }
 }
 ```
+
+**Configuration Notes:**
+
+- **Azure.TenantId** (Optional): Use this if your Azure resources are in a different tenant than your Graph API
+  - If specified: Azure operations use this tenant, Graph API uses Graph.TenantId
+  - If omitted: Both Azure and Graph operations use Graph.TenantId (backward compatible)
+  - Common in multi-tenant environments or when using Azure Lighthouse
 
 **Important:**
 - Use a **unique SQL server name** (must be globally unique in Azure)

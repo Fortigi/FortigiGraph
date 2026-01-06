@@ -1,58 +1,60 @@
-function Sync-FGUser {
+function Sync-FGGroup {
     <#
     .SYNOPSIS
-    Syncs Microsoft Graph users to Azure SQL with automatic schema detection and temporal versioning.
+    Syncs Microsoft Graph groups to Azure SQL with automatic schema detection and temporal versioning.
 
     .DESCRIPTION
-    This function makes syncing Graph users to SQL incredibly easy:
-    - Specify the user attributes you want to sync
+    This function makes syncing Graph groups to SQL incredibly easy:
+    - Specify the group attributes you want to sync
     - Automatically creates the SQL table on first run
     - Auto-detects SQL data types from Graph schema
     - Uses temporal tables for automatic change tracking
-    - Syncs all users or filtered users to SQL
+    - Syncs all groups or filtered groups to SQL
+    - Does NOT sync members (use Sync-FGGroupMember for that)
 
     .PARAMETER Attributes
-    Array of user attribute names to sync. If not specified, uses default set of common attributes.
+    Array of group attribute names to sync. If not specified, uses default set of common attributes.
     To add to defaults, use -AdditionalAttributes instead.
 
     .PARAMETER AdditionalAttributes
     Array of additional attributes to sync on top of the defaults.
 
     .PARAMETER Filter
-    Optional OData filter to limit which users to sync (e.g., "accountEnabled eq true")
+    Optional OData filter to limit which groups to sync (e.g., "securityEnabled eq true")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphUsers"
+    Name of the SQL table to create/sync to. Default: "GraphGroups"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
     .PARAMETER BatchSize
-    Number of users to process at once. Default: 100
+    Number of groups to process at once. Default: 100
 
     .EXAMPLE
-    Sync-FGUser
+    Sync-FGGroup
 
-    Syncs all users with default attributes (id, userPrincipalName, displayName, department, etc.)
-
-    .EXAMPLE
-    Sync-FGUser -AdditionalAttributes @('officeLocation', 'city', 'state')
-
-    Syncs users with default attributes PLUS the additional ones specified
+    Syncs all groups with default attributes (id, displayName, description, mail, etc.)
 
     .EXAMPLE
-    Sync-FGUser -Attributes @('id', 'userPrincipalName', 'mail') -Filter "accountEnabled eq true"
+    Sync-FGGroup -AdditionalAttributes @('classification', 'visibility')
 
-    Syncs only enabled users with custom attributes (overrides defaults)
+    Syncs groups with default attributes PLUS the additional ones specified
+
+    .EXAMPLE
+    Sync-FGGroup -Filter "securityEnabled eq true" -TableName "SecurityGroups"
+
+    Syncs only security groups to a custom table name
 
     .NOTES
     Requires:
     - Connect-FGSQLServer to be called first
     - Valid Graph access token (Get-FGAccessToken)
+    - Does NOT sync group members - those are in a separate many-to-many relationship
     #>
 
     [CmdletBinding(DefaultParameterSetName = 'Default')]
-    [Alias("Sync-User")]
+    [Alias("Sync-Group")]
     Param(
         [Parameter(Mandatory = $false, ParameterSetName = 'Custom')]
         [string[]]$Attributes,
@@ -64,7 +66,7 @@ function Sync-FGUser {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphUsers",
+        [string]$TableName = "GraphGroups",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -87,33 +89,33 @@ function Sync-FGUser {
     $defaultAttributes = @(
         # Identity
         'id'
-        'userPrincipalName'
-        'onPremisesSamAccountName'
-        'employeeId'
-        'mail'
-
-        # Status
-        'accountEnabled'
-        'userType'
-        'onPremisesSyncEnabled'
-
-        # Basic Info
         'displayName'
-        'givenName'
-        'surname'
+        'description'
+        'mail'
+        'mailNickname'
 
-        # Organization
-        'companyName'
-        'department'
-        'jobTitle'
+        # Type & Security
+        'mailEnabled'
+        'securityEnabled'
+        'groupTypes'  # Array - Unified for M365 groups
+        'visibility'  # Public, Private, HiddenMembership
 
         # Metadata
         'createdDateTime'
-        'employeeHireDate'
+        'renewedDateTime'
+        'expirationDateTime'
 
-        # Manager & Sign-in (these need special handling)
-        'managerId'  # We'll fetch this from manager/id
-        'lastSignInDateTime'  # From signInActivity
+        # Advanced
+        'isAssignableToRole'
+        'membershipRule'
+        'membershipRuleProcessingState'
+
+        # On-Premises Sync
+        'onPremisesSamAccountName'
+        'onPremisesSyncEnabled'
+        'onPremisesSecurityIdentifier'
+        'onPremisesNetBiosName'
+        'onPremisesDomainName'
     )
 
     # Determine which attributes to use
@@ -145,40 +147,33 @@ function Sync-FGUser {
     # Map Graph attribute types to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'UNIQUEIDENTIFIER'
-        'userPrincipalName' = 'NVARCHAR(255)'
         'displayName' = 'NVARCHAR(255)'
-        'givenName' = 'NVARCHAR(255)'
-        'surname' = 'NVARCHAR(255)'
+        'description' = 'NVARCHAR(1024)'
         'mail' = 'NVARCHAR(255)'
         'mailNickname' = 'NVARCHAR(255)'
-        'jobTitle' = 'NVARCHAR(255)'
-        'department' = 'NVARCHAR(255)'
-        'companyName' = 'NVARCHAR(255)'
-        'officeLocation' = 'NVARCHAR(255)'
-        'city' = 'NVARCHAR(255)'
-        'state' = 'NVARCHAR(255)'
-        'country' = 'NVARCHAR(255)'
-        'postalCode' = 'NVARCHAR(50)'
-        'streetAddress' = 'NVARCHAR(500)'
-        'mobilePhone' = 'NVARCHAR(50)'
-        'businessPhones' = 'NVARCHAR(500)'
-        'employeeId' = 'NVARCHAR(255)'
-        'employeeType' = 'NVARCHAR(255)'
-        'onPremisesSamAccountName' = 'NVARCHAR(255)'
-        'onPremisesDistinguishedName' = 'NVARCHAR(1000)'
-        'onPremisesDomainName' = 'NVARCHAR(255)'
-        'onPremisesUserPrincipalName' = 'NVARCHAR(255)'
-        'onPremisesSyncEnabled' = 'BIT'
-        'accountEnabled' = 'BIT'
+        'mailEnabled' = 'BIT'
+        'securityEnabled' = 'BIT'
+        'groupTypes' = 'NVARCHAR(500)'  # Array stored as comma-separated
+        'visibility' = 'NVARCHAR(50)'
         'createdDateTime' = 'DATETIME2'
-        'lastPasswordChangeDateTime' = 'DATETIME2'
-        'lastSignInDateTime' = 'DATETIME2'
-        'employeeHireDate' = 'DATETIME2'
-        'ageGroup' = 'NVARCHAR(50)'
-        'usageLocation' = 'NVARCHAR(10)'
+        'renewedDateTime' = 'DATETIME2'
+        'expirationDateTime' = 'DATETIME2'
+        'deletedDateTime' = 'DATETIME2'
+        'isAssignableToRole' = 'BIT'
+        'membershipRule' = 'NVARCHAR(MAX)'
+        'membershipRuleProcessingState' = 'NVARCHAR(50)'
+        'resourceProvisioningOptions' = 'NVARCHAR(500)'
+        'classification' = 'NVARCHAR(255)'
+        'preferredDataLocation' = 'NVARCHAR(50)'
         'preferredLanguage' = 'NVARCHAR(50)'
-        'userType' = 'NVARCHAR(50)'
-        'managerId' = 'UNIQUEIDENTIFIER'
+        'theme' = 'NVARCHAR(50)'
+        'onPremisesSamAccountName' = 'NVARCHAR(255)'
+        'onPremisesSyncEnabled' = 'BIT'
+        'onPremisesSecurityIdentifier' = 'NVARCHAR(255)'
+        'onPremisesNetBiosName' = 'NVARCHAR(255)'
+        'onPremisesDomainName' = 'NVARCHAR(255)'
+        'onPremisesProvisioningErrors' = 'NVARCHAR(MAX)'
+        'proxyAddresses' = 'NVARCHAR(MAX)'
     }
 
     # Build column definitions
@@ -242,58 +237,40 @@ function Sync-FGUser {
     }
 
     # Build Graph API request
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching users from Microsoft Graph..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching groups from Microsoft Graph..." -ForegroundColor Cyan
 
-    # Remove special attributes that need expand or separate handling
-    $regularAttributes = $Attributes | Where-Object { $_ -notin @('managerId', 'lastSignInDateTime') }
-    $needsManager = $Attributes -contains 'managerId'
-    $needsSignInActivity = $Attributes -contains 'lastSignInDateTime'
-
-    $selectProperties = $regularAttributes -join ','
-    $uri = "https://graph.microsoft.com/v1.0/users?`$select=$selectProperties"
-
-    # Add expands for special properties
-    $expands = @()
-    if ($needsManager) {
-        $expands += 'manager($select=id)'
-    }
-    if ($needsSignInActivity) {
-        $uri += ",signInActivity"
-    }
-
-    if ($expands.Count -gt 0) {
-        $uri += "&`$expand=$($expands -join ',')"
-    }
+    $selectProperties = $Attributes -join ','
+    $uri = "https://graph.microsoft.com/v1.0/groups?`$select=$selectProperties"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"
     }
 
-    # Fetch all users using Invoke-FGGetRequest (handles token validation and pagination)
+    # Fetch all groups using Invoke-FGGetRequest (handles token validation and pagination)
     $graphStartTime = Get-Date
 
     try {
-        $allUsers = Invoke-FGGetRequest -URI $uri
-        if (-not $allUsers) {
-            $allUsers = @()
+        $allGroups = Invoke-FGGetRequest -URI $uri
+        if (-not $allGroups) {
+            $allGroups = @()
         }
     }
     catch {
-        throw "Failed to fetch users from Graph: $_"
+        throw "Failed to fetch groups from Graph: $_"
     }
 
     $graphElapsed = (Get-Date) - $graphStartTime
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total users fetched: $($allUsers.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total groups fetched: $($allGroups.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-    if ($allUsers.Count -eq 0) {
-        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No users found to sync."
+    if ($allGroups.Count -eq 0) {
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No groups found to sync."
         return
     }
 
     # Sync to SQL
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing users to SQL Server..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing groups to SQL Server..." -ForegroundColor Cyan
 
-    # Build MERGE statement using helper
+    # Build MERGE statement
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing MERGE statement..." -ForegroundColor Gray
     $mergeSQL = New-FGSQLMergeStatement -TableName $TableName -Attributes $Attributes -TypeMap $graphToSqlTypeMap
 
@@ -316,38 +293,17 @@ function Sync-FGUser {
             $cmd.Transaction = $transaction
             $cmd.CommandText = $mergeSQL
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allUsers.Count) users..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allGroups.Count) groups..." -ForegroundColor Cyan
 
-            foreach ($user in $allUsers) {
+            foreach ($group in $allGroups) {
                 try {
                     $cmd.Parameters.Clear()
 
-                    # Add parameters
+                    # Add parameters for each attribute
                     foreach ($attr in $Attributes) {
-                        # Handle special attributes that come from different Graph properties
-                        if ($attr -eq 'managerId') {
-                            # Manager ID comes from expanded manager object
-                            if ($user.manager -and $user.manager.id) {
-                                ConvertTo-FGSQLParameter -Value $user.manager.id -AttributeName $attr -SqlCommand $cmd
-                            }
-                            else {
-                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                            }
-                            continue
-                        }
-                        elseif ($attr -eq 'lastSignInDateTime') {
-                            # Last sign-in comes from signInActivity object
-                            if ($user.signInActivity -and $user.signInActivity.lastSignInDateTime) {
-                                ConvertTo-FGSQLParameter -Value $user.signInActivity.lastSignInDateTime -AttributeName $attr -SqlCommand $cmd
-                            }
-                            else {
-                                $cmd.Parameters.AddWithValue("@$attr", [DBNull]::Value) | Out-Null
-                            }
-                            continue
-                        }
-
+                        # Handle special attributes
                         # Regular attributes - use helper for type conversion
-                        $value = $user.$attr
+                        $value = $group.$attr
                         ConvertTo-FGSQLParameter -Value $value -AttributeName $attr -SqlCommand $cmd
                     }
 
@@ -357,11 +313,11 @@ function Sync-FGUser {
                     if ($syncedCount % 100 -eq 0) {
                         $elapsed = (Get-Date) - $syncStartTime
                         $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allUsers.Count) users ($rate users/sec)" -ForegroundColor Gray
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allGroups.Count) groups ($rate groups/sec)" -ForegroundColor Gray
                     }
                 }
                 catch {
-                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync user $($user.userPrincipalName): $_"
+                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync group $($group.displayName): $_"
                     $errorCount++
                 }
             }
@@ -372,13 +328,13 @@ function Sync-FGUser {
             $syncElapsed = (Get-Date) - $syncStartTime
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($syncElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-            # Handle deletions - remove users from SQL that no longer exist in Graph
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted users..." -ForegroundColor Cyan
-            $graphUserIds = ($allUsers | ForEach-Object { "'$($_.id)'" }) -join ','
+            # Handle deletions - remove groups from SQL that no longer exist in Graph
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted groups..." -ForegroundColor Cyan
+            $graphGroupIds = ($allGroups | ForEach-Object { "'$($_.id)'" }) -join ','
 
             $deleteSQL = @"
 DELETE FROM dbo.$TableName
-WHERE id NOT IN ($graphUserIds)
+WHERE id NOT IN ($graphGroupIds)
 "@
 
             $deletedCount = 0
@@ -388,14 +344,14 @@ WHERE id NOT IN ($graphUserIds)
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
 
                 if ($deletedCount -gt 0) {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount users that no longer exist in Graph" -ForegroundColor Yellow
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount groups that no longer exist in Graph" -ForegroundColor Yellow
                 }
                 else {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted users found" -ForegroundColor Green
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted groups found" -ForegroundColor Green
                 }
             }
             catch {
-                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed users: $_"
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed groups: $_"
             }
 
             # Cleanup
@@ -429,7 +385,7 @@ WHERE id NOT IN ($graphUserIds)
     Write-Host "Sync Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "Table:           $TableName" -ForegroundColor White
-    Write-Host "Total Users:     $($allUsers.Count)" -ForegroundColor White
+    Write-Host "Total Groups:    $($allGroups.Count)" -ForegroundColor White
     Write-Host "Synced:          $syncedCount" -ForegroundColor White
     Write-Host "Deleted:         $deletedCount" -ForegroundColor White
     Write-Host "Errors:          $errorCount" -ForegroundColor White
@@ -439,7 +395,7 @@ WHERE id NOT IN ($graphUserIds)
 
     return @{
         TableName = $TableName
-        TotalUsers = $allUsers.Count
+        TotalGroups = $allGroups.Count
         SyncedCount = $syncedCount
         DeletedCount = $deletedCount
         ErrorCount = $errorCount
