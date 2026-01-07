@@ -72,14 +72,21 @@ FortigiGraph/
 ├── Specific/               # Higher-level helper functions
 │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation (~10 functions)
 │
-├── _Test/                  # ⭐ NEW: Testing infrastructure
+├── _Test/                  # ⭐ Testing & Production Runbooks
+│   ├── Daily-Sync.ps1                  # ⭐ Production daily sync runbook
 │   ├── Test-Integration.ps1            # Full end-to-end test
 │   ├── Test-Simple.ps1                 # Quick diagnostic
 │   ├── SecureConfig.ps1                # Encrypted credential storage
 │   ├── Manage-Credentials.ps1          # Credential management
+│   ├── README-Daily-Sync.md            # ⭐ Daily sync documentation
+│   ├── QUICK-START-Daily-Sync.md       # ⭐ Daily sync quick start
+│   ├── SYNC-CONFIG-GUIDE.md            # ⭐ Sync configuration guide
 │   ├── README-Integration-Tests.md     # Test documentation
 │   ├── README-SQL-Management.md        # SQL functions guide
 │   ├── README-Secure-Credentials.md    # Security documentation
+│   ├── config.dailysync.json.template  # ⭐ Daily sync config template
+│   ├── config.dailysync-example.json   # ⭐ Working example config
+│   ├── Run-DailySync-Example.ps1       # ⭐ Wrapper for scheduling
 │   └── QUICK-START.md                  # Quick reference
 │
 ├── _Build/                 # Build and publishing scripts
@@ -99,8 +106,12 @@ FortigiGraph/
 | **Generic** | ~47 | Graph API CRUD operations (including Sync-FGUser) |
 | **SQL** | 10 | Azure SQL database operations |
 | **Specific** | ~10 | High-level idempotent helpers |
-| **Test** | 4 | Integration testing & credential management |
-| **Total** | **~88 functions** | **~4,753 lines of code** |
+| **Test/Runbooks** | 5 | Integration testing, daily sync, credential management |
+| **Total** | **~89 functions** | **~5,400+ lines of code** |
+
+**Production Runbooks:**
+- `Daily-Sync.ps1` - Production-ready scheduled sync with config file support (~650 lines)
+- `Run-DailySync-Example.ps1` - Wrapper script for scheduling
 
 ## Architecture & Design Patterns
 
@@ -791,12 +802,92 @@ Clear-FGSQLTable -TableName "GraphUsers_Test" -DeleteHistory -Force
 Remove-FGAzureSQLServer -SubscriptionId "..." -ResourceGroupName "..." -ServerName "..."
 ```
 
+## Daily Sync Runbook (Production)
+
+### Overview
+
+The **Daily Sync Runbook** (`_Test/Daily-Sync.ps1`) is a production-ready script for scheduled Graph data synchronization. It supports comprehensive configuration via JSON config file, making it perfect for large environments with many custom attributes.
+
+### Key Features
+
+- **Config File Driven**: All sync settings in one JSON file
+- **Automatic Setup**: Creates SQL Server on first run if needed
+- **Secure Credentials**: DPAPI encryption for passwords
+- **Flexible Sync**: Enable/disable individual entity types
+- **Attribute Management**: Easy to add custom user attributes
+- **Comprehensive Logging**: Timestamped logs for auditing
+- **Error Handling**: Continues on errors, reports at end
+- **Summary Reports**: Clear statistics after each sync
+
+### Quick Usage
+
+```powershell
+# First time: Create config from template
+cd _Test
+cp config.dailysync.json.template config.production.json
+# Edit config.production.json with your settings
+
+# Run sync
+.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+
+# Schedule with Task Scheduler
+$action = New-ScheduledTaskAction -Execute "pwsh.exe" `
+    -Argument "-File C:\Path\To\_Test\Daily-Sync.ps1 -ConfigFile C:\Path\To\config.production.json"
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
+Register-ScheduledTask -TaskName "Graph Daily Sync" -Action $action -Trigger $trigger
+```
+
+### Config File Structure
+
+The config file supports a comprehensive `Sync` section:
+
+```json
+{
+  "Azure": { ... },
+  "Graph": { ... },
+
+  "Sync": {
+    "Users": {
+      "Enabled": true,
+      "TableName": "GraphUsers",
+      "Filter": "accountEnabled eq true",
+      "AdditionalAttributes": [
+        "officeLocation", "city", "country", "employeeType",
+        "extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfEmploymentUserID"
+      ]
+    },
+    "Groups": { "Enabled": true, "Filter": "" },
+    "GroupMembers": { "Enabled": true },
+    "GroupTransitiveMembers": { "Enabled": true },
+    "GroupEligibleMembers": { "Enabled": false },
+    "GroupOwners": { "Enabled": true },
+    "Views": { "Enabled": true }
+  }
+}
+```
+
+### Documentation
+
+- **[README-Daily-Sync.md](_Test/README-Daily-Sync.md)** - Complete guide with examples
+- **[QUICK-START-Daily-Sync.md](_Test/QUICK-START-Daily-Sync.md)** - 5-minute quick start
+- **[SYNC-CONFIG-GUIDE.md](_Test/SYNC-CONFIG-GUIDE.md)** - Config options and scenarios
+- **[config.dailysync-example.json](_Test/config.dailysync-example.json)** - Working example
+
+### Benefits for Large Environments
+
+Perfect for environments with:
+- Many custom user attributes (SuccessFactors, Workday extensions)
+- Multiple environments (dev/test/prod) with different configs
+- Need for centralized, version-controlled sync configuration
+- Requirements for audit logging and error tracking
+
 ## Testing Infrastructure
 
 ### Test Files
 
 | File | Purpose | Runtime |
 |------|---------|---------|
+| `Daily-Sync.ps1` | Production daily sync runbook | ~5-15 minutes |
 | `Test-Simple.ps1` | Quick diagnostic | ~10 seconds |
 | `Test-Integration.ps1` | Full end-to-end test | ~5-10 minutes |
 | `Manage-Credentials.ps1` | Credential management | Instant |

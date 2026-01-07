@@ -1,6 +1,13 @@
-# FortigiGraph Integration Tests
+# FortigiGraph Integration Tests & Daily Sync
 
 ## Overview
+
+This folder contains:
+- **Integration Tests** - Comprehensive test suite for validating FortigiGraph functionality
+- **Daily Sync Runbook** - Production-ready script for scheduled Graph data synchronization (see `README-Daily-Sync.md`)
+- **Secure Credentials** - Encrypted credential management for both testing and production (see `README-Secure-Credentials.md`)
+
+### Integration Test Suite
 
 The integration test suite validates the complete FortigiGraph workflow end-to-end:
 
@@ -313,6 +320,13 @@ Run tests in your pipeline:
 3. **Run before commits** - Catch breaking changes early
 4. **Monitor costs** - Basic SQL tier is cheap but verify after tests
 5. **Review transcript logs** - Full console output saved to `integration-test-<configname>.log` (unique per config file for parallel testing)
+
+## Related Documentation
+
+- **[Daily Sync Runbook](README-Daily-Sync.md)** - Production-ready scheduled sync script
+- **[Quick Start Guide](QUICK-START-Daily-Sync.md)** - Get started with daily sync in 5 minutes
+- **[Secure Credentials](README-Secure-Credentials.md)** - Encrypted credential management
+- **[SQL Management](README-SQL-Management.md)** - SQL Server operations guide
 
 ## Support
 

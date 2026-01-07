@@ -91,6 +91,7 @@ function Sync-FGUser {
         'onPremisesSamAccountName'
         'employeeId'
         'mail'
+        'onPremisesDistinguishedName'
 
         # Status
         'accountEnabled'
@@ -110,6 +111,7 @@ function Sync-FGUser {
         # Metadata
         'createdDateTime'
         'employeeHireDate'
+        'employeeType'
 
         # Manager & Sign-in (these need special handling)
         'managerId'  # We'll fetch this from manager/id

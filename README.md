@@ -15,6 +15,7 @@ A PowerShell module for working with Microsoft Graph API and syncing data to Azu
 - **SQL Management Tools**: Query, list, clear, and manage SQL tables and servers
 - **Secure Credentials**: Encrypted credential storage using Windows DPAPI
 - **Comprehensive Testing**: Integration tests with parallel execution support
+- **Daily Sync Runbook**: Production-ready scheduled sync with config file support
 
 ## Installation
 
@@ -73,6 +74,77 @@ Sync-FGGroupEligibleMember
 # Create helpful views for membership analysis
 Initialize-FGGroupMembershipViews
 ```
+
+---
+
+## Daily Sync Runbook
+
+For production environments, use the **Daily Sync runbook** to automate Graph data synchronization.
+
+### Quick Start
+
+1. **Create a config file:**
+```powershell
+cd _Test
+cp config.dailysync.json.template config.production.json
+# Edit config.production.json with your Azure/Graph settings
+```
+
+2. **Run the sync:**
+```powershell
+.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+```
+
+3. **Schedule it:**
+```powershell
+$action = New-ScheduledTaskAction -Execute "pwsh.exe" `
+    -Argument "-File C:\Path\To\_Test\Daily-Sync.ps1 -ConfigFile C:\Path\To\config.production.json"
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
+Register-ScheduledTask -TaskName "Graph Daily Sync" -Action $action -Trigger $trigger
+```
+
+### Config File with Sync Section
+
+The daily sync supports comprehensive configuration in the config file:
+
+```json
+{
+  "Azure": { ... },
+  "Graph": { ... },
+
+  "Sync": {
+    "Users": {
+      "Enabled": true,
+      "Filter": "accountEnabled eq true",
+      "AdditionalAttributes": [
+        "city", "country", "officeLocation", "employeeType",
+        "extension_*_sfEmploymentUserID"
+      ]
+    },
+    "Groups": { "Enabled": true },
+    "GroupMembers": { "Enabled": true },
+    "GroupTransitiveMembers": { "Enabled": true },
+    "GroupEligibleMembers": { "Enabled": false },
+    "Views": { "Enabled": true }
+  }
+}
+```
+
+### Features
+
+- **Automatic Setup**: Creates SQL Server on first run if needed
+- **Config-Driven**: All sync settings in one config file
+- **Secure Credentials**: DPAPI encryption for passwords
+- **Comprehensive Logging**: Timestamped logs for auditing
+- **Error Handling**: Continues on errors, reports at end
+- **Summary Reports**: Clear statistics after each sync
+
+### Documentation
+
+- **[Daily Sync Guide](_Test/README-Daily-Sync.md)** - Full documentation
+- **[Quick Start](_Test/QUICK-START-Daily-Sync.md)** - Get started in 5 minutes
+- **[Sync Config Guide](_Test/SYNC-CONFIG-GUIDE.md)** - Config file options
+- **[Example Config](_Test/config.dailysync-example.json)** - Working example
 
 ---
 

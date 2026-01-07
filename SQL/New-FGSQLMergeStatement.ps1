@@ -66,16 +66,20 @@ function New-FGSQLMergeStatement {
     $onConditions = ($pkArray | ForEach-Object { "target.[$_] = source.[$_]" }) -join ' AND '
 
     # Build change detection conditions (only update if something changed, exclude PK columns)
-    $changeConditions = ($Attributes | Where-Object { $_ -notin $pkArray } | ForEach-Object {
-        $attr = $_
-        $sqlType = $TypeMap[$attr]
-
-        # Use proper NULL handling for all types
-        "((target.[$attr] IS NULL AND source.[$attr] IS NOT NULL) OR (target.[$attr] IS NOT NULL AND source.[$attr] IS NULL) OR (target.[$attr] <> source.[$attr]))"
-    }) -join ' OR '
+    $nonPkAttributes = $Attributes | Where-Object { $_ -notin $pkArray }
 
     # Build the MERGE statement
-    $mergeSQL = @"
+    if ($nonPkAttributes.Count -gt 0) {
+        # Table has non-PK columns - include WHEN MATCHED clause with change detection
+        $changeConditions = ($nonPkAttributes | ForEach-Object {
+            $attr = $_
+            $sqlType = $TypeMap[$attr]
+
+            # Use proper NULL handling for all types
+            "((target.[$attr] IS NULL AND source.[$attr] IS NOT NULL) OR (target.[$attr] IS NOT NULL AND source.[$attr] IS NULL) OR (target.[$attr] <> source.[$attr]))"
+        }) -join ' OR '
+
+        $mergeSQL = @"
 MERGE dbo.$TableName AS target
 USING (SELECT $sourceColumns) AS source
 ON $onConditions
@@ -85,6 +89,19 @@ WHEN NOT MATCHED THEN
     INSERT ($insertColumns)
     VALUES ($insertValues);
 "@
+    }
+    else {
+        # Relationship table with only PK columns - skip WHEN MATCHED clause
+        # (no non-PK columns to update, relationships are defined entirely by the composite key)
+        $mergeSQL = @"
+MERGE dbo.$TableName AS target
+USING (SELECT $sourceColumns) AS source
+ON $onConditions
+WHEN NOT MATCHED THEN
+    INSERT ($insertColumns)
+    VALUES ($insertValues);
+"@
+    }
 
     return $mergeSQL
 }

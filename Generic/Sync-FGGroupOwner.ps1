@@ -258,25 +258,40 @@ function Sync-FGGroupOwner {
             # Handle deletions (ownerships that no longer exist in Graph)
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed ownership relationships..." -ForegroundColor Cyan
 
-            $deleteCmd = $connection.CreateCommand()
-            $deleteCmd.CommandText = @"
+            if ($allOwnerships.Count -gt 0) {
+                # Build VALUES clause for deletion check
+                $valuesClause = ($allOwnerships | ForEach-Object { "('$($_.groupId)', '$($_.ownerId)')" }) -join ','
+
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.CommandText = @"
 DELETE FROM dbo.$TableName
 WHERE NOT EXISTS (
     SELECT 1 FROM (VALUES
-        $( ($allOwnerships | ForEach-Object { "('$($_.groupId)', '$($_.ownerId)')" }) -join ',' )
+        $valuesClause
     ) AS Source(groupId, ownerId)
     WHERE dbo.$TableName.groupId = CAST(Source.groupId AS UNIQUEIDENTIFIER)
     AND dbo.$TableName.ownerId = CAST(Source.ownerId AS UNIQUEIDENTIFIER)
 )
 "@
 
-            if ($allOwnerships.Count -gt 0) {
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow
                 }
                 else {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No removed ownership relationships found" -ForegroundColor Gray
+                }
+            }
+            else {
+                # If no ownerships exist in Graph, delete all from table
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.CommandText = "DELETE FROM dbo.$TableName"
+                $deletedCount = $deleteCmd.ExecuteNonQuery()
+                if ($deletedCount -gt 0) {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed all $deletedCount ownership relationship(s) (no owners found in Graph)" -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No ownership relationships to remove" -ForegroundColor Gray
                 }
             }
 
