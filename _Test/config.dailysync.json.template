@@ -1,0 +1,130 @@
+{
+  "_INFO": "Configuration template for Daily-Sync.ps1 runbook",
+  "_SECURITY_NOTE": "Passwords are stored encrypted using Windows DPAPI",
+  "_INSTRUCTIONS": "1. Copy this file to config.production.json (or another name)",
+  "_INSTRUCTIONS2": "2. Fill in YOUR-* values below",
+  "_INSTRUCTIONS3": "3. Leave passwords empty - you'll be prompted on first run",
+  "_INSTRUCTIONS4": "4. Passwords are encrypted and can only be decrypted by you on this machine",
+
+  "Azure": {
+    "TenantId": "",
+    "_TenantIdNote": "OPTIONAL: Only needed if Azure resources are in different tenant than Graph API. Leave empty to use Graph.TenantId",
+
+    "SubscriptionId": "YOUR-SUBSCRIPTION-ID",
+    "_SubscriptionIdNote": "Azure subscription where SQL Server will be created",
+
+    "ResourceGroupName": "rg-graph-sync",
+    "_ResourceGroupNameNote": "Resource group for SQL Server (will be created if doesn't exist)",
+
+    "Location": "northeurope",
+    "_LocationNote": "Azure region: northeurope, westeurope, eastus, etc.",
+
+    "SQLServerName": "graph-sync-sql-CHANGEME",
+    "_SQLServerNameNote": "Must be globally unique! Change CHANGEME to something unique",
+
+    "DatabaseName": "GraphData",
+    "_DatabaseNameNote": "SQL database name (will be created automatically)",
+
+    "AdminUsername": "sqladmin",
+    "_AdminUsernameNote": "SQL Server admin username",
+
+    "AdminUserPassword": "",
+    "_AdminPasswordNote": "LEAVE EMPTY - Script will prompt and encrypt on first run"
+  },
+
+  "Graph": {
+    "TenantId": "YOUR-TENANT-ID",
+    "_TenantIdNote": "Azure AD tenant ID (GUID) or domain name (e.g., contoso.onmicrosoft.com)",
+
+    "ClientId": "YOUR-APP-CLIENT-ID",
+    "_ClientIdNote": "Application (client) ID from your Azure AD app registration",
+
+    "ClientSecret": "",
+    "_ClientSecretNote": "LEAVE EMPTY - Script will prompt and encrypt on first run. Or press Enter for interactive auth"
+  },
+
+  "Sync": {
+    "_INFO": "Configure what data to sync and how",
+
+    "Users": {
+      "Enabled": true,
+      "TableName": "GraphUsers",
+      "Filter": "",
+      "_FilterNote": "Optional OData filter, e.g., 'accountEnabled eq true' or 'userType eq Member'",
+      "AdditionalAttributes": [],
+      "_AdditionalAttributesNote": "Additional attributes beyond defaults. Examples: city, country, officeLocation, employeeType, extension_*",
+      "_AdditionalAttributesExamples": [
+        "officeLocation",
+        "city",
+        "state",
+        "country",
+        "employeeType",
+        "companyName",
+        "extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfEmploymentUserID",
+        "extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfTeamID"
+      ]
+    },
+
+    "Groups": {
+      "Enabled": true,
+      "TableName": "GraphGroups",
+      "Filter": "",
+      "_FilterNote": "Optional OData filter, e.g., 'securityEnabled eq true' or 'mailEnabled eq false'"
+    },
+
+    "GroupMembers": {
+      "Enabled": true,
+      "TableName": "GraphGroupMembers",
+      "_Note": "Direct group memberships"
+    },
+
+    "GroupTransitiveMembers": {
+      "Enabled": true,
+      "TableName": "GraphGroupTransitiveMembers",
+      "_Note": "Nested/indirect group memberships"
+    },
+
+    "GroupEligibleMembers": {
+      "Enabled": true,
+      "TableName": "GraphGroupEligibleMembers",
+      "_Note": "PIM eligible memberships - set to false if PIM is not configured"
+    },
+
+    "GroupOwners": {
+      "Enabled": true,
+      "TableName": "GraphGroupOwners",
+      "_Note": "Group ownership relationships"
+    },
+
+    "Views": {
+      "Enabled": true,
+      "_Note": "Create analysis views for group memberships"
+    }
+  },
+
+  "_PERMISSIONS_REQUIRED": {
+    "Graph API Permissions": [
+      "User.Read.All - Read all users",
+      "Group.Read.All - Read all groups",
+      "GroupMember.Read.All - Read group memberships",
+      "PrivilegedAccess.Read.AzureADGroup - Read PIM eligible memberships (optional)"
+    ],
+    "Azure Permissions": [
+      "Contributor or Owner on the subscription/resource group",
+      "Ability to create SQL Server and databases"
+    ]
+  },
+
+  "_EXAMPLE_USAGE": {
+    "Basic sync": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json",
+    "Sync enabled users only": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -UserFilter \"accountEnabled eq true\"",
+    "Skip PIM sync": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -SyncGroupEligibleMembers $false",
+    "Add custom attributes": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -UserAdditionalAttributes @('city','country')"
+  },
+
+  "_SCHEDULING": {
+    "Windows Task Scheduler": "See README-Daily-Sync.md for examples",
+    "Azure Automation": "Upload as runbook and schedule",
+    "Recommended Time": "Daily at 2:00 AM (low usage period)"
+  }
+}
