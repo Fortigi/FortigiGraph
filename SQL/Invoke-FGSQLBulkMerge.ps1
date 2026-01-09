@@ -142,11 +142,13 @@ CREATE TABLE $tempTableName (
 
         # Build MERGE statement
         $keyConditions = ($KeyColumns | ForEach-Object { "target.$_ = source.$_" }) -join " AND "
-        $updateAssignments = ($UpdateColumns | ForEach-Object { "$_ = source.$_" }) -join ", `n        "
         $insertColumns = ($DataTable.Columns | ForEach-Object { $_.ColumnName }) -join ", "
         $insertValues = ($DataTable.Columns | ForEach-Object { "source.$($_.ColumnName)" }) -join ", "
 
-        $mergeSQL = @"
+        # Build MERGE with or without UPDATE clause depending on whether there are non-key columns
+        if ($UpdateColumns -and $UpdateColumns.Count -gt 0) {
+            $updateAssignments = ($UpdateColumns | ForEach-Object { "$_ = source.$_" }) -join ", `n        "
+            $mergeSQL = @"
 MERGE dbo.$TargetTableName AS target
 USING $tempTableName AS source
 ON $keyConditions
@@ -158,6 +160,19 @@ WHEN NOT MATCHED BY TARGET THEN
     VALUES ($insertValues)
 OUTPUT `$action;
 "@
+        }
+        else {
+            # No non-key columns to update - skip UPDATE clause (table has only key columns)
+            $mergeSQL = @"
+MERGE dbo.$TargetTableName AS target
+USING $tempTableName AS source
+ON $keyConditions
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT ($insertColumns)
+    VALUES ($insertValues)
+OUTPUT `$action;
+"@
+        }
 
         $cmd.CommandText = $mergeSQL
         $cmd.CommandTimeout = 300
