@@ -267,12 +267,69 @@ function Sync-FGGroup {
         return
     }
 
-    # Sync to SQL
+    # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing groups to SQL Server..." -ForegroundColor Cyan
 
-    # Build MERGE statement
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing MERGE statement..." -ForegroundColor Gray
-    $mergeSQL = New-FGSQLMergeStatement -TableName $TableName -Attributes $Attributes -TypeMap $graphToSqlTypeMap
+    # Build DataTable for bulk operations
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
+
+    $dataTable = New-Object System.Data.DataTable
+
+    # Add columns based on attributes and their SQL types
+    foreach ($attr in $Attributes) {
+        $sqlType = $columns[$attr]
+        $dotNetType = switch -Regex ($sqlType) {
+            'UNIQUEIDENTIFIER' { [guid] }
+            'BIT' { [bool] }
+            'DATETIME2' { [datetime] }
+            'INT' { [int] }
+            'BIGINT' { [long] }
+            default { [string] }
+        }
+        $dataTable.Columns.Add($attr, $dotNetType) | Out-Null
+    }
+
+    # Populate DataTable with group data
+    foreach ($group in $allGroups) {
+        $row = $dataTable.NewRow()
+
+        foreach ($attr in $Attributes) {
+            $value = $group.$attr
+
+            # Convert value to appropriate type or DBNull
+            if ($null -eq $value -or $value -eq '') {
+                $row[$attr] = [DBNull]::Value
+            }
+            else {
+                # Type conversion based on column type
+                $sqlType = $columns[$attr]
+                try {
+                    switch -Regex ($sqlType) {
+                        'UNIQUEIDENTIFIER' { $row[$attr] = [guid]$value }
+                        'BIT' { $row[$attr] = [bool]$value }
+                        'DATETIME2' { $row[$attr] = [datetime]$value }
+                        'INT' { $row[$attr] = [int]$value }
+                        'BIGINT' { $row[$attr] = [long]$value }
+                        default {
+                            # For arrays like groupTypes, join them
+                            if ($value -is [Array]) {
+                                $row[$attr] = [string]($value -join ',')
+                            }
+                            else {
+                                $row[$attr] = [string]$value
+                            }
+                        }
+                    }
+                }
+                catch {
+                    # If conversion fails, use DBNull
+                    $row[$attr] = [DBNull]::Value
+                }
+            }
+        }
+
+        $dataTable.Rows.Add($row)
+    }
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -285,111 +342,51 @@ function Sync-FGGroup {
 
         $syncedCount = 0
         $errorCount = 0
+        $deletedCount = 0
         $syncStartTime = Get-Date
 
         try {
-            # Create command and reuse it
-            $cmd = $connection.CreateCommand()
-            $cmd.Transaction = $transaction
-            $cmd.CommandText = $mergeSQL
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) groups..." -ForegroundColor Cyan
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allGroups.Count) groups..." -ForegroundColor Cyan
+            # Use bulk MERGE operation - much faster than row-by-row
+            $mergeResult = Invoke-FGSQLBulkMerge `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('id')
 
-            foreach ($group in $allGroups) {
-                try {
-                    $cmd.Parameters.Clear()
+            $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
-                    # Add parameters for each attribute
-                    foreach ($attr in $Attributes) {
-                        # Handle special attributes
-                        # Regular attributes - use helper for type conversion
-                        $value = $group.$attr
-                        ConvertTo-FGSQLParameter -Value $value -AttributeName $attr -SqlCommand $cmd
-                    }
+            $syncElapsed = (Get-Date) - $syncStartTime
+            $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate groups/sec)" -ForegroundColor Green
 
-                    $cmd.ExecuteNonQuery() | Out-Null
-                    $syncedCount++
+            # Handle deletions using bulk delete (avoids massive IN clause)
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted groups..." -ForegroundColor Cyan
 
-                    if ($syncedCount % 100 -eq 0) {
-                        $elapsed = (Get-Date) - $syncStartTime
-                        $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allGroups.Count) groups ($rate groups/sec)" -ForegroundColor Gray
-                    }
-                }
-                catch {
-                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync group $($group.displayName): $_"
-                    $errorCount++
-                }
+            $deletedCount = Invoke-FGSQLBulkDelete `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('id')
+
+            if ($deletedCount -gt 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount groups that no longer exist in Graph" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted groups found" -ForegroundColor Green
             }
 
             # Commit transaction
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
             $transaction.Commit()
-            $syncElapsed = (Get-Date) - $syncStartTime
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($syncElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-            # Handle deletions - remove groups from SQL that no longer exist in Graph
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted groups..." -ForegroundColor Cyan
-
-            $deletedCount = 0
-            try {
-                # Create temp table with current Graph group IDs
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph groups..." -ForegroundColor Gray
-                $createTempTableSQL = @"
-CREATE TABLE #CurrentGraphGroups (id UNIQUEIDENTIFIER PRIMARY KEY);
-"@
-
-                $tempTableCmd = $connection.CreateCommand()
-                $tempTableCmd.CommandText = $createTempTableSQL
-                $tempTableCmd.ExecuteNonQuery() | Out-Null
-
-                # Insert Graph group IDs into temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allGroups.Count) group IDs..." -ForegroundColor Gray
-                $insertCmd = $connection.CreateCommand()
-                $insertCmd.CommandText = "INSERT INTO #CurrentGraphGroups (id) VALUES (@id)"
-                $insertCmd.Parameters.Add("@id", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
-
-                $insertCount = 0
-                foreach ($group in $allGroups) {
-                    $insertCmd.Parameters["@id"].Value = [Guid]$group.id
-                    $insertCmd.ExecuteNonQuery() | Out-Null
-                    $insertCount++
-
-                    if ($insertCount % 1000 -eq 0) {
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allGroups.Count) IDs inserted..." -ForegroundColor Gray
-                    }
-                }
-
-                # Delete groups not in temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for groups no longer in Graph..." -ForegroundColor Gray
-                $deleteSQL = @"
-DELETE FROM dbo.$TableName
-WHERE id NOT IN (SELECT id FROM #CurrentGraphGroups)
-"@
-
-                $deleteCmd = $connection.CreateCommand()
-                $deleteCmd.CommandText = $deleteSQL
-                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
-                $deletedCount = $deleteCmd.ExecuteNonQuery()
-
-                # Cleanup temp table
-                $dropCmd = $connection.CreateCommand()
-                $dropCmd.CommandText = "DROP TABLE #CurrentGraphGroups"
-                $dropCmd.ExecuteNonQuery() | Out-Null
-
-                if ($deletedCount -gt 0) {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount groups that no longer exist in Graph" -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted groups found" -ForegroundColor Green
-                }
-            }
-            catch {
-                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed groups: $_"
-            }
+            $totalElapsed = (Get-Date) - $syncStartTime
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($totalElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
             # Cleanup
-            $cmd.Dispose()
             $transaction.Dispose()
 
             return @{
@@ -403,9 +400,6 @@ WHERE id NOT IN (SELECT id FROM #CurrentGraphGroups)
             if ($transaction) {
                 $transaction.Rollback()
                 $transaction.Dispose()
-            }
-            if ($cmd) {
-                $cmd.Dispose()
             }
             throw
         }

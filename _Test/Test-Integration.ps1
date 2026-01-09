@@ -648,8 +648,49 @@ AND CONSTRAINT_NAME LIKE 'PK_%'
     Add-TestResult -Category "Sync" -TestName "Group member sync" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 18: Group Transitive Member Sync - Nested Memberships
-Write-TestHeader "Test 18: Group Transitive Member Sync (Nested Memberships)"
+# Test 18: Group Owner Sync - Group Ownership Relationships
+Write-TestHeader "Test 18: Group Owner Sync (Ownership Relationships)"
+
+try {
+    Write-TestStep "Syncing group ownership relationships..."
+
+    Sync-FGGroupOwner -TableName "GraphGroupOwners_Test"
+    Add-TestResult -Category "Sync" -TestName "Group ownership sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced ownership data..."
+    $syncedOwnerCount = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphGroupOwners_Test"
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Ownership data verification" -Passed ($syncedOwnerCount -ge 0) -Data "Synced $syncedOwnerCount ownership relationships"
+
+    # Verify composite key structure (groupId, ownerId)
+    Write-TestStep "Verifying composite primary key..."
+    $pkInfo = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT COUNT(*)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE TABLE_NAME = 'GraphGroupOwners_Test'
+AND CONSTRAINT_NAME LIKE 'PK_%'
+"@
+        return $cmd.ExecuteScalar()
+    }
+
+    Add-TestResult -Category "Sync" -TestName "Composite primary key verification" -Passed ($pkInfo -eq 2) -Data "Primary key has $pkInfo columns (expected: 2)"
+
+    Register-Resource -Type "SQLTable" -Name "GraphGroupOwners_Test" -Details @{ Type = "GroupOwnerships" }
+} catch {
+    Add-TestResult -Category "Sync" -TestName "Group owner sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 19: Group Transitive Member Sync - Nested Memberships
+Write-TestHeader "Test 19: Group Transitive Member Sync (Nested Memberships)"
 
 try {
     Write-TestStep "Syncing transitive/nested group memberships..."
@@ -680,8 +721,8 @@ try {
     Add-TestResult -Category "Sync" -TestName "Transitive member sync" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 19: Group Eligible Member Sync - PIM Memberships (Optional)
-Write-TestHeader "Test 19: Group Eligible Member Sync (PIM Memberships)"
+# Test 20: Group Eligible Member Sync - PIM Memberships (Optional)
+Write-TestHeader "Test 20: Group Eligible Member Sync (PIM Memberships)"
 
 try {
     Write-TestStep "Checking for PIM-enabled groups..."
@@ -716,8 +757,8 @@ try {
     Add-TestResult -Category "Sync" -TestName "Eligible member sync" -Passed $true -Message "Skipped - PIM not available or configured"
 }
 
-# Test 20: Group Membership Views
-Write-TestHeader "Test 20: Group Membership Analysis Views"
+# Test 21: Group Membership Views
+Write-TestHeader "Test 21: Group Membership Analysis Views"
 
 try {
     Write-TestStep "Creating group membership analysis views..."
@@ -754,8 +795,8 @@ WHERE TABLE_NAME IN ('vw_GraphGroupNestedMembers', 'vw_GraphGroupMembershipType'
     Add-TestResult -Category "Query" -TestName "Group membership views" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 21: Query Group Membership Views
-Write-TestHeader "Test 21: Query Group Membership Views"
+# Test 22: Query Group Membership Views
+Write-TestHeader "Test 22: Query Group Membership Views"
 
 try {
     Write-TestStep "Querying nested members view..."

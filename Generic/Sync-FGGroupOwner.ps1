@@ -195,159 +195,124 @@ function Sync-FGGroupOwner {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total ownership relationships fetched: $($allOwnerships.Count)" -ForegroundColor Cyan
 
-    # Sync to SQL
+    if ($allOwnerships.Count -eq 0) {
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No ownership relationships found to sync."
+        return
+    }
+
+    # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing ownership relationships to SQL Server..." -ForegroundColor Cyan
 
-    Invoke-FGSQLCommand -ScriptBlock {
+    # Build DataTable for bulk operations
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
+
+    $dataTable = New-Object System.Data.DataTable
+    $dataTable.Columns.Add("groupId", [guid]) | Out-Null
+    $dataTable.Columns.Add("ownerId", [guid]) | Out-Null
+
+    foreach ($ownership in $allOwnerships) {
+        $row = $dataTable.NewRow()
+        $row["groupId"] = [guid]$ownership.groupId
+        $row["ownerId"] = [guid]$ownership.ownerId
+        $dataTable.Rows.Add($row)
+    }
+
+    $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Database connection established" -ForegroundColor Gray
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
 
+        # Start transaction
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
         $transaction = $connection.BeginTransaction()
 
+        $syncedCount = 0
+        $errorCount = 0
+        $deletedCount = 0
+        $syncStartTime = Get-Date
+
         try {
-            # Prepare MERGE statement
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing MERGE statement..." -ForegroundColor Gray
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) ownership relationships..." -ForegroundColor Cyan
 
-            $mergeSQL = New-FGSQLMergeStatement -TableName $TableName -Attributes $attributes -TypeMap $graphToSqlTypeMap -PrimaryKey @('groupId', 'ownerId')
+            # Use bulk MERGE operation - much faster than row-by-row
+            $mergeResult = Invoke-FGSQLBulkMerge `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('groupId', 'ownerId')
 
-            $cmd = $connection.CreateCommand()
-            $cmd.Transaction = $transaction
-            $cmd.CommandText = $mergeSQL
+            $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
-            # Add parameters (will be reused for each row)
-            foreach ($attr in $attributes) {
-                $cmd.Parameters.Add("@$attr", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+            $syncElapsed = (Get-Date) - $syncStartTime
+            $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate ownerships/sec)" -ForegroundColor Green
+
+            # Handle deletions using bulk delete (avoids massive VALUES clause)
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed ownership relationships..." -ForegroundColor Cyan
+
+            $deletedCount = Invoke-FGSQLBulkDelete `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('groupId', 'ownerId')
+
+            if ($deletedCount -gt 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow
             }
-
-            # Execute for each ownership relationship
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allOwnerships.Count) ownership relationships..." -ForegroundColor Gray
-            $syncStartTime = Get-Date
-            $syncedCount = 0
-            $errorCount = 0
-
-            foreach ($ownership in $allOwnerships) {
-                try {
-                    # Set parameter values
-                    $cmd.Parameters["@groupId"].Value = [Guid]$ownership.groupId
-                    $cmd.Parameters["@ownerId"].Value = [Guid]$ownership.ownerId
-
-                    $cmd.ExecuteNonQuery() | Out-Null
-                    $syncedCount++
-
-                    if ($syncedCount % 100 -eq 0) {
-                        $elapsed = (Get-Date) - $syncStartTime
-                        $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allOwnerships.Count) ownerships ($rate/sec)" -ForegroundColor Gray
-                    }
-                }
-                catch {
-                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync ownership (group: $($ownership.groupId), owner: $($ownership.ownerId)): $_"
-                    $errorCount++
-                }
+            else {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No removed ownership relationships found" -ForegroundColor Green
             }
 
             # Commit transaction
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Gray
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
             $transaction.Commit()
 
-            $syncElapsed = (Get-Date) - $syncStartTime
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $($syncElapsed.TotalSeconds)s)" -ForegroundColor Green
+            $totalElapsed = (Get-Date) - $syncStartTime
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($totalElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-            # Handle deletions (ownerships that no longer exist in Graph)
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed ownership relationships..." -ForegroundColor Cyan
+            # Cleanup
+            $transaction.Dispose()
 
-            if ($allOwnerships.Count -gt 0) {
-                # Create temp table with current Graph ownerships
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph ownerships..." -ForegroundColor Gray
-                $createTempTableSQL = @"
-CREATE TABLE #CurrentGraphOwnerships (
-    groupId UNIQUEIDENTIFIER,
-    ownerId UNIQUEIDENTIFIER,
-    PRIMARY KEY (groupId, ownerId)
-);
-"@
-
-                $tempTableCmd = $connection.CreateCommand()
-                $tempTableCmd.CommandText = $createTempTableSQL
-                $tempTableCmd.ExecuteNonQuery() | Out-Null
-
-                # Insert Graph ownership pairs into temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allOwnerships.Count) ownerships..." -ForegroundColor Gray
-                $insertCmd = $connection.CreateCommand()
-                $insertCmd.CommandText = "INSERT INTO #CurrentGraphOwnerships (groupId, ownerId) VALUES (@groupId, @ownerId)"
-                $insertCmd.Parameters.Add("@groupId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
-                $insertCmd.Parameters.Add("@ownerId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
-
-                $insertCount = 0
-                foreach ($ownership in $allOwnerships) {
-                    $insertCmd.Parameters["@groupId"].Value = [Guid]$ownership.groupId
-                    $insertCmd.Parameters["@ownerId"].Value = [Guid]$ownership.ownerId
-                    $insertCmd.ExecuteNonQuery() | Out-Null
-                    $insertCount++
-
-                    if ($insertCount % 1000 -eq 0) {
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allOwnerships.Count) ownerships inserted..." -ForegroundColor Gray
-                    }
-                }
-
-                # Delete ownerships not in temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for ownerships no longer in Graph..." -ForegroundColor Gray
-                $deleteCmd = $connection.CreateCommand()
-                $deleteCmd.CommandText = @"
-DELETE FROM dbo.$TableName
-WHERE NOT EXISTS (
-    SELECT 1 FROM #CurrentGraphOwnerships
-    WHERE dbo.$TableName.groupId = #CurrentGraphOwnerships.groupId
-    AND dbo.$TableName.ownerId = #CurrentGraphOwnerships.ownerId
-)
-"@
-                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
-                $deletedCount = $deleteCmd.ExecuteNonQuery()
-
-                # Cleanup temp table
-                $dropCmd = $connection.CreateCommand()
-                $dropCmd.CommandText = "DROP TABLE #CurrentGraphOwnerships"
-                $dropCmd.ExecuteNonQuery() | Out-Null
-
-                if ($deletedCount -gt 0) {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No removed ownership relationships found" -ForegroundColor Gray
-                }
+            return @{
+                SyncedCount = $syncedCount
+                ErrorCount = $errorCount
+                DeletedCount = $deletedCount
             }
-            else {
-                # If no ownerships exist in Graph, delete all from table
-                $deleteCmd = $connection.CreateCommand()
-                $deleteCmd.CommandText = "DELETE FROM dbo.$TableName"
-                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
-                $deletedCount = $deleteCmd.ExecuteNonQuery()
-                if ($deletedCount -gt 0) {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed all $deletedCount ownership relationship(s) (no owners found in Graph)" -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No ownership relationships to remove" -ForegroundColor Gray
-                }
-            }
-
-            # Summary
-            Write-Host "`n================================================================================" -ForegroundColor Cyan
-            Write-Host "Sync Complete!" -ForegroundColor Green
-            Write-Host "================================================================================" -ForegroundColor Cyan
-            Write-Host "Table:                    $TableName" -ForegroundColor White
-            Write-Host "Total Groups:             $($groups.Count)" -ForegroundColor White
-            Write-Host "Total Ownerships:         $($allOwnerships.Count)" -ForegroundColor White
-            Write-Host "Synced:                   $syncedCount" -ForegroundColor White
-            Write-Host "Errors:                   $errorCount" -ForegroundColor $(if ($errorCount -eq 0) { "Green" } else { "Yellow" })
-            Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Gray
-            Write-Host "================================================================================" -ForegroundColor Cyan
         }
         catch {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Error occurred, rolling back transaction..." -ForegroundColor Red
-            $transaction.Rollback()
-            throw "Sync failed: $_"
+            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during sync: $_"
+            if ($transaction) {
+                $transaction.Rollback()
+                $transaction.Dispose()
+            }
+            throw
         }
+    }
+
+    $syncedCount = $syncResult.SyncedCount
+    $errorCount = $syncResult.ErrorCount
+    $deletedCount = $syncResult.DeletedCount
+
+    Write-Host "`n========================================" -ForegroundColor Green
+    Write-Host "Sync Complete!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "Table:                      $TableName" -ForegroundColor White
+    Write-Host "Groups:                     $($groups.Count)" -ForegroundColor White
+    Write-Host "Ownership Relationships:    $($allOwnerships.Count)" -ForegroundColor White
+    Write-Host "Synced:                     $syncedCount" -ForegroundColor White
+    Write-Host "Deleted:                    $deletedCount" -ForegroundColor White
+    Write-Host "Errors:                     $errorCount" -ForegroundColor White
+    Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
+    Write-Host "========================================`n" -ForegroundColor Green
+
+    return @{
+        TableName = $TableName
+        TotalGroups = $groups.Count
+        TotalOwnerships = $allOwnerships.Count
+        SyncedCount = $syncedCount
+        DeletedCount = $deletedCount
+        ErrorCount = $errorCount
     }
 }

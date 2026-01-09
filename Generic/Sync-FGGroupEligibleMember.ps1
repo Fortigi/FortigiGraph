@@ -247,12 +247,24 @@ function Sync-FGGroupEligibleMember {
         return
     }
 
-    # Sync to SQL
+    # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing eligible memberships to SQL Server..." -ForegroundColor Cyan
 
-    # Build MERGE statement with composite key
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing MERGE statement..." -ForegroundColor Gray
-    $mergeSQL = New-FGSQLMergeStatement -TableName $TableName -Attributes $attributes -TypeMap $graphToSqlTypeMap -PrimaryKey @('groupId', 'memberId')
+    # Build DataTable for bulk operations
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
+
+    $dataTable = New-Object System.Data.DataTable
+    $dataTable.Columns.Add("groupId", [guid]) | Out-Null
+    $dataTable.Columns.Add("memberId", [guid]) | Out-Null
+    $dataTable.Columns.Add("memberType", [string]) | Out-Null
+
+    foreach ($membership in $allEligibleMembers) {
+        $row = $dataTable.NewRow()
+        $row["groupId"] = [guid]$membership.groupId
+        $row["memberId"] = [guid]$membership.memberId
+        $row["memberType"] = if ($membership.memberType) { $membership.memberType } else { [DBNull]::Value }
+        $dataTable.Rows.Add($row)
+    }
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -265,125 +277,51 @@ function Sync-FGGroupEligibleMember {
 
         $syncedCount = 0
         $errorCount = 0
+        $deletedCount = 0
         $syncStartTime = Get-Date
 
         try {
-            # Create command and reuse it
-            $cmd = $connection.CreateCommand()
-            $cmd.Transaction = $transaction
-            $cmd.CommandText = $mergeSQL
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) eligible memberships..." -ForegroundColor Cyan
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Inserting/updating $($allEligibleMembers.Count) eligible memberships..." -ForegroundColor Cyan
+            # Use bulk MERGE operation - much faster than row-by-row
+            $mergeResult = Invoke-FGSQLBulkMerge `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('groupId', 'memberId')
 
-            foreach ($membership in $allEligibleMembers) {
-                try {
-                    $cmd.Parameters.Clear()
+            $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
-                    # Add parameters using helper
-                    ConvertTo-FGSQLParameter -Value $membership.groupId -AttributeName 'groupId' -SqlCommand $cmd
-                    ConvertTo-FGSQLParameter -Value $membership.memberId -AttributeName 'memberId' -SqlCommand $cmd
+            $syncElapsed = (Get-Date) - $syncStartTime
+            $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate memberships/sec)" -ForegroundColor Green
 
-                    # memberType might be null
-                    if ($membership.memberType) {
-                        $cmd.Parameters.AddWithValue("@memberType", $membership.memberType) | Out-Null
-                    }
-                    else {
-                        $cmd.Parameters.AddWithValue("@memberType", [DBNull]::Value) | Out-Null
-                    }
+            # Handle deletions using bulk delete (avoids massive VALUES clause)
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed eligible memberships..." -ForegroundColor Cyan
 
-                    $cmd.ExecuteNonQuery() | Out-Null
-                    $syncedCount++
+            $deletedCount = Invoke-FGSQLBulkDelete `
+                -Connection $connection `
+                -Transaction $transaction `
+                -TargetTableName $TableName `
+                -DataTable $dataTable `
+                -KeyColumns @('groupId', 'memberId')
 
-                    if ($syncedCount % 500 -eq 0) {
-                        $elapsed = (Get-Date) - $syncStartTime
-                        $rate = [math]::Round($syncedCount / $elapsed.TotalSeconds, 1)
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $syncedCount/$($allEligibleMembers.Count) memberships ($rate memberships/sec)" -ForegroundColor Gray
-                    }
-                }
-                catch {
-                    Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to sync eligible membership (groupId: $($membership.groupId), memberId: $($membership.memberId)): $_"
-                    $errorCount++
-                }
+            if ($deletedCount -gt 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount eligible memberships that no longer exist" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted eligible memberships found" -ForegroundColor Green
             }
 
             # Commit transaction
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
             $transaction.Commit()
-            $syncElapsed = (Get-Date) - $syncStartTime
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($syncElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-            # Handle deletions - remove eligibilities that no longer exist
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed eligible memberships..." -ForegroundColor Cyan
-
-            $deletedCount = 0
-            try {
-                # Create temp table with current Graph eligible memberships
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph eligible memberships..." -ForegroundColor Gray
-                $createTempTableSQL = @"
-CREATE TABLE #CurrentGraphEligibleMemberships (
-    groupId UNIQUEIDENTIFIER,
-    memberId UNIQUEIDENTIFIER,
-    PRIMARY KEY (groupId, memberId)
-);
-"@
-
-                $tempTableCmd = $connection.CreateCommand()
-                $tempTableCmd.CommandText = $createTempTableSQL
-                $tempTableCmd.ExecuteNonQuery() | Out-Null
-
-                # Insert Graph eligible membership pairs into temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allEligibleMembers.Count) eligible memberships..." -ForegroundColor Gray
-                $insertCmd = $connection.CreateCommand()
-                $insertCmd.CommandText = "INSERT INTO #CurrentGraphEligibleMemberships (groupId, memberId) VALUES (@groupId, @memberId)"
-                $insertCmd.Parameters.Add("@groupId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
-                $insertCmd.Parameters.Add("@memberId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
-
-                $insertCount = 0
-                foreach ($membership in $allEligibleMembers) {
-                    $insertCmd.Parameters["@groupId"].Value = [Guid]$membership.groupId
-                    $insertCmd.Parameters["@memberId"].Value = [Guid]$membership.memberId
-                    $insertCmd.ExecuteNonQuery() | Out-Null
-                    $insertCount++
-
-                    if ($insertCount % 1000 -eq 0) {
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allEligibleMembers.Count) eligible memberships inserted..." -ForegroundColor Gray
-                    }
-                }
-
-                # Delete eligible memberships not in temp table
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for eligible memberships no longer in Graph..." -ForegroundColor Gray
-                $deleteSQL = @"
-DELETE FROM dbo.$TableName
-WHERE NOT EXISTS (
-    SELECT 1 FROM #CurrentGraphEligibleMemberships
-    WHERE dbo.$TableName.groupId = #CurrentGraphEligibleMemberships.groupId
-    AND dbo.$TableName.memberId = #CurrentGraphEligibleMemberships.memberId
-)
-"@
-
-                $deleteCmd = $connection.CreateCommand()
-                $deleteCmd.CommandText = $deleteSQL
-                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
-                $deletedCount = $deleteCmd.ExecuteNonQuery()
-
-                # Cleanup temp table
-                $dropCmd = $connection.CreateCommand()
-                $dropCmd.CommandText = "DROP TABLE #CurrentGraphEligibleMemberships"
-                $dropCmd.ExecuteNonQuery() | Out-Null
-
-                if ($deletedCount -gt 0) {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount eligible memberships that no longer exist" -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted eligible memberships found" -ForegroundColor Green
-                }
-            }
-            catch {
-                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to delete removed eligible memberships: $_"
-            }
+            $totalElapsed = (Get-Date) - $syncStartTime
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($totalElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
             # Cleanup
-            $cmd.Dispose()
             $transaction.Dispose()
 
             return @{
@@ -397,9 +335,6 @@ WHERE NOT EXISTS (
             if ($transaction) {
                 $transaction.Rollback()
                 $transaction.Dispose()
-            }
-            if ($cmd) {
-                $cmd.Dispose()
             }
             throw
         }
