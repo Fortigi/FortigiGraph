@@ -315,23 +315,61 @@ function Sync-FGGroupEligibleMember {
             # Handle deletions - remove eligibilities that no longer exist
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed eligible memberships..." -ForegroundColor Cyan
 
-            # Build list of current memberships
-            $membershipPairs = ($allEligibleMembers | ForEach-Object { "('$($_.groupId)', '$($_.memberId)')" }) -join ','
+            $deletedCount = 0
+            try {
+                # Create temp table with current Graph eligible memberships
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph eligible memberships..." -ForegroundColor Gray
+                $createTempTableSQL = @"
+CREATE TABLE #CurrentGraphEligibleMemberships (
+    groupId UNIQUEIDENTIFIER,
+    memberId UNIQUEIDENTIFIER,
+    PRIMARY KEY (groupId, memberId)
+);
+"@
 
-            $deleteSQL = @"
+                $tempTableCmd = $connection.CreateCommand()
+                $tempTableCmd.CommandText = $createTempTableSQL
+                $tempTableCmd.ExecuteNonQuery() | Out-Null
+
+                # Insert Graph eligible membership pairs into temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allEligibleMembers.Count) eligible memberships..." -ForegroundColor Gray
+                $insertCmd = $connection.CreateCommand()
+                $insertCmd.CommandText = "INSERT INTO #CurrentGraphEligibleMemberships (groupId, memberId) VALUES (@groupId, @memberId)"
+                $insertCmd.Parameters.Add("@groupId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+                $insertCmd.Parameters.Add("@memberId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+
+                $insertCount = 0
+                foreach ($membership in $allEligibleMembers) {
+                    $insertCmd.Parameters["@groupId"].Value = [Guid]$membership.groupId
+                    $insertCmd.Parameters["@memberId"].Value = [Guid]$membership.memberId
+                    $insertCmd.ExecuteNonQuery() | Out-Null
+                    $insertCount++
+
+                    if ($insertCount % 1000 -eq 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allEligibleMembers.Count) eligible memberships inserted..." -ForegroundColor Gray
+                    }
+                }
+
+                # Delete eligible memberships not in temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for eligible memberships no longer in Graph..." -ForegroundColor Gray
+                $deleteSQL = @"
 DELETE FROM dbo.$TableName
 WHERE NOT EXISTS (
-    SELECT 1 FROM (VALUES $membershipPairs) AS CurrentMembers(groupId, memberId)
-    WHERE dbo.$TableName.groupId = CurrentMembers.groupId
-    AND dbo.$TableName.memberId = CurrentMembers.memberId
+    SELECT 1 FROM #CurrentGraphEligibleMemberships
+    WHERE dbo.$TableName.groupId = #CurrentGraphEligibleMemberships.groupId
+    AND dbo.$TableName.memberId = #CurrentGraphEligibleMemberships.memberId
 )
 "@
 
-            $deletedCount = 0
-            try {
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = $deleteSQL
+                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                # Cleanup temp table
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "DROP TABLE #CurrentGraphEligibleMemberships"
+                $dropCmd.ExecuteNonQuery() | Out-Null
 
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount eligible memberships that no longer exist" -ForegroundColor Yellow

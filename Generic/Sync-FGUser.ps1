@@ -349,7 +349,12 @@ function Sync-FGUser {
                         }
 
                         # Regular attributes - use helper for type conversion
-                        $value = $user.$attr
+                        # For extension attributes, we need to check PSObject properties to handle complex property names
+                        if ($user.PSObject.Properties[$attr]) {
+                            $value = $user.PSObject.Properties[$attr].Value
+                        } else {
+                            $value = $user.$attr
+                        }
                         ConvertTo-FGSQLParameter -Value $value -AttributeName $attr -SqlCommand $cmd
                     }
 
@@ -376,18 +381,52 @@ function Sync-FGUser {
 
             # Handle deletions - remove users from SQL that no longer exist in Graph
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted users..." -ForegroundColor Cyan
-            $graphUserIds = ($allUsers | ForEach-Object { "'$($_.id)'" }) -join ','
-
-            $deleteSQL = @"
-DELETE FROM dbo.$TableName
-WHERE id NOT IN ($graphUserIds)
-"@
 
             $deletedCount = 0
             try {
+                # Create temp table with current Graph user IDs
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph users..." -ForegroundColor Gray
+                $createTempTableSQL = @"
+CREATE TABLE #CurrentGraphUsers (id UNIQUEIDENTIFIER PRIMARY KEY);
+"@
+
+                $tempTableCmd = $connection.CreateCommand()
+                $tempTableCmd.CommandText = $createTempTableSQL
+                $tempTableCmd.ExecuteNonQuery() | Out-Null
+
+                # Insert Graph user IDs into temp table in batches
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allUsers.Count) user IDs..." -ForegroundColor Gray
+                $insertCmd = $connection.CreateCommand()
+                $insertCmd.CommandText = "INSERT INTO #CurrentGraphUsers (id) VALUES (@id)"
+                $insertCmd.Parameters.Add("@id", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+
+                $insertCount = 0
+                foreach ($user in $allUsers) {
+                    $insertCmd.Parameters["@id"].Value = [Guid]$user.id
+                    $insertCmd.ExecuteNonQuery() | Out-Null
+                    $insertCount++
+
+                    if ($insertCount % 1000 -eq 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allUsers.Count) IDs inserted..." -ForegroundColor Gray
+                    }
+                }
+
+                # Delete users not in temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for users no longer in Graph..." -ForegroundColor Gray
+                $deleteSQL = @"
+DELETE FROM dbo.$TableName
+WHERE id NOT IN (SELECT id FROM #CurrentGraphUsers)
+"@
+
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = $deleteSQL
+                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                # Cleanup temp table
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "DROP TABLE #CurrentGraphUsers"
+                $dropCmd.ExecuteNonQuery() | Out-Null
 
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount users that no longer exist in Graph" -ForegroundColor Yellow

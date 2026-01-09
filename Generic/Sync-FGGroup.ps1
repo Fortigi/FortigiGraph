@@ -330,18 +330,52 @@ function Sync-FGGroup {
 
             # Handle deletions - remove groups from SQL that no longer exist in Graph
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted groups..." -ForegroundColor Cyan
-            $graphGroupIds = ($allGroups | ForEach-Object { "'$($_.id)'" }) -join ','
-
-            $deleteSQL = @"
-DELETE FROM dbo.$TableName
-WHERE id NOT IN ($graphGroupIds)
-"@
 
             $deletedCount = 0
             try {
+                # Create temp table with current Graph group IDs
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph groups..." -ForegroundColor Gray
+                $createTempTableSQL = @"
+CREATE TABLE #CurrentGraphGroups (id UNIQUEIDENTIFIER PRIMARY KEY);
+"@
+
+                $tempTableCmd = $connection.CreateCommand()
+                $tempTableCmd.CommandText = $createTempTableSQL
+                $tempTableCmd.ExecuteNonQuery() | Out-Null
+
+                # Insert Graph group IDs into temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allGroups.Count) group IDs..." -ForegroundColor Gray
+                $insertCmd = $connection.CreateCommand()
+                $insertCmd.CommandText = "INSERT INTO #CurrentGraphGroups (id) VALUES (@id)"
+                $insertCmd.Parameters.Add("@id", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+
+                $insertCount = 0
+                foreach ($group in $allGroups) {
+                    $insertCmd.Parameters["@id"].Value = [Guid]$group.id
+                    $insertCmd.ExecuteNonQuery() | Out-Null
+                    $insertCount++
+
+                    if ($insertCount % 1000 -eq 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allGroups.Count) IDs inserted..." -ForegroundColor Gray
+                    }
+                }
+
+                # Delete groups not in temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for groups no longer in Graph..." -ForegroundColor Gray
+                $deleteSQL = @"
+DELETE FROM dbo.$TableName
+WHERE id NOT IN (SELECT id FROM #CurrentGraphGroups)
+"@
+
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = $deleteSQL
+                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                # Cleanup temp table
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "DROP TABLE #CurrentGraphGroups"
+                $dropCmd.ExecuteNonQuery() | Out-Null
 
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount groups that no longer exist in Graph" -ForegroundColor Yellow

@@ -303,23 +303,61 @@ function Sync-FGGroupMember {
             # Handle deletions - remove memberships that no longer exist in Graph
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
 
-            # Build list of current memberships
-            $membershipPairs = ($allMemberships | ForEach-Object { "('$($_.groupId)', '$($_.memberId)')" }) -join ','
+            $deletedCount = 0
+            try {
+                # Create temp table with current Graph memberships
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph memberships..." -ForegroundColor Gray
+                $createTempTableSQL = @"
+CREATE TABLE #CurrentGraphMemberships (
+    groupId UNIQUEIDENTIFIER,
+    memberId UNIQUEIDENTIFIER,
+    PRIMARY KEY (groupId, memberId)
+);
+"@
 
-            $deleteSQL = @"
+                $tempTableCmd = $connection.CreateCommand()
+                $tempTableCmd.CommandText = $createTempTableSQL
+                $tempTableCmd.ExecuteNonQuery() | Out-Null
+
+                # Insert Graph membership pairs into temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allMemberships.Count) memberships..." -ForegroundColor Gray
+                $insertCmd = $connection.CreateCommand()
+                $insertCmd.CommandText = "INSERT INTO #CurrentGraphMemberships (groupId, memberId) VALUES (@groupId, @memberId)"
+                $insertCmd.Parameters.Add("@groupId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+                $insertCmd.Parameters.Add("@memberId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+
+                $insertCount = 0
+                foreach ($membership in $allMemberships) {
+                    $insertCmd.Parameters["@groupId"].Value = [Guid]$membership.groupId
+                    $insertCmd.Parameters["@memberId"].Value = [Guid]$membership.memberId
+                    $insertCmd.ExecuteNonQuery() | Out-Null
+                    $insertCount++
+
+                    if ($insertCount % 5000 -eq 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allMemberships.Count) memberships inserted..." -ForegroundColor Gray
+                    }
+                }
+
+                # Delete memberships not in temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for memberships no longer in Graph..." -ForegroundColor Gray
+                $deleteSQL = @"
 DELETE FROM dbo.$TableName
 WHERE NOT EXISTS (
-    SELECT 1 FROM (VALUES $membershipPairs) AS CurrentMembers(groupId, memberId)
-    WHERE dbo.$TableName.groupId = CurrentMembers.groupId
-    AND dbo.$TableName.memberId = CurrentMembers.memberId
+    SELECT 1 FROM #CurrentGraphMemberships
+    WHERE dbo.$TableName.groupId = #CurrentGraphMemberships.groupId
+    AND dbo.$TableName.memberId = #CurrentGraphMemberships.memberId
 )
 "@
 
-            $deletedCount = 0
-            try {
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = $deleteSQL
+                $deleteCmd.CommandTimeout = 600  # 10 minutes timeout (larger dataset)
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                # Cleanup temp table
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "DROP TABLE #CurrentGraphMemberships"
+                $dropCmd.ExecuteNonQuery() | Out-Null
 
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount memberships that no longer exist in Graph" -ForegroundColor Yellow

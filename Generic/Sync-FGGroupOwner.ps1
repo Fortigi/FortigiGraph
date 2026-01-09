@@ -259,22 +259,58 @@ function Sync-FGGroupOwner {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed ownership relationships..." -ForegroundColor Cyan
 
             if ($allOwnerships.Count -gt 0) {
-                # Build VALUES clause for deletion check
-                $valuesClause = ($allOwnerships | ForEach-Object { "('$($_.groupId)', '$($_.ownerId)')" }) -join ','
+                # Create temp table with current Graph ownerships
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Creating temp table for current Graph ownerships..." -ForegroundColor Gray
+                $createTempTableSQL = @"
+CREATE TABLE #CurrentGraphOwnerships (
+    groupId UNIQUEIDENTIFIER,
+    ownerId UNIQUEIDENTIFIER,
+    PRIMARY KEY (groupId, ownerId)
+);
+"@
 
+                $tempTableCmd = $connection.CreateCommand()
+                $tempTableCmd.CommandText = $createTempTableSQL
+                $tempTableCmd.ExecuteNonQuery() | Out-Null
+
+                # Insert Graph ownership pairs into temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Populating temp table with $($allOwnerships.Count) ownerships..." -ForegroundColor Gray
+                $insertCmd = $connection.CreateCommand()
+                $insertCmd.CommandText = "INSERT INTO #CurrentGraphOwnerships (groupId, ownerId) VALUES (@groupId, @ownerId)"
+                $insertCmd.Parameters.Add("@groupId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+                $insertCmd.Parameters.Add("@ownerId", [System.Data.SqlDbType]::UniqueIdentifier) | Out-Null
+
+                $insertCount = 0
+                foreach ($ownership in $allOwnerships) {
+                    $insertCmd.Parameters["@groupId"].Value = [Guid]$ownership.groupId
+                    $insertCmd.Parameters["@ownerId"].Value = [Guid]$ownership.ownerId
+                    $insertCmd.ExecuteNonQuery() | Out-Null
+                    $insertCount++
+
+                    if ($insertCount % 1000 -eq 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $insertCount/$($allOwnerships.Count) ownerships inserted..." -ForegroundColor Gray
+                    }
+                }
+
+                # Delete ownerships not in temp table
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Executing DELETE for ownerships no longer in Graph..." -ForegroundColor Gray
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = @"
 DELETE FROM dbo.$TableName
 WHERE NOT EXISTS (
-    SELECT 1 FROM (VALUES
-        $valuesClause
-    ) AS Source(groupId, ownerId)
-    WHERE dbo.$TableName.groupId = CAST(Source.groupId AS UNIQUEIDENTIFIER)
-    AND dbo.$TableName.ownerId = CAST(Source.ownerId AS UNIQUEIDENTIFIER)
+    SELECT 1 FROM #CurrentGraphOwnerships
+    WHERE dbo.$TableName.groupId = #CurrentGraphOwnerships.groupId
+    AND dbo.$TableName.ownerId = #CurrentGraphOwnerships.ownerId
 )
 "@
-
+                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                # Cleanup temp table
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "DROP TABLE #CurrentGraphOwnerships"
+                $dropCmd.ExecuteNonQuery() | Out-Null
+
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow
                 }
@@ -286,6 +322,7 @@ WHERE NOT EXISTS (
                 # If no ownerships exist in Graph, delete all from table
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.CommandText = "DELETE FROM dbo.$TableName"
+                $deleteCmd.CommandTimeout = 300  # 5 minutes timeout
                 $deletedCount = $deleteCmd.ExecuteNonQuery()
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Removed all $deletedCount ownership relationship(s) (no owners found in Graph)" -ForegroundColor Yellow
