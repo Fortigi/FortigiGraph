@@ -1,48 +1,42 @@
 function Get-FGGroupEligibleMemberAll {
     [alias("Get-GroupEligibleMemberAll")]
 
-    #Get Groups
+    # Query eligibility schedules directly - this is the correct way to identify PIM-enabled groups
+    # Note: isAssignableToRole and PIM-enabled are INDEPENDENT properties since January 2023
+    # Any group (except dynamic) can be PIM-enabled, not just role-assignable groups
+    # See: https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/concept-pim-for-groups
+
     $GraphURI = 'https://graph.microsoft.com/beta'
-    $URI = $GraphURI + '/groups?$select=id,isAssignableToRole,groupTypes'
-    [array]$Groups = Invoke-FGGetRequest -URI $URI
 
-    #This is no way to do this with one qeury we need to do it group by group or user by user.
-    #Filter Groups that can't used in PIM
-    $PIMGroups = $Groups | Where-Object { $_.IsAssignableToRole -eq $true }
-    $PIMGroups = $PIMGroups | Where-Object { $_.groupTypes -notcontains "DynamicMembership" }
-    
+    Write-Progress -Activity "Getting All Group Eligible Members" -Status "Querying eligibility schedules..." -PercentComplete 0
 
-    [int]$GroupCount = $PIMGroups.Count
-    [int]$Count = 0
+    # Query ALL eligibility schedules at once - much more efficient than group-by-group
+    # This returns only groups that are actually PIM-enabled (have eligible members)
+    $URI = $GraphURI + "/identityGovernance/privilegedAccess/group/eligibilitySchedules"
 
-    #Export Eligible Group Members
-    [array]$GroupEligibleMembers = $null
+    Try {
+        $Results = Invoke-FGGetRequest -Uri $URI
 
-    Foreach ($Group in $PIMGroups) {
-        
-        $Count++
-        $Completed = ($Count/$GroupCount) * 100
-        Write-Progress -Activity "Getting All Group Eligible Members" -Status "Progress:" -PercentComplete $Completed
+        Write-Progress -Activity "Getting All Group Eligible Members" -Status "Processing results..." -PercentComplete 50
 
-        $URI = $GraphURI + "/identityGovernance/privilegedAccess/group/eligibilitySchedules?" + '$filter' + "=groupId eq '" + $group.id + "'"
-        Try {
+        #Export Eligible Group Members
+        [array]$GroupEligibleMembers = @()
 
-            $Results = Invoke-FGGetRequest -Uri $URI
-
-            Foreach ($Result in $Results) {
-                $Row = @{
-                    "groupId"    = $Result.groupId
-                    "memberId"   = $Result.principalId
-                }
-                $GroupEligibleMembers += $Row
+        Foreach ($Result in $Results) {
+            $Row = @{
+                "groupId"    = $Result.groupId
+                "memberId"   = $Result.principalId
             }
+            $GroupEligibleMembers += $Row
+        }
 
-        }
-        Catch {
-            #Write-Output $_
-            #Write-Output ("Could not get PIM memberships for group " + $Group.displayName) -ForegroundColor Red
-        }
+        Write-Progress -Activity "Getting All Group Eligible Members" -Completed
+
+        Return $GroupEligibleMembers
     }
-
-    Return $GroupEligibleMembers 
+    Catch {
+        Write-Progress -Activity "Getting All Group Eligible Members" -Completed
+        Write-Error "Failed to retrieve eligible group members: $_"
+        Return $null
+    }
 }
