@@ -417,7 +417,7 @@ BEGIN
     )
 END
 "@
-    Invoke-FGSQLCommand -Query $syncLogTableSQL
+    Invoke-FGSQLQuery -Query $syncLogTableSQL | Out-Null
     Write-SyncSuccess "Sync log table ready"
     #endregion
 
