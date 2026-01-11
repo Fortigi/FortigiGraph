@@ -46,6 +46,9 @@
   "Sync": {
     "_INFO": "Configure what data to sync and how",
 
+    "ParallelExecution": true,
+    "_ParallelExecutionNote": "Run sync operations in parallel (faster) or sequential (easier debugging). Default: true",
+
     "Users": {
       "Enabled": true,
       "TableName": "GraphUsers",
@@ -119,7 +122,8 @@
     "Basic sync": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json",
     "Sync enabled users only": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -UserFilter \"accountEnabled eq true\"",
     "Skip PIM sync": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -SyncGroupEligibleMembers $false",
-    "Add custom attributes": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -UserAdditionalAttributes @('city','country')"
+    "Add custom attributes": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -UserAdditionalAttributes @('city','country')",
+    "Sequential execution": ".\Daily-Sync.ps1 -ConfigFile .\config.production.json -ParallelExecution $false"
   },
 
   "_SCHEDULING": {

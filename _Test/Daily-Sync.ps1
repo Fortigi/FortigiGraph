@@ -46,6 +46,11 @@ Command-line parameter overrides config file setting
 Create/update analysis views after sync. Default: Read from config (Sync.Views.Enabled) or $true
 Command-line parameter overrides config file setting
 
+.PARAMETER ParallelExecution
+Enable parallel execution of sync operations. Default: Read from config (Sync.ParallelExecution) or $true
+Set to $false for sequential execution (useful for debugging or resource-constrained environments)
+Command-line parameter overrides config file setting
+
 .PARAMETER UserFilter
 Optional OData filter for user sync (e.g., "accountEnabled eq true")
 Command-line parameter overrides config file setting (Sync.Users.Filter)
@@ -112,6 +117,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [bool]$CreateViews = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$ParallelExecution = $true,
 
     [Parameter(Mandatory = $false)]
     [string]$UserFilter,
@@ -253,6 +261,9 @@ try {
         }
         if ($PSBoundParameters.ContainsKey('CreateViews') -eq $false -and $null -ne $config.Sync.Views.Enabled) {
             $CreateViews = $config.Sync.Views.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('ParallelExecution') -eq $false -and $null -ne $config.Sync.ParallelExecution) {
+            $ParallelExecution = $config.Sync.ParallelExecution
         }
 
         # Read filters and attributes from config (if not provided via command-line)
@@ -467,7 +478,8 @@ END
     #endregion
 
     #region Data Synchronization
-    Write-SyncHeader "Starting Data Synchronization (Parallel)"
+    $executionMode = if ($ParallelExecution) { "Parallel" } else { "Sequential" }
+    Write-SyncHeader "Starting Data Synchronization ($executionMode)"
 
     # Determine table names (from config or defaults)
     $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "GraphUsers" }
@@ -477,7 +489,11 @@ END
     $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "GraphGroupEligibleMembers" }
     $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "GraphGroupOwners" }
 
-    # Create runspace pool for parallel execution
+    if ($ParallelExecution) {
+        # === PARALLEL EXECUTION MODE ===
+        Write-SyncStep "Using parallel execution (up to 6 concurrent operations)"
+
+        # Create runspace pool for parallel execution
     $runspacePool = [runspacefactory]::CreateRunspacePool(1, 6)
     $runspacePool.Open()
 
@@ -820,11 +836,142 @@ END
         }
     }
 
-    # Clean up runspace pool
-    $runspacePool.Close()
-    $runspacePool.Dispose()
+        # Clean up runspace pool
+        $runspacePool.Close()
+        $runspacePool.Dispose()
 
-    Write-SyncSuccess "All parallel sync operations completed"
+        Write-SyncSuccess "All parallel sync operations completed"
+    } else {
+        # === SEQUENTIAL EXECUTION MODE ===
+        Write-SyncStep "Using sequential execution"
+
+        # Sync Users
+        if ($SyncUsers) {
+            Write-SyncStep "Syncing users to SQL..."
+            try {
+                $syncParams = @{
+                    TableName = $userTableName
+                }
+
+                if ($UserFilter) {
+                    $syncParams.Filter = $UserFilter
+                    Write-SyncStep "Using user filter: $UserFilter"
+                }
+
+                if ($UserAdditionalAttributes) {
+                    $syncParams.AdditionalAttributes = $UserAdditionalAttributes
+                    Write-SyncStep "Additional attributes: $($UserAdditionalAttributes -join ', ')"
+                }
+
+                Sync-FGUser @syncParams
+
+                # Get count
+                $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$userTableName" -AsScalar
+                $script:SyncStats.Users = $userCount
+                Write-SyncSuccess "Users synced: $userCount (table: $userTableName)"
+            } catch {
+                Write-SyncError "User sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Groups
+        if ($SyncGroups) {
+            Write-SyncStep "Syncing groups to SQL..."
+            try {
+                $syncParams = @{
+                    TableName = $groupTableName
+                }
+
+                if ($GroupFilter) {
+                    $syncParams.Filter = $GroupFilter
+                    Write-SyncStep "Using group filter: $GroupFilter"
+                }
+
+                Sync-FGGroup @syncParams
+
+                $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTableName" -AsScalar
+                $script:SyncStats.Groups = $groupCount
+                Write-SyncSuccess "Groups synced: $groupCount (table: $groupTableName)"
+            } catch {
+                Write-SyncError "Group sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Group Members (Direct)
+        if ($SyncGroupMembers) {
+            Write-SyncStep "Syncing direct group memberships..."
+            try {
+                Sync-FGGroupMember -TableName $groupMembersTableName
+
+                $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupMembersTableName" -AsScalar
+                $script:SyncStats.DirectMembers = $memberCount
+                Write-SyncSuccess "Direct memberships synced: $memberCount (table: $groupMembersTableName)"
+            } catch {
+                Write-SyncError "Direct membership sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Group Transitive Members (Nested)
+        if ($SyncGroupTransitiveMembers) {
+            Write-SyncStep "Syncing transitive/nested group memberships..."
+            try {
+                Sync-FGGroupTransitiveMember -TableName $groupTransitiveMembersTableName
+
+                $transitiveCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTransitiveMembersTableName" -AsScalar
+                $script:SyncStats.TransitiveMembers = $transitiveCount
+                Write-SyncSuccess "Transitive memberships synced: $transitiveCount (table: $groupTransitiveMembersTableName)"
+            } catch {
+                Write-SyncError "Transitive membership sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Group Eligible Members (PIM)
+        if ($SyncGroupEligibleMembers) {
+            Write-SyncStep "Syncing eligible/PIM group memberships..."
+            try {
+                # Check if there are PIM-enabled groups first
+                $pimGroupCount = 0
+                if ($SyncGroups) {
+                    try {
+                        $pimGroupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTableName WHERE isAssignableToRole = 1" -AsScalar
+                    } catch {
+                        Write-SyncStep "Unable to check for PIM groups, attempting sync anyway..."
+                    }
+                }
+
+                if ($pimGroupCount -gt 0 -or -not $SyncGroups) {
+                    Sync-FGGroupEligibleMember -TableName $groupEligibleMembersTableName
+
+                    $eligibleCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupEligibleMembersTableName" -AsScalar
+                    $script:SyncStats.EligibleMembers = $eligibleCount
+                    Write-SyncSuccess "Eligible memberships synced: $eligibleCount (table: $groupEligibleMembersTableName)"
+                } else {
+                    Write-SyncStep "No PIM-enabled groups found. Skipping eligible membership sync."
+                    $script:SyncStats.EligibleMembers = 0
+                }
+            } catch {
+                # PIM might not be available, so we just warn
+                Write-Host "  ⚠ Eligible membership sync skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+                $script:SyncStats.EligibleMembers = 0
+            }
+        }
+
+        # Sync Group Owners
+        if ($SyncGroupOwners) {
+            Write-SyncStep "Syncing group ownership relationships..."
+            try {
+                Sync-FGGroupOwner -TableName $groupOwnersTableName
+
+                $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupOwnersTableName" -AsScalar
+                $script:SyncStats.Owners = $ownerCount
+                Write-SyncSuccess "Group ownerships synced: $ownerCount (table: $groupOwnersTableName)"
+            } catch {
+                Write-SyncError "Group ownership sync failed" $_.Exception.Message
+            }
+        }
+
+        Write-SyncSuccess "All sequential sync operations completed"
+    }
     #endregion
 
     #region Create Views
