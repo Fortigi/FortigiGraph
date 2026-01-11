@@ -535,7 +535,7 @@ END
                 $Global:ClientSecret = $clientSecret
                 $Global:RefreshToken = $refreshToken
 
-                Sync-FGUser @syncParams
+                Sync-FGUser @syncParams | Out-Null
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                 return @{ Success = $true; Count = $count; Type = "Users" }
             } catch {
@@ -578,7 +578,7 @@ END
                 $Global:ClientSecret = $clientSecret
                 $Global:RefreshToken = $refreshToken
 
-                Sync-FGGroup @syncParams
+                Sync-FGGroup @syncParams | Out-Null
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                 return @{ Success = $true; Count = $count; Type = "Groups" }
             } catch {
@@ -614,7 +614,7 @@ END
                 $Global:ClientSecret = $clientSecret
                 $Global:RefreshToken = $refreshToken
 
-                Sync-FGGroupMember -TableName $tableName
+                Sync-FGGroupMember -TableName $tableName | Out-Null
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                 return @{ Success = $true; Count = $count; Type = "DirectMembers" }
             } catch {
@@ -650,7 +650,7 @@ END
                 $Global:ClientSecret = $clientSecret
                 $Global:RefreshToken = $refreshToken
 
-                Sync-FGGroupTransitiveMember -TableName $tableName
+                Sync-FGGroupTransitiveMember -TableName $tableName | Out-Null
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                 return @{ Success = $true; Count = $count; Type = "TransitiveMembers" }
             } catch {
@@ -697,7 +697,7 @@ END
                 }
 
                 if ($pimGroupCount -gt 0 -or -not $syncGroups) {
-                    Sync-FGGroupEligibleMember -TableName $tableName
+                    Sync-FGGroupEligibleMember -TableName $tableName | Out-Null
                     $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                     return @{ Success = $true; Count = $count; Type = "EligibleMembers" }
                 } else {
@@ -737,7 +737,7 @@ END
                 $Global:ClientSecret = $clientSecret
                 $Global:RefreshToken = $refreshToken
 
-                Sync-FGGroupOwner -TableName $tableName
+                Sync-FGGroupOwner -TableName $tableName | Out-Null
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
                 return @{ Success = $true; Count = $count; Type = "Owners" }
             } catch {
@@ -756,7 +756,15 @@ END
     # Wait for all jobs to complete and collect results
     Write-SyncStep "Waiting for all sync operations to complete..."
     foreach ($job in $syncJobs) {
-        $result = $job.PowerShell.EndInvoke($job.Handle)
+        $resultCollection = $job.PowerShell.EndInvoke($job.Handle)
+
+        # EndInvoke returns a collection - get the actual hashtable result
+        # The scriptblock's return statement is the last item in the collection
+        $result = if ($resultCollection -is [array] -and $resultCollection.Count -gt 0) {
+            $resultCollection[-1]  # Get the last item (our return hashtable)
+        } else {
+            $resultCollection
+        }
 
         # Capture and display stream output from the runspace
         $hasStreamOutput = $false
