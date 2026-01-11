@@ -472,10 +472,13 @@ END
     }
     #endregion
 
-    # Capture Graph API access token for runspaces (must happen AFTER authentication)
+    # Capture Graph API access token and credentials for runspaces (must happen AFTER authentication)
+    # These are needed for automatic token refresh if token expires during long-running sync operations
     $graphAccessToken = $Global:AccessToken
     $graphTenantId = $config.Graph.TenantId
     $graphClientId = $config.Graph.ClientId
+    $graphClientSecret = $Global:ClientSecret      # For service principal auth refresh
+    $graphRefreshToken = $Global:RefreshToken      # For interactive auth refresh
 
     #region Data Synchronization
     $executionMode = if ($ParallelExecution) { "Parallel" } else { "Sequential" }
@@ -516,7 +519,7 @@ END
         }
 
         $powershell = [powershell]::Create().AddScript({
-            param($syncParams, $tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($syncParams, $tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -525,10 +528,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 Sync-FGUser @syncParams
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
@@ -536,7 +541,7 @@ END
             } catch {
                 return @{ Success = $false; Error = $_.Exception.Message; Type = "Users" }
             }
-        }).AddArgument($syncParams).AddArgument($userTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($syncParams).AddArgument($userTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
@@ -557,7 +562,7 @@ END
         }
 
         $powershell = [powershell]::Create().AddScript({
-            param($syncParams, $tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($syncParams, $tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -566,10 +571,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 Sync-FGGroup @syncParams
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
@@ -577,7 +584,7 @@ END
             } catch {
                 return @{ Success = $false; Error = $_.Exception.Message; Type = "Groups" }
             }
-        }).AddArgument($syncParams).AddArgument($groupTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($syncParams).AddArgument($groupTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
@@ -591,7 +598,7 @@ END
     if ($SyncGroupMembers) {
         Write-SyncStep "Queuing direct group memberships sync..."
         $powershell = [powershell]::Create().AddScript({
-            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -600,10 +607,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 Sync-FGGroupMember -TableName $tableName
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
@@ -611,7 +620,7 @@ END
             } catch {
                 return @{ Success = $false; Error = $_.Exception.Message; Type = "DirectMembers" }
             }
-        }).AddArgument($groupMembersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($groupMembersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
@@ -625,7 +634,7 @@ END
     if ($SyncGroupTransitiveMembers) {
         Write-SyncStep "Queuing transitive group memberships sync..."
         $powershell = [powershell]::Create().AddScript({
-            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -634,10 +643,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 Sync-FGGroupTransitiveMember -TableName $tableName
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
@@ -645,7 +656,7 @@ END
             } catch {
                 return @{ Success = $false; Error = $_.Exception.Message; Type = "TransitiveMembers" }
             }
-        }).AddArgument($groupTransitiveMembersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($groupTransitiveMembersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
@@ -659,7 +670,7 @@ END
     if ($SyncGroupEligibleMembers) {
         Write-SyncStep "Queuing eligible/PIM group memberships sync..."
         $powershell = [powershell]::Create().AddScript({
-            param($tableName, $moduleRoot, $groupTableName, $syncGroups, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($tableName, $moduleRoot, $groupTableName, $syncGroups, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -668,10 +679,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 # Check if there are PIM-enabled groups first
                 $pimGroupCount = 0
@@ -694,7 +707,7 @@ END
                 # PIM might not be available
                 return @{ Success = $true; Count = 0; Type = "EligibleMembers"; Warning = $_.Exception.Message }
             }
-        }).AddArgument($groupEligibleMembersTableName).AddArgument($moduleRoot).AddArgument($groupTableName).AddArgument($SyncGroups).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($groupEligibleMembersTableName).AddArgument($moduleRoot).AddArgument($groupTableName).AddArgument($SyncGroups).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
@@ -708,7 +721,7 @@ END
     if ($SyncGroupOwners) {
         Write-SyncStep "Queuing group ownership relationships sync..."
         $powershell = [powershell]::Create().AddScript({
-            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId)
+            param($tableName, $moduleRoot, $sqlConnString, $sqlServer, $sqlDb, $accessToken, $tenantId, $clientId, $clientSecret, $refreshToken)
             try {
                 Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
 
@@ -717,10 +730,12 @@ END
                 $Global:FGSQLServerName = $sqlServer
                 $Global:FGSQLDatabaseName = $sqlDb
 
-                # Set Graph API globals in this runspace
+                # Set Graph API globals in this runspace (including credentials for token refresh)
                 $Global:AccessToken = $accessToken
                 $Global:TenantId = $tenantId
                 $Global:ClientId = $clientId
+                $Global:ClientSecret = $clientSecret
+                $Global:RefreshToken = $refreshToken
 
                 Sync-FGGroupOwner -TableName $tableName
                 $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
@@ -728,7 +743,7 @@ END
             } catch {
                 return @{ Success = $false; Error = $_.Exception.Message; Type = "Owners" }
             }
-        }).AddArgument($groupOwnersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId)
+        }).AddArgument($groupOwnersTableName).AddArgument($moduleRoot).AddArgument($sqlConnectionString).AddArgument($sqlServerName).AddArgument($sqlDatabaseName).AddArgument($graphAccessToken).AddArgument($graphTenantId).AddArgument($graphClientId).AddArgument($graphClientSecret).AddArgument($graphRefreshToken)
 
         $powershell.RunspacePool = $runspacePool
         $syncJobs += @{
