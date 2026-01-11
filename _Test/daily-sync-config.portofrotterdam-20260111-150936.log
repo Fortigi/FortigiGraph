@@ -1,0 +1,164 @@
+**********************
+PowerShell transcript start
+Start time: 20260111150936
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 8452
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+
+========================================
+FortigiGraph Daily Sync Runbook
+========================================
+Started: 2026-01-11 15:09:36
+Config:  .\config.portofrotterdam.json
+Log:     C:\Source\Fortigi\GitHub\FortigiGraph\_Test\daily-sync-config.portofrotterdam-20260111-150936.log
+
+=== Loading Configuration ===
+  ✓ FortigiGraph module loaded
+  ✓ Configuration loaded
+  ✓ Configuration validated
+  → Reading sync configuration from config file...
+  ✓ Sync configuration read from config file
+  → Using separate Azure TenantId: portofrotterdam.onmicrosoft.com
+  → Loading secure credentials...
+  ✓ Secure credentials loaded
+
+=== Connecting to Azure ===
+  → Switching Azure context...
+  ✓ Connected to Azure: IAM DevTest (w.heijkant@portofrotterdam.onmicrosoft.com)
+
+=== Validating SQL Server ===
+  → Checking SQL Server: WimSQLTestPor...
+  ✓ SQL Server exists: wimsqltestpor
+  → Connecting to SQL Server...
+Setting Azure subscription context...
+Retrieving SQL Server details from Azure...
+  Found server: wimsqltestpor
+  Location: northeurope
+  FQDN: wimsqltestpor.database.windows.net
+Updating firewall rules...
+  Your current IP: 143.178.133.160
+  Updated existing firewall rule
+Connecting to SQL Server...
+Successfully connected to SQL Server: wimsqltestpor.database.windows.net, Database: GraphData
+
+Connection successful!
+You can now use Initialize-FGSQLTable and other SQL functions.
+SQL Connection Test: SUCCESS
+  Server: wimsqltestpor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/11/2026 14:09:41
+
+Name                           Value
+----                           -----
+Version                        12.0.2000.8
+CurrentTime                    11/01/2026 14:09:41
+ConnectionStatus               Connected
+Server                         wimsqltestpor.database.windows.net
+Edition                        SQL Azure
+Database                       GraphData
+  ✓ Connected to SQL Server
+SQL Connection Test: SUCCESS
+  Server: wimsqltestpor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/11/2026 14:09:41
+  ✓ SQL connection verified: GraphData
+  → Ensuring sync log table exists...
+  ✓ Sync log table ready
+
+=== Connecting to Microsoft Graph ===
+  → Getting Graph access token...
+  ✓ Graph access token obtained
+
+=== Starting Data Synchronization (Parallel) ===
+  → Using parallel execution (up to 6 concurrent operations)
+  → Starting parallel sync operations...
+  → Queuing users sync...
+  → Queuing groups sync...
+  → Queuing direct group memberships sync...
+  → Queuing transitive group memberships sync...
+  → Queuing eligible/PIM group memberships sync...
+  → Queuing group ownership relationships sync...
+  → Waiting for all sync operations to complete...
+  ✗ Users sync failed
+    No Graph access token found. Please run Get-FGAccessToken first.
+  ✗ Groups sync failed
+    No Graph access token found. Please run Get-FGAccessToken first.
+  ✗ DirectMembers sync failed
+    No Graph access token found. Please run Get-FGAccessToken first.
+  ✗ TransitiveMembers sync failed
+    No Graph access token found. Please run Get-FGAccessToken first.
+  ⚠ Eligible membership sync skipped: No Graph access token found. Please run Get-FGAccessToken first.
+  ✗ Owners sync failed
+    No Graph access token found. Please run Get-FGAccessToken first.
+  ✓ All parallel sync operations completed
+
+=== Creating Analysis Views ===
+  → Creating group membership analysis views...
+[15:09:50] Creating group membership analysis views...
+
+[15:09:50] Creating view: vw_GraphGroupNestedMembers
+  Purpose: Shows only members with indirect/nested access (not direct members)
+  ✅ Created: vw_GraphGroupNestedMembers
+
+[15:09:50] Creating view: vw_GraphGroupEligibleMembers
+  Purpose: Shows only eligible members (PIM - can activate membership)
+  ✅ Created: vw_GraphGroupEligibleMembers
+
+[15:09:50] Creating view: vw_GraphGroupMembershipType
+  Purpose: Shows all members with Owner/Direct/Eligible/Indirect indicator
+  ✅ Created: vw_GraphGroupMembershipType
+
+[15:09:50] Creating view: vw_GraphGroupMembersRecursive
+  Purpose: Calculates ALL memberships with paths using ONLY direct members
+  Benefit: Eliminates need for transitive members sync (75% faster!)
+PS>TerminatingError(): "Exception calling "ExecuteNonQuery" with "0" argument(s): "Incorrect syntax near the keyword 'OPTION'.""
+>> TerminatingError(): "SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "Incorrect syntax near the keyword 'OPTION'.""
+>> TerminatingError(): "SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "Incorrect syntax near the keyword 'OPTION'.""
+  ✗ View creation failed
+    SQL command execution failed: Exception calling "ExecuteNonQuery" with "0" argument(s): "Incorrect syntax near the keyword 'OPTION'."
+
+=== Sync Summary ===
+
+  Sync Duration: 00:00:13
+
+  Eligible Memberships:    1
+
+  Errors encountered: 6
+    - Users sync failed
+    - Groups sync failed
+    - DirectMembers sync failed
+    - TransitiveMembers sync failed
+    - Owners sync failed
+    - View creation failed
+
+  → Storing sync summary in database...
+PS>TerminatingError(Invoke-FGSQLQuery): "A parameter cannot be found that matches parameter name 'Parameters'."
+  ✗ Failed to store sync summary in database
+    A parameter cannot be found that matches parameter name 'Parameters'.
+
+========================================
+Sync Complete!
+========================================
+Completed: 2026-01-11 15:09:50
+Log File:  C:\Source\Fortigi\GitHub\FortigiGraph\_Test\daily-sync-config.portofrotterdam-20260111-150936.log
+**********************
+PowerShell transcript end
+End time: 20260111150950
+**********************
