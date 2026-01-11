@@ -140,6 +140,7 @@ Write-Host "Log:     $transcriptFile`n" -ForegroundColor Cyan
 # Track sync statistics
 $script:SyncStats = @{
     StartTime = Get-Date
+    EndTime = $null
     Users = $null
     Groups = $null
     DirectMembers = $null
@@ -147,6 +148,7 @@ $script:SyncStats = @{
     EligibleMembers = $null
     Owners = $null
     Errors = @()
+    ConfigFile = $ConfigFile
 }
 
 #region Helper Functions
@@ -390,6 +392,33 @@ try {
     # Verify connection
     $connectionInfo = Test-FGSQLConnection
     Write-SyncSuccess "SQL connection verified: $($connectionInfo.Database)"
+
+    # Create sync log table if it doesn't exist
+    Write-SyncStep "Ensuring sync log table exists..."
+    $syncLogTableSQL = @"
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GraphSyncLog')
+BEGIN
+    CREATE TABLE dbo.GraphSyncLog (
+        SyncRunId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        StartTime DATETIME2 NOT NULL,
+        EndTime DATETIME2 NULL,
+        DurationSeconds INT NULL,
+        ConfigFile NVARCHAR(500) NULL,
+        UsersCount INT NULL,
+        GroupsCount INT NULL,
+        DirectMembersCount INT NULL,
+        TransitiveMembersCount INT NULL,
+        EligibleMembersCount INT NULL,
+        OwnersCount INT NULL,
+        ErrorCount INT NULL,
+        ErrorDetails NVARCHAR(MAX) NULL,
+        Status NVARCHAR(50) NULL,
+        CreatedDate DATETIME2 DEFAULT GETDATE()
+    )
+END
+"@
+    Invoke-FGSQLCommand -Query $syncLogTableSQL
+    Write-SyncSuccess "Sync log table ready"
     #endregion
 
     #region Microsoft Graph Connection
@@ -428,7 +457,7 @@ try {
     #endregion
 
     #region Data Synchronization
-    Write-SyncHeader "Starting Data Synchronization"
+    Write-SyncHeader "Starting Data Synchronization (Parallel)"
 
     # Determine table names (from config or defaults)
     $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "GraphUsers" }
@@ -438,130 +467,235 @@ try {
     $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "GraphGroupEligibleMembers" }
     $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "GraphGroupOwners" }
 
-    # Sync Users
+    # Create runspace pool for parallel execution
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, 6)
+    $runspacePool.Open()
+
+    # Array to track all running sync jobs
+    $syncJobs = @()
+
+    Write-SyncStep "Starting parallel sync operations..."
+
+    # Sync Users (Job 1)
     if ($SyncUsers) {
-        Write-SyncStep "Syncing users to SQL..."
-        try {
-            $syncParams = @{
-                TableName = $userTableName
+        Write-SyncStep "Queuing users sync..."
+        $syncParams = @{
+            TableName = $userTableName
+        }
+        if ($UserFilter) {
+            $syncParams.Filter = $UserFilter
+        }
+        if ($UserAdditionalAttributes) {
+            $syncParams.AdditionalAttributes = $UserAdditionalAttributes
+        }
+
+        $powershell = [powershell]::Create().AddScript({
+            param($syncParams, $tableName, $moduleRoot)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+                Sync-FGUser @syncParams
+                $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                return @{ Success = $true; Count = $count; Type = "Users" }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message; Type = "Users" }
             }
+        }).AddArgument($syncParams).AddArgument($userTableName).AddArgument($moduleRoot)
 
-            if ($UserFilter) {
-                $syncParams.Filter = $UserFilter
-                Write-SyncStep "Using user filter: $UserFilter"
-            }
-
-            if ($UserAdditionalAttributes) {
-                $syncParams.AdditionalAttributes = $UserAdditionalAttributes
-                Write-SyncStep "Additional attributes: $($UserAdditionalAttributes -join ', ')"
-            }
-
-            Sync-FGUser @syncParams
-
-            # Get count
-            $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$userTableName" -AsScalar
-            $script:SyncStats.Users = $userCount
-            Write-SyncSuccess "Users synced: $userCount (table: $userTableName)"
-        } catch {
-            Write-SyncError "User sync failed" $_.Exception.Message
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "Users"
         }
     }
 
-    # Sync Groups
+    # Sync Groups (Job 2)
     if ($SyncGroups) {
-        Write-SyncStep "Syncing groups to SQL..."
-        try {
-            $syncParams = @{
-                TableName = $groupTableName
+        Write-SyncStep "Queuing groups sync..."
+        $syncParams = @{
+            TableName = $groupTableName
+        }
+        if ($GroupFilter) {
+            $syncParams.Filter = $GroupFilter
+        }
+
+        $powershell = [powershell]::Create().AddScript({
+            param($syncParams, $tableName, $moduleRoot)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+                Sync-FGGroup @syncParams
+                $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                return @{ Success = $true; Count = $count; Type = "Groups" }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message; Type = "Groups" }
             }
+        }).AddArgument($syncParams).AddArgument($groupTableName).AddArgument($moduleRoot)
 
-            if ($GroupFilter) {
-                $syncParams.Filter = $GroupFilter
-                Write-SyncStep "Using group filter: $GroupFilter"
-            }
-
-            Sync-FGGroup @syncParams
-
-            $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTableName" -AsScalar
-            $script:SyncStats.Groups = $groupCount
-            Write-SyncSuccess "Groups synced: $groupCount (table: $groupTableName)"
-        } catch {
-            Write-SyncError "Group sync failed" $_.Exception.Message
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "Groups"
         }
     }
 
-    # Sync Group Members (Direct)
+    # Sync Group Members (Job 3)
     if ($SyncGroupMembers) {
-        Write-SyncStep "Syncing direct group memberships..."
-        try {
-            Sync-FGGroupMember -TableName $groupMembersTableName
+        Write-SyncStep "Queuing direct group memberships sync..."
+        $powershell = [powershell]::Create().AddScript({
+            param($tableName, $moduleRoot)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+                Sync-FGGroupMember -TableName $tableName
+                $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                return @{ Success = $true; Count = $count; Type = "DirectMembers" }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message; Type = "DirectMembers" }
+            }
+        }).AddArgument($groupMembersTableName).AddArgument($moduleRoot)
 
-            $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupMembersTableName" -AsScalar
-            $script:SyncStats.DirectMembers = $memberCount
-            Write-SyncSuccess "Direct memberships synced: $memberCount (table: $groupMembersTableName)"
-        } catch {
-            Write-SyncError "Direct membership sync failed" $_.Exception.Message
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "DirectMembers"
         }
     }
 
-    # Sync Group Transitive Members (Nested)
+    # Sync Group Transitive Members (Job 4)
     if ($SyncGroupTransitiveMembers) {
-        Write-SyncStep "Syncing transitive/nested group memberships..."
-        try {
-            Sync-FGGroupTransitiveMember -TableName $groupTransitiveMembersTableName
+        Write-SyncStep "Queuing transitive group memberships sync..."
+        $powershell = [powershell]::Create().AddScript({
+            param($tableName, $moduleRoot)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+                Sync-FGGroupTransitiveMember -TableName $tableName
+                $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                return @{ Success = $true; Count = $count; Type = "TransitiveMembers" }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message; Type = "TransitiveMembers" }
+            }
+        }).AddArgument($groupTransitiveMembersTableName).AddArgument($moduleRoot)
 
-            $transitiveCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTransitiveMembersTableName" -AsScalar
-            $script:SyncStats.TransitiveMembers = $transitiveCount
-            Write-SyncSuccess "Transitive memberships synced: $transitiveCount (table: $groupTransitiveMembersTableName)"
-        } catch {
-            Write-SyncError "Transitive membership sync failed" $_.Exception.Message
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "TransitiveMembers"
         }
     }
 
-    # Sync Group Eligible Members (PIM)
+    # Sync Group Eligible Members (Job 5)
     if ($SyncGroupEligibleMembers) {
-        Write-SyncStep "Syncing eligible/PIM group memberships..."
-        try {
-            # Check if there are PIM-enabled groups first
-            $pimGroupCount = 0
-            if ($SyncGroups) {
-                try {
-                    $pimGroupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTableName WHERE isAssignableToRole = 1" -AsScalar
-                } catch {
-                    Write-SyncStep "Unable to check for PIM groups, attempting sync anyway..."
+        Write-SyncStep "Queuing eligible/PIM group memberships sync..."
+        $powershell = [powershell]::Create().AddScript({
+            param($tableName, $moduleRoot, $groupTableName, $syncGroups)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+
+                # Check if there are PIM-enabled groups first
+                $pimGroupCount = 0
+                if ($syncGroups) {
+                    try {
+                        $pimGroupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTableName WHERE isAssignableToRole = 1" -AsScalar
+                    } catch {
+                        # Unable to check, attempt sync anyway
+                    }
+                }
+
+                if ($pimGroupCount -gt 0 -or -not $syncGroups) {
+                    Sync-FGGroupEligibleMember -TableName $tableName
+                    $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                    return @{ Success = $true; Count = $count; Type = "EligibleMembers" }
+                } else {
+                    return @{ Success = $true; Count = 0; Type = "EligibleMembers"; Skipped = $true }
+                }
+            } catch {
+                # PIM might not be available
+                return @{ Success = $true; Count = 0; Type = "EligibleMembers"; Warning = $_.Exception.Message }
+            }
+        }).AddArgument($groupEligibleMembersTableName).AddArgument($moduleRoot).AddArgument($groupTableName).AddArgument($SyncGroups)
+
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "EligibleMembers"
+        }
+    }
+
+    # Sync Group Owners (Job 6)
+    if ($SyncGroupOwners) {
+        Write-SyncStep "Queuing group ownership relationships sync..."
+        $powershell = [powershell]::Create().AddScript({
+            param($tableName, $moduleRoot)
+            try {
+                Import-Module (Join-Path $moduleRoot "FortigiGraph.psd1") -Force -ErrorAction Stop
+                Sync-FGGroupOwner -TableName $tableName
+                $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$tableName" -AsScalar
+                return @{ Success = $true; Count = $count; Type = "Owners" }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message; Type = "Owners" }
+            }
+        }).AddArgument($groupOwnersTableName).AddArgument($moduleRoot)
+
+        $powershell.RunspacePool = $runspacePool
+        $syncJobs += @{
+            PowerShell = $powershell
+            Handle = $powershell.BeginInvoke()
+            Type = "Owners"
+        }
+    }
+
+    # Wait for all jobs to complete and collect results
+    Write-SyncStep "Waiting for all sync operations to complete..."
+    foreach ($job in $syncJobs) {
+        $result = $job.PowerShell.EndInvoke($job.Handle)
+        $job.PowerShell.Dispose()
+
+        if ($result.Success) {
+            switch ($result.Type) {
+                "Users" {
+                    $script:SyncStats.Users = $result.Count
+                    Write-SyncSuccess "Users synced: $($result.Count) (table: $userTableName)"
+                }
+                "Groups" {
+                    $script:SyncStats.Groups = $result.Count
+                    Write-SyncSuccess "Groups synced: $($result.Count) (table: $groupTableName)"
+                }
+                "DirectMembers" {
+                    $script:SyncStats.DirectMembers = $result.Count
+                    Write-SyncSuccess "Direct memberships synced: $($result.Count) (table: $groupMembersTableName)"
+                }
+                "TransitiveMembers" {
+                    $script:SyncStats.TransitiveMembers = $result.Count
+                    Write-SyncSuccess "Transitive memberships synced: $($result.Count) (table: $groupTransitiveMembersTableName)"
+                }
+                "EligibleMembers" {
+                    $script:SyncStats.EligibleMembers = $result.Count
+                    if ($result.Skipped) {
+                        Write-SyncStep "No PIM-enabled groups found. Skipping eligible membership sync."
+                    } elseif ($result.Warning) {
+                        Write-Host "  ⚠ Eligible membership sync skipped: $($result.Warning)" -ForegroundColor Yellow
+                    } else {
+                        Write-SyncSuccess "Eligible memberships synced: $($result.Count) (table: $groupEligibleMembersTableName)"
+                    }
+                }
+                "Owners" {
+                    $script:SyncStats.Owners = $result.Count
+                    Write-SyncSuccess "Group ownerships synced: $($result.Count) (table: $groupOwnersTableName)"
                 }
             }
-
-            if ($pimGroupCount -gt 0 -or -not $SyncGroups) {
-                Sync-FGGroupEligibleMember -TableName $groupEligibleMembersTableName
-
-                $eligibleCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupEligibleMembersTableName" -AsScalar
-                $script:SyncStats.EligibleMembers = $eligibleCount
-                Write-SyncSuccess "Eligible memberships synced: $eligibleCount (table: $groupEligibleMembersTableName)"
-            } else {
-                Write-SyncStep "No PIM-enabled groups found. Skipping eligible membership sync."
-                $script:SyncStats.EligibleMembers = 0
-            }
-        } catch {
-            # PIM might not be available, so we just warn
-            Write-Host "  ⚠ Eligible membership sync skipped: $($_.Exception.Message)" -ForegroundColor Yellow
-            $script:SyncStats.EligibleMembers = 0
+        } else {
+            Write-SyncError "$($result.Type) sync failed" $result.Error
         }
     }
 
-    # Sync Group Owners
-    if ($SyncGroupOwners) {
-        Write-SyncStep "Syncing group ownership relationships..."
-        try {
-            Sync-FGGroupOwner -TableName $groupOwnersTableName
+    # Clean up runspace pool
+    $runspacePool.Close()
+    $runspacePool.Dispose()
 
-            $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupOwnersTableName" -AsScalar
-            $script:SyncStats.Owners = $ownerCount
-            Write-SyncSuccess "Group ownerships synced: $ownerCount (table: $groupOwnersTableName)"
-        } catch {
-            Write-SyncError "Group ownership sync failed" $_.Exception.Message
-        }
-    }
+    Write-SyncSuccess "All parallel sync operations completed"
     #endregion
 
     #region Create Views
@@ -601,8 +735,9 @@ try {
     #region Summary Report
     Write-SyncHeader "Sync Summary"
 
-    $endTime = Get-Date
-    $duration = $endTime - $script:SyncStats.StartTime
+    $script:SyncStats.EndTime = Get-Date
+    $duration = $script:SyncStats.EndTime - $script:SyncStats.StartTime
+    $durationSeconds = [int]$duration.TotalSeconds
 
     Write-Host ""
     Write-Host "  Sync Duration: $($duration.ToString('hh\:mm\:ss'))" -ForegroundColor Cyan
@@ -633,6 +768,74 @@ try {
         $script:SyncStats.Errors | ForEach-Object {
             Write-Host "    - $($_.Message)" -ForegroundColor Yellow
         }
+    }
+
+    # Store sync summary in SQL table
+    Write-Host ""
+    Write-SyncStep "Storing sync summary in database..."
+    try {
+        $errorDetails = if ($script:SyncStats.Errors.Count -gt 0) {
+            ($script:SyncStats.Errors | ForEach-Object { "$($_.Message): $($_.Details)" }) -join "; "
+        } else {
+            $null
+        }
+
+        $status = if ($script:SyncStats.Errors.Count -eq 0) { "Success" }
+                  elseif ($script:SyncStats.Errors.Count -lt 3) { "PartialSuccess" }
+                  else { "Failed" }
+
+        $insertQuery = @"
+INSERT INTO dbo.GraphSyncLog (
+    StartTime,
+    EndTime,
+    DurationSeconds,
+    ConfigFile,
+    UsersCount,
+    GroupsCount,
+    DirectMembersCount,
+    TransitiveMembersCount,
+    EligibleMembersCount,
+    OwnersCount,
+    ErrorCount,
+    ErrorDetails,
+    Status
+) VALUES (
+    @StartTime,
+    @EndTime,
+    @DurationSeconds,
+    @ConfigFile,
+    @UsersCount,
+    @GroupsCount,
+    @DirectMembersCount,
+    @TransitiveMembersCount,
+    @EligibleMembersCount,
+    @OwnersCount,
+    @ErrorCount,
+    @ErrorDetails,
+    @Status
+)
+"@
+
+        $parameters = @{
+            StartTime = $script:SyncStats.StartTime
+            EndTime = $script:SyncStats.EndTime
+            DurationSeconds = $durationSeconds
+            ConfigFile = [System.IO.Path]::GetFileName($script:SyncStats.ConfigFile)
+            UsersCount = $script:SyncStats.Users
+            GroupsCount = $script:SyncStats.Groups
+            DirectMembersCount = $script:SyncStats.DirectMembers
+            TransitiveMembersCount = $script:SyncStats.TransitiveMembers
+            EligibleMembersCount = $script:SyncStats.EligibleMembers
+            OwnersCount = $script:SyncStats.Owners
+            ErrorCount = $script:SyncStats.Errors.Count
+            ErrorDetails = $errorDetails
+            Status = $status
+        }
+
+        Invoke-FGSQLQuery -Query $insertQuery -Parameters $parameters | Out-Null
+        Write-SyncSuccess "Sync summary stored in GraphSyncLog table"
+    } catch {
+        Write-SyncError "Failed to store sync summary in database" $_.Exception.Message
     }
     #endregion
 
