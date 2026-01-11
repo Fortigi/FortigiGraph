@@ -1075,7 +1075,24 @@ END
                   elseif ($script:SyncStats.Errors.Count -lt 3) { "PartialSuccess" }
                   else { "Failed" }
 
-        $insertQuery = @"
+        # Capture values before scriptblock (to avoid scope issues)
+        $startTime = $script:SyncStats.StartTime
+        $endTime = $script:SyncStats.EndTime
+        $configFileName = [System.IO.Path]::GetFileName($script:SyncStats.ConfigFile)
+        $usersCount = $script:SyncStats.Users
+        $groupsCount = $script:SyncStats.Groups
+        $directMembersCount = $script:SyncStats.DirectMembers
+        $transitiveMembersCount = $script:SyncStats.TransitiveMembers
+        $eligibleMembersCount = $script:SyncStats.EligibleMembers
+        $ownersCount = $script:SyncStats.Owners
+        $errorCount = $script:SyncStats.Errors.Count
+
+        # Use Invoke-FGSQLCommand for proper parameterized query support
+        # Note: Variables from outer scope are automatically captured by the scriptblock
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+
+            $insertQuery = @"
 INSERT INTO dbo.GraphSyncLog (
     StartTime,
     EndTime,
@@ -1107,23 +1124,32 @@ INSERT INTO dbo.GraphSyncLog (
 )
 "@
 
-        $parameters = @{
-            StartTime = $script:SyncStats.StartTime
-            EndTime = $script:SyncStats.EndTime
-            DurationSeconds = $durationSeconds
-            ConfigFile = [System.IO.Path]::GetFileName($script:SyncStats.ConfigFile)
-            UsersCount = $script:SyncStats.Users
-            GroupsCount = $script:SyncStats.Groups
-            DirectMembersCount = $script:SyncStats.DirectMembers
-            TransitiveMembersCount = $script:SyncStats.TransitiveMembers
-            EligibleMembersCount = $script:SyncStats.EligibleMembers
-            OwnersCount = $script:SyncStats.Owners
-            ErrorCount = $script:SyncStats.Errors.Count
-            ErrorDetails = $errorDetails
-            Status = $status
-        }
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = $insertQuery
 
-        Invoke-FGSQLQuery -Query $insertQuery -Parameters $parameters | Out-Null
+            # Add parameters with proper SQL types
+            $cmd.Parameters.AddWithValue("@StartTime", $startTime) | Out-Null
+            $cmd.Parameters.AddWithValue("@EndTime", $endTime) | Out-Null
+            $cmd.Parameters.AddWithValue("@DurationSeconds", $durationSeconds) | Out-Null
+            $cmd.Parameters.AddWithValue("@ConfigFile", $configFileName) | Out-Null
+
+            # Handle nullable counts - use DBNull if null
+            $cmd.Parameters.AddWithValue("@UsersCount", $(if ($null -eq $usersCount) { [DBNull]::Value } else { $usersCount })) | Out-Null
+            $cmd.Parameters.AddWithValue("@GroupsCount", $(if ($null -eq $groupsCount) { [DBNull]::Value } else { $groupsCount })) | Out-Null
+            $cmd.Parameters.AddWithValue("@DirectMembersCount", $(if ($null -eq $directMembersCount) { [DBNull]::Value } else { $directMembersCount })) | Out-Null
+            $cmd.Parameters.AddWithValue("@TransitiveMembersCount", $(if ($null -eq $transitiveMembersCount) { [DBNull]::Value } else { $transitiveMembersCount })) | Out-Null
+            $cmd.Parameters.AddWithValue("@EligibleMembersCount", $(if ($null -eq $eligibleMembersCount) { [DBNull]::Value } else { $eligibleMembersCount })) | Out-Null
+            $cmd.Parameters.AddWithValue("@OwnersCount", $(if ($null -eq $ownersCount) { [DBNull]::Value } else { $ownersCount })) | Out-Null
+
+            $cmd.Parameters.AddWithValue("@ErrorCount", $errorCount) | Out-Null
+            $cmd.Parameters.AddWithValue("@ErrorDetails", $(if ($errorDetails) { $errorDetails } else { [DBNull]::Value })) | Out-Null
+            $cmd.Parameters.AddWithValue("@Status", $status) | Out-Null
+
+            # Execute the insert
+            $rowsAffected = $cmd.ExecuteNonQuery()
+            return $rowsAffected
+        } | Out-Null
+
         Write-SyncSuccess "Sync summary stored in GraphSyncLog table"
     } catch {
         Write-SyncError "Failed to store sync summary in database" $_.Exception.Message
