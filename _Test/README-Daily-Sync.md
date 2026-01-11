@@ -7,6 +7,9 @@ The `Daily-Sync.ps1` runbook provides an easy-to-use, production-ready script fo
 ## Features
 
 ✅ **Automatic Setup**: Creates SQL Server if it doesn't exist (perfect for first run)
+✅ **Parallel Execution**: Run sync operations concurrently for faster completion (configurable)
+✅ **SQL Logging**: Automatic sync history tracking in GraphSyncLog table
+✅ **Stream Capture**: Full visibility into warnings and errors from parallel operations
 ✅ **Secure Credentials**: Uses the same encrypted credential system as integration tests
 ✅ **Flexible Sync**: Enable/disable individual entity types as needed
 ✅ **Smart Filtering**: Apply OData filters to sync only the data you need
@@ -98,6 +101,43 @@ By default, the runbook syncs:
 | Eligible Memberships (PIM) | ✅ Enabled | `-SyncGroupEligibleMembers $true/$false` |
 | Group Ownerships | ✅ Enabled | `-SyncGroupOwners $true/$false` |
 | Analysis Views | ✅ Enabled | `-CreateViews $true/$false` |
+| Parallel Execution | ✅ Enabled | `-ParallelExecution $true/$false` |
+
+### Parallel Execution Mode
+
+By default, all sync operations run in **parallel** for maximum performance:
+
+**Parallel Mode (Default - Faster):**
+```powershell
+.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+# Output: Starting Data Synchronization (Parallel)
+# Up to 6 operations run simultaneously
+```
+
+**Sequential Mode (Debugging/Lower Resources):**
+```powershell
+.\Daily-Sync.ps1 -ConfigFile .\config.production.json -ParallelExecution $false
+# Output: Starting Data Synchronization (Sequential)
+# Operations run one at a time
+```
+
+**When to use Sequential Mode:**
+- 🐛 Debugging sync issues (easier to follow logs)
+- 💻 Resource-constrained environments (laptops, small VMs)
+- 🔗 SQL servers with connection limits
+- 📊 First-time setup (understand the process)
+
+**Stream Capture in Parallel Mode:**
+
+The script captures all output from parallel operations:
+```
+  ℹ [Users] Fetching 2500 users from Microsoft Graph API...
+  ⚠ [Users] User john.doe@contoso.com has no manager
+  ✓ Users synced: 2500
+
+  ℹ [Groups] Fetching 150 groups from Microsoft Graph API...
+  ✓ Groups synced: 150
+```
 
 ### Selective Sync Examples
 
@@ -270,24 +310,28 @@ Log:     daily-sync-production-20250106-143000.log
 === Connecting to Microsoft Graph ===
   ✓ Existing token is valid
 
-=== Starting Data Synchronization ===
-  → Syncing users to SQL...
-  ✓ Users synced: 1,245
+=== Starting Data Synchronization (Parallel) ===
+  → Using parallel execution (up to 6 concurrent operations)
+  → Starting parallel sync operations...
+  → Queuing users sync...
+  → Queuing groups sync...
+  → Queuing direct group memberships sync...
+  → Queuing transitive group memberships sync...
+  → Queuing eligible/PIM group memberships sync...
+  → Queuing group ownership relationships sync...
+  → Waiting for all sync operations to complete...
 
-  → Syncing groups to SQL...
-  ✓ Groups synced: 387
+  ℹ [Users] Fetching 1,245 users from Microsoft Graph API...
+  ℹ [Groups] Fetching 387 groups from Microsoft Graph API...
 
-  → Syncing direct group memberships...
-  ✓ Direct memberships synced: 4,521
+  ✓ Users synced: 1,245 (table: GraphUsers)
+  ✓ Groups synced: 387 (table: GraphGroups)
+  ✓ Direct memberships synced: 4,521 (table: GraphGroupMembers)
+  ✓ Transitive memberships synced: 8,932 (table: GraphGroupTransitiveMembers)
+  → No PIM-enabled groups found. Skipping eligible membership sync.
+  ✓ Group ownerships synced: 245 (table: GraphGroupOwners)
 
-  → Syncing transitive/nested group memberships...
-  ✓ Transitive memberships synced: 8,932
-
-  → Syncing eligible/PIM group memberships...
-  ⚠ Eligible membership sync skipped: No PIM groups
-
-  → Syncing group ownership relationships...
-  ✓ Group ownerships synced: 245
+  ✓ All parallel sync operations completed
 
 === Creating Analysis Views ===
   ✓ Analysis views created
@@ -302,6 +346,9 @@ Log:     daily-sync-production-20250106-143000.log
   Transitive Memberships:  8,932
   Eligible Memberships:    0
   Group Ownerships:        245
+
+  → Storing sync summary in database...
+  ✓ Sync summary stored in GraphSyncLog table
 
 ========================================
 Sync Complete!
@@ -325,6 +372,64 @@ Every sync creates a timestamped log file:
 - All console output
 - Error details and stack traces
 - Timestamps for all operations
+
+### SQL Sync History
+
+Every sync run is automatically logged to the **GraphSyncLog** table:
+
+```sql
+-- View sync history
+SELECT
+    StartTime,
+    EndTime,
+    DurationSeconds,
+    ConfigFile,
+    UsersCount,
+    GroupsCount,
+    DirectMembersCount,
+    TransitiveMembers Count,
+    EligibleMembersCount,
+    OwnersCount,
+    ErrorCount,
+    Status
+FROM dbo.GraphSyncLog
+ORDER BY StartTime DESC
+```
+
+**Table Schema:**
+- `SyncRunId` - Unique identifier for each sync
+- `StartTime` / `EndTime` - When the sync ran
+- `DurationSeconds` - How long it took
+- `ConfigFile` - Which config was used
+- `UsersCount`, `GroupsCount`, etc. - Objects synced
+- `ErrorCount` / `ErrorDetails` - Any errors encountered
+- `Status` - Success, PartialSuccess, or Failed
+
+**Example Query - Sync Performance Over Time:**
+```sql
+SELECT
+    CAST(StartTime AS DATE) as SyncDate,
+    AVG(DurationSeconds) as AvgDuration,
+    SUM(UsersCount) as TotalUsers,
+    SUM(ErrorCount) as TotalErrors
+FROM dbo.GraphSyncLog
+WHERE StartTime >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY CAST(StartTime AS DATE)
+ORDER BY SyncDate DESC
+```
+
+**Example Query - Failed Syncs:**
+```sql
+SELECT
+    StartTime,
+    ConfigFile,
+    ErrorCount,
+    ErrorDetails,
+    Status
+FROM dbo.GraphSyncLog
+WHERE Status != 'Success'
+ORDER BY StartTime DESC
+```
 
 ## Error Handling
 
@@ -435,40 +540,61 @@ WHERE ValidFrom >= DATEADD(HOUR, -1, GETDATE())
 
 **For tenants with 10,000+ users:**
 
-1. **Use filters to reduce data:**
+1. **Enable parallel execution (default):**
+```powershell
+.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+# Parallel mode significantly reduces sync time
+# Up to 6x faster for full syncs
+```
+
+2. **Use filters to reduce data:**
 ```powershell
 .\Daily-Sync.ps1 -ConfigFile .\config.production.json `
     -UserFilter "accountEnabled eq true and userType eq 'Member'"
 ```
 
-2. **Increase SQL Server tier:**
+3. **Increase SQL Server tier:**
    - Upgrade from Basic to Standard S3+ for better performance
    - Consider Premium tier for very large datasets
+   - Parallel execution benefits from higher DTU/vCore limits
 
-3. **Run during off-hours:**
+4. **Run during off-hours:**
    - Schedule sync during low-usage periods
    - Reduces impact on SQL Server
 
-4. **Monitor sync duration:**
-   - Check log files for bottlenecks
-   - Consider parallel processing for multiple entity types
+5. **Monitor sync duration:**
+   - Check GraphSyncLog table for trends
+   - Compare parallel vs sequential performance
+   - Identify bottlenecks using logs
 
 ### Sync Statistics
 
-Track sync performance over time:
+Track sync performance using the built-in GraphSyncLog table:
 
 ```sql
--- Create a sync stats table
-CREATE TABLE SyncStatistics (
-    SyncDate DATETIME2 DEFAULT GETDATE(),
-    EntityType NVARCHAR(50),
-    RecordCount INT,
-    DurationSeconds INT
-)
+-- Performance trends
+SELECT
+    CAST(StartTime AS DATE) as Date,
+    COUNT(*) as SyncRuns,
+    AVG(DurationSeconds) as AvgDuration,
+    MIN(DurationSeconds) as MinDuration,
+    MAX(DurationSeconds) as MaxDuration,
+    SUM(CASE WHEN Status = 'Success' THEN 1 ELSE 0 END) as Successful
+FROM dbo.GraphSyncLog
+WHERE StartTime >= DATEADD(DAY, -30, GETDATE())
+GROUP BY CAST(StartTime AS DATE)
+ORDER BY Date DESC
 
--- Log stats after each sync
-INSERT INTO SyncStatistics (EntityType, RecordCount, DurationSeconds)
-VALUES ('Users', (SELECT COUNT(*) FROM GraphUsers), 125)
+-- Data growth over time
+SELECT
+    CAST(StartTime AS DATE) as Date,
+    AVG(UsersCount) as AvgUsers,
+    AVG(GroupsCount) as AvgGroups,
+    AVG(DirectMembersCount) as AvgMembers
+FROM dbo.GraphSyncLog
+WHERE StartTime >= DATEADD(DAY, -30, GETDATE())
+GROUP BY CAST(StartTime AS DATE)
+ORDER BY Date DESC
 ```
 
 ## Troubleshooting
