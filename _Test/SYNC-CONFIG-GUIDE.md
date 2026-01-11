@@ -22,6 +22,8 @@ Add a `Sync` section to your config file:
   "Graph": { ... },
 
   "Sync": {
+    "ParallelExecution": true,
+
     "Users": {
       "Enabled": true,
       "TableName": "GraphUsers",
@@ -63,6 +65,41 @@ Add a `Sync` section to your config file:
 ```
 
 ## Configuration Options
+
+### ParallelExecution (Global Setting)
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `ParallelExecution` | Boolean | Run sync operations in parallel or sequential | `true` |
+
+**Parallel Mode (Default - Faster):**
+- All sync operations run simultaneously
+- Up to 6 concurrent operations
+- Significantly faster (often 3-6x improvement)
+- Best for: Production, scheduled runs, normal operation
+
+**Sequential Mode (Debugging/Lower Resources):**
+- Operations run one at a time
+- Lower CPU/memory usage
+- Easier to debug and follow logs
+- Best for: Troubleshooting, resource-constrained environments, SQL connection limits
+
+**Example:**
+```json
+"Sync": {
+  "ParallelExecution": false,  // Use sequential mode for debugging
+  "Users": { ... }
+}
+```
+
+**Command-line override:**
+```powershell
+# Force sequential execution
+.\Daily-Sync.ps1 -ConfigFile .\config.json -ParallelExecution $false
+
+# Force parallel execution
+.\Daily-Sync.ps1 -ConfigFile .\config.json -ParallelExecution $true
+```
 
 ### Users Section
 
