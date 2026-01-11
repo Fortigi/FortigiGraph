@@ -5,19 +5,18 @@ function Sync-FGGroupEligibleMember {
 
     .DESCRIPTION
     This function syncs eligible group memberships from Privileged Identity Management (PIM):
-    - Only processes groups that are assignable to roles (PIM-enabled)
-    - Excludes dynamic membership groups
+    - Queries eligibility schedules directly to identify actual PIM-enabled groups
+    - Note: Since January 2023, PIM-enabled and role-assignable are INDEPENDENT properties
+    - Any group (except dynamic/on-prem synced) can be PIM-enabled, not just role-assignable
     - Creates a table with groupId, memberId, and memberType columns
     - Uses composite primary key (groupId, memberId)
     - Automatically creates temporal table for change tracking
-    - Iterates through each PIM group and fetches eligible members
     - Tracks PIM eligibility changes over time
 
     Use this to track who has ELIGIBLE access (can activate membership) vs active membership.
     For active members, use Sync-FGGroupMember or Sync-FGGroupTransitiveMember.
 
-    .PARAMETER Filter
-    Optional OData filter to limit which groups to process (applied before PIM filtering)
+    Reference: https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/concept-pim-for-groups
 
     .PARAMETER GroupIds
     Optional array of specific group IDs to sync. If not specified, syncs all PIM groups.
@@ -42,16 +41,12 @@ function Sync-FGGroupEligibleMember {
     Requires:
     - Connect-FGSQLServer to be called first
     - Valid Graph access token (Get-FGAccessToken) with PrivilegedEligibilitySchedule.Read.AzureADGroup permission
-    - Only works with groups where isAssignableToRole = true
-    - Excludes dynamic membership groups
+    - Works with any PIM-enabled group (isAssignableToRole is not required since January 2023)
     #>
 
     [CmdletBinding()]
     [Alias("Sync-GroupEligibleMember")]
     Param(
-        [Parameter(Mandatory = $false)]
-        [string]$Filter,
-
         [Parameter(Mandatory = $false)]
         [string[]]$GroupIds,
 
@@ -120,127 +115,124 @@ function Sync-FGGroupEligibleMember {
         throw "Failed to check/create table: $_"
     }
 
-    # Fetch PIM-enabled groups
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching PIM-enabled groups from Microsoft Graph..." -ForegroundColor Cyan
+    # Fetch PIM-enabled groups by querying all groups and checking each for eligibility schedules
+    # Note: Graph API requires $filter parameter for eligibilitySchedules endpoint - cannot query all at once
+    # isAssignableToRole and PIM-enabled are INDEPENDENT properties (since January 2023)
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching groups to check for PIM eligibility..." -ForegroundColor Cyan
 
     $graphUri = 'https://graph.microsoft.com/beta'
+    $membershipStartTime = Get-Date
 
-    if ($GroupIds) {
-        # Use specific group IDs - fetch and filter for PIM eligibility
-        $groups = @()
-        foreach ($groupId in $GroupIds) {
-            try {
-                $uri = "$graphUri/groups/$groupId`?`$select=id,displayName,isAssignableToRole,groupTypes"
-                $group = Invoke-FGGetRequest -URI $uri
-
-                # Only include if PIM-eligible
-                if ($group.isAssignableToRole -eq $true -and $group.groupTypes -notcontains "DynamicMembership") {
-                    $groups += $group
+    try {
+        # Determine which groups to check
+        if ($GroupIds) {
+            # Use specific group IDs provided by user
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking $($GroupIds.Count) specified groups..." -ForegroundColor Gray
+            $groupsToCheck = @()
+            foreach ($groupId in $GroupIds) {
+                try {
+                    $uri = "$graphUri/groups/$groupId`?`$select=id,displayName,groupTypes"
+                    $group = Invoke-FGGetRequest -URI $uri
+                    $groupsToCheck += $group
                 }
-                else {
-                    Write-Warning "Group $groupId is not PIM-enabled (requires isAssignableToRole = true and not dynamic)"
+                catch {
+                    Write-Warning "Failed to fetch group $groupId : $_"
                 }
             }
-            catch {
-                Write-Warning "Failed to fetch group $groupId : $_"
-            }
         }
-    }
-    else {
-        # Fetch all groups with PIM properties using Invoke-FGGetRequest (handles token validation and pagination)
-        $uri = "$graphUri/groups?`$select=id,displayName,isAssignableToRole,groupTypes"
-        if ($Filter) {
-            $uri += "&`$filter=$Filter"
-        }
-
-        try {
+        else {
+            # Fetch ALL groups - don't pre-filter by isAssignableToRole since PIM-enabled is independent
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fetching all groups from Microsoft Graph..." -ForegroundColor Gray
+            $uri = "$graphUri/groups?`$select=id,displayName,groupTypes"
             $allGroups = Invoke-FGGetRequest -URI $uri
             if (-not $allGroups) {
                 $allGroups = @()
             }
+
+            # Filter out groups that CANNOT be PIM-enabled (dynamic membership)
+            $groupsToCheck = $allGroups | Where-Object { $_.groupTypes -notcontains "DynamicMembership" }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($groupsToCheck.Count) candidate groups (excluded dynamic groups)" -ForegroundColor Gray
         }
-        catch {
-            throw "Failed to fetch groups from Graph: $_"
+
+        if ($groupsToCheck.Count -eq 0) {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No groups found to check for PIM eligibility."
+            return
         }
 
-        # Filter for PIM-enabled groups only
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Filtering for PIM-enabled groups (isAssignableToRole = true, not dynamic)..." -ForegroundColor Cyan
-        $groups = $allGroups | Where-Object { $_.isAssignableToRole -eq $true -and $_.groupTypes -notcontains "DynamicMembership" }
-    }
+        # Query each group for eligibility schedules (API requires groupId filter)
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking groups for PIM eligibility schedules..." -ForegroundColor Cyan
+        $allEligibleMembers = @()
+        $processedGroups = 0
+        $pimGroupCount = 0
+        $totalGroupsToCheck = $groupsToCheck.Count
 
-    $totalGroups = $groups.Count
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total PIM-enabled groups to process: $totalGroups" -ForegroundColor Green
+        foreach ($group in $groupsToCheck) {
+            $processedGroups++
+            $percentComplete = [math]::Round(($processedGroups / $totalGroupsToCheck) * 100, 1)
 
-    if ($totalGroups -eq 0) {
-        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No PIM-enabled groups found to process."
-        return
-    }
+            Write-Progress -Activity "Fetching Eligible Group Memberships" -Status "Checking group $processedGroups of $totalGroupsToCheck ($percentComplete%)" -PercentComplete $percentComplete
 
-    # Fetch all eligible group memberships (iterating through each PIM group)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching eligible group memberships from PIM..." -ForegroundColor Cyan
-    Write-Host "  This may take a while for tenants with many PIM groups..." -ForegroundColor Gray
+            # Query eligibility schedules for this specific group (API requires groupId filter)
+            $eligibilityUri = "$graphUri/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($group.id)'"
 
-    $allEligibleMembers = @()
-    $processedGroups = 0
-    $membershipStartTime = Get-Date
+            try {
+                $eligibilities = Invoke-FGGetRequest -URI $eligibilityUri
+                if (-not $eligibilities) {
+                    $eligibilities = @()
+                }
 
-    foreach ($group in $groups) {
-        $processedGroups++
-        $percentComplete = [math]::Round(($processedGroups / $totalGroups) * 100, 1)
+                # Only process if group has eligible members
+                if ($eligibilities.Count -gt 0) {
+                    $pimGroupCount++
 
-        Write-Progress -Activity "Fetching Eligible Group Memberships" -Status "Processing group $processedGroups of $totalGroups ($percentComplete%)" -PercentComplete $percentComplete
+                    # For each eligibility, get principal details to determine memberType
+                    foreach ($eligibility in $eligibilities) {
+                        try {
+                            # Get principal details to determine memberType
+                            $principalUri = "$graphUri/directoryObjects/$($eligibility.principalId)?`$select=id"
+                            $principal = Invoke-FGGetRequest -URI $principalUri
 
-        # Use eligibilitySchedules endpoint for PIM
-        $eligibilityUri = "$graphUri/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($group.id)'"
-
-        try {
-            # Fetch all eligible members for this group using Invoke-FGGetRequest (handles token validation and pagination)
-            $eligibilities = Invoke-FGGetRequest -URI $eligibilityUri
-            if (-not $eligibilities) {
-                $eligibilities = @()
+                            $membership = [PSCustomObject]@{
+                                groupId = $eligibility.groupId
+                                memberId = $eligibility.principalId
+                                memberType = $principal.'@odata.type'
+                            }
+                            $allEligibleMembers += $membership
+                        }
+                        catch {
+                            # If we can't get principal details, add without type
+                            $membership = [PSCustomObject]@{
+                                groupId = $eligibility.groupId
+                                memberId = $eligibility.principalId
+                                memberType = $null
+                            }
+                            $allEligibleMembers += $membership
+                        }
+                    }
+                }
             }
-
-            # For each eligibility, we need to get the principal details to determine type
-            foreach ($eligibility in $eligibilities) {
-                try {
-                    # Get principal details to determine memberType using Invoke-FGGetRequest (handles token validation)
-                    $principalUri = "$graphUri/directoryObjects/$($eligibility.principalId)?`$select=id"
-                    $principal = Invoke-FGGetRequest -URI $principalUri
-
-                    $membership = [PSCustomObject]@{
-                        groupId = $eligibility.groupId
-                        memberId = $eligibility.principalId
-                        memberType = $principal.'@odata.type'
-                    }
-                    $allEligibleMembers += $membership
-                }
-                catch {
-                    # If we can't get principal details, add without type
-                    $membership = [PSCustomObject]@{
-                        groupId = $eligibility.groupId
-                        memberId = $eligibility.principalId
-                        memberType = $null
-                    }
-                    $allEligibleMembers += $membership
-                }
+            catch {
+                # Group has no PIM eligibilities or error occurred - skip it
+                # This is expected for non-PIM groups
             }
 
             # Show progress every 10 groups
             if ($processedGroups % 10 -eq 0) {
                 $elapsed = (Get-Date) - $membershipStartTime
                 $rate = [math]::Round($processedGroups / $elapsed.TotalSeconds, 1)
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedGroups/$totalGroups groups, $($allEligibleMembers.Count) eligible memberships ($rate groups/sec)" -ForegroundColor Gray
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedGroups/$totalGroupsToCheck groups, $pimGroupCount PIM groups, $($allEligibleMembers.Count) memberships ($rate groups/sec)" -ForegroundColor Gray
             }
         }
-        catch {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch eligible members for group '$($group.displayName)' ($($group.id)): $_"
-        }
+
+        Write-Progress -Activity "Fetching Eligible Group Memberships" -Completed
+
+        $membershipElapsed = (Get-Date) - $membershipStartTime
+        $totalGroups = $pimGroupCount
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total eligible memberships fetched: $($allEligibleMembers.Count) from $totalGroups PIM-enabled groups (checked $processedGroups groups in $([math]::Round($membershipElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
     }
-
-    Write-Progress -Activity "Fetching Eligible Group Memberships" -Completed
-
-    $membershipElapsed = (Get-Date) - $membershipStartTime
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total eligible memberships fetched: $($allEligibleMembers.Count) from $totalGroups PIM groups (took $([math]::Round($membershipElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+    catch {
+        throw "Failed to fetch eligible memberships: $_"
+    }
 
     if ($allEligibleMembers.Count -eq 0) {
         Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No eligible memberships found to sync."
@@ -354,7 +346,7 @@ function Sync-FGGroupEligibleMember {
     Write-Host "Deleted:                    $deletedCount" -ForegroundColor White
     Write-Host "Errors:                     $errorCount" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
-    Write-Host "Note: Only PIM-enabled groups (isAssignableToRole = true) are processed" -ForegroundColor Cyan
+    Write-Host "Note: Only groups with eligible members (actual PIM-enabled groups) are processed" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
 
     return @{
