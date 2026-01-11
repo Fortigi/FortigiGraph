@@ -772,6 +772,14 @@ WHERE groupId = 'group-guid-here'
 ORDER BY depth;
 ```
 
+**Note:** The view limits recursion depth to 20 levels by default (controlled in the WHERE clause). If you need deeper nesting, you can add `OPTION (MAXRECURSION N)` when querying:
+
+```sql
+SELECT * FROM vw_GraphGroupMembersRecursive
+WHERE groupId = 'group-guid-here'
+OPTION (MAXRECURSION 50);  -- Allow up to 50 levels
+```
+
 **Use case:** "Eliminate the slow transitive members sync and calculate indirect memberships on-demand with complete path information"
 
 #### Examples
