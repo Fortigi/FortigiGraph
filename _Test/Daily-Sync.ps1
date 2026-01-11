@@ -726,8 +726,62 @@ END
     Write-SyncStep "Waiting for all sync operations to complete..."
     foreach ($job in $syncJobs) {
         $result = $job.PowerShell.EndInvoke($job.Handle)
+
+        # Capture and display stream output from the runspace
+        $hasStreamOutput = $false
+
+        # Display Information stream (Write-Host messages get redirected here in PS 5.0+)
+        if ($job.PowerShell.Streams.Information.Count -gt 0) {
+            $hasStreamOutput = $true
+            $job.PowerShell.Streams.Information | ForEach-Object {
+                Write-Host "  ℹ [$($job.Type)] $($_.MessageData)" -ForegroundColor Cyan
+            }
+        }
+
+        # Display Warning stream
+        if ($job.PowerShell.Streams.Warning.Count -gt 0) {
+            $hasStreamOutput = $true
+            $job.PowerShell.Streams.Warning | ForEach-Object {
+                Write-Host "  ⚠ [$($job.Type)] $_" -ForegroundColor Yellow
+            }
+        }
+
+        # Display Error stream (non-terminating errors)
+        if ($job.PowerShell.Streams.Error.Count -gt 0) {
+            $hasStreamOutput = $true
+            $job.PowerShell.Streams.Error | ForEach-Object {
+                Write-Host "  ✗ [$($job.Type)] $($_.Exception.Message)" -ForegroundColor Red
+                if ($_.ErrorDetails) {
+                    Write-Host "    Details: $($_.ErrorDetails)" -ForegroundColor Gray
+                }
+            }
+        }
+
+        # Display Verbose stream
+        if ($job.PowerShell.Streams.Verbose.Count -gt 0) {
+            $hasStreamOutput = $true
+            $job.PowerShell.Streams.Verbose | ForEach-Object {
+                Write-Host "  VERBOSE: [$($job.Type)] $_" -ForegroundColor Gray
+            }
+        }
+
+        # Display Debug stream
+        if ($job.PowerShell.Streams.Debug.Count -gt 0) {
+            $hasStreamOutput = $true
+            $job.PowerShell.Streams.Debug | ForEach-Object {
+                Write-Host "  DEBUG: [$($job.Type)] $_" -ForegroundColor DarkGray
+            }
+        }
+
+        # Add separator if there was stream output
+        if ($hasStreamOutput) {
+            Write-Host ""
+        }
+
+        # Dispose of the PowerShell instance
         $job.PowerShell.Dispose()
 
+        # Process the result
         if ($result.Success) {
             switch ($result.Type) {
                 "Users" {
