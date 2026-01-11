@@ -409,11 +409,6 @@ try {
     $sqlServerName = $Global:FGSQLServerName
     $sqlDatabaseName = $Global:FGSQLDatabaseName
 
-    # Capture Graph API access token for runspaces
-    $graphAccessToken = $Global:AccessToken
-    $graphTenantId = $config.Graph.TenantId
-    $graphClientId = $config.Graph.ClientId
-
     # Create sync log table if it doesn't exist
     Write-SyncStep "Ensuring sync log table exists..."
     $syncLogTableSQL = @"
@@ -476,6 +471,11 @@ END
         Write-SyncSuccess "Graph access token obtained"
     }
     #endregion
+
+    # Capture Graph API access token for runspaces (must happen AFTER authentication)
+    $graphAccessToken = $Global:AccessToken
+    $graphTenantId = $config.Graph.TenantId
+    $graphClientId = $config.Graph.ClientId
 
     #region Data Synchronization
     $executionMode = if ($ParallelExecution) { "Parallel" } else { "Sequential" }
