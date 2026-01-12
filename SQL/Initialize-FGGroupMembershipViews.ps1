@@ -458,7 +458,7 @@ WHERE r.ValidTo = '9999-12-31 23:59:59.9999999';
         }
 
         $viewNum = if ($eligibleExists) { "4" } else { "3" }
-        Write-Host "`nView $viewNum: vw_GraphGroupMembershipType" -ForegroundColor White
+        Write-Host "`nView ${viewNum}: vw_GraphGroupMembershipType" -ForegroundColor White
         $desc = @("members")
         if ($ownersExists) { $desc = @("owner") + $desc }
         if ($eligibleExists) { $desc += "eligible" }
@@ -472,14 +472,14 @@ WHERE r.ValidTo = '9999-12-31 23:59:59.9999999';
         Write-Host "  - Uses vw_GraphGroupMembersRecursive (no transitive table needed!)" -ForegroundColor Gray
 
         $nextViewNum = [int]$viewNum + 1
-        Write-Host "`nView $nextViewNum`: vw_GraphGroupMultiplePathsStats ⭐ NEW!" -ForegroundColor White
+        Write-Host "`nView ${nextViewNum}: vw_GraphGroupMultiplePathsStats ⭐ NEW!" -ForegroundColor White
         Write-Host "  - Shows users with redundant memberships (direct + indirect to same group)" -ForegroundColor Gray
         Write-Host "  - Summary view: PathCount, DirectPaths, IndirectPaths, MinDepth, MaxDepth" -ForegroundColor Gray
         Write-Host "  - Perfect for identifying over-permissioned users" -ForegroundColor Gray
         Write-Host "  - Example: User is both direct member AND member through nested group" -ForegroundColor Gray
 
         $nextViewNum++
-        Write-Host "`nView $nextViewNum`: vw_GraphGroupMultiplePaths ⭐ NEW!" -ForegroundColor White
+        Write-Host "`nView ${nextViewNum}: vw_GraphGroupMultiplePaths ⭐ NEW!" -ForegroundColor White
         Write-Host "  - Shows all paths for users with redundant memberships" -ForegroundColor Gray
         Write-Host "  - Detailed view: Shows the actual path for each membership" -ForegroundColor Gray
         Write-Host "  - Use this to understand HOW users got multiple paths to same group" -ForegroundColor Gray
