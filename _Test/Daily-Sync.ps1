@@ -1025,6 +1025,35 @@ END
             Initialize-FGGroupMembershipViews @viewParams
 
             Write-SyncSuccess "Analysis views created"
+
+            # Add performance indexes for faster view queries
+            Write-SyncStep "Adding performance indexes to tables..."
+            try {
+                $indexParams = @{}
+                if ($SyncGroupMembers) {
+                    $indexParams.DirectMembersTable = $groupMembersTableName
+                }
+                if ($SyncGroupTransitiveMembers) {
+                    $indexParams.TransitiveMembersTable = $groupTransitiveMembersTableName
+                }
+                if ($SyncGroupEligibleMembers) {
+                    $indexParams.EligibleMembersTable = $groupEligibleMembersTableName
+                }
+                if ($SyncGroupOwners) {
+                    $indexParams.OwnersTable = $groupOwnersTableName
+                }
+
+                $indexResult = Add-FGGroupMembershipIndexes @indexParams
+
+                if ($indexResult.Created -gt 0) {
+                    Write-SyncSuccess "Created $($indexResult.Created) new index(es)"
+                }
+                if ($indexResult.Skipped -gt 0) {
+                    Write-Host "  ℹ $($indexResult.Skipped) index(es) already existed" -ForegroundColor Gray
+                }
+            } catch {
+                Write-SyncError "Index creation failed" $_.Exception.Message
+            }
         } catch {
             Write-SyncError "View creation failed" $_.Exception.Message
         }
