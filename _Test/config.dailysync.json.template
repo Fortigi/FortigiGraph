@@ -78,13 +78,7 @@
     "GroupMembers": {
       "Enabled": true,
       "TableName": "GraphGroupMembers",
-      "_Note": "Direct group memberships"
-    },
-
-    "GroupTransitiveMembers": {
-      "Enabled": true,
-      "TableName": "GraphGroupTransitiveMembers",
-      "_Note": "Nested/indirect group memberships"
+      "_Note": "Direct group memberships (indirect memberships calculated via vw_GraphGroupMembersRecursive view)"
     },
 
     "GroupEligibleMembers": {

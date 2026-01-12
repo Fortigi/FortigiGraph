@@ -107,7 +107,7 @@ param(
     [bool]$SyncGroupMembers = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncGroupTransitiveMembers = $true,
+    [bool]$SyncGroupTransitiveMembers = $false,  # DEPRECATED: Use vw_GraphGroupMembersRecursive instead
 
     [Parameter(Mandatory = $false)]
     [bool]$SyncGroupEligibleMembers = $true,
