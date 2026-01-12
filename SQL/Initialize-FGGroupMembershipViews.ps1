@@ -6,27 +6,37 @@ function Initialize-FGGroupMembershipViews {
     .DESCRIPTION
     Creates views that make it easy to work with group membership data:
 
-    1. vw_GraphGroupNestedMembers
-       - Shows ONLY members who have access through nested groups (not direct members)
+    1. vw_GraphGroupMembersRecursive ⭐
+       - Foundation view: Calculates ALL memberships (direct + indirect) recursively
+       - Uses ONLY direct members table (no transitive sync needed!)
+       - Includes complete path showing how membership was obtained
+       - Shows multiple paths when a member reaches a group through different routes
+       - Includes depth and cycle detection
+       - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
+
+    2. vw_GraphGroupNestedMembers
+       - Shows ONLY members who have access through nested groups (depth > 1)
        - Useful for finding indirect access paths
 
-    2. vw_GraphGroupEligibleMembers
+    3. vw_GraphGroupEligibleMembers
        - Shows ONLY eligible members (PIM eligible, not active)
        - Useful for finding who can activate membership
 
-    3. vw_GraphGroupMembershipType
+    4. vw_GraphGroupMembershipType
        - Shows ALL relationships with membership type: Owner, Member, or Eligible
        - Uses vw_GraphGroupMembersRecursive (no need for transitive table!)
        - Includes depth column for members (shows nesting level)
        - Includes memberType for filtering by user/group/device/etc
 
-    4. vw_GraphGroupMembersRecursive ⭐ NEW!
-       - Calculates ALL memberships (direct + indirect) recursively using ONLY direct members
-       - Eliminates need for transitive members sync (75% faster!)
-       - Includes complete path showing how membership was obtained
-       - Shows multiple paths when a member reaches a group through different routes
-       - Includes depth and cycle detection
-       - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
+    5. vw_GraphGroupMultiplePathsStats ⭐ NEW!
+       - Shows users with redundant memberships (direct + indirect to same group)
+       - Summary view with PathCount, DirectPaths, IndirectPaths, MinDepth, MaxDepth
+       - Perfect for identifying over-permissioned users
+
+    6. vw_GraphGroupMultiplePaths ⭐ NEW!
+       - Shows all paths for users with redundant memberships
+       - Detailed view showing the actual path for each membership
+       - Use to understand HOW users got multiple paths to the same group
 
     .PARAMETER DirectMembersTable
     Name of the table containing direct group memberships. Default: "GraphGroupMembers"
@@ -65,10 +75,12 @@ function Initialize-FGGroupMembershipViews {
     recursively from direct members only. This eliminates the need for transitive sync.
 
     Views Created:
-    - vw_GraphGroupNestedMembers: Only indirect/nested members
+    - vw_GraphGroupMembersRecursive: Foundation view - ALL memberships with paths (recursive)
+    - vw_GraphGroupNestedMembers: Only indirect/nested members (depth > 1)
     - vw_GraphGroupEligibleMembers: Only eligible members (PIM - if table exists)
     - vw_GraphGroupMembershipType: All relationships with Owner/Member/Eligible + depth
-    - vw_GraphGroupMembersRecursive: ALL memberships with paths (recursive, uses only direct table!)
+    - vw_GraphGroupMultiplePathsStats: Users with redundant memberships - summary stats
+    - vw_GraphGroupMultiplePaths: Users with redundant memberships - detailed paths
 
     Performance Tip:
     Use vw_GraphGroupMembersRecursive instead of syncing transitive members to save ~75% sync time.
@@ -349,6 +361,81 @@ WHERE o.ValidTo = '9999-12-31 23:59:59.9999999';
         $createView3Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupMembershipType" -ForegroundColor Green
 
+        # View 5: Multiple Membership Paths - Statistics
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMultiplePathsStats" -ForegroundColor Cyan
+        Write-Host "  Purpose: Shows users with multiple paths (direct + indirect) to the same group - summary view" -ForegroundColor Gray
+
+        if ($DropIfExists) {
+            $dropView5Cmd = $connection.CreateCommand()
+            $dropView5Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMultiplePathsStats') DROP VIEW dbo.vw_GraphGroupMultiplePathsStats;"
+            $dropView5Cmd.ExecuteNonQuery() | Out-Null
+        }
+
+        $createView5SQL = @"
+CREATE VIEW dbo.vw_GraphGroupMultiplePathsStats AS
+SELECT
+    groupId,
+    memberId,
+    memberType,
+    COUNT(*) AS PathCount,
+    COUNT(CASE WHEN membershipType = 'direct' THEN 1 END) AS DirectPaths,
+    COUNT(CASE WHEN membershipType = 'indirect' THEN 1 END) AS IndirectPaths,
+    MIN(depth) AS MinDepth,
+    MAX(depth) AS MaxDepth,
+    STRING_AGG(CAST(depth AS VARCHAR(10)), ', ') AS AllDepths,
+    MIN(ValidFrom) AS ValidFrom,
+    MIN(ValidTo) AS ValidTo
+FROM dbo.vw_GraphGroupMembersRecursive
+WHERE ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current memberships
+GROUP BY groupId, memberId, memberType
+HAVING COUNT(*) > 1;  -- Only members with multiple paths
+"@
+
+        $createView5Cmd = $connection.CreateCommand()
+        $createView5Cmd.CommandText = $createView5SQL
+        $createView5Cmd.ExecuteNonQuery() | Out-Null
+        Write-Host "  ✅ Created: vw_GraphGroupMultiplePathsStats" -ForegroundColor Green
+
+        # View 6: Multiple Membership Paths - Detailed Paths
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMultiplePaths" -ForegroundColor Cyan
+        Write-Host "  Purpose: Shows all paths for users with redundant memberships - detailed view with actual paths" -ForegroundColor Gray
+
+        if ($DropIfExists) {
+            $dropView6Cmd = $connection.CreateCommand()
+            $dropView6Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMultiplePaths') DROP VIEW dbo.vw_GraphGroupMultiplePaths;"
+            $dropView6Cmd.ExecuteNonQuery() | Out-Null
+        }
+
+        $createView6SQL = @"
+CREATE VIEW dbo.vw_GraphGroupMultiplePaths AS
+WITH MultiplePaths AS (
+    SELECT groupId, memberId
+    FROM dbo.vw_GraphGroupMembersRecursive
+    WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+    GROUP BY groupId, memberId
+    HAVING COUNT(*) > 1
+)
+SELECT
+    r.groupId,
+    r.memberId,
+    r.memberType,
+    r.membershipType,
+    r.depth,
+    r.path,
+    r.ValidFrom,
+    r.ValidTo
+FROM dbo.vw_GraphGroupMembersRecursive r
+INNER JOIN MultiplePaths mp
+    ON r.groupId = mp.groupId
+    AND r.memberId = mp.memberId
+WHERE r.ValidTo = '9999-12-31 23:59:59.9999999';
+"@
+
+        $createView6Cmd = $connection.CreateCommand()
+        $createView6Cmd.CommandText = $createView6SQL
+        $createView6Cmd.ExecuteNonQuery() | Out-Null
+        Write-Host "  ✅ Created: vw_GraphGroupMultiplePaths" -ForegroundColor Green
+
         Write-Host "`n========================================" -ForegroundColor Green
         Write-Host "Views Created Successfully!" -ForegroundColor Green
         Write-Host "========================================" -ForegroundColor Green
@@ -383,6 +470,20 @@ WHERE o.ValidTo = '9999-12-31 23:59:59.9999999';
         Write-Host "  - Includes membershipType column ($($types -join '/'))" -ForegroundColor Gray
         Write-Host "  - Includes depth column for members (NULL for owners/eligible)" -ForegroundColor Gray
         Write-Host "  - Uses vw_GraphGroupMembersRecursive (no transitive table needed!)" -ForegroundColor Gray
+
+        $nextViewNum = [int]$viewNum + 1
+        Write-Host "`nView $nextViewNum`: vw_GraphGroupMultiplePathsStats ⭐ NEW!" -ForegroundColor White
+        Write-Host "  - Shows users with redundant memberships (direct + indirect to same group)" -ForegroundColor Gray
+        Write-Host "  - Summary view: PathCount, DirectPaths, IndirectPaths, MinDepth, MaxDepth" -ForegroundColor Gray
+        Write-Host "  - Perfect for identifying over-permissioned users" -ForegroundColor Gray
+        Write-Host "  - Example: User is both direct member AND member through nested group" -ForegroundColor Gray
+
+        $nextViewNum++
+        Write-Host "`nView $nextViewNum`: vw_GraphGroupMultiplePaths ⭐ NEW!" -ForegroundColor White
+        Write-Host "  - Shows all paths for users with redundant memberships" -ForegroundColor Gray
+        Write-Host "  - Detailed view: Shows the actual path for each membership" -ForegroundColor Gray
+        Write-Host "  - Use this to understand HOW users got multiple paths to same group" -ForegroundColor Gray
+        Write-Host "  - Columns: groupId, memberId, membershipType, depth, path" -ForegroundColor Gray
         Write-Host "========================================`n" -ForegroundColor Green
 
         return $true
