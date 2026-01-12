@@ -405,8 +405,7 @@ SELECT
     ValidFrom,
     ValidTo
 FROM
-    RecursiveMemberships
-OPTION (MAXRECURSION 100);  -- Allow up to 100 levels of recursion
+    RecursiveMemberships;
 "@
 
         $createView4Cmd = $connection.CreateCommand()
