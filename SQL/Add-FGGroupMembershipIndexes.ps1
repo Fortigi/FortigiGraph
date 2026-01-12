@@ -62,6 +62,8 @@ function Add-FGGroupMembershipIndexes {
     - Only creates indexes on tables that exist
     - Indexes are created as NON-CLUSTERED (temporal tables already have clustered PK)
     - Creating indexes can take several minutes on large tables (>100k rows)
+    - Command timeout set to 30 minutes to handle very large tables
+    - Progress is shown with timing for each index created
     - Indexes significantly improve query performance (3.5 min -> seconds)
     #>
 
@@ -135,6 +137,7 @@ SELECT
                     Write-Host "  Dropping existing index: $indexName" -ForegroundColor Yellow
                     $dropCmd = $connection.CreateCommand()
                     $dropCmd.CommandText = "DROP INDEX $indexName ON dbo.$tableName"
+                    $dropCmd.CommandTimeout = 300  # 5 minutes timeout for drop
                     $dropCmd.ExecuteNonQuery() | Out-Null
                     $indexExists = $false
                 }
@@ -146,13 +149,18 @@ SELECT
                     Write-Host "  Creating: $indexName" -ForegroundColor White
                     Write-Host "    Purpose: $description" -ForegroundColor Gray
                     Write-Host "    Columns: $columns" -ForegroundColor Gray
+                    Write-Host "    Note: This may take several minutes for large tables..." -ForegroundColor Gray
 
                     $createIndexSQL = "CREATE NONCLUSTERED INDEX $indexName ON dbo.$tableName ($columns)"
                     $createCmd = $connection.CreateCommand()
                     $createCmd.CommandText = $createIndexSQL
-                    $createCmd.ExecuteNonQuery() | Out-Null
+                    $createCmd.CommandTimeout = 1800  # 30 minutes timeout for large tables
 
-                    Write-Host "  ✅ Created: $indexName" -ForegroundColor Green
+                    $startTime = Get-Date
+                    $createCmd.ExecuteNonQuery() | Out-Null
+                    $duration = (Get-Date) - $startTime
+
+                    Write-Host "  ✅ Created: $indexName (took $([int]$duration.TotalSeconds) seconds)" -ForegroundColor Green
                     $script:indexesCreated++
                 }
             } catch {
