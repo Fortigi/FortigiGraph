@@ -688,7 +688,7 @@ Connect to your synced data:
 4. Use views for analysis:
    - `vw_GraphGroupMembershipType`
    - `vw_GraphGroupNestedMembers`
-   - `vw_GraphGroupEligibleMembers`
+   - `vw_GraphGroupMembersRecursive`
 
 ### Excel
 

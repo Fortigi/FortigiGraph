@@ -137,11 +137,11 @@ WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));
             # Create a helpful view for seeing all changes (drop first if exists)
             try {
                 $dropViewCmd = $connection.CreateCommand()
-                $dropViewCmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_${TableName}_AllHistory') DROP VIEW dbo.vw_${TableName}_AllHistory;"
+                $dropViewCmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_AllHistory_${TableName}') DROP VIEW dbo.vw_AllHistory_${TableName};"
                 $dropViewCmd.ExecuteNonQuery() | Out-Null
 
                 $viewSQL = @"
-CREATE VIEW dbo.vw_${TableName}_AllHistory AS
+CREATE VIEW dbo.vw_AllHistory_${TableName} AS
 SELECT
     *,
     CASE
@@ -154,7 +154,7 @@ FROM dbo.$TableName FOR SYSTEM_TIME ALL;
                 $viewCmd = $connection.CreateCommand()
                 $viewCmd.CommandText = $viewSQL
                 $viewCmd.ExecuteNonQuery() | Out-Null
-                Write-Host "  Created helper view: vw_${TableName}_AllHistory" -ForegroundColor Green
+                Write-Host "  Created helper view: vw_AllHistory_${TableName}" -ForegroundColor Green
             } catch {
                 Write-Warning "Could not create helper view (this is optional): $_"
             }

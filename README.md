@@ -704,17 +704,7 @@ WHERE groupId = 'group-guid-here';
 
 **Use case:** "Show me users who have access only through nested groups"
 
-**2. vw_GraphGroupEligibleMembers** (if PIM table exists)
-Shows only **PIM eligible** members:
-
-```sql
-SELECT * FROM vw_GraphGroupEligibleMembers
-WHERE groupId = 'group-guid-here';
-```
-
-**Use case:** "Show me who can activate membership"
-
-**3. vw_GraphGroupMembershipType**
+**2. vw_GraphGroupMembershipType**
 Shows **all members** with a `membershipType` indicator:
 - `'Direct'` - Explicitly added to the group
 - `'Indirect'` - Access through nested groups only
@@ -818,11 +808,7 @@ View 1: vw_GraphGroupNestedMembers
   - Shows only indirect/nested members
   - Excludes direct members
 
-View 2: vw_GraphGroupEligibleMembers
-  - Shows only eligible members (PIM)
-  - Members who can activate access
-
-View 3: vw_GraphGroupMembershipType
+View 2: vw_GraphGroupMembershipType
   - Shows all members (direct + indirect + eligible)
   - Includes membershipType column (Direct/Indirect/Eligible)
 ========================================

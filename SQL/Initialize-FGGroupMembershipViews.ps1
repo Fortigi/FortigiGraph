@@ -18,22 +18,18 @@ function Initialize-FGGroupMembershipViews {
        - Shows ONLY members who have access through nested groups (depth > 1)
        - Useful for finding indirect access paths
 
-    3. vw_GraphGroupEligibleMembers
-       - Shows ONLY eligible members (PIM eligible, not active)
-       - Useful for finding who can activate membership
-
-    4. vw_GraphGroupMembershipType
+    3. vw_GraphGroupMembershipType
        - Shows ALL relationships with membership type: Owner, Member, or Eligible
        - Uses vw_GraphGroupMembersRecursive (no need for transitive table!)
        - Includes depth column for members (shows nesting level)
        - Includes memberType for filtering by user/group/device/etc
 
-    5. vw_GraphGroupMultiplePathsStats ⭐ NEW!
+    4. vw_GraphGroupMultiplePathsStats ⭐ NEW!
        - Shows users with redundant memberships (direct + indirect to same group)
        - Summary view with PathCount, DirectPaths, IndirectPaths, MinDepth, MaxDepth
        - Perfect for identifying over-permissioned users
 
-    6. vw_GraphGroupMultiplePaths ⭐ NEW!
+    5. vw_GraphGroupMultiplePaths ⭐ NEW!
        - Shows all paths for users with redundant memberships
        - Detailed view showing the actual path for each membership
        - Use to understand HOW users got multiple paths to the same group
@@ -77,7 +73,6 @@ function Initialize-FGGroupMembershipViews {
     Views Created:
     - vw_GraphGroupMembersRecursive: Foundation view - ALL memberships with paths (recursive)
     - vw_GraphGroupNestedMembers: Only indirect/nested members (depth > 1)
-    - vw_GraphGroupEligibleMembers: Only eligible members (PIM - if table exists)
     - vw_GraphGroupMembershipType: All relationships with Owner/Member/Eligible + depth
     - vw_GraphGroupMultiplePathsStats: Users with redundant memberships - summary stats
     - vw_GraphGroupMultiplePaths: Users with redundant memberships - detailed paths
@@ -252,38 +247,6 @@ WHERE r.depth > 1  -- Only indirect members (not direct)
         $createView2Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupNestedMembers" -ForegroundColor Green
 
-        # View 2: Eligible Members Only (PIM eligible, not active)
-        if ($eligibleExists) {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupEligibleMembers" -ForegroundColor Cyan
-            Write-Host "  Purpose: Shows only eligible members (PIM - can activate membership)" -ForegroundColor Gray
-
-            if ($DropIfExists) {
-                $dropView2Cmd = $connection.CreateCommand()
-                $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupEligibleMembers') DROP VIEW dbo.vw_GraphGroupEligibleMembers;"
-                $dropView2Cmd.ExecuteNonQuery() | Out-Null
-            }
-
-            $createView2SQL = @"
-CREATE VIEW dbo.vw_GraphGroupEligibleMembers AS
-SELECT
-    e.groupId,
-    e.memberId,
-    e.memberType,
-    e.ValidFrom,
-    e.ValidTo
-FROM dbo.$EligibleMembersTable e
-WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
-"@
-
-            $createView2Cmd = $connection.CreateCommand()
-            $createView2Cmd.CommandText = $createView2SQL
-            $createView2Cmd.ExecuteNonQuery() | Out-Null
-            Write-Host "  ✅ Created: vw_GraphGroupEligibleMembers" -ForegroundColor Green
-        }
-        else {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)" -ForegroundColor Yellow
-        }
-
         # View 3: All Members with Membership Type Indicator (uses recursive view)
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
         $types = @()
@@ -454,14 +417,7 @@ WHERE r.ValidTo = '9999-12-31 23:59:59.9999999';
         Write-Host "  - Excludes direct members" -ForegroundColor Gray
         Write-Host "  - Includes depth column" -ForegroundColor Gray
 
-        if ($eligibleExists) {
-            Write-Host "`nView 3: vw_GraphGroupEligibleMembers" -ForegroundColor White
-            Write-Host "  - Shows only eligible members (PIM)" -ForegroundColor Gray
-            Write-Host "  - Members who can activate access" -ForegroundColor Gray
-        }
-
-        $viewNum = if ($eligibleExists) { "4" } else { "3" }
-        Write-Host "`nView ${viewNum}: vw_GraphGroupMembershipType" -ForegroundColor White
+        Write-Host "`nView 3: vw_GraphGroupMembershipType" -ForegroundColor White
         $desc = @("members")
         if ($ownersExists) { $desc = @("owner") + $desc }
         if ($eligibleExists) { $desc += "eligible" }
@@ -474,15 +430,13 @@ WHERE r.ValidTo = '9999-12-31 23:59:59.9999999';
         Write-Host "  - Includes depth column for members (NULL for owners/eligible)" -ForegroundColor Gray
         Write-Host "  - Uses vw_GraphGroupMembersRecursive (no transitive table needed!)" -ForegroundColor Gray
 
-        $nextViewNum = [int]$viewNum + 1
-        Write-Host "`nView ${nextViewNum}: vw_GraphGroupMultiplePathsStats ⭐ NEW!" -ForegroundColor White
+        Write-Host "`nView 4: vw_GraphGroupMultiplePathsStats ⭐ NEW!" -ForegroundColor White
         Write-Host "  - Shows users with redundant memberships (direct + indirect to same group)" -ForegroundColor Gray
         Write-Host "  - Summary view: PathCount, DirectPaths, IndirectPaths, MinDepth, MaxDepth" -ForegroundColor Gray
         Write-Host "  - Perfect for identifying over-permissioned users" -ForegroundColor Gray
         Write-Host "  - Example: User is both direct member AND member through nested group" -ForegroundColor Gray
 
-        $nextViewNum++
-        Write-Host "`nView ${nextViewNum}: vw_GraphGroupMultiplePaths ⭐ NEW!" -ForegroundColor White
+        Write-Host "`nView 5: vw_GraphGroupMultiplePaths ⭐ NEW!" -ForegroundColor White
         Write-Host "  - Shows all paths for users with redundant memberships" -ForegroundColor Gray
         Write-Host "  - Detailed view: Shows the actual path for each membership" -ForegroundColor Gray
         Write-Host "  - Use this to understand HOW users got multiple paths to same group" -ForegroundColor Gray

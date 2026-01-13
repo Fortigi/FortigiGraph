@@ -779,18 +779,18 @@ try {
         $cmd.CommandText = @"
 SELECT COUNT(*)
 FROM INFORMATION_SCHEMA.VIEWS
-WHERE TABLE_NAME IN ('vw_GraphGroupNestedMembers', 'vw_GraphGroupMembershipType', 'vw_GraphGroupEligibleMembers')
+WHERE TABLE_NAME IN ('vw_GraphGroupMembersRecursive', 'vw_GraphGroupNestedMembers', 'vw_GraphGroupMembershipType', 'vw_GraphGroupMultiplePathsStats', 'vw_GraphGroupMultiplePaths')
 "@
         return $cmd.ExecuteScalar()
     }
 
-    Add-TestResult -Category "Query" -TestName "View creation verification" -Passed ($viewCount -ge 2) -Data "$viewCount views created"
+    Add-TestResult -Category "Query" -TestName "View creation verification" -Passed ($viewCount -eq 5) -Data "$viewCount views created"
 
+    Register-Resource -Type "SQLView" -Name "vw_GraphGroupMembersRecursive" -Details @{ Type = "RecursiveMembersView" }
     Register-Resource -Type "SQLView" -Name "vw_GraphGroupNestedMembers" -Details @{ Type = "NestedMembersView" }
     Register-Resource -Type "SQLView" -Name "vw_GraphGroupMembershipType" -Details @{ Type = "MembershipTypeView" }
-    if ($viewCount -eq 3) {
-        Register-Resource -Type "SQLView" -Name "vw_GraphGroupEligibleMembers" -Details @{ Type = "EligibleMembersView" }
-    }
+    Register-Resource -Type "SQLView" -Name "vw_GraphGroupMultiplePathsStats" -Details @{ Type = "MultiplePathsStatsView" }
+    Register-Resource -Type "SQLView" -Name "vw_GraphGroupMultiplePaths" -Details @{ Type = "MultiplePathsView" }
 } catch {
     Add-TestResult -Category "Query" -TestName "Group membership views" -Passed $false -Message $_.Exception.Message
 }
