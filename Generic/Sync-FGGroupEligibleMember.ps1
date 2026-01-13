@@ -215,13 +215,6 @@ function Sync-FGGroupEligibleMember {
                 # Group has no PIM eligibilities or error occurred - skip it
                 # This is expected for non-PIM groups
             }
-
-            # Show progress every 10 groups
-            if ($processedGroups % 10 -eq 0) {
-                $elapsed = (Get-Date) - $membershipStartTime
-                $rate = [math]::Round($processedGroups / $elapsed.TotalSeconds, 1)
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedGroups/$totalGroupsToCheck groups, $pimGroupCount PIM groups, $($allEligibleMembers.Count) memberships ($rate groups/sec)" -ForegroundColor Gray
-            }
         }
 
         Write-Progress -Activity "Fetching Eligible Group Memberships" -Completed

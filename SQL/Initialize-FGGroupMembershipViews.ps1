@@ -152,6 +152,7 @@ SELECT
         if ($DropIfExists) {
             $dropView1Cmd = $connection.CreateCommand()
             $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembersRecursive') DROP VIEW dbo.vw_GraphGroupMembersRecursive;"
+            $dropView1Cmd.CommandTimeout = 300  # 5 minutes for drop
             $dropView1Cmd.ExecuteNonQuery() | Out-Null
         }
 
@@ -217,6 +218,7 @@ FROM
 
         $createView1Cmd = $connection.CreateCommand()
         $createView1Cmd.CommandText = $createView1SQL
+        $createView1Cmd.CommandTimeout = 600  # 10 minutes for recursive view creation
         $createView1Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupMembersRecursive" -ForegroundColor Green
 
@@ -227,6 +229,7 @@ FROM
         if ($DropIfExists) {
             $dropView2Cmd = $connection.CreateCommand()
             $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupNestedMembers') DROP VIEW dbo.vw_GraphGroupNestedMembers;"
+            $dropView2Cmd.CommandTimeout = 300  # 5 minutes for drop
             $dropView2Cmd.ExecuteNonQuery() | Out-Null
         }
 
