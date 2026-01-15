@@ -153,14 +153,14 @@ Write-TestSuccess "Configuration validated"
 Write-TestStep "Loading secure credentials..."
 try {
     # Get SQL Admin Password (required)
-    $SecurePassword = Get-SecureConfigValue `
+    $SecurePassword = Get-FgSecureConfigValue `
         -ConfigPath $ConfigFile `
         -PropertyPath "Azure.AdminUserPassword" `
         -PromptMessage "Enter SQL Server Admin Password" `
         -AsSecureString
 
     # Get Graph Client Secret (optional - can be empty for interactive auth)
-    $clientSecret = Get-SecureConfigValue `
+    $clientSecret = Get-FgSecureConfigValue `
         -ConfigPath $ConfigFile `
         -PropertyPath "Graph.ClientSecret" `
         -PromptMessage "Enter Graph Client Secret (or press Enter for interactive auth)" `

@@ -24,7 +24,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 
 # Start transcript to capture all console output (unique per config file)
 $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
-$transcriptFile = Join-Path $PSScriptRoot "integration-test-$configBaseName.log"
+$transcriptFile = Join-Path $PSScriptRoot ".\logs\integration-test-$configBaseName.log"
 Write-Host "Starting transcript logging..." -ForegroundColor Gray
 Start-Transcript -Path $transcriptFile -Force | Out-Null
 Write-Host "Transcript logging to: $transcriptFile`n" -ForegroundColor Cyan
@@ -98,7 +98,16 @@ function Register-Resource {
     }
 }
 
-# Secure config functions now loaded from module (Get-FGSecureConfigValue, etc.)
+# Import module first - secure config functions are part of the module
+Write-TestHeader "Test 1: Module Import"
+
+try {
+    Import-Module $modulePath -Force
+    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $true
+} catch {
+    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $false -Message $_.Exception.Message
+    exit 1
+}
 
 # Load configuration
 Write-TestHeader "Loading Test Configuration"
@@ -145,18 +154,18 @@ if (-not $configValid) {
 
 Write-TestSuccess "Configuration validated"
 
-# Load secure credentials
+# Load secure credentials (now that module is loaded)
 Write-TestStep "Loading secure credentials..."
 try {
     # Get SQL Admin Password (required)
-    $SecurePassword = Get-SecureConfigValue `
+    $SecurePassword = Get-FgSecureConfigValue `
         -ConfigPath $ConfigFile `
         -PropertyPath "Azure.AdminUserPassword" `
         -PromptMessage "Enter SQL Server Admin Password" `
         -AsSecureString
 
     # Get Graph Client Secret (optional - can be empty for interactive auth)
-    $clientSecret = Get-SecureConfigValue `
+    $clientSecret = Get-FgSecureConfigValue `
         -ConfigPath $ConfigFile `
         -PropertyPath "Graph.ClientSecret" `
         -PromptMessage "Enter Graph Client Secret (or press Enter for interactive auth)" `
@@ -165,17 +174,6 @@ try {
     Write-TestSuccess "Secure credentials loaded"
 } catch {
     Write-TestFailure "Failed to load credentials: $($_.Exception.Message)"
-    exit 1
-}
-
-# Import module
-Write-TestHeader "Test 1: Module Import"
-
-try {
-    Import-Module $modulePath -Force
-    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $true
-} catch {
-    Add-TestResult -Category "Setup" -TestName "Import FortigiGraph module" -Passed $false -Message $_.Exception.Message
     exit 1
 }
 
@@ -852,8 +850,8 @@ ORDER BY m.membershipType, m.groupId
     Add-TestResult -Category "Query" -TestName "Group membership view queries" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 22: Group Sync Summary Query
-Write-TestHeader "Test 22: Group Sync Summary"
+# Test 23: Group Sync Summary Query
+Write-TestHeader "Test 23: Group Sync Summary"
 
 try {
     Write-TestStep "Generating comprehensive group sync summary..."
@@ -938,8 +936,8 @@ FROM dbo.GraphGroupOwners_Test
     Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 23: Start-FGSync function with config file (sequential sync)
-Write-TestHeader "Test 23: Start-FGSync (Sequential Sync)"
+# Test 24: Start-FGSync function with config file (sequential sync)
+Write-TestHeader "Test 24: Start-FGSync (Sequential Sync)"
 
 try {
     Write-TestStep "Testing Start-FGSync function with config file..."
@@ -1057,8 +1055,8 @@ try {
     Add-TestResult -Category "Sync" -TestName "Start-FGSync sequential" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 24: Start-FGSync alias test
-Write-TestHeader "Test 24: Start-FGSync Alias (Daily-Sync)"
+# Test 25: Start-FGSync alias test
+Write-TestHeader "Test 25: Start-FGSync Alias (Daily-Sync)"
 
 try {
     Write-TestStep "Testing Daily-Sync alias..."
@@ -1080,7 +1078,7 @@ try {
 
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 25: Cleanup Test Resources"
+    Write-TestHeader "Test 26: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."
