@@ -116,19 +116,19 @@ That's it! You now have all your Microsoft Graph users in SQL with automatic his
 For production environments with automated daily syncs:
 
 ```powershell
-# 1. Create a config file
-cd _Test
-cp config.dailysync.json.template config.production.json
+# 1. Create a config file from template
+cp Config\config.template.json C:\MyConfigs\production.json
 
 # 2. Edit the config file
 # Fill in your Azure subscription, SQL server, and Graph settings
 
-# 3. Run the sync
-.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+# 3. Import module and run the sync
+Import-Module FortigiGraph
+Start-FGSync -ConfigFile C:\MyConfigs\production.json
 
 # 4. Schedule it with Task Scheduler
 $action = New-ScheduledTaskAction -Execute "pwsh.exe" `
-    -Argument "-File C:\Path\_Test\Daily-Sync.ps1 -ConfigFile C:\Path\config.production.json"
+    -Argument "-Command Import-Module FortigiGraph; Start-FGSync -ConfigFile C:\MyConfigs\production.json"
 $trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
 Register-ScheduledTask -TaskName "Graph Daily Sync" -Action $action -Trigger $trigger
 ```
@@ -592,11 +592,11 @@ $mappings | Export-Csv -Path "attribute-mappings.csv" -NoTypeInformation
 
 ## Production Deployment (Daily Sync)
 
-For production environments, use the **Daily Sync** runbook to automate Graph data synchronization.
+For production environments, use **Start-FGSync** to automate Graph data synchronization.
 
 ### Configuration File
 
-Create a config file with all your settings:
+Create a config file from the template in `Config/config.template.json`:
 
 ```json
 {
@@ -653,8 +653,14 @@ Create a config file with all your settings:
 ### Running Daily Sync
 
 ```powershell
+# Import the module
+Import-Module FortigiGraph
+
 # Run once
-.\Daily-Sync.ps1 -ConfigFile .\config.production.json
+Start-FGSync -ConfigFile C:\MyConfigs\production.json
+
+# Or use the alias
+Daily-Sync -ConfigFile C:\MyConfigs\production.json
 
 # On first run, you'll be prompted for passwords
 # They will be encrypted and stored in the config file
@@ -666,7 +672,7 @@ Create a config file with all your settings:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "pwsh.exe" `
-    -Argument "-File C:\Scripts\_Test\Daily-Sync.ps1 -ConfigFile C:\Scripts\config.production.json"
+    -Argument "-Command Import-Module FortigiGraph; Start-FGSync -ConfigFile C:\MyConfigs\production.json"
 
 $trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
 
@@ -682,7 +688,7 @@ Register-ScheduledTask `
 
 **Azure Automation:**
 
-1. Upload the Daily-Sync.ps1 script as a runbook
+1. Create a runbook that imports FortigiGraph and runs Start-FGSync
 2. Upload the config file as an automation variable
 3. Schedule the runbook to run daily
 4. Configure managed identity for Azure SQL access
@@ -699,10 +705,10 @@ Register-ScheduledTask `
 
 ### Monitoring
 
-The script creates detailed logs:
+Start-FGSync creates detailed logs in your Documents folder:
 
 ```
-_Test/daily-sync-config.production-YYYYMMDD-HHMMSS.log
+%USERPROFILE%\Documents\FortigiGraph\Logs\sync-production-YYYYMMDD-HHMMSS.log
 ```
 
 **Log Contents:**
@@ -1141,14 +1147,24 @@ This follows the **DRY (Don't Repeat Yourself)** principle.
 
 ```
 FortigiGraph/
-├── Base/          # Authentication & HTTP operations (~17 functions)
-├── Generic/       # Graph API wrappers (~50 functions)
-├── SQL/           # Azure SQL operations (10 functions)
+├── Base/          # Authentication & HTTP operations (~20 functions)
+├── Generic/       # Graph API wrappers (~44 functions)
 ├── Specific/      # Business logic helpers (~10 functions)
-└── _Test/         # Testing & production runbooks (5 scripts)
+├── SQL/           # Azure SQL operations (10 functions)
+├── Sync/          # Data synchronization (7 functions)
+│   ├── Sync-FGUser.ps1
+│   ├── Sync-FGGroup.ps1
+│   ├── Sync-FGGroupMember.ps1
+│   ├── Sync-FGGroupTransitiveMember.ps1
+│   ├── Sync-FGGroupEligibleMember.ps1
+│   ├── Sync-FGGroupOwner.ps1
+│   └── Start-FGSync.ps1  # Main sync orchestration
+├── Config/        # Configuration templates
+│   └── config.template.json
+└── _Test/         # Testing scripts
 ```
 
-Total: **~90 functions, ~5,500 lines of code**
+Total: **~91 functions, ~6,200 lines of code**
 
 ---
 
