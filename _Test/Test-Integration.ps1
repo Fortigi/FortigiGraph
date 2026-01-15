@@ -938,9 +938,149 @@ FROM dbo.GraphGroupOwners_Test
     Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $false -Message $_.Exception.Message
 }
 
+# Test 23: Start-FGSync function with config file (sequential sync)
+Write-TestHeader "Test 23: Start-FGSync (Sequential Sync)"
+
+try {
+    Write-TestStep "Testing Start-FGSync function with config file..."
+
+    # Create a temporary config file for testing
+    $tempConfigPath = Join-Path $PSScriptRoot "config.startsync-test.json"
+
+    # Build test config based on main config
+    $syncConfig = @{
+        Azure = @{
+            SubscriptionId = $config.Azure.SubscriptionId
+            ResourceGroupName = $config.Azure.ResourceGroupName
+            SqlServerName = $config.Azure.SQLServerName
+            SqlDatabaseName = $config.Azure.SqlDatabaseName
+            SqlServerAdminUsername = $config.Azure.SqlServerAdminUsername
+            Location = $config.Azure.Location
+            SkuName = $config.Azure.SkuName
+        }
+        Graph = @{
+            TenantId = $config.Graph.TenantId
+            ClientId = $config.Graph.ClientId
+        }
+        Sync = @{
+            Users = @{
+                Enabled = $true
+                TableName = "GraphUsers_StartSync"
+                Filter = "accountEnabled eq true"
+                AdditionalAttributes = @("officeLocation")
+            }
+            Groups = @{
+                Enabled = $true
+                TableName = "GraphGroups_StartSync"
+                Filter = ""
+            }
+            GroupMembers = @{
+                Enabled = $true
+                TableName = "GraphGroupMembers_StartSync"
+            }
+            GroupTransitiveMembers = @{
+                Enabled = $false
+            }
+            GroupEligibleMembers = @{
+                Enabled = $false
+            }
+            GroupOwners = @{
+                Enabled = $true
+                TableName = "GraphGroupOwners_StartSync"
+            }
+            Views = @{
+                Enabled = $false
+            }
+        }
+    }
+
+    # Handle encrypted credentials
+    if ($config.Azure.PSObject.Properties['SqlServerAdminPassword_Encrypted']) {
+        $syncConfig.Azure.SqlServerAdminPassword_Encrypted = $config.Azure.SqlServerAdminPassword_Encrypted
+    }
+    if ($config.Graph.PSObject.Properties['ClientSecret_Encrypted']) {
+        $syncConfig.Graph.ClientSecret_Encrypted = $config.Graph.ClientSecret_Encrypted
+    }
+
+    # Write temp config
+    $syncConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $tempConfigPath
+
+    Write-TestStep "Running Start-FGSync with sequential sync..."
+    $syncStartTime = Get-Date
+
+    # Run the sync
+    Start-FGSync -ConfigFile $tempConfigPath
+
+    $syncDuration = (Get-Date) - $syncStartTime
+    Write-TestSuccess "Start-FGSync completed in $($syncDuration.TotalSeconds.ToString('F2')) seconds"
+
+    # Verify tables were created
+    Write-TestStep "Verifying synced tables..."
+    $tables = Get-FGSQLTable
+    $expectedTables = @("GraphUsers_StartSync", "GraphGroups_StartSync", "GraphGroupMembers_StartSync", "GraphGroupOwners_StartSync")
+
+    $allTablesExist = $true
+    foreach ($tableName in $expectedTables) {
+        if ($tables.TableName -contains $tableName) {
+            Write-TestSuccess "Table found: $tableName"
+        } else {
+            Write-Host "  ✗ Table missing: $tableName" -ForegroundColor Red
+            $allTablesExist = $false
+        }
+    }
+
+    # Verify row counts
+    if ($allTablesExist) {
+        Write-TestStep "Verifying row counts..."
+        $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphUsers_StartSync" -AsScalar
+        $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroups_StartSync" -AsScalar
+        $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupMembers_StartSync" -AsScalar
+        $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupOwners_StartSync" -AsScalar
+
+        Write-TestSuccess "Users synced: $userCount"
+        Write-TestSuccess "Groups synced: $groupCount"
+        Write-TestSuccess "Memberships synced: $memberCount"
+        Write-TestSuccess "Ownerships synced: $ownerCount"
+
+        $syncPassed = ($userCount -gt 0) -and ($groupCount -gt 0)
+    } else {
+        $syncPassed = $false
+    }
+
+    # Cleanup temp config
+    Remove-Item -Path $tempConfigPath -Force -ErrorAction SilentlyContinue
+
+    Add-TestResult -Category "Sync" -TestName "Start-FGSync sequential" -Passed $syncPassed -Message "Duration: $($syncDuration.TotalSeconds.ToString('F2'))s, Users: $userCount, Groups: $groupCount"
+
+} catch {
+    Remove-Item -Path $tempConfigPath -Force -ErrorAction SilentlyContinue
+    Add-TestResult -Category "Sync" -TestName "Start-FGSync sequential" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 24: Start-FGSync alias test
+Write-TestHeader "Test 24: Start-FGSync Alias (Daily-Sync)"
+
+try {
+    Write-TestStep "Testing Daily-Sync alias..."
+
+    # Verify alias exists
+    $aliasExists = Get-Alias -Name "Daily-Sync" -ErrorAction SilentlyContinue
+
+    if ($aliasExists -and $aliasExists.ResolvedCommandName -eq "Start-FGSync") {
+        Write-TestSuccess "Alias 'Daily-Sync' correctly points to Start-FGSync"
+        Add-TestResult -Category "Sync" -TestName "Start-FGSync alias" -Passed $true
+    } else {
+        Write-Host "  ✗ Alias 'Daily-Sync' not found or not pointing to Start-FGSync" -ForegroundColor Red
+        Add-TestResult -Category "Sync" -TestName "Start-FGSync alias" -Passed $false -Message "Alias not configured correctly"
+    }
+
+} catch {
+    Add-TestResult -Category "Sync" -TestName "Start-FGSync alias" -Passed $false -Message $_.Exception.Message
+}
+
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 23: Cleanup Test Resources"
+    Write-TestHeader "Test 25: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."
