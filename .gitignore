@@ -1,1 +1,2 @@
-_Test/*.json
+Config/*.json
+.claude/
