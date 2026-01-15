@@ -950,11 +950,10 @@ try {
         Azure = @{
             SubscriptionId = $config.Azure.SubscriptionId
             ResourceGroupName = $config.Azure.ResourceGroupName
-            SqlServerName = $config.Azure.SQLServerName
-            SqlDatabaseName = $config.Azure.SqlDatabaseName
-            SqlServerAdminUsername = $config.Azure.SqlServerAdminUsername
+            SQLServerName = $config.Azure.SQLServerName
+            DatabaseName = $config.Azure.DatabaseName
+            AdminUsername = $config.Azure.AdminUsername
             Location = $config.Azure.Location
-            SkuName = $config.Azure.SkuName
         }
         Graph = @{
             TenantId = $config.Graph.TenantId
@@ -989,12 +988,13 @@ try {
             Views = @{
                 Enabled = $false
             }
+            ParallelExecution = $false  # Explicitly test sequential mode
         }
     }
 
     # Handle encrypted credentials
-    if ($config.Azure.PSObject.Properties['SqlServerAdminPassword_Encrypted']) {
-        $syncConfig.Azure.SqlServerAdminPassword_Encrypted = $config.Azure.SqlServerAdminPassword_Encrypted
+    if ($config.Azure.PSObject.Properties['AdminUserPassword_Encrypted']) {
+        $syncConfig.Azure.AdminUserPassword_Encrypted = $config.Azure.AdminUserPassword_Encrypted
     }
     if ($config.Graph.PSObject.Properties['ClientSecret_Encrypted']) {
         $syncConfig.Graph.ClientSecret_Encrypted = $config.Graph.ClientSecret_Encrypted
@@ -1055,8 +1055,127 @@ try {
     Add-TestResult -Category "Sync" -TestName "Start-FGSync sequential" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 25: Start-FGSync alias test
-Write-TestHeader "Test 25: Start-FGSync Alias (Daily-Sync)"
+# Test 25: Start-FGSync function with parallel execution
+Write-TestHeader "Test 25: Start-FGSync (Parallel Sync)"
+
+try {
+    Write-TestStep "Testing Start-FGSync function with parallel execution..."
+
+    # Create a temporary config file for testing parallel sync
+    $tempConfigPath = Join-Path $PSScriptRoot "config.startsync-parallel-test.json"
+
+    # Build test config based on main config
+    $syncConfig = @{
+        Azure = @{
+            SubscriptionId = $config.Azure.SubscriptionId
+            ResourceGroupName = $config.Azure.ResourceGroupName
+            SQLServerName = $config.Azure.SQLServerName
+            DatabaseName = $config.Azure.DatabaseName
+            AdminUsername = $config.Azure.AdminUsername
+            Location = $config.Azure.Location
+        }
+        Graph = @{
+            TenantId = $config.Graph.TenantId
+            ClientId = $config.Graph.ClientId
+        }
+        Sync = @{
+            Users = @{
+                Enabled = $true
+                TableName = "GraphUsers_ParallelSync"
+                Filter = "accountEnabled eq true"
+                AdditionalAttributes = @("officeLocation", "department")
+            }
+            Groups = @{
+                Enabled = $true
+                TableName = "GraphGroups_ParallelSync"
+                Filter = ""
+            }
+            GroupMembers = @{
+                Enabled = $true
+                TableName = "GraphGroupMembers_ParallelSync"
+            }
+            GroupTransitiveMembers = @{
+                Enabled = $false
+            }
+            GroupEligibleMembers = @{
+                Enabled = $false
+            }
+            GroupOwners = @{
+                Enabled = $true
+                TableName = "GraphGroupOwners_ParallelSync"
+            }
+            Views = @{
+                Enabled = $false
+            }
+            ParallelExecution = $true  # Enable parallel mode
+        }
+    }
+
+    # Handle encrypted credentials
+    if ($config.Azure.PSObject.Properties['AdminUserPassword_Encrypted']) {
+        $syncConfig.Azure.AdminUserPassword_Encrypted = $config.Azure.AdminUserPassword_Encrypted
+    }
+    if ($config.Graph.PSObject.Properties['ClientSecret_Encrypted']) {
+        $syncConfig.Graph.ClientSecret_Encrypted = $config.Graph.ClientSecret_Encrypted
+    }
+
+    # Write temp config
+    $syncConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $tempConfigPath
+
+    Write-TestStep "Running Start-FGSync with parallel execution (up to 6 concurrent operations)..."
+    $syncStartTime = Get-Date
+
+    # Run the sync with parallel execution
+    Start-FGSync -ConfigFile $tempConfigPath
+
+    $parallelSyncDuration = (Get-Date) - $syncStartTime
+    Write-TestSuccess "Start-FGSync (parallel) completed in $($parallelSyncDuration.TotalSeconds.ToString('F2')) seconds"
+
+    # Verify tables were created
+    Write-TestStep "Verifying synced tables..."
+    $tables = Get-FGSQLTable
+    $expectedTables = @("GraphUsers_ParallelSync", "GraphGroups_ParallelSync", "GraphGroupMembers_ParallelSync", "GraphGroupOwners_ParallelSync")
+
+    $allTablesExist = $true
+    foreach ($tableName in $expectedTables) {
+        if ($tables.TableName -contains $tableName) {
+            Write-TestSuccess "Table found: $tableName"
+        } else {
+            Write-Host "  ✗ Table missing: $tableName" -ForegroundColor Red
+            $allTablesExist = $false
+        }
+    }
+
+    # Verify row counts
+    if ($allTablesExist) {
+        Write-TestStep "Verifying row counts..."
+        $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphUsers_ParallelSync" -AsScalar
+        $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroups_ParallelSync" -AsScalar
+        $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupMembers_ParallelSync" -AsScalar
+        $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupOwners_ParallelSync" -AsScalar
+
+        Write-TestSuccess "Users synced: $userCount"
+        Write-TestSuccess "Groups synced: $groupCount"
+        Write-TestSuccess "Memberships synced: $memberCount"
+        Write-TestSuccess "Ownerships synced: $ownerCount"
+
+        $syncPassed = ($userCount -gt 0) -and ($groupCount -gt 0)
+    } else {
+        $syncPassed = $false
+    }
+
+    # Cleanup temp config
+    Remove-Item -Path $tempConfigPath -Force -ErrorAction SilentlyContinue
+
+    Add-TestResult -Category "Sync" -TestName "Start-FGSync parallel" -Passed $syncPassed -Message "Duration: $($parallelSyncDuration.TotalSeconds.ToString('F2'))s, Users: $userCount, Groups: $groupCount"
+
+} catch {
+    Remove-Item -Path $tempConfigPath -Force -ErrorAction SilentlyContinue
+    Add-TestResult -Category "Sync" -TestName "Start-FGSync parallel" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 26: Start-FGSync alias test
+Write-TestHeader "Test 26: Start-FGSync Alias (Daily-Sync)"
 
 try {
     Write-TestStep "Testing Daily-Sync alias..."
@@ -1078,7 +1197,7 @@ try {
 
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 26: Cleanup Test Resources"
+    Write-TestHeader "Test 27: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."

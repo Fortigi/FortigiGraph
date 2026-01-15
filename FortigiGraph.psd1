@@ -27,7 +27,7 @@ Author = 'Wim van den Heijkant'
 CompanyName = 'Fortigi'
 
 # Copyright statement for this module
-Copyright = '(c) Wim van den Heijkant. All rights reserved.'
+Copyright = '(c) 2025 Wim van den Heijkant / Fortigi. Licensed under the MIT License.'
 
 # Description of the functionality provided by this module
 Description = 'PowerShell Module to assist with scripting against the Microsoft Graph. The sources for this module, including versioning can be found on GitHub: https://github.com/Fortigi/FortigiGraph'
@@ -95,13 +95,13 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        # Tags = @()
+        Tags = @('MicrosoftGraph', 'Graph', 'AzureAD', 'EntraID', 'SQL', 'Azure', 'IdentityGovernance')
 
         # A URL to the license for this module.
-        # LicenseUri = ''
+        LicenseUri = 'https://github.com/Fortigi/FortigiGraph/blob/main/LICENSE'
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://github.com/Fortigi/FortigiGraph'
 
         # A URL to an icon representing this module.
         # IconUri = ''

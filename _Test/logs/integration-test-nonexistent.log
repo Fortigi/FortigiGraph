@@ -1,0 +1,33 @@
+**********************
+PowerShell transcript start
+Start time: 20260115143015
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -NoProfile -File Test-Integration.ps1 -ConfigFile nonexistent.json
+Process ID: 17028
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\integration-test-nonexistent.log
+
+Test 1: Module Import
+=====================
+  ✓ Import FortigiGraph module
+
+Loading Test Configuration
+==========================
+Configuration file not found. Please read the readme file.
+PS>TerminatingError(): "System error."
+**********************
+PowerShell transcript end
+End time: 20260115143017
+**********************

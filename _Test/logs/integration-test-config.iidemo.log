@@ -1,12 +1,12 @@
 **********************
 PowerShell transcript start
-Start time: 20260115113109
+Start time: 20260115143149
 Username: AzureAD\WimvandenHeijkant
 RunAs User: AzureAD\WimvandenHeijkant
 Configuration Name: 
 Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
 Host Application: C:\Program Files\PowerShell\7\pwsh.dll
-Process ID: 4028
+Process ID: 9604
 PSVersion: 7.5.4
 PSEdition: Core
 GitCommitId: 7.5.4
@@ -17,7 +17,7 @@ PSRemotingProtocolVersion: 2.3
 SerializationVersion: 1.1.0.1
 WSManStackVersion: 3.0
 **********************
-Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\.\logs\integration-test-config.iidemo.log
+Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\integration-test-config.iidemo.log
 
 Test 1: Module Import
 =====================
@@ -25,7 +25,22 @@ Test 1: Module Import
 
 Loading Test Configuration
 ==========================
-  ✓ Configuration loaded from .\Config\config.iidemo.json
+Configuration file not found. Please read the readme file.
+PS C:\Source\Fortigi\GitHub\FortigiGraph> .\_Test\Test-Integration.ps1 -configfile .\Config\iidemo.json
+
+========================================
+FortigiGraph Integration Test Suite
+========================================
+Starting transcript logging...
+Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\integration-test-iidemo.log
+
+Test 1: Module Import
+=====================
+  ✓ Import FortigiGraph module
+
+Loading Test Configuration
+==========================
+  ✓ Configuration loaded from .\Config\iidemo.json
   → Validating configuration...
   → Using Graph TenantId for Azure operations: 10b6a2c8-41f9-400d-8020-4ca96606899f
   ✓ Configuration validated
@@ -35,10 +50,6 @@ Loading Test Configuration
 Test 2: Azure Connection
 ========================
   → Checking Azure connection...
-WARNING: You're using Az version 13.0.0. The latest version of Az is 15.2.0. Upgrade your Az modules using the following commands:
-  Update-PSResource Az -WhatIf    -- Simulate updating your Az modules.
-  Update-PSResource Az            -- Update your Az modules.
-There will be breaking changes from 13.0.0 to 15.2.0. Open https://go.microsoft.com/fwlink/?linkid=2241373 and check the details.
   → Switching to correct tenant/subscription...
   → Current: Tenant=30453998-4784-4b0e-bdb0-a8ba14eff494, Sub=affbe01c-589c-45c3-a6b0-ab0ed3c7fce4
   → Target: Tenant=10b6a2c8-41f9-400d-8020-4ca96606899f, Sub=6af08f87-5594-49ed-a029-976707a2a70b
@@ -126,7 +137,7 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/15/2026 10:34:11
+  Server Time: 01/15/2026 13:34:47
   ✓ SQL Server created
   ✓ SQL Server auto-connected
 
@@ -138,7 +149,7 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/15/2026 10:34:12
+  Server Time: 01/15/2026 13:34:47
   ✓ SQL connection verified
 
 Test 7: Table Creation (Default Properties)
@@ -180,40 +191,40 @@ True
 Test 10: Data Sync (Default Properties)
 =======================================
   → Syncing users with default properties...
-[11:34:12] Using default attributes: 20 attributes
-[11:34:12] Table 'GraphUsers_DefaultTest' already exists. Checking schema...
-  [11:34:13] Found 15 new attribute(s) to add: jobTitle, employeeId, userType, givenName, managerId, onPremisesSamAccountName, surname, companyName, employeeType, lastSignInDateTime, department, createdDateTime, onPremisesDistinguishedName, employeeHireDate, onPremisesSyncEnabled
-  [11:34:13] Adding 15 column(s) to table 'GraphUsers_DefaultTest'...
-    [11:34:13] Adding column: jobTitle (NVARCHAR(255))
-    [11:34:13] Adding column: employeeId (NVARCHAR(255))
-    [11:34:13] Adding column: userType (NVARCHAR(50))
-    [11:34:13] Adding column: givenName (NVARCHAR(255))
-    [11:34:13] Adding column: managerId (UNIQUEIDENTIFIER)
-    [11:34:13] Adding column: onPremisesSamAccountName (NVARCHAR(255))
-    [11:34:13] Adding column: surname (NVARCHAR(255))
-    [11:34:13] Adding column: companyName (NVARCHAR(255))
-    [11:34:14] Adding column: employeeType (NVARCHAR(255))
-    [11:34:14] Adding column: lastSignInDateTime (DATETIME2)
-    [11:34:14] Adding column: department (NVARCHAR(255))
-    [11:34:14] Adding column: createdDateTime (DATETIME2)
-    [11:34:14] Adding column: onPremisesDistinguishedName (NVARCHAR(1000))
-    [11:34:14] Adding column: employeeHireDate (DATETIME2)
-    [11:34:14] Adding column: onPremisesSyncEnabled (BIT)
-  [11:34:14] Schema updated successfully
+[14:34:48] Using default attributes: 20 attributes
+[14:34:48] Table 'GraphUsers_DefaultTest' already exists. Checking schema...
+  [14:34:49] Found 15 new attribute(s) to add: onPremisesDistinguishedName, onPremisesSyncEnabled, department, createdDateTime, employeeHireDate, managerId, userType, employeeId, surname, lastSignInDateTime, givenName, onPremisesSamAccountName, employeeType, jobTitle, companyName
+  [14:34:49] Adding 15 column(s) to table 'GraphUsers_DefaultTest'...
+    [14:34:49] Adding column: onPremisesDistinguishedName (NVARCHAR(1000))
+    [14:34:49] Adding column: onPremisesSyncEnabled (BIT)
+    [14:34:49] Adding column: department (NVARCHAR(255))
+    [14:34:49] Adding column: createdDateTime (DATETIME2)
+    [14:34:49] Adding column: employeeHireDate (DATETIME2)
+    [14:34:49] Adding column: managerId (UNIQUEIDENTIFIER)
+    [14:34:49] Adding column: userType (NVARCHAR(50))
+    [14:34:49] Adding column: employeeId (NVARCHAR(255))
+    [14:34:50] Adding column: surname (NVARCHAR(255))
+    [14:34:50] Adding column: lastSignInDateTime (DATETIME2)
+    [14:34:50] Adding column: givenName (NVARCHAR(255))
+    [14:34:50] Adding column: onPremisesSamAccountName (NVARCHAR(255))
+    [14:34:50] Adding column: employeeType (NVARCHAR(255))
+    [14:34:50] Adding column: jobTitle (NVARCHAR(255))
+    [14:34:50] Adding column: companyName (NVARCHAR(255))
+  [14:34:50] Schema updated successfully
 
-[11:34:14] Fetching users from Microsoft Graph...
-[11:34:15] Total users fetched: 34 (took 0.6s)
+[14:34:50] Fetching users from Microsoft Graph...
+[14:34:51] Total users fetched: 34 (took 0.3s)
 
-[11:34:15] Syncing users to SQL Server...
-[11:34:15] Preparing data for bulk sync...
-[11:34:15] Database connection established
-[11:34:15] Starting transaction...
-[11:34:15] Bulk merging 34 users...
-[11:34:17] Bulk merge completed: 34 inserted, 0 updated (22.6 users/sec)
-[11:34:17] Checking for deleted users...
-  [11:34:17] No deleted users found
-[11:34:17] Committing transaction...
-[11:34:17] Transaction committed successfully (took 1.9s)
+[14:34:51] Syncing users to SQL Server...
+[14:34:51] Preparing data for bulk sync...
+[14:34:51] Database connection established
+[14:34:51] Starting transaction...
+[14:34:51] Bulk merging 34 users...
+[14:34:53] Bulk merge completed: 34 inserted, 0 updated (19.2 users/sec)
+[14:34:53] Checking for deleted users...
+  [14:34:53] No deleted users found
+[14:34:53] Committing transaction...
+[14:34:53] Transaction committed successfully (took 2.3s)
 
 ========================================
 Sync Complete!
@@ -228,9 +239,9 @@ Attributes:      20
 All changes are automatically tracked in GraphUsers_DefaultTestHistory
 ========================================
 
-Key   : Attributes
-Value : {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
-Name  : Attributes
+Key   : TableName
+Value : GraphUsers_DefaultTest
+Name  : TableName
 
 
 Key   : TotalUsers
@@ -238,19 +249,19 @@ Value : 34
 Name  : TotalUsers
 
 
-Key   : DeletedCount
-Value : 0
-Name  : DeletedCount
-
-
 Key   : ErrorCount
 Value : 0
 Name  : ErrorCount
 
 
-Key   : TableName
-Value : GraphUsers_DefaultTest
-Name  : TableName
+Key   : DeletedCount
+Value : 0
+Name  : DeletedCount
+
+
+Key   : Attributes
+Value : {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
+Name  : Attributes
 
 
 Key   : SyncedCount
@@ -264,10 +275,10 @@ Name  : SyncedCount
 Test 11: Data Sync (Additional Attributes)
 ==========================================
   → Syncing users with Additional Attributes...
-[11:34:17] Using default attributes + 3 additional: Total 22 attributes
+[14:34:53] Using default attributes + 3 additional: Total 22 attributes
 WARNING: Unknown attribute 'extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfEmploymentUserID', using NVARCHAR(MAX). Consider adding to type map.
 WARNING: Unknown attribute 'extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfTeamID', using NVARCHAR(MAX). Consider adding to type map.
-[11:34:17] Table 'GraphUsers_AdditionalAttributes' does not exist. Will be created...
+[14:34:54] Table 'GraphUsers_AdditionalAttributes' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphUsers_AdditionalAttributes
   History table: dbo.GraphUsers_AdditionalAttributesHistory
   Primary Key: id
@@ -275,19 +286,19 @@ Successfully created temporal table: dbo.GraphUsers_AdditionalAttributes
   Created helper view: vw_GraphUsers_AdditionalAttributes_AllHistory
 True
 
-[11:34:18] Fetching users from Microsoft Graph...
-[11:34:18] Total users fetched: 34 (took 0.5s)
+[14:34:54] Fetching users from Microsoft Graph...
+[14:34:54] Total users fetched: 34 (took 0.7s)
 
-[11:34:18] Syncing users to SQL Server...
-[11:34:18] Preparing data for bulk sync...
-[11:34:18] Database connection established
-[11:34:18] Starting transaction...
-[11:34:18] Bulk merging 34 users...
-[11:34:19] Bulk merge completed: 34 inserted, 0 updated (50.6 users/sec)
-[11:34:19] Checking for deleted users...
-  [11:34:19] No deleted users found
-[11:34:19] Committing transaction...
-[11:34:19] Transaction committed successfully (took 1s)
+[14:34:54] Syncing users to SQL Server...
+[14:34:54] Preparing data for bulk sync...
+[14:34:54] Database connection established
+[14:34:54] Starting transaction...
+[14:34:55] Bulk merging 34 users...
+[14:34:55] Bulk merge completed: 34 inserted, 0 updated (90.1 users/sec)
+[14:34:55] Checking for deleted users...
+  [14:34:55] No deleted users found
+[14:34:55] Committing transaction...
+[14:34:55] Transaction committed successfully (took 0.8s)
 
 ========================================
 Sync Complete!
@@ -302,9 +313,9 @@ Attributes:      22
 All changes are automatically tracked in GraphUsers_AdditionalAttributesHistory
 ========================================
 
-Key   : Attributes
-Value : {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
-Name  : Attributes
+Key   : TableName
+Value : GraphUsers_AdditionalAttributes
+Name  : TableName
 
 
 Key   : TotalUsers
@@ -312,19 +323,19 @@ Value : 34
 Name  : TotalUsers
 
 
-Key   : DeletedCount
-Value : 0
-Name  : DeletedCount
-
-
 Key   : ErrorCount
 Value : 0
 Name  : ErrorCount
 
 
-Key   : TableName
-Value : GraphUsers_AdditionalAttributes
-Name  : TableName
+Key   : DeletedCount
+Value : 0
+Name  : DeletedCount
+
+
+Key   : Attributes
+Value : {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
+Name  : Attributes
 
 
 Key   : SyncedCount
@@ -337,23 +348,23 @@ Name  : SyncedCount
 Test 12: Data Sync (Custom Properties)
 ======================================
   → Syncing users with custom properties...
-[11:34:19] Using custom attributes: 6 attributes
-[11:34:19] Table 'GraphUsers_CustomTest' already exists. Checking schema...
-  [11:34:20] Schema is up to date
+[14:34:55] Using custom attributes: 6 attributes
+[14:34:55] Table 'GraphUsers_CustomTest' already exists. Checking schema...
+  [14:34:56] Schema is up to date
 
-[11:34:20] Fetching users from Microsoft Graph...
-[11:34:20] Total users fetched: 34 (took 0.2s)
+[14:34:56] Fetching users from Microsoft Graph...
+[14:34:56] Total users fetched: 34 (took 0.1s)
 
-[11:34:20] Syncing users to SQL Server...
-[11:34:20] Preparing data for bulk sync...
-[11:34:20] Database connection established
-[11:34:20] Starting transaction...
-[11:34:20] Bulk merging 34 users...
-[11:34:20] Bulk merge completed: 34 inserted, 0 updated (71.8 users/sec)
-[11:34:20] Checking for deleted users...
-  [11:34:21] No deleted users found
-[11:34:21] Committing transaction...
-[11:34:21] Transaction committed successfully (took 0.8s)
+[14:34:56] Syncing users to SQL Server...
+[14:34:56] Preparing data for bulk sync...
+[14:34:56] Database connection established
+[14:34:56] Starting transaction...
+[14:34:56] Bulk merging 34 users...
+[14:34:56] Bulk merge completed: 34 inserted, 0 updated (104.8 users/sec)
+[14:34:56] Checking for deleted users...
+  [14:34:57] No deleted users found
+[14:34:57] Committing transaction...
+[14:34:57] Transaction committed successfully (took 0.7s)
 
 ========================================
 Sync Complete!
@@ -368,9 +379,9 @@ Attributes:      7
 All changes are automatically tracked in GraphUsers_CustomTestHistory
 ========================================
 
-Key   : Attributes
-Value : {id, userPrincipalName, displayName, givenName…}
-Name  : Attributes
+Key   : TableName
+Value : GraphUsers_CustomTest
+Name  : TableName
 
 
 Key   : TotalUsers
@@ -378,19 +389,19 @@ Value : 34
 Name  : TotalUsers
 
 
-Key   : DeletedCount
-Value : 0
-Name  : DeletedCount
-
-
 Key   : ErrorCount
 Value : 0
 Name  : ErrorCount
 
 
-Key   : TableName
-Value : GraphUsers_CustomTest
-Name  : TableName
+Key   : DeletedCount
+Value : 0
+Name  : DeletedCount
+
+
+Key   : Attributes
+Value : {id, userPrincipalName, displayName, givenName…}
+Name  : Attributes
 
 
 Key   : SyncedCount
@@ -408,9 +419,9 @@ Test 13: Query and Verify Results
 
 TableName               RecordCount FirstSync           LastSync
 ---------               ----------- ---------           --------
-GraphUsers_DefaultTest           34 15/01/2026 10:34:16 15/01/2026 10:34:16
+GraphUsers_DefaultTest           34 15/01/2026 13:34:51 15/01/2026 13:34:51
 GraphUsers_ExtendedTest           0                     
-GraphUsers_CustomTest            34 15/01/2026 10:34:20 15/01/2026 10:34:20
+GraphUsers_CustomTest            34 15/01/2026 13:34:56 15/01/2026 13:34:56
   ✓ Query execution successful
 
 Test 14: Temporal Table Features
@@ -439,8 +450,8 @@ David@iidemos.onmicrosoft.com                            David Marquess         
 Test 16: Group Sync (Default Properties)
 ========================================
   → Syncing groups with default properties...
-[11:34:21] Using default attributes: 20 attributes
-[11:34:21] Table 'GraphGroups_Test' does not exist. Will be created...
+[14:34:57] Using default attributes: 20 attributes
+[14:34:57] Table 'GraphGroups_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroups_Test
   History table: dbo.GraphGroups_TestHistory
   Primary Key: id
@@ -448,19 +459,19 @@ Successfully created temporal table: dbo.GraphGroups_Test
   Created helper view: vw_GraphGroups_Test_AllHistory
 True
 
-[11:34:22] Fetching groups from Microsoft Graph...
-[11:34:22] Total groups fetched: 68 (took 0.2s)
+[14:34:57] Fetching groups from Microsoft Graph...
+[14:34:57] Total groups fetched: 68 (took 0.1s)
 
-[11:34:22] Syncing groups to SQL Server...
-[11:34:22] Preparing data for bulk sync...
-[11:34:22] Database connection established
-[11:34:22] Starting transaction...
-[11:34:22] Bulk merging 68 groups...
-[11:34:23] Bulk merge completed: 68 inserted, 0 updated (121.6 groups/sec)
-[11:34:23] Checking for deleted groups...
-  [11:34:23] No deleted groups found
-[11:34:23] Committing transaction...
-[11:34:23] Transaction committed successfully (took 0.9s)
+[14:34:57] Syncing groups to SQL Server...
+[14:34:57] Preparing data for bulk sync...
+[14:34:57] Database connection established
+[14:34:57] Starting transaction...
+[14:34:57] Bulk merging 68 groups...
+[14:34:58] Bulk merge completed: 68 inserted, 0 updated (220 groups/sec)
+[14:34:58] Checking for deleted groups...
+  [14:34:58] No deleted groups found
+[14:34:58] Committing transaction...
+[14:34:58] Transaction committed successfully (took 0.7s)
 
 ========================================
 Sync Complete!
@@ -475,6 +486,26 @@ Attributes:      20
 All changes are automatically tracked in GraphGroups_TestHistory
 ========================================
 
+Key   : TableName
+Value : GraphGroups_Test
+Name  : TableName
+
+
+Key   : ErrorCount
+Value : 0
+Name  : ErrorCount
+
+
+Key   : DeletedCount
+Value : 0
+Name  : DeletedCount
+
+
+Key   : TotalGroups
+Value : 68
+Name  : TotalGroups
+
+
 Key   : Attributes
 Value : {id, displayName, description, mail…}
 Name  : Attributes
@@ -484,26 +515,6 @@ Key   : SyncedCount
 Value : 68
 Name  : SyncedCount
 
-
-Key   : DeletedCount
-Value : 0
-Name  : DeletedCount
-
-
-Key   : ErrorCount
-Value : 0
-Name  : ErrorCount
-
-
-Key   : TableName
-Value : GraphGroups_Test
-Name  : TableName
-
-
-Key   : TotalGroups
-Value : 68
-Name  : TotalGroups
-
   ✓ Group sync completed (default properties)
   → Verifying synced group data...
   ✓ Group data verification
@@ -511,8 +522,8 @@ Name  : TotalGroups
 Test 17: Group Member Sync (Direct Memberships)
 ===============================================
   → Syncing direct group memberships...
-[11:34:23] Starting group membership sync...
-[11:34:23] Table 'GraphGroupMembers_Test' does not exist. Will be created...
+[14:34:58] Starting group membership sync...
+[14:34:58] Table 'GraphGroupMembers_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupMembers_Test
   History table: dbo.GraphGroupMembers_TestHistory
   Primary Key: groupId, memberId
@@ -520,29 +531,23 @@ Successfully created temporal table: dbo.GraphGroupMembers_Test
   Created helper view: vw_GraphGroupMembers_Test_AllHistory
 True
 
-[11:34:23] Fetching groups from Microsoft Graph...
-[11:34:24] Total groups to process: 68
+[14:34:58] Fetching groups from Microsoft Graph...
+[14:34:59] Total groups to process: 68
 
-[11:34:24] Fetching group memberships...
+[14:34:59] Fetching group memberships...
   This may take a while for tenants with many groups and members...
-  [11:34:25] Progress: 10/68 groups, 109 memberships (6.6 groups/sec)
-  [11:34:27] Progress: 20/68 groups, 269 memberships (6.5 groups/sec)
-  [11:34:28] Progress: 30/68 groups, 384 memberships (6.4 groups/sec)
-  [11:34:30] Progress: 40/68 groups, 488 memberships (6.5 groups/sec)
-  [11:34:31] Progress: 50/68 groups, 629 memberships (6.6 groups/sec)
-  [11:34:33] Progress: 60/68 groups, 738 memberships (6.7 groups/sec)
-[11:34:34] Total memberships fetched: 853 from 68 groups (took 10.3s)
+[14:35:09] Total memberships fetched: 853 from 68 groups (took 10.5s)
 
-[11:34:34] Syncing memberships to SQL Server...
-[11:34:34] Preparing data for bulk sync...
-[11:34:34] Database connection established
-[11:34:34] Starting transaction...
-[11:34:34] Bulk merging 853 memberships...
-[11:34:34] Bulk merge completed: 853 inserted, 0 updated (2580.6 memberships/sec)
-[11:34:34] Checking for deleted memberships...
-  [11:34:35] No deleted memberships found
-[11:34:35] Committing transaction...
-[11:34:35] Transaction committed successfully (took 0.7s)
+[14:35:09] Syncing memberships to SQL Server...
+[14:35:09] Preparing data for bulk sync...
+[14:35:09] Database connection established
+[14:35:09] Starting transaction...
+[14:35:09] Bulk merging 853 memberships...
+[14:35:10] Bulk merge completed: 853 inserted, 0 updated (1799.9 memberships/sec)
+[14:35:10] Checking for deleted memberships...
+  [14:35:10] No deleted memberships found
+[14:35:10] Committing transaction...
+[14:35:10] Transaction committed successfully (took 0.8s)
 
 ========================================
 Sync Complete!
@@ -557,24 +562,14 @@ Errors:          0
 All changes are automatically tracked in GraphGroupMembers_TestHistory
 ========================================
 
-Key   : SyncedCount
-Value : 853
-Name  : SyncedCount
+Key   : TableName
+Value : GraphGroupMembers_Test
+Name  : TableName
 
 
 Key   : TotalMemberships
 Value : 853
 Name  : TotalMemberships
-
-
-Key   : ErrorCount
-Value : 0
-Name  : ErrorCount
-
-
-Key   : TableName
-Value : GraphGroupMembers_Test
-Name  : TableName
 
 
 Key   : DeletedCount
@@ -586,6 +581,16 @@ Key   : TotalGroups
 Value : 68
 Name  : TotalGroups
 
+
+Key   : ErrorCount
+Value : 0
+Name  : ErrorCount
+
+
+Key   : SyncedCount
+Value : 853
+Name  : SyncedCount
+
   ✓ Direct group membership sync completed
   → Verifying synced membership data...
   ✓ Direct membership data verification
@@ -595,8 +600,8 @@ Name  : TotalGroups
 Test 18: Group Owner Sync (Ownership Relationships)
 ===================================================
   → Syncing group ownership relationships...
-[11:34:37] Starting group ownership sync...
-[11:34:37] Table 'GraphGroupOwners_Test' does not exist. Will be created...
+[14:35:12] Starting group ownership sync...
+[14:35:12] Table 'GraphGroupOwners_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupOwners_Test
   History table: dbo.GraphGroupOwners_TestHistory
   Primary Key: groupId, ownerId
@@ -604,28 +609,28 @@ Successfully created temporal table: dbo.GraphGroupOwners_Test
   Created helper view: vw_GraphGroupOwners_Test_AllHistory
 True
 
-[11:34:37] Fetching groups from Microsoft Graph...
-[11:34:37] Total groups to process: 68
+[14:35:12] Fetching groups from Microsoft Graph...
+[14:35:12] Total groups to process: 68
 
-[11:34:37] Fetching ownership relationships...
-  [11:34:39] Processing group 10/68...
-  [11:34:40] Processing group 20/68...
-  [11:34:41] Processing group 30/68...
-  [11:34:42] Processing group 40/68...
-  [11:34:44] Processing group 50/68...
-  [11:34:45] Processing group 60/68...
-[11:34:47] Total ownership relationships fetched: 17
+[14:35:12] Fetching ownership relationships...
+  [14:35:13] Processing group 10/68...
+  [14:35:15] Processing group 20/68...
+  [14:35:16] Processing group 30/68...
+  [14:35:17] Processing group 40/68...
+  [14:35:19] Processing group 50/68...
+  [14:35:21] Processing group 60/68...
+[14:35:22] Total ownership relationships fetched: 17
 
-[11:34:47] Syncing ownership relationships to SQL Server...
-[11:34:47] Preparing data for bulk sync...
-[11:34:47] Database connection established
-[11:34:47] Starting transaction...
-[11:34:47] Bulk merging 17 ownership relationships...
-[11:34:47] Bulk merge completed: 17 inserted, 0 updated (60.2 ownerships/sec)
-[11:34:47] Checking for removed ownership relationships...
-  [11:34:47] No removed ownership relationships found
-[11:34:47] Committing transaction...
-[11:34:47] Transaction committed successfully (took 0.6s)
+[14:35:22] Syncing ownership relationships to SQL Server...
+[14:35:22] Preparing data for bulk sync...
+[14:35:22] Database connection established
+[14:35:22] Starting transaction...
+[14:35:22] Bulk merging 17 ownership relationships...
+[14:35:22] Bulk merge completed: 17 inserted, 0 updated (61.5 ownerships/sec)
+[14:35:22] Checking for removed ownership relationships...
+  [14:35:22] No removed ownership relationships found
+[14:35:22] Committing transaction...
+[14:35:22] Transaction committed successfully (took 0.6s)
 
 ========================================
 Sync Complete!
@@ -640,14 +645,14 @@ Errors:                     0
 All changes are automatically tracked in GraphGroupOwners_TestHistory
 ========================================
 
+Key   : TableName
+Value : GraphGroupOwners_Test
+Name  : TableName
+
+
 Key   : SyncedCount
 Value : 17
 Name  : SyncedCount
-
-
-Key   : TotalOwnerships
-Value : 17
-Name  : TotalOwnerships
 
 
 Key   : DeletedCount
@@ -655,19 +660,19 @@ Value : 0
 Name  : DeletedCount
 
 
+Key   : TotalGroups
+Value : 68
+Name  : TotalGroups
+
+
 Key   : ErrorCount
 Value : 0
 Name  : ErrorCount
 
 
-Key   : TableName
-Value : GraphGroupOwners_Test
-Name  : TableName
-
-
-Key   : TotalGroups
-Value : 68
-Name  : TotalGroups
+Key   : TotalOwnerships
+Value : 17
+Name  : TotalOwnerships
 
   ✓ Group ownership sync completed
   → Verifying synced ownership data...
@@ -678,8 +683,8 @@ Name  : TotalGroups
 Test 19: Group Transitive Member Sync (Nested Memberships)
 ==========================================================
   → Syncing transitive/nested group memberships...
-[11:34:49] Starting transitive group membership sync...
-[11:34:49] Table 'GraphGroupTransitiveMembers_Test' does not exist. Will be created...
+[14:35:23] Starting transitive group membership sync...
+[14:35:23] Table 'GraphGroupTransitiveMembers_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupTransitiveMembers_Test
   History table: dbo.GraphGroupTransitiveMembers_TestHistory
   Primary Key: groupId, memberId
@@ -687,29 +692,23 @@ Successfully created temporal table: dbo.GraphGroupTransitiveMembers_Test
   Created helper view: vw_GraphGroupTransitiveMembers_Test_AllHistory
 True
 
-[11:34:49] Fetching groups from Microsoft Graph...
-[11:34:49] Total groups to process: 68
+[14:35:24] Fetching groups from Microsoft Graph...
+[14:35:24] Total groups to process: 68
 
-[11:34:49] Fetching transitive group memberships...
+[14:35:24] Fetching transitive group memberships...
   This may take a while for tenants with many groups and nested structures...
-  [11:34:51] Progress: 10/68 groups, 109 memberships (6.4 groups/sec)
-  [11:34:52] Progress: 20/68 groups, 269 memberships (6.6 groups/sec)
-  [11:34:54] Progress: 30/68 groups, 384 memberships (6.8 groups/sec)
-  [11:34:55] Progress: 40/68 groups, 488 memberships (6.8 groups/sec)
-  [11:34:56] Progress: 50/68 groups, 629 memberships (6.8 groups/sec)
-  [11:34:58] Progress: 60/68 groups, 738 memberships (6.9 groups/sec)
-[11:34:59] Total transitive memberships fetched: 853 from 68 groups (took 9.9s)
+[14:35:34] Total transitive memberships fetched: 853 from 68 groups (took 10.1s)
 
-[11:34:59] Syncing transitive memberships to SQL Server...
-[11:34:59] Preparing data for bulk sync...
-[11:34:59] Database connection established
-[11:34:59] Starting transaction...
-[11:34:59] Bulk merging 853 transitive memberships...
-[11:35:00] Bulk merge completed: 853 inserted, 0 updated (2531.5 memberships/sec)
-[11:35:00] Checking for deleted transitive memberships...
-  [11:35:00] No deleted transitive memberships found
-[11:35:00] Committing transaction...
-[11:35:00] Transaction committed successfully (took 0.7s)
+[14:35:34] Syncing transitive memberships to SQL Server...
+[14:35:34] Preparing data for bulk sync...
+[14:35:34] Database connection established
+[14:35:34] Starting transaction...
+[14:35:34] Bulk merging 853 transitive memberships...
+[14:35:34] Bulk merge completed: 853 inserted, 0 updated (2852.5 memberships/sec)
+[14:35:34] Checking for deleted transitive memberships...
+  [14:35:35] No deleted transitive memberships found
+[14:35:35] Committing transaction...
+[14:35:35] Transaction committed successfully (took 0.6s)
 
 ========================================
 Sync Complete!
@@ -724,24 +723,14 @@ Errors:                     0
 All changes are automatically tracked in GraphGroupTransitiveMembers_TestHistory
 ========================================
 
-Key   : SyncedCount
-Value : 853
-Name  : SyncedCount
+Key   : TableName
+Value : GraphGroupTransitiveMembers_Test
+Name  : TableName
 
 
 Key   : TotalMemberships
 Value : 853
 Name  : TotalMemberships
-
-
-Key   : ErrorCount
-Value : 0
-Name  : ErrorCount
-
-
-Key   : TableName
-Value : GraphGroupTransitiveMembers_Test
-Name  : TableName
 
 
 Key   : DeletedCount
@@ -752,6 +741,16 @@ Name  : DeletedCount
 Key   : TotalGroups
 Value : 68
 Name  : TotalGroups
+
+
+Key   : ErrorCount
+Value : 0
+Name  : ErrorCount
+
+
+Key   : SyncedCount
+Value : 853
+Name  : SyncedCount
 
   ✓ Transitive group membership sync completed
   → Verifying synced transitive membership data...
@@ -770,21 +769,21 @@ Test 20: Group Eligible Member Sync (PIM Memberships)
 Test 21: Group Membership Analysis Views
 ========================================
   → Creating group membership analysis views...
-[11:35:00] Creating group membership analysis views...
+[14:35:35] Creating group membership analysis views...
 WARNING: Table 'GraphGroupEligibleMembers_Test' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional).
 WARNING: Table 'GraphGroupOwners' does not exist. Run Sync-FGGroupOwner to include owners in views (optional).
 
-[11:35:00] Creating view: vw_GraphGroupNestedMembers
+[14:35:35] Creating view: vw_GraphGroupNestedMembers
   Purpose: Shows only members with indirect/nested access (not direct members)
   ✅ Created: vw_GraphGroupNestedMembers
 
-[11:35:00] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)
+[14:35:35] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)
 
-[11:35:00] Creating view: vw_GraphGroupMembershipType
+[14:35:35] Creating view: vw_GraphGroupMembershipType
   Purpose: Shows all members with Direct/Indirect indicator
   ✅ Created: vw_GraphGroupMembershipType
 
-[11:35:01] Creating view: vw_GraphGroupMembersRecursive
+[14:35:35] Creating view: vw_GraphGroupMembersRecursive
   Purpose: Calculates ALL memberships with paths using ONLY direct members
   Benefit: Eliminates need for transitive members sync (75% faster!)
   ✅ Created: vw_GraphGroupMembersRecursive
@@ -842,73 +841,33 @@ Test 23: Group Sync Summary
 
 EntityType             TotalCount FirstSync           LastSync
 ----------             ---------- ---------           --------
-Groups                         68 15/01/2026 10:34:22 15/01/2026 10:34:22
-Direct Memberships            853 15/01/2026 10:34:34 15/01/2026 10:34:34
-Transitive Memberships        853 15/01/2026 10:35:00 15/01/2026 10:35:00
-Group Ownerships               17 15/01/2026 10:34:47 15/01/2026 10:34:47
+Groups                         68 15/01/2026 13:34:57 15/01/2026 13:34:57
+Direct Memberships            853 15/01/2026 13:35:09 15/01/2026 13:35:09
+Transitive Memberships        853 15/01/2026 13:35:34 15/01/2026 13:35:34
+Group Ownerships               17 15/01/2026 13:35:22 15/01/2026 13:35:22
   ✓ Group sync summary
 
 Test 24: Start-FGSync (Sequential Sync)
 =======================================
   → Testing Start-FGSync function with config file...
   → Running Start-FGSync with sequential sync...
-PS>TerminatingError(Start-Transcript): "Transcription cannot be started due to the error: Could not find file 'C:\Users\WimvandenHeijkant\OneDrive - Mudhori\Profile\Documents\FortigiGraph\Logs'."
->> TerminatingError(Start-Transcript): "Transcription cannot be started due to the error: Could not find file 'C:\Users\WimvandenHeijkant\OneDrive - Mudhori\Profile\Documents\FortigiGraph\Logs'."
-  ✗ Start-FGSync sequential - Transcription cannot be started due to the error: Could not find file 'C:\Users\WimvandenHeijkant\OneDrive - Mudhori\Profile\Documents\FortigiGraph\Logs'.
-
-Test 25: Start-FGSync Alias (Daily-Sync)
-========================================
-  → Testing Daily-Sync alias...
-  ✓ Alias 'Daily-Sync' correctly points to Start-FGSync
-  ✓ Start-FGSync alias
-
-Test 26: Cleanup Test Resources
-===============================
-  → Removing test SQL Server and resources...
-
-ResourceGroupName             : SQLServer2
-ServerName                    : iisqlserver2
-Location                      : northeurope
-SqlAdministratorLogin         : sqladmin
-SqlAdministratorPassword      : 
-ServerVersion                 : 12.0
-Tags                          : 
-Identity                      : 
-FullyQualifiedDomainName      : iisqlserver2.database.windows.net
-ResourceId                    : /subscriptions/6af08f87-5594-49ed-a029-976707a2a70b/resourceGroups/SQLServer2/providers/Microsoft.Sql/servers/iisqlserver2
-MinimalTlsVersion             : 1.2
-PublicNetworkAccess           : Enabled
-RestrictOutboundNetworkAccess : Disabled
-Administrators                : 
-PrimaryUserAssignedIdentityId : 
-KeyId                         : 
-FederatedClientId             : 
-
-  ✓ Test resources cleaned up
 
 ========================================
-Integration Test Summary
+FortigiGraph Daily Sync
 ========================================
+Started: 2026-01-15 14:35:36
+Config:  C:\Source\Fortigi\GitHub\FortigiGraph\_Test\config.startsync-test.json
 
-Total Tests:  42
-Passed:       41
-Failed:       1
-
-Results by Category:
-  ✓ Azure: 2/2 passed
-  ✓ Cleanup: 2/2 passed
-  ✓ Graph: 2/2 passed
-  ✓ Query: 10/10 passed
-  ✓ Setup: 1/1 passed
-  ✓ SQL: 6/6 passed
-  ✗ Sync: 18/19 passed
-
-Failed Tests:
-  ✗ [Sync] Start-FGSync sequential
-    Transcription cannot be started due to the error: Could not find file 'C:\Users\WimvandenHeijkant\OneDrive - Mudhori\Profile\Documents\FortigiGraph\Logs'.
-
-========================================
-**********************
-PowerShell transcript end
-End time: 20260115113520
-**********************
+=== Loading Configuration ===
+  ✓ Configuration loaded
+  ✓ Configuration validated
+  → Reading sync configuration from config file...
+  ✓ Sync configuration read from config file
+  → Using Graph TenantId for Azure operations
+  → Loading secure credentials...
+PS C:\Source\Fortigi\GitHub\FortigiGraph> TerminatingError(): "The pipeline has been stopped."
+>> TerminatingError(): "The pipeline has been stopped."
+>> TerminatingError(): "The pipeline has been stopped."
+>> TerminatingError(): "The pipeline has been stopped."
+>> TerminatingError(): "The pipeline has been stopped."
+PS C:\Source\Fortigi\GitHub\FortigiGraph> clear
