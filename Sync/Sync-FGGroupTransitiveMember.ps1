@@ -205,13 +205,6 @@ function Sync-FGGroupTransitiveMember {
                 }
                 $allMemberships += $membership
             }
-
-            # Show progress every 10 groups
-            if ($processedGroups % 10 -eq 0) {
-                $elapsed = (Get-Date) - $membershipStartTime
-                $rate = [math]::Round($processedGroups / $elapsed.TotalSeconds, 1)
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedGroups/$totalGroups groups, $($allMemberships.Count) memberships ($rate groups/sec)" -ForegroundColor Gray
-            }
         }
         catch {
             Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch transitive members for group '$($group.displayName)' ($($group.id)): $_"

@@ -188,3 +188,88 @@ DeletedCount                   0
 
 [12:29:09] Fetching group memberships...
   This may take a while for tenants with many groups and members...
+[13:09:55] Total memberships fetched: 245013 from 9410 groups (took 2445.9s)
+
+[13:09:55] Syncing memberships to SQL Server...
+[13:09:55] Preparing data for bulk sync...
+[13:09:59] Database connection established
+[13:09:59] Starting transaction...
+[13:09:59] Bulk merging 245013 memberships...
+[13:14:13] Bulk merge completed: 1926 inserted, 243087 updated (961.7 memberships/sec)
+[13:14:13] Checking for deleted memberships...
+  [13:14:44] Deleted 925 memberships that no longer exist in Graph
+[13:14:44] Committing transaction...
+[13:14:44] Transaction committed successfully (took 285.8s)
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphGroupMembers
+Groups:          9410
+Memberships:     245013
+Synced:          245013
+Deleted:         925
+Errors:          0
+
+All changes are automatically tracked in GraphGroupMembersHistory
+========================================
+ErrorCount                     0
+TotalGroups                    9410
+SyncedCount                    245013
+TableName                      GraphGroupMembers
+TotalMemberships               245013
+DeletedCount                   925
+  ✓ Direct memberships synced: 245013 (table: GraphGroupMembers)
+  → Syncing transitive/nested group memberships...
+[13:14:45] Starting transitive group membership sync...
+[13:14:45] Table 'GraphGroupTransitiveMembers' does not exist. Will be created...
+Successfully created temporal table: dbo.GraphGroupTransitiveMembers
+  History table: dbo.GraphGroupTransitiveMembersHistory
+  Primary Key: groupId, memberId
+  Columns: 3
+  Created helper view: vw_GraphGroupTransitiveMembers_AllHistory
+True
+
+[13:14:45] Fetching groups from Microsoft Graph...
+[13:15:01] Total groups to process: 9410
+
+[13:15:01] Fetching transitive group memberships...
+  This may take a while for tenants with many groups and nested structures...
+  [13:15:03] Progress: 10/9410 groups, 90 memberships (5.5 groups/sec)
+  [13:15:05] Progress: 20/9410 groups, 421 memberships (5.1 groups/sec)
+  [13:15:10] Progress: 30/9410 groups, 1438 memberships (3.3 groups/sec)
+  [13:15:12] Progress: 40/9410 groups, 1649 memberships (3.5 groups/sec)
+  [13:15:14] Progress: 50/9410 groups, 1745 memberships (3.9 groups/sec)
+  [13:15:15] Progress: 60/9410 groups, 1801 memberships (4.1 groups/sec)
+  [13:15:17] Progress: 70/9410 groups, 1885 memberships (4.4 groups/sec)
+  [13:15:19] Progress: 80/9410 groups, 2039 memberships (4.4 groups/sec)
+  [13:15:21] Progress: 90/9410 groups, 2148 memberships (4.5 groups/sec)
+  [13:15:22] Progress: 100/9410 groups, 2319 memberships (4.6 groups/sec)
+  [13:15:25] Progress: 110/9410 groups, 2575 memberships (4.5 groups/sec)
+  [13:15:27] Progress: 120/9410 groups, 2667 memberships (4.6 groups/sec)
+  [13:15:28] Progress: 130/9410 groups, 2766 memberships (4.7 groups/sec)
+  [13:15:31] Progress: 140/9410 groups, 2883 memberships (4.7 groups/sec)
+  [13:15:32] Progress: 150/9410 groups, 2929 memberships (4.8 groups/sec)
+  [13:15:36] Progress: 160/9410 groups, 3571 memberships (4.5 groups/sec)
+  [13:15:38] Progress: 170/9410 groups, 3805 memberships (4.5 groups/sec)
+  [13:15:43] Progress: 180/9410 groups, 4763 memberships (4.2 groups/sec)
+  [13:15:49] Progress: 190/9410 groups, 5582 memberships (4 groups/sec)
+  [13:15:50] Progress: 200/9410 groups, 5691 memberships (4 groups/sec)
+  [13:15:52] Progress: 210/9410 groups, 5904 memberships (4.1 groups/sec)
+  [13:15:54] Progress: 220/9410 groups, 6040 memberships (4.1 groups/sec)
+  [13:15:55] Progress: 230/9410 groups, 6156 memberships (4.2 groups/sec)
+  [13:15:58] Progress: 240/9410 groups, 6408 memberships (4.2 groups/sec)
+  [13:15:59] Progress: 250/9410 groups, 6469 memberships (4.3 groups/sec)
+  [13:16:01] Progress: 260/9410 groups, 6604 memberships (4.3 groups/sec)
+  [13:16:03] Progress: 270/9410 groups, 6664 memberships (4.4 groups/sec)
+  [13:16:05] Progress: 280/9410 groups, 6914 memberships (4.4 groups/sec)
+  [13:16:07] Progress: 290/9410 groups, 7133 memberships (4.4 groups/sec)
+  [13:16:09] Progress: 300/9410 groups, 7328 memberships (4.4 groups/sec)
+  [13:16:11] Progress: 310/9410 groups, 7379 memberships (4.4 groups/sec)
+  [13:16:12] Progress: 320/9410 groups, 7489 memberships (4.5 groups/sec)
+  [13:16:15] Progress: 330/9410 groups, 7746 memberships (4.5 groups/sec)
+  [13:16:17] Progress: 340/9410 groups, 7829 memberships (4.5 groups/sec)
+  [13:16:21] Progress: 350/9410 groups, 8644 memberships (4.3 groups/sec)
+  [13:16:33] Progress: 360/9410 groups, 11022 memberships (3.9 groups/sec)
+  [13:16:35] Progress: 370/9410 groups, 11047 memberships (3.9 groups/sec)
+  [13:16:37] Progress: 380/9410 groups, 11068 memberships (3.9 groups/sec)
