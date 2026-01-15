@@ -2,13 +2,14 @@
 # THIS FILE WILL NOT BE OVERWRITTEN WHEN NEW CONTENT IS PUBLISHED TO THIS MODULE
 
 # Get public and private function definition files.
-$base    = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'base') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
-$generic = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'generic') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$base     = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'base') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$generic  = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'generic') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $specific = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'specific') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
-$SQL = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'SQL') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$SQL      = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'SQL') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$sync     = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'Sync') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 
-# Dot source base & generic function files
-foreach ($import in @($base + $generic + $specific + $SQL)) {
+# Dot source all function files
+foreach ($import in @($base + $generic + $specific + $SQL + $sync)) {
     try {
         . $import.fullname
     }
