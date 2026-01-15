@@ -6,9 +6,7 @@ param(
     [string]$ConfigFile = (Join-Path $PSScriptRoot "config.iidemo.json")
 )
 
-# Load secure configuration helper
-$secureConfigPath = Join-Path $PSScriptRoot "SecureConfig.ps1"
-. $secureConfigPath
+# Secure config functions now loaded from module (Get-FGSecureConfigValue, etc.)
 
 # Start transcript (unique per config file)
 $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)

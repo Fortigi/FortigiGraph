@@ -98,9 +98,7 @@ function Register-Resource {
     }
 }
 
-# Load secure configuration helper
-$secureConfigPath = Join-Path $PSScriptRoot "SecureConfig.ps1"
-. $secureConfigPath
+# Secure config functions now loaded from module (Get-FGSecureConfigValue, etc.)
 
 # Load configuration
 Write-TestHeader "Loading Test Configuration"

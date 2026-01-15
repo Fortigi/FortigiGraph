@@ -276,13 +276,7 @@ try {
         Write-SyncStep "Using Graph TenantId for Azure operations"
     }
 
-    # Load secure credentials
-    $secureConfigPath = Join-Path $PSScriptRoot "SecureConfig.ps1"
-    if (-not (Test-Path $secureConfigPath)) {
-        throw "SecureConfig.ps1 not found. Required for credential management."
-    }
-    . $secureConfigPath
-
+    # Secure config functions now loaded from module (Get-FGSecureConfigValue, etc.)
     Write-SyncStep "Loading secure credentials..."
 
     # Get SQL Admin Password
