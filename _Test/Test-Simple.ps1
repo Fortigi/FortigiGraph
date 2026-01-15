@@ -10,7 +10,7 @@ param(
 
 # Start transcript (unique per config file)
 $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
-$transcriptFile = Join-Path $PSScriptRoot "simple-test-$configBaseName.log"
+$transcriptFile = Join-Path $PSScriptRoot "logs\simple-test-$configBaseName.log"
 Start-Transcript -Path $transcriptFile -Force
 
 Write-Host "============================================" -ForegroundColor Cyan

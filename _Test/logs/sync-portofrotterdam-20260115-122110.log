@@ -1,0 +1,212 @@
+**********************
+PowerShell transcript start
+Start time: 20260115122110
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 4028
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+
+========================================
+FortigiGraph Daily Sync
+========================================
+Started: 2026-01-15 12:21:10
+Config:  .\Config\portofrotterdam.json
+
+=== Loading Configuration ===
+  ✓ Configuration loaded
+  ✓ Configuration validated
+  → Reading sync configuration from config file...
+  ✓ Sync configuration read from config file
+  → Using separate Azure TenantId: portofrotterdam.onmicrosoft.com
+  → Loading secure credentials...
+  ✓ Secure credentials loaded
+
+=== Connecting to Azure ===
+  → Switching Azure context...
+PS>TerminatingError(Set-AzContext): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Please provide a valid tenant or a valid subscription."
+Please select the account you want to login with.
+Retrieving subscriptions for the selection...
+  ✓ Connected to Azure: IAM DevTest (w.heijkant@portofrotterdam.onmicrosoft.com)
+
+=== Validating SQL Server ===
+  → Checking SQL Server: WimSQLTestPor...
+  ✓ SQL Server exists: wimsqltestpor
+  → Connecting to SQL Server...
+Setting Azure subscription context...
+Retrieving SQL Server details from Azure...
+  Found server: wimsqltestpor
+  Location: northeurope
+  FQDN: wimsqltestpor.database.windows.net
+Updating firewall rules...
+  Your current IP: 141.176.60.14
+  Updated existing firewall rule
+Connecting to SQL Server...
+Successfully connected to SQL Server: wimsqltestpor.database.windows.net, Database: GraphData
+
+Connection successful!
+You can now use Initialize-FGSQLTable and other SQL functions.
+SQL Connection Test: SUCCESS
+  Server: wimsqltestpor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/15/2026 11:21:50
+
+Name                           Value
+----                           -----
+ConnectionStatus               Connected
+CurrentTime                    15/01/2026 11:21:50
+Server                         wimsqltestpor.database.windows.net
+Database                       GraphData
+Version                        12.0.2000.8
+Edition                        SQL Azure
+  ✓ Connected to SQL Server
+SQL Connection Test: SUCCESS
+  Server: wimsqltestpor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 01/15/2026 11:21:50
+  ✓ SQL connection verified: GraphData
+
+=== Connecting to Microsoft Graph ===
+  → Testing existing Graph token...
+  ✓ Existing token is valid
+
+=== Starting Data Synchronization ===
+  → Syncing users to SQL...
+  → Additional attributes: extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentUserID, extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionID, extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentName, extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentID, extension_8ce8d3db3b314def88d829e15494e83f_sfTeamName, extension_8ce8d3db3b314def88d829e15494e83f_sfTeamID, extension_8ce8d3db3b314def88d829e15494e83f_sfManagerID, extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterName, extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterID, extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitName, extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitID, extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionName, extension_8ce8d3db3b314def88d829e15494e83f_sfBirthName, extension_8ce8d3db3b314def88d829e15494e83f_sfLastnamePrefix, extension_8ce8d3db3b314def88d829e15494e83f_sfFormalName, extension_8ce8d3db3b314def88d829e15494e83f_employeeID, extension_8ce8d3db3b314def88d829e15494e83f_middleName, extension_8ce8d3db3b314def88d829e15494e83f_sAMAccountName, extension_8ce8d3db3b314def88d829e15494e83f_extensionAttribute3, extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentEndDate, extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentStartDate, extension_8ce8d3db3b314def88d829e15494e83f_sfFromHR, extension_8ce8d3db3b314def88d829e15494e83f_sfIsContingentWorker
+[12:21:50] Using default attributes + 23 additional: Total 43 attributes
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentUserID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfTeamName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfTeamID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfManagerID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBirthName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfLastnamePrefix', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfFormalName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_employeeID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_middleName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sAMAccountName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_extensionAttribute3', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentEndDate', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentStartDate', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfFromHR', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfIsContingentWorker', using NVARCHAR(MAX). Consider adding to type map.
+[12:21:50] Table 'GraphUsers' already exists. Checking schema...
+  [12:21:50] Schema is up to date
+
+[12:21:50] Fetching users from Microsoft Graph...
+[12:21:50] Total users fetched: 34 (took 0.4s)
+
+[12:21:50] Syncing users to SQL Server...
+[12:21:50] Preparing data for bulk sync...
+[12:21:50] Database connection established
+[12:21:50] Starting transaction...
+[12:21:50] Bulk merging 34 users...
+[12:21:52] Bulk merge completed: 34 inserted, 0 updated (24.1 users/sec)
+[12:21:52] Checking for deleted users...
+  [12:22:05] Deleted 4320 users that no longer exist in Graph
+[12:22:05] Committing transaction...
+[12:22:05] Transaction committed successfully (took 14.7s)
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphUsers
+Total Users:     34
+Synced:          34
+Deleted:         4320
+Errors:          0
+Attributes:      43
+
+All changes are automatically tracked in GraphUsersHistory
+========================================
+Attributes                     {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
+TotalUsers                     34
+DeletedCount                   4320
+ErrorCount                     0
+TableName                      GraphUsers
+SyncedCount                    34
+  ✓ Users synced: 34 (table: GraphUsers)
+  → Syncing groups to SQL...
+[12:22:05] Using default attributes: 20 attributes
+[12:22:05] Table 'GraphGroups' already exists. Checking schema...
+  [12:22:05] Schema is up to date
+
+[12:22:05] Fetching groups from Microsoft Graph...
+[12:22:05] Total groups fetched: 68 (took 0.1s)
+
+[12:22:05] Syncing groups to SQL Server...
+[12:22:05] Preparing data for bulk sync...
+[12:22:05] Database connection established
+[12:22:05] Starting transaction...
+[12:22:05] Bulk merging 68 groups...
+[12:22:06] Bulk merge completed: 68 inserted, 0 updated (118.1 groups/sec)
+[12:22:06] Checking for deleted groups...
+  [12:22:22] Deleted 9409 groups that no longer exist in Graph
+[12:22:22] Committing transaction...
+[12:22:22] Transaction committed successfully (took 17s)
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphGroups
+Total Groups:    68
+Synced:          68
+Deleted:         9409
+Errors:          0
+Attributes:      20
+
+All changes are automatically tracked in GraphGroupsHistory
+========================================
+Attributes                     {id, displayName, description, mail…}
+SyncedCount                    68
+DeletedCount                   9409
+ErrorCount                     0
+TableName                      GraphGroups
+TotalGroups                    68
+  ✓ Groups synced: 68 (table: GraphGroups)
+  → Syncing direct group memberships...
+[12:22:22] Starting group membership sync...
+[12:22:22] Table 'GraphGroupMembers' already exists.
+
+[12:22:23] Fetching groups from Microsoft Graph...
+[12:22:23] Total groups to process: 68
+
+[12:22:23] Fetching group memberships...
+  This may take a while for tenants with many groups and members...
+  [12:22:26] Progress: 10/68 groups, 109 memberships (3.2 groups/sec)
+  [12:22:28] Progress: 20/68 groups, 269 memberships (3.9 groups/sec)
+  [12:22:30] Progress: 30/68 groups, 384 memberships (4.6 groups/sec)
+  [12:22:31] Progress: 40/68 groups, 488 memberships (5 groups/sec)
+  [12:22:33] Progress: 50/68 groups, 629 memberships (5.1 groups/sec)
+  [12:22:34] Progress: 60/68 groups, 738 memberships (5.3 groups/sec)
+[12:22:36] Total memberships fetched: 853 from 68 groups (took 13s)
+
+[12:22:36] Syncing memberships to SQL Server...
+[12:22:36] Preparing data for bulk sync...
+[12:22:36] Database connection established
+[12:22:36] Starting transaction...
+[12:22:36] Bulk merging 853 memberships...
+[12:22:37] Bulk merge completed: 853 inserted, 0 updated (691.8 memberships/sec)
+[12:22:37] Checking for deleted memberships...

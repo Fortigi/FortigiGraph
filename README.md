@@ -668,11 +668,12 @@ Daily-Sync -ConfigFile C:\MyConfigs\production.json
 
 ### Scheduling
 
-**Windows Task Scheduler:**
+**Windows Task Scheduler (with logging):**
 
 ```powershell
+# Using the wrapper script for automatic transcript logging
 $action = New-ScheduledTaskAction -Execute "pwsh.exe" `
-    -Argument "-Command Import-Module FortigiGraph; Start-FGSync -ConfigFile C:\MyConfigs\production.json"
+    -Argument "-File C:\Path\To\FortigiGraph\_Test\Run-Sync.ps1 -ConfigFile C:\MyConfigs\production.json"
 
 $trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
 
@@ -683,6 +684,22 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger $trigger `
     -Principal $principal `
+    -Description "Daily sync of Graph data to SQL"
+```
+
+**Windows Task Scheduler (without logging):**
+
+```powershell
+# Direct function call (no transcript logging)
+$action = New-ScheduledTaskAction -Execute "pwsh.exe" `
+    -Argument "-Command Import-Module FortigiGraph; Start-FGSync -ConfigFile C:\MyConfigs\production.json"
+
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
+
+Register-ScheduledTask `
+    -TaskName "Graph Daily Sync - Production" `
+    -Action $action `
+    -Trigger $trigger `
     -Description "Daily sync of Graph data to SQL"
 ```
 
@@ -705,7 +722,14 @@ Register-ScheduledTask `
 
 ### Monitoring
 
-Start-FGSync creates detailed logs in your Documents folder:
+For transcript logging, use the Run-Sync.ps1 wrapper script:
+
+```powershell
+# Run with transcript logging
+.\_Test\Run-Sync.ps1 -ConfigFile C:\MyConfigs\production.json
+```
+
+This creates detailed logs in your Documents folder:
 
 ```
 %USERPROFILE%\Documents\FortigiGraph\Logs\sync-production-YYYYMMDD-HHMMSS.log
@@ -717,6 +741,8 @@ Start-FGSync creates detailed logs in your Documents folder:
 - Progress for each entity type
 - Errors and warnings
 - Summary statistics
+
+**Note:** Start-FGSync itself doesn't create transcripts (functions shouldn't manage logging). Use the wrapper script for logging, or handle transcripts in your own calling script.
 
 ---
 

@@ -124,21 +124,11 @@ Command-line parameter overrides config file setting (Sync.Groups.Filter)
 
     $ErrorActionPreference = "Stop"
 
-    # Start transcript for logging
-    $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
-    $logDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "FortigiGraph\Logs"
-    if (-not (Test-Path $logDir)) {
-        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-    }
-    $transcriptFile = Join-Path $logDir "sync-$configBaseName-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-    Start-Transcript -Path $transcriptFile -Force | Out-Null
-
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "FortigiGraph Daily Sync" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
-    Write-Host "Config:  $ConfigFile" -ForegroundColor Cyan
-    Write-Host "Log:     $transcriptFile`n" -ForegroundColor Cyan
+    Write-Host "Config:  $ConfigFile`n" -ForegroundColor Cyan
 
     # Track sync statistics
     $script:SyncStats = @{
@@ -633,7 +623,6 @@ function Write-SyncError {
         Write-Host "Stack Trace:" -ForegroundColor Gray
         Write-Host $_.ScriptStackTrace -ForegroundColor Gray
 
-        Stop-Transcript
         throw
     }
 
@@ -642,7 +631,4 @@ function Write-SyncError {
     Write-Host "Sync Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
-    Write-Host "Log File:  $transcriptFile`n" -ForegroundColor Cyan
-
-    Stop-Transcript
 }

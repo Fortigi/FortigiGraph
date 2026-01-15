@@ -28,7 +28,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 
 # Start transcript to capture all console output (unique per config file)
 $configBaseName = [System.IO.Path]::GetFileNameWithoutExtension($ConfigFile)
-$transcriptFile = Join-Path $PSScriptRoot "integration-test-fast-$configBaseName.log"
+$transcriptFile = Join-Path $PSScriptRoot "logs\integration-test-fast-$configBaseName.log"
 Write-Host "Starting transcript logging..." -ForegroundColor Gray
 Start-Transcript -Path $transcriptFile -Force | Out-Null
 Write-Host "Transcript logging to: $transcriptFile`n" -ForegroundColor Cyan
