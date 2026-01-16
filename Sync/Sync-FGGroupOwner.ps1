@@ -167,10 +167,6 @@ function Sync-FGGroupOwner {
     foreach ($group in $groups) {
         $processedGroups++
 
-        if ($processedGroups % 10 -eq 0) {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Processing group $processedGroups/$($groups.Count)..." -ForegroundColor Gray
-        }
-
         try {
             # Fetch owners for this group using Invoke-FGGetRequest (handles token validation and pagination)
             $ownerUri = "$graphUri/groups/$($group.id)/owners?`$select=id"

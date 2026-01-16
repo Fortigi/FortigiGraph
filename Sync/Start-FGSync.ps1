@@ -505,38 +505,43 @@ function Write-SyncError {
                 $Global:FGSQLDatabaseName = $SqlDb
 
                 # Execute sync based on type
+                # Suppress all output and only return the result object
+                $outputMode = $null
                 switch ($SyncType) {
                     "Users" {
                         $null = Sync-FGUser @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "Groups" {
                         $null = Sync-FGGroup @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupMembers" {
                         $null = Sync-FGGroupMember -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupTransitiveMembers" {
                         $null = Sync-FGGroupTransitiveMember -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupEligibleMembers" {
                         $null = Sync-FGGroupEligibleMember -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupOwners" {
                         $null = Sync-FGGroupOwner -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        Write-Output ([PSCustomObject]@{ Success = $true; Count = $count; Type = $SyncType })
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                 }
+
+                # Return only the result object
+                return $outputMode
             } catch {
                 return @{
                     Success = $false
@@ -712,7 +717,10 @@ function Write-SyncError {
         foreach ($job in $jobs) {
             try {
                 # Wait for job to complete and get result
-                $result = $job.PowerShell.EndInvoke($job.Handle)
+                $resultCollection = $job.PowerShell.EndInvoke($job.Handle)
+
+                # EndInvoke returns a collection, get the first (and should be only) item
+                $result = $resultCollection | Select-Object -First 1
 
                 # Process streams (Information, Warning, Error, Verbose)
                 if ($job.PowerShell.Streams.Information.Count -gt 0) {
