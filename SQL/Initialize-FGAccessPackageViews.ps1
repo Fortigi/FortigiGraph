@@ -9,10 +9,12 @@ function Initialize-FGAccessPackageViews {
     - Which catalog each package belongs to
     - Which group memberships/ownerships users get from access packages
     - Complete user entitlement view (both direct and access package-based)
+    - IST vs SOLL gap analysis: Shows which permissions exist directly but are NOT managed by access packages
 
-    The views enable analysis of the "soll" (should-be) state of permissions
-    as defined by access packages, complementing the "ist" (as-is) state from
-    group membership views.
+    The views enable complete governance analysis:
+    - "Soll" (should-be): Permissions defined by access packages
+    - "Ist" (as-is): Current direct permissions
+    - Gap: Direct permissions not governed by access packages (potential compliance risk)
 
     .PARAMETER DropIfExists
     If specified, drops existing views before creating new ones
@@ -35,6 +37,12 @@ function Initialize-FGAccessPackageViews {
     .PARAMETER GroupsTable
     Name of the groups table. Default: "GraphGroups"
 
+    .PARAMETER GroupMembersTable
+    Name of the group members table. Default: "GraphGroupMembers"
+
+    .PARAMETER GroupOwnersTable
+    Name of the group owners table. Default: "GraphGroupOwners"
+
     .EXAMPLE
     Initialize-FGAccessPackageViews
 
@@ -53,8 +61,11 @@ function Initialize-FGAccessPackageViews {
     Creates these views:
     - vw_UserAccessPackages: User → Access Package → Catalog mapping
     - vw_UserAccessPackageResources: User → Access Package → Group/Resource → Role mapping
-    - vw_UserAccessPackageGroupMemberships: Filtered view for group Member roles
-    - vw_UserAccessPackageGroupOwnerships: Filtered view for group Owner roles
+    - vw_UserAccessPackageGroupMemberships: Filtered view for group Member roles from access packages
+    - vw_UserAccessPackageGroupOwnerships: Filtered view for group Owner roles from access packages
+    - vw_DirectGroupMemberships: Group memberships that exist but are NOT from access packages (ist vs soll gap)
+    - vw_DirectGroupOwnerships: Group ownerships that exist but are NOT from access packages (ist vs soll gap)
+    - vw_UnmanagedPermissions: Combined view of all direct permissions not managed by access packages
     #>
 
     [CmdletBinding()]
@@ -79,7 +90,13 @@ function Initialize-FGAccessPackageViews {
         [string]$UsersTable = "GraphUsers",
 
         [Parameter(Mandatory = $false)]
-        [string]$GroupsTable = "GraphGroups"
+        [string]$GroupsTable = "GraphGroups",
+
+        [Parameter(Mandatory = $false)]
+        [string]$GroupMembersTable = "GraphGroupMembers",
+
+        [Parameter(Mandatory = $false)]
+        [string]$GroupOwnersTable = "GraphGroupOwners"
     )
 
     # Check SQL connection
@@ -202,12 +219,103 @@ WHERE resourceType = 'AadGroup'
     AND roleName = 'Owner'
 "@
 
+        # View 5: Direct Group Memberships (NOT from Access Packages)
+        # Shows: The gap between "ist" (as-is) and "soll" (should-be) for memberships
+        $view5Name = "vw_DirectGroupMemberships"
+        $view5Sql = @"
+-- Direct Group Memberships View (IST vs SOLL Gap)
+-- Shows group memberships that exist but are NOT assigned via access packages
+CREATE VIEW dbo.$view5Name AS
+SELECT
+    gm.memberId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    gm.groupId,
+    g.displayName AS groupName,
+    g.mail AS groupMail,
+    'Direct' AS sourceType,
+    'Direct Assignment' AS source,
+    'Member' AS roleName
+FROM dbo.$GroupMembersTable gm
+    INNER JOIN dbo.$UsersTable u ON gm.memberId = u.id
+    INNER JOIN dbo.$GroupsTable g ON gm.groupId = g.id
+    LEFT JOIN dbo.vw_UserAccessPackageGroupMemberships ap
+        ON gm.memberId = ap.userId
+        AND gm.groupId = ap.groupId
+WHERE ap.userId IS NULL  -- No matching access package assignment
+"@
+
+        # View 6: Direct Group Ownerships (NOT from Access Packages)
+        # Shows: The gap between "ist" (as-is) and "soll" (should-be) for ownerships
+        $view6Name = "vw_DirectGroupOwnerships"
+        $view6Sql = @"
+-- Direct Group Ownerships View (IST vs SOLL Gap)
+-- Shows group ownerships that exist but are NOT assigned via access packages
+CREATE VIEW dbo.$view6Name AS
+SELECT
+    go.ownerId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    go.groupId,
+    g.displayName AS groupName,
+    g.mail AS groupMail,
+    'Direct' AS sourceType,
+    'Direct Assignment' AS source,
+    'Owner' AS roleName
+FROM dbo.$GroupOwnersTable go
+    INNER JOIN dbo.$UsersTable u ON go.ownerId = u.id
+    INNER JOIN dbo.$GroupsTable g ON go.groupId = g.id
+    LEFT JOIN dbo.vw_UserAccessPackageGroupOwnerships ap
+        ON go.ownerId = ap.userId
+        AND go.groupId = ap.groupId
+WHERE ap.userId IS NULL  -- No matching access package assignment
+"@
+
+        # View 7: Unmanaged Permissions (Combined)
+        # Shows: All direct permissions (memberships + ownerships) not managed by access packages
+        $view7Name = "vw_UnmanagedPermissions"
+        $view7Sql = @"
+-- Unmanaged Permissions View (IST vs SOLL Gap - Combined)
+-- Shows all group permissions that exist directly but are NOT managed by access packages
+CREATE VIEW dbo.$view7Name AS
+SELECT
+    userId,
+    userPrincipalName,
+    userDisplayName,
+    groupId,
+    groupName,
+    groupMail,
+    roleName,
+    sourceType,
+    source,
+    'Membership' AS permissionType
+FROM dbo.vw_DirectGroupMemberships
+
+UNION ALL
+
+SELECT
+    userId,
+    userPrincipalName,
+    userDisplayName,
+    groupId,
+    groupName,
+    groupMail,
+    roleName,
+    sourceType,
+    source,
+    'Ownership' AS permissionType
+FROM dbo.vw_DirectGroupOwnerships
+"@
+
         # Array of views to create
         $views = @(
             @{ Name = $view1Name; SQL = $view1Sql },
             @{ Name = $view2Name; SQL = $view2Sql },
             @{ Name = $view3Name; SQL = $view3Sql },
-            @{ Name = $view4Name; SQL = $view4Sql }
+            @{ Name = $view4Name; SQL = $view4Sql },
+            @{ Name = $view5Name; SQL = $view5Sql },
+            @{ Name = $view6Name; SQL = $view6Sql },
+            @{ Name = $view7Name; SQL = $view7Sql }
         )
 
         foreach ($view in $views) {
