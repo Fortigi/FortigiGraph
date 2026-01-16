@@ -10,11 +10,13 @@ function Initialize-FGAccessPackageViews {
     - Which group memberships/ownerships users get from access packages
     - Complete user entitlement view (both direct and access package-based)
     - IST vs SOLL gap analysis: Shows which permissions exist directly but are NOT managed by access packages
+    - Assignment method analysis: Shows HOW access was granted (automatic, user-requested, admin-assigned)
 
     The views enable complete governance analysis:
     - "Soll" (should-be): Permissions defined by access packages
     - "Ist" (as-is): Current direct permissions
     - Gap: Direct permissions not governed by access packages (potential compliance risk)
+    - Assignment method: Automatic (policy rules) vs Requested (user initiated) vs Admin (directly assigned)
 
     .PARAMETER DropIfExists
     If specified, drops existing views before creating new ones
@@ -43,6 +45,12 @@ function Initialize-FGAccessPackageViews {
     .PARAMETER GroupOwnersTable
     Name of the group owners table. Default: "GraphGroupOwners"
 
+    .PARAMETER AssignmentRequestsTable
+    Name of the assignment requests table. Default: "GraphAccessPackageAssignmentRequests"
+
+    .PARAMETER AssignmentPoliciesTable
+    Name of the assignment policies table. Default: "GraphAccessPackageAssignmentPolicies"
+
     .EXAMPLE
     Initialize-FGAccessPackageViews
 
@@ -66,6 +74,10 @@ function Initialize-FGAccessPackageViews {
     - vw_DirectGroupMemberships: Group memberships that exist but are NOT from access packages (ist vs soll gap)
     - vw_DirectGroupOwnerships: Group ownerships that exist but are NOT from access packages (ist vs soll gap)
     - vw_UnmanagedPermissions: Combined view of all direct permissions not managed by access packages
+    - vw_AccessPackageAssignmentDetails: Shows HOW access was granted (automatic, requested, admin-assigned)
+    - vw_AutomaticAssignments: Assignments automatically granted by system based on policy rules
+    - vw_RequestedAssignments: Assignments that were user-requested (with approval status)
+    - vw_AdminAssignments: Assignments directly made by administrators
     #>
 
     [CmdletBinding()]
@@ -96,7 +108,13 @@ function Initialize-FGAccessPackageViews {
         [string]$GroupMembersTable = "GraphGroupMembers",
 
         [Parameter(Mandatory = $false)]
-        [string]$GroupOwnersTable = "GraphGroupOwners"
+        [string]$GroupOwnersTable = "GraphGroupOwners",
+
+        [Parameter(Mandatory = $false)]
+        [string]$AssignmentRequestsTable = "GraphAccessPackageAssignmentRequests",
+
+        [Parameter(Mandatory = $false)]
+        [string]$AssignmentPoliciesTable = "GraphAccessPackageAssignmentPolicies"
     )
 
     # Check SQL connection
@@ -307,6 +325,121 @@ SELECT
 FROM dbo.vw_DirectGroupOwnerships
 "@
 
+        # View 8: Access Package Assignment Details (with Request Type)
+        # Shows HOW each access package was assigned (automatic, requested, admin)
+        $view8Name = "vw_AccessPackageAssignmentDetails"
+        $view8Sql = @"
+-- Access Package Assignment Details View
+-- Shows how each access package assignment was granted (automatic, user-requested, or admin-assigned)
+CREATE VIEW dbo.$view8Name AS
+SELECT
+    a.id AS assignmentId,
+    a.targetId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    a.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    a.state AS assignmentState,
+    a.createdDateTime AS assignedDateTime,
+    COALESCE(req.requestType, 'Unknown') AS requestType,
+    COALESCE(req.requestState, 'Unknown') AS requestState,
+    COALESCE(req.requestStatus, 'Unknown') AS requestStatus,
+    req.justification,
+    req.createdDateTime AS requestCreatedDateTime,
+    req.completedDateTime AS requestCompletedDateTime,
+    CASE
+        WHEN req.requestType = 'SystemAdd' THEN 'Automatic (Policy Rule)'
+        WHEN req.requestType = 'UserAdd' THEN 'User Requested'
+        WHEN req.requestType = 'AdminAdd' THEN 'Admin Assigned'
+        ELSE 'Unknown'
+    END AS assignmentMethod
+FROM dbo.$AssignmentsTable a
+    INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+    LEFT JOIN dbo.$AssignmentRequestsTable req
+        ON a.accessPackageId = req.accessPackageId
+        AND a.targetId = req.requestorId
+        AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
+        AND req.requestState = 'Delivered'
+WHERE a.state = 'delivered'
+"@
+
+        # View 9: Automatic Assignments
+        # Shows assignments automatically granted by system based on policy rules
+        $view9Name = "vw_AutomaticAssignments"
+        $view9Sql = @"
+-- Automatic Assignments View
+-- Shows access package assignments that were automatically granted based on policy rules
+CREATE VIEW dbo.$view9Name AS
+SELECT
+    assignmentId,
+    userId,
+    userPrincipalName,
+    userDisplayName,
+    accessPackageId,
+    accessPackageName,
+    catalogName,
+    assignmentState,
+    assignedDateTime,
+    requestCreatedDateTime,
+    'Automatic (Policy Rule)' AS assignmentMethod
+FROM dbo.vw_AccessPackageAssignmentDetails
+WHERE requestType = 'SystemAdd'
+"@
+
+        # View 10: Requested Assignments
+        # Shows assignments that were user-requested (may have required approval)
+        $view10Name = "vw_RequestedAssignments"
+        $view10Sql = @"
+-- Requested Assignments View
+-- Shows access package assignments that were requested by users (includes approval info)
+CREATE VIEW dbo.$view10Name AS
+SELECT
+    assignmentId,
+    userId,
+    userPrincipalName,
+    userDisplayName,
+    accessPackageId,
+    accessPackageName,
+    catalogName,
+    assignmentState,
+    assignedDateTime,
+    requestState,
+    requestStatus,
+    justification,
+    requestCreatedDateTime,
+    requestCompletedDateTime,
+    DATEDIFF(day, requestCreatedDateTime, requestCompletedDateTime) AS daysToApprove,
+    'User Requested' AS assignmentMethod
+FROM dbo.vw_AccessPackageAssignmentDetails
+WHERE requestType = 'UserAdd'
+"@
+
+        # View 11: Admin Assignments
+        # Shows assignments directly made by administrators
+        $view11Name = "vw_AdminAssignments"
+        $view11Sql = @"
+-- Admin Assignments View
+-- Shows access package assignments that were directly made by administrators
+CREATE VIEW dbo.$view11Name AS
+SELECT
+    assignmentId,
+    userId,
+    userPrincipalName,
+    userDisplayName,
+    accessPackageId,
+    accessPackageName,
+    catalogName,
+    assignmentState,
+    assignedDateTime,
+    requestCreatedDateTime,
+    'Admin Assigned' AS assignmentMethod
+FROM dbo.vw_AccessPackageAssignmentDetails
+WHERE requestType = 'AdminAdd'
+"@
+
         # Array of views to create
         $views = @(
             @{ Name = $view1Name; SQL = $view1Sql },
@@ -315,7 +448,11 @@ FROM dbo.vw_DirectGroupOwnerships
             @{ Name = $view4Name; SQL = $view4Sql },
             @{ Name = $view5Name; SQL = $view5Sql },
             @{ Name = $view6Name; SQL = $view6Sql },
-            @{ Name = $view7Name; SQL = $view7Sql }
+            @{ Name = $view7Name; SQL = $view7Sql },
+            @{ Name = $view8Name; SQL = $view8Sql },
+            @{ Name = $view9Name; SQL = $view9Sql },
+            @{ Name = $view10Name; SQL = $view10Sql },
+            @{ Name = $view11Name; SQL = $view11Sql }
         )
 
         foreach ($view in $views) {
