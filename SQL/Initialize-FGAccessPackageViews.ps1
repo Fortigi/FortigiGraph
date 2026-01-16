@@ -82,6 +82,10 @@ function Initialize-FGAccessPackageViews {
     - vw_RequestedAssignments: Assignments that were user-requested (with approval status)
     - vw_AdminAssignments: Assignments directly made by administrators
     - vw_AccessPackageLastReview: Shows when each access package was last reviewed and by whom
+    - vw_ApprovedRequestTimeline: Shows approved requests with response time metrics (hours/days)
+    - vw_DeniedRequestTimeline: Shows denied requests with response time metrics
+    - vw_PendingRequestTimeline: Shows pending requests with days pending
+    - vw_RequestResponseMetrics: Aggregate view showing average/median response times by access package
     #>
 
     [CmdletBinding()]
@@ -490,6 +494,198 @@ FROM LatestReviews lr
 WHERE lr.rn = 1  -- Only the most recent review
 "@
 
+        # View 13: Approved Request Timeline
+        # Shows approved requests with response time metrics
+        $view13Name = "vw_ApprovedRequestTimeline"
+        $view13Sql = @"
+-- Approved Request Timeline View
+-- Shows access package requests that were approved with response time metrics
+CREATE VIEW dbo.$view13Name AS
+SELECT
+    req.id AS requestId,
+    req.requestorId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    req.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    req.requestType,
+    req.requestState,
+    req.requestStatus,
+    req.justification,
+    req.createdDateTime AS requestCreatedDateTime,
+    req.completedDateTime AS requestCompletedDateTime,
+    DATEDIFF(hour, req.createdDateTime, req.completedDateTime) AS hoursToApprove,
+    DATEDIFF(day, req.createdDateTime, req.completedDateTime) AS daysToApprove,
+    CASE
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 1 THEN 'Less than 1 hour'
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 4 THEN '1-4 hours'
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 24 THEN '4-24 hours'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 3 THEN '1-3 days'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 7 THEN '3-7 days'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 14 THEN '1-2 weeks'
+        ELSE 'Over 2 weeks'
+    END AS responseTimeBucket
+FROM dbo.$AssignmentRequestsTable req
+    INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON req.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+WHERE req.requestState = 'Delivered'
+    AND req.completedDateTime IS NOT NULL
+    AND req.requestType IN ('UserAdd', 'AdminAdd')  -- Only requested/admin assignments
+"@
+
+        # View 14: Denied Request Timeline
+        # Shows denied requests with response time metrics
+        $view14Name = "vw_DeniedRequestTimeline"
+        $view14Sql = @"
+-- Denied Request Timeline View
+-- Shows access package requests that were denied with response time metrics
+CREATE VIEW dbo.$view14Name AS
+SELECT
+    req.id AS requestId,
+    req.requestorId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    req.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    req.requestType,
+    req.requestState,
+    req.requestStatus,
+    req.justification,
+    req.createdDateTime AS requestCreatedDateTime,
+    req.completedDateTime AS requestCompletedDateTime,
+    DATEDIFF(hour, req.createdDateTime, req.completedDateTime) AS hoursToDeny,
+    DATEDIFF(day, req.createdDateTime, req.completedDateTime) AS daysToDeny,
+    CASE
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 1 THEN 'Less than 1 hour'
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 4 THEN '1-4 hours'
+        WHEN DATEDIFF(hour, req.createdDateTime, req.completedDateTime) < 24 THEN '4-24 hours'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 3 THEN '1-3 days'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 7 THEN '3-7 days'
+        WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 14 THEN '1-2 weeks'
+        ELSE 'Over 2 weeks'
+    END AS responseTimeBucket
+FROM dbo.$AssignmentRequestsTable req
+    INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON req.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+WHERE req.requestState = 'Denied'
+    AND req.completedDateTime IS NOT NULL
+"@
+
+        # View 15: Pending Request Timeline
+        # Shows pending requests with days waiting
+        $view15Name = "vw_PendingRequestTimeline"
+        $view15Sql = @"
+-- Pending Request Timeline View
+-- Shows access package requests that are still pending approval with days waiting
+CREATE VIEW dbo.$view15Name AS
+SELECT
+    req.id AS requestId,
+    req.requestorId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    req.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    req.requestType,
+    req.requestState,
+    req.requestStatus,
+    req.justification,
+    req.createdDateTime AS requestCreatedDateTime,
+    DATEDIFF(hour, req.createdDateTime, GETDATE()) AS hoursPending,
+    DATEDIFF(day, req.createdDateTime, GETDATE()) AS daysPending,
+    CASE
+        WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) < 1 THEN 'Less than 1 day'
+        WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) < 3 THEN '1-3 days'
+        WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) < 7 THEN '3-7 days'
+        WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) < 14 THEN '1-2 weeks'
+        ELSE 'Over 2 weeks'
+    END AS pendingTimeBucket,
+    CASE
+        WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) > 7 THEN 1
+        ELSE 0
+    END AS isOverdue
+FROM dbo.$AssignmentRequestsTable req
+    INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON req.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+WHERE req.requestState IN ('PendingApproval', 'Submitted', 'Accepted')
+    AND req.completedDateTime IS NULL
+"@
+
+        # View 16: Request Response Metrics (Aggregate)
+        # Shows aggregate response time metrics by access package and catalog
+        $view16Name = "vw_RequestResponseMetrics"
+        $view16Sql = @"
+-- Request Response Metrics View (Aggregate)
+-- Shows average, median, min, max response times and approval rates by access package
+CREATE VIEW dbo.$view16Name AS
+WITH RequestMetrics AS (
+    SELECT
+        req.accessPackageId,
+        ap.displayName AS accessPackageName,
+        c.id AS catalogId,
+        c.displayName AS catalogName,
+        req.requestState,
+        DATEDIFF(hour, req.createdDateTime, req.completedDateTime) AS responseHours,
+        DATEDIFF(day, req.createdDateTime, req.completedDateTime) AS responseDays
+    FROM dbo.$AssignmentRequestsTable req
+        INNER JOIN dbo.$AccessPackagesTable ap ON req.accessPackageId = ap.id
+        INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+    WHERE req.completedDateTime IS NOT NULL
+        AND req.requestType IN ('UserAdd', 'AdminAdd')
+        AND req.requestState IN ('Delivered', 'Denied')
+),
+ApprovalStats AS (
+    SELECT
+        accessPackageId,
+        accessPackageName,
+        catalogId,
+        catalogName,
+        COUNT(*) AS totalRequests,
+        SUM(CASE WHEN requestState = 'Delivered' THEN 1 ELSE 0 END) AS approvedCount,
+        SUM(CASE WHEN requestState = 'Denied' THEN 1 ELSE 0 END) AS deniedCount,
+        AVG(CAST(responseHours AS FLOAT)) AS avgResponseHours,
+        AVG(CAST(responseDays AS FLOAT)) AS avgResponseDays,
+        MIN(responseHours) AS minResponseHours,
+        MAX(responseHours) AS maxResponseHours,
+        MIN(responseDays) AS minResponseDays,
+        MAX(responseDays) AS maxResponseDays
+    FROM RequestMetrics
+    GROUP BY accessPackageId, accessPackageName, catalogId, catalogName
+)
+SELECT
+    accessPackageId,
+    accessPackageName,
+    catalogId,
+    catalogName,
+    totalRequests,
+    approvedCount,
+    deniedCount,
+    CAST(ROUND(avgResponseHours, 1) AS DECIMAL(10,1)) AS avgResponseHours,
+    CAST(ROUND(avgResponseDays, 1) AS DECIMAL(10,1)) AS avgResponseDays,
+    minResponseHours,
+    maxResponseHours,
+    minResponseDays,
+    maxResponseDays,
+    CASE
+        WHEN totalRequests > 0 THEN
+            CAST(ROUND((CAST(approvedCount AS FLOAT) / totalRequests) * 100, 1) AS DECIMAL(5,1))
+        ELSE 0
+    END AS approvalRatePercent,
+    CASE
+        WHEN avgResponseDays < 1 THEN 'Same Day'
+        WHEN avgResponseDays < 3 THEN '1-3 Days'
+        WHEN avgResponseDays < 7 THEN '3-7 Days'
+        WHEN avgResponseDays < 14 THEN '1-2 Weeks'
+        ELSE 'Over 2 Weeks'
+    END AS avgResponseCategory
+FROM ApprovalStats
+"@
+
         # Array of views to create
         $views = @(
             @{ Name = $view1Name; SQL = $view1Sql },
@@ -503,7 +699,11 @@ WHERE lr.rn = 1  -- Only the most recent review
             @{ Name = $view9Name; SQL = $view9Sql },
             @{ Name = $view10Name; SQL = $view10Sql },
             @{ Name = $view11Name; SQL = $view11Sql },
-            @{ Name = $view12Name; SQL = $view12Sql }
+            @{ Name = $view12Name; SQL = $view12Sql },
+            @{ Name = $view13Name; SQL = $view13Sql },
+            @{ Name = $view14Name; SQL = $view14Sql },
+            @{ Name = $view15Name; SQL = $view15Sql },
+            @{ Name = $view16Name; SQL = $view16Sql }
         )
 
         foreach ($view in $views) {
