@@ -51,6 +51,9 @@ function Initialize-FGAccessPackageViews {
     .PARAMETER AssignmentPoliciesTable
     Name of the assignment policies table. Default: "GraphAccessPackageAssignmentPolicies"
 
+    .PARAMETER AccessReviewDecisionsTable
+    Name of the access review decisions table. Default: "GraphAccessPackageAccessReviewDecisions"
+
     .EXAMPLE
     Initialize-FGAccessPackageViews
 
@@ -78,6 +81,7 @@ function Initialize-FGAccessPackageViews {
     - vw_AutomaticAssignments: Assignments automatically granted by system based on policy rules
     - vw_RequestedAssignments: Assignments that were user-requested (with approval status)
     - vw_AdminAssignments: Assignments directly made by administrators
+    - vw_AccessPackageLastReview: Shows when each access package was last reviewed and by whom
     #>
 
     [CmdletBinding()]
@@ -114,7 +118,10 @@ function Initialize-FGAccessPackageViews {
         [string]$AssignmentRequestsTable = "GraphAccessPackageAssignmentRequests",
 
         [Parameter(Mandatory = $false)]
-        [string]$AssignmentPoliciesTable = "GraphAccessPackageAssignmentPolicies"
+        [string]$AssignmentPoliciesTable = "GraphAccessPackageAssignmentPolicies",
+
+        [Parameter(Mandatory = $false)]
+        [string]$AccessReviewDecisionsTable = "GraphAccessPackageAccessReviewDecisions"
     )
 
     # Check SQL connection
@@ -440,6 +447,49 @@ FROM dbo.vw_AccessPackageAssignmentDetails
 WHERE requestType = 'AdminAdd'
 "@
 
+        # View 12: Last Access Review Per Access Package
+        # Shows when each access package was last reviewed and by whom
+        $view12Name = "vw_AccessPackageLastReview"
+        $view12Sql = @"
+-- Last Access Review View
+-- Shows when each access package was last reviewed and by which user (actual reviewer)
+CREATE VIEW dbo.$view12Name AS
+WITH LatestReviews AS (
+    SELECT
+        r.accessPackageId,
+        r.reviewedBy,
+        r.reviewedByDisplayName,
+        r.reviewedDateTime,
+        r.decision,
+        r.justification,
+        r.reviewInstanceStatus,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.accessPackageId
+            ORDER BY r.reviewedDateTime DESC
+        ) AS rn
+    FROM dbo.$AccessReviewDecisionsTable r
+    WHERE r.reviewedDateTime IS NOT NULL
+        AND r.reviewedBy IS NOT NULL  -- Only actual user reviews, not system actions
+        AND r.decision IS NOT NULL
+        AND r.decision != 'NotReviewed'  -- Exclude non-decisions
+)
+SELECT
+    lr.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    lr.reviewedBy AS lastReviewedBy,
+    lr.reviewedByDisplayName AS lastReviewedByName,
+    lr.reviewedDateTime AS lastReviewDateTime,
+    lr.decision AS lastReviewDecision,
+    lr.justification AS lastReviewJustification,
+    lr.reviewInstanceStatus,
+    DATEDIFF(day, lr.reviewedDateTime, GETDATE()) AS daysSinceLastReview
+FROM LatestReviews lr
+    INNER JOIN dbo.$AccessPackagesTable ap ON lr.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+WHERE lr.rn = 1  -- Only the most recent review
+"@
+
         # Array of views to create
         $views = @(
             @{ Name = $view1Name; SQL = $view1Sql },
@@ -452,7 +502,8 @@ WHERE requestType = 'AdminAdd'
             @{ Name = $view8Name; SQL = $view8Sql },
             @{ Name = $view9Name; SQL = $view9Sql },
             @{ Name = $view10Name; SQL = $view10Sql },
-            @{ Name = $view11Name; SQL = $view11Sql }
+            @{ Name = $view11Name; SQL = $view11Sql },
+            @{ Name = $view12Name; SQL = $view12Sql }
         )
 
         foreach ($view in $views) {
