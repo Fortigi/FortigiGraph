@@ -246,6 +246,15 @@ function Sync-FGAccessPackageAssignmentRequest {
         return
     }
 
+    # Deduplicate requests by ID (in case Graph API returns duplicates)
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating requests by ID..." -ForegroundColor Gray
+    $originalCount = $allRequests.Count
+    $allRequests = $allRequests | Group-Object -Property id | ForEach-Object { $_.Group[0] }
+    $deduplicatedCount = $allRequests.Count
+    if ($originalCount -ne $deduplicatedCount) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) duplicate request(s)" -ForegroundColor Yellow
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing assignment requests to SQL Server..." -ForegroundColor Cyan
 

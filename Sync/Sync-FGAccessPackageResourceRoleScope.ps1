@@ -206,8 +206,10 @@ function Sync-FGAccessPackageResourceRoleScope {
                     }
 
                     # Validate that id can be parsed as GUID
-                    $guidId = $null
-                    if (-not [guid]::TryParse($scope.id, [ref]$guidId)) {
+                    try {
+                        $guidId = [guid]$scope.id
+                    }
+                    catch {
                         Write-Verbose "  Skipping scope with invalid GUID id '$($scope.id)' for package '$($package.displayName)'"
                         continue
                     }
