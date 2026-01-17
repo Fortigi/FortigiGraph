@@ -1,9 +1,318 @@
 # FortigiGraph
 
-A PowerShell module for working with Microsoft Graph API, syncing data to Azure SQL with temporal versioning, and documenting identity attribute mappings across your environment.
+**Unlock the insights hidden in your Entra ID Governance that the Azure Portal doesn't show you.**
+
+FortigiGraph syncs Microsoft Graph data to Azure SQL with temporal versioning, enabling powerful governance insights, access analysis, and identity auditing that simply aren't possible through the Entra ID portal alone.
+
+## Why FortigiGraph?
+
+### 🎯 Identity Governance Insights You Can't Get from Entra ID
+
+#### 1. **IST vs SOLL Analysis** (As-Is vs Should-Be State)
+
+**The Problem**: In Entra ID, you can't easily see the gap between what users *should* have (access package assignments) and what they *actually* have (direct group memberships).
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Find users with DIRECT group memberships when they should only have access through packages
+SELECT
+    u.userPrincipalName,
+    u.displayName,
+    g.displayName AS GroupName,
+    'DIRECT - Should be via Access Package' AS Issue
+FROM GraphGroupMembers gm
+JOIN GraphUsers u ON gm.memberId = u.id
+JOIN GraphGroups g ON gm.groupId = g.id
+WHERE gm.groupId IN (
+    -- Groups managed by access packages
+    SELECT DISTINCT resourceId
+    FROM GraphAccessPackageResourceRoleScopes
+)
+AND NOT EXISTS (
+    -- User doesn't have this through an access package
+    SELECT 1
+    FROM GraphAccessPackageAssignments apa
+    JOIN GraphAccessPackageResourceRoleScopes rs ON apa.accessPackageId = rs.accessPackageId
+    WHERE apa.targetId = u.id AND rs.resourceId = g.id
+);
+```
+
+**Use Cases**:
+- Identify "backdoor" access that bypasses governance
+- Clean up direct assignments that should be managed by access packages
+- Audit compliance with access governance policies
+- Find orphaned permissions
+
+#### 2. **Access Package Assignment Analysis**
+
+**The Problem**: Entra ID doesn't show you aggregate views of who has what through access packages, which packages are most used, or how assignments have changed over time.
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Most assigned access packages with user details
+SELECT
+    ap.displayName AS AccessPackage,
+    c.displayName AS Catalog,
+    COUNT(DISTINCT apa.targetId) AS UserCount,
+    COUNT(DISTINCT rs.resourceId) AS GroupCount,
+    STRING_AGG(g.displayName, ', ') AS Groups
+FROM GraphAccessPackages ap
+LEFT JOIN GraphCatalogs c ON ap.catalogId = c.id
+LEFT JOIN GraphAccessPackageAssignments apa ON ap.id = apa.accessPackageId
+LEFT JOIN GraphAccessPackageResourceRoleScopes rs ON ap.id = rs.accessPackageId
+LEFT JOIN GraphGroups g ON rs.resourceId = g.id
+WHERE apa.state = 'Delivered'
+GROUP BY ap.displayName, c.displayName
+ORDER BY UserCount DESC;
+
+-- Find users with multiple access package assignments
+SELECT
+    u.userPrincipalName,
+    u.displayName,
+    u.department,
+    COUNT(DISTINCT apa.accessPackageId) AS PackageCount,
+    STRING_AGG(ap.displayName, ', ') AS Packages
+FROM GraphUsers u
+JOIN GraphAccessPackageAssignments apa ON u.id = apa.targetId
+JOIN GraphAccessPackages ap ON apa.accessPackageId = ap.id
+WHERE apa.state = 'Delivered'
+GROUP BY u.userPrincipalName, u.displayName, u.department
+HAVING COUNT(DISTINCT apa.accessPackageId) > 3
+ORDER BY PackageCount DESC;
+```
+
+#### 3. **Access Review Insights**
+
+**The Problem**: Entra ID shows individual review results, but doesn't aggregate patterns, completion rates, or reviewer behavior analysis.
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Access review completion and approval rates by access package
+SELECT
+    ap.displayName AS AccessPackage,
+    COUNT(DISTINCT ard.reviewInstanceId) AS TotalReviews,
+    COUNT(DISTINCT CASE WHEN ard.decision = 'Approve' THEN ard.id END) AS Approved,
+    COUNT(DISTINCT CASE WHEN ard.decision = 'Deny' THEN ard.id END) AS Denied,
+    COUNT(DISTINCT CASE WHEN ard.decision IS NULL THEN ard.id END) AS Pending,
+    CAST(COUNT(CASE WHEN ard.decision = 'Approve' THEN 1 END) * 100.0 /
+         NULLIF(COUNT(CASE WHEN ard.decision IS NOT NULL THEN 1 END), 0) AS DECIMAL(5,2)) AS ApprovalRate
+FROM GraphAccessPackages ap
+LEFT JOIN GraphAccessPackageAccessReviewDecisions ard ON ap.id = ard.accessPackageId
+GROUP BY ap.displayName
+ORDER BY TotalReviews DESC;
+
+-- Find reviewers who haven't completed reviews
+SELECT
+    u.userPrincipalName AS Reviewer,
+    u.displayName,
+    COUNT(DISTINCT ard.reviewInstanceId) AS PendingReviews,
+    MIN(ard.reviewInstanceStartDateTime) AS OldestPendingReview,
+    DATEDIFF(DAY, MIN(ard.reviewInstanceStartDateTime), GETDATE()) AS DaysOverdue
+FROM GraphAccessPackageAccessReviewDecisions ard
+LEFT JOIN GraphUsers u ON ard.reviewedBy = u.id
+WHERE ard.decision IS NULL
+  AND ard.reviewInstanceStatus = 'InProgress'
+GROUP BY u.userPrincipalName, u.displayName
+HAVING COUNT(*) > 5
+ORDER BY DaysOverdue DESC;
+
+-- Reviewer performance: Who reviews fastest?
+SELECT
+    u.userPrincipalName AS Reviewer,
+    COUNT(DISTINCT ard.id) AS ReviewsCompleted,
+    AVG(DATEDIFF(HOUR, ard.reviewInstanceStartDateTime, ard.reviewedDateTime)) AS AvgHoursToReview,
+    MIN(ard.reviewedDateTime) AS FirstReview,
+    MAX(ard.reviewedDateTime) AS LastReview
+FROM GraphAccessPackageAccessReviewDecisions ard
+JOIN GraphUsers u ON ard.reviewedBy = u.id
+WHERE ard.decision IS NOT NULL
+  AND ard.reviewedDateTime IS NOT NULL
+GROUP BY u.userPrincipalName
+HAVING COUNT(*) > 10
+ORDER BY AvgHoursToReview ASC;
+```
+
+#### 4. **Approval Timeline Analysis**
+
+**The Problem**: Entra ID doesn't provide aggregate statistics on how long access requests take to approve, which requests are stuck, or which approvers are bottlenecks.
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Approval response time distribution by access package
+SELECT
+    ap.displayName AS AccessPackage,
+    COUNT(*) AS TotalRequests,
+    AVG(DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime)) AS AvgHoursToApprove,
+    MIN(DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime)) AS FastestApproval,
+    MAX(DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime)) AS SlowestApproval,
+    -- Response time buckets
+    SUM(CASE WHEN DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime) < 1 THEN 1 ELSE 0 END) AS Under1Hour,
+    SUM(CASE WHEN DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime) BETWEEN 1 AND 4 THEN 1 ELSE 0 END) AS Between1And4Hours,
+    SUM(CASE WHEN DATEDIFF(HOUR, req.createdDateTime, req.completedDateTime) BETWEEN 4 AND 24 THEN 1 ELSE 0 END) AS Between4And24Hours,
+    SUM(CASE WHEN DATEDIFF(DAY, req.createdDateTime, req.completedDateTime) >= 1 THEN 1 ELSE 0 END) AS Over1Day
+FROM GraphAccessPackageAssignmentRequests req
+JOIN GraphAccessPackages ap ON req.accessPackageId = ap.id
+WHERE req.requestState = 'Delivered'
+  AND req.completedDateTime IS NOT NULL
+GROUP BY ap.displayName
+ORDER BY AvgHoursToApprove DESC;
+
+-- Find pending requests and how long they've been waiting
+SELECT
+    u.userPrincipalName AS Requestor,
+    ap.displayName AS AccessPackage,
+    req.requestType,
+    req.createdDateTime,
+    DATEDIFF(HOUR, req.createdDateTime, GETDATE()) AS HoursWaiting,
+    req.justification
+FROM GraphAccessPackageAssignmentRequests req
+JOIN GraphUsers u ON req.requestorId = u.id
+JOIN GraphAccessPackages ap ON req.accessPackageId = ap.id
+WHERE req.requestState IN ('Submitted', 'PendingApproval')
+ORDER BY HoursWaiting DESC;
+
+-- Approver bottleneck analysis
+SELECT
+    policy.displayName AS PolicyName,
+    ap.displayName AS AccessPackage,
+    COUNT(DISTINCT req.id) AS PendingRequests,
+    AVG(DATEDIFF(HOUR, req.createdDateTime, GETDATE())) AS AvgHoursWaiting,
+    MAX(DATEDIFF(HOUR, req.createdDateTime, GETDATE())) AS MaxHoursWaiting
+FROM GraphAccessPackageAssignmentRequests req
+JOIN GraphAccessPackages ap ON req.accessPackageId = ap.id
+JOIN GraphAccessPackageAssignmentPolicies policy ON req.assignmentPolicyId = policy.id
+WHERE req.requestState IN ('Submitted', 'PendingApproval')
+GROUP BY policy.displayName, ap.displayName
+HAVING COUNT(*) > 3
+ORDER BY AvgHoursWaiting DESC;
+```
+
+#### 5. **Direct vs Governed Access Analysis**
+
+**The Problem**: You can't easily see which group memberships are managed through governance (access packages, PIM) vs. direct assignment.
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Complete membership source analysis
+SELECT
+    u.userPrincipalName,
+    g.displayName AS GroupName,
+    CASE
+        WHEN apa.id IS NOT NULL THEN 'Access Package'
+        WHEN pim.id IS NOT NULL THEN 'PIM Eligible'
+        WHEN direct.groupId IS NOT NULL THEN 'Direct Assignment'
+        ELSE 'Unknown'
+    END AS AccessSource,
+    ap.displayName AS AccessPackageName
+FROM GraphUsers u
+JOIN GraphGroupMembers direct ON u.id = direct.memberId
+JOIN GraphGroups g ON direct.groupId = g.id
+LEFT JOIN GraphAccessPackageAssignments apa ON u.id = apa.targetId AND apa.state = 'Delivered'
+LEFT JOIN GraphAccessPackageResourceRoleScopes rs ON apa.accessPackageId = rs.accessPackageId AND rs.resourceId = g.id
+LEFT JOIN GraphAccessPackages ap ON apa.accessPackageId = ap.id
+LEFT JOIN GraphGroupEligibleMembers pim ON u.id = pim.memberId AND pim.groupId = g.id
+WHERE u.accountEnabled = 1
+ORDER BY u.userPrincipalName, g.displayName;
+
+-- Groups with mixed access methods (governance gap)
+SELECT
+    g.displayName AS GroupName,
+    COUNT(DISTINCT CASE WHEN rs.id IS NOT NULL THEN gm.memberId END) AS ViaAccessPackage,
+    COUNT(DISTINCT CASE WHEN rs.id IS NULL AND pim.id IS NULL THEN gm.memberId END) AS DirectAssignment,
+    COUNT(DISTINCT pim.memberId) AS ViaEligible,
+    COUNT(DISTINCT gm.memberId) AS TotalMembers
+FROM GraphGroups g
+LEFT JOIN GraphGroupMembers gm ON g.id = gm.groupId
+LEFT JOIN GraphAccessPackageResourceRoleScopes rs ON g.id = rs.resourceId
+LEFT JOIN GraphGroupEligibleMembers pim ON g.id = pim.groupId AND gm.memberId = pim.memberId
+WHERE gm.memberType = '#microsoft.graph.user'
+GROUP BY g.displayName
+HAVING COUNT(DISTINCT CASE WHEN rs.id IS NULL AND pim.id IS NULL THEN gm.memberId END) > 0
+   AND COUNT(DISTINCT CASE WHEN rs.id IS NOT NULL THEN gm.memberId END) > 0
+ORDER BY DirectAssignment DESC;
+```
+
+#### 6. **Temporal/Historical Analysis**
+
+**The Problem**: Entra ID only shows current state. You can't answer "who had access on this date?" or "when did this access change?"
+
+**What FortigiGraph Gives You**:
+
+```sql
+-- Who had access to a specific group on a specific date?
+SELECT
+    u.userPrincipalName,
+    u.displayName,
+    gm.ValidFrom,
+    gm.ValidTo
+FROM GraphGroupMembers FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00' gm
+JOIN GraphUsers u ON gm.memberId = u.id
+WHERE gm.groupId = 'your-group-id';
+
+-- Access package assignment changes over time
+SELECT
+    u.userPrincipalName,
+    ap.displayName AS AccessPackage,
+    apa.state,
+    apa.ValidFrom AS AssignedDate,
+    apa.ValidTo AS RemovedDate,
+    DATEDIFF(DAY, apa.ValidFrom, ISNULL(apa.ValidTo, GETDATE())) AS DaysActive
+FROM GraphAccessPackageAssignments FOR SYSTEM_TIME ALL apa
+JOIN GraphUsers u ON apa.targetId = u.id
+JOIN GraphAccessPackages ap ON apa.accessPackageId = ap.id
+WHERE u.userPrincipalName = 'john.doe@contoso.com'
+ORDER BY apa.ValidFrom DESC;
+
+-- Audit: Changes to a critical group in the last 30 days
+SELECT
+    u.displayName AS Member,
+    g.displayName AS GroupName,
+    gm.ValidFrom AS ChangeDate,
+    CASE
+        WHEN gm.ValidTo = '9999-12-31 23:59:59.9999999' THEN 'Added'
+        ELSE 'Removed'
+    END AS Action
+FROM GraphGroupMembers FOR SYSTEM_TIME ALL gm
+JOIN GraphUsers u ON gm.memberId = u.id
+JOIN GraphGroups g ON gm.groupId = g.id
+WHERE g.displayName = 'Production-Admins'
+  AND gm.ValidFrom >= DATEADD(DAY, -30, GETDATE())
+ORDER BY gm.ValidFrom DESC;
+```
+
+### 📊 Pre-Built SQL Views for Instant Insights
+
+FortigiGraph creates 16 analytical views automatically:
+
+**Access Package Views**:
+- `vw_AccessPackageEffectiveAssignments` - Current user assignments
+- `vw_AccessPackageResourceSummary` - What resources each package grants
+- `vw_AccessPackageMembershipSummary` - Group membership counts per package
+- `vw_AccessPackageMembershipGaps` - IST vs SOLL gaps
+- `vw_ApprovedRequestTimeline` - Approval response times with buckets
+- `vw_PendingRequestTimeline` - Pending request aging
+- `vw_DeniedRequestTimeline` - Denied request analysis
+- `vw_RequestResponseMetrics` - Aggregate approval statistics
+
+**Group Membership Views**:
+- `vw_GraphGroupNestedMembers` - Indirect memberships
+- `vw_GraphGroupEligibleMembers` - PIM eligible access
+- `vw_GraphGroupMembershipType` - Membership source classification
+- `vw_GraphGroupMembersRecursive` - Complete membership paths
+
+**Review Views**:
+- `vw_AccessReviewSummary` - Review completion rates
+- `vw_PendingAccessReviews` - Overdue reviews
+- `vw_ReviewerPerformance` - Reviewer statistics
 
 ## Table of Contents
 
+- [Why FortigiGraph?](#why-fortigraph)
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -17,6 +326,7 @@ A PowerShell module for working with Microsoft Graph API, syncing data to Azure 
 - [Data Synchronization](#data-synchronization)
   - [User Sync](#user-sync)
   - [Group Sync](#group-sync)
+  - [Access Package Sync](#access-package-sync)
   - [Membership Analysis](#membership-analysis)
 - [Attribute Mapping Discovery](#attribute-mapping-discovery)
 - [Production Deployment (Daily Sync)](#production-deployment-daily-sync)
@@ -489,6 +799,206 @@ JOIN GraphGroups g ON m.groupId = g.id
 WHERE m.memberId = 'user-guid-here'
 ORDER BY g.displayName, m.membershipType;
 ```
+
+---
+
+### Access Package Sync
+
+**NEW**: Complete Entra ID Identity Governance synchronization for access packages, catalogs, assignments, policies, requests, and access reviews.
+
+#### Overview
+
+FortigiGraph now syncs all Entra ID Identity Governance data, enabling insights that aren't available in the portal:
+
+- **IST vs SOLL gaps**: Find users with direct access when they should only have access through packages
+- **Approval timeline metrics**: Identify bottlenecks in access request approvals
+- **Access review analytics**: Track review completion rates and reviewer performance
+- **Historical tracking**: See how access has changed over time with temporal tables
+
+#### Sync All Access Package Data
+
+```powershell
+# Sync everything at once with Start-FGSync
+Start-FGSync -ConfigFile production.json
+
+# Or sync individually:
+
+# 1. Catalogs
+Sync-FGCatalog
+
+# 2. Access Packages
+Sync-FGAccessPackage
+
+# 3. Assignments (who has which access package)
+Sync-FGAccessPackageAssignment
+
+# 4. Resource Role Scopes (what groups/apps each package grants)
+Sync-FGAccessPackageResourceRoleScope
+
+# 5. Assignment Policies (rules for requesting access)
+Sync-FGAccessPackageAssignmentPolicy
+
+# 6. Assignment Requests (all access requests)
+Sync-FGAccessPackageAssignmentRequest
+
+# 7. Access Review Decisions
+Sync-FGAccessPackageAccessReview
+
+# 8. Create analytical views
+Initialize-FGAccessPackageViews
+```
+
+#### What Gets Synced
+
+**Catalogs** (`GraphCatalogs`):
+- Identity: id, displayName, description
+- Type & Visibility: catalogType, isExternallyVisible
+- Status & Metadata: catalogStatus, createdDateTime, modifiedDateTime
+
+**Access Packages** (`GraphAccessPackages`):
+- Identity: id, displayName, description
+- Relationships: catalogId
+- Status & Visibility: isHidden, state
+- Metadata: createdDateTime, modifiedDateTime
+
+**Assignments** (`GraphAccessPackageAssignments`):
+- Identity: id, accessPackageId, targetId (user)
+- Policy & Schedule: assignmentPolicyId, schedule, expirationDateTime
+- Status & Metadata: state, createdDateTime
+
+**Resource Role Scopes** (`GraphAccessPackageResourceRoleScopes`):
+- What resources: resourceId, resourceDisplayName, resourceType (Group, Application, Site)
+- What role: roleId, roleDisplayName (Member, Owner)
+- Which package: accessPackageId
+- Origin: resourceOriginSystem (AadGroup, AadApplication)
+
+**Assignment Policies** (`GraphAccessPackageAssignmentPolicies`):
+- Identity: id, displayName, description
+- Package: accessPackageId
+- Rules: canExtend, durationInDays
+- Metadata: createdDateTime, modifiedDateTime
+
+**Assignment Requests** (`GraphAccessPackageAssignmentRequests`):
+- Identity: id, accessPackageId, requestorId
+- Request Details: requestType, requestState, requestStatus, justification
+- Timeline: createdDateTime, completedDateTime
+- Policy: assignmentPolicyId
+
+**Access Review Decisions** (`GraphAccessPackageAccessReviewDecisions`):
+- Identity: id, reviewInstanceId, reviewDefinitionId
+- Review Target: accessPackageId, reviewedResourceId, reviewedResourceDisplayName
+- Decision: decision (Approve/Deny), justification, recommendation
+- Reviewer: reviewedBy, reviewedByDisplayName, reviewedDateTime
+- Timeline: reviewInstanceStartDateTime, reviewInstanceEndDateTime, reviewInstanceStatus
+
+#### Configuration File
+
+Configure all sync operations in `Start-FGSync` config file:
+
+```json
+{
+  "Sync": {
+    "Catalogs": {
+      "Enabled": true,
+      "TableName": "GraphCatalogs"
+    },
+    "AccessPackages": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackages"
+    },
+    "AccessPackageAssignments": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignments"
+    },
+    "AccessPackageResourceRoleScopes": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageResourceRoleScopes"
+    },
+    "AccessPackageAssignmentPolicies": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignmentPolicies"
+    },
+    "AccessPackageAssignmentRequests": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignmentRequests"
+    },
+    "AccessPackageAccessReviews": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAccessReviewDecisions"
+    },
+    "ParallelExecution": true
+  }
+}
+```
+
+#### Analytical Views
+
+16 SQL views created automatically for instant insights:
+
+**IST vs SOLL Analysis**:
+- `vw_AccessPackageMembershipGaps` - Direct memberships that should be via packages
+- `vw_AccessPackageEffectiveAssignments` - Current user assignments
+
+**Package Usage**:
+- `vw_AccessPackageResourceSummary` - What each package grants
+- `vw_AccessPackageMembershipSummary` - Group membership counts
+
+**Request Timeline**:
+- `vw_ApprovedRequestTimeline` - Approval times with response buckets
+- `vw_PendingRequestTimeline` - Aging pending requests
+- `vw_DeniedRequestTimeline` - Denied request analysis
+- `vw_RequestResponseMetrics` - Aggregate approval statistics
+
+**Access Reviews**:
+- `vw_AccessReviewSummary` - Completion and approval rates
+- `vw_PendingAccessReviews` - Overdue reviews
+- `vw_ReviewerPerformance` - Reviewer statistics
+
+**Additional Views** (12 more): See [Access Package Views Documentation](SQL/Initialize-FGAccessPackageViews.ps1) for complete list
+
+#### Example Queries
+
+**Find IST vs SOLL gaps:**
+```sql
+SELECT * FROM vw_AccessPackageMembershipGaps
+WHERE DiscrepancyType = 'Direct membership without assignment';
+```
+
+**Approval timeline by package:**
+```sql
+SELECT
+    accessPackageName,
+    AVG(hoursToApprove) AS AvgHours,
+    COUNT(*) AS TotalApproved
+FROM vw_ApprovedRequestTimeline
+GROUP BY accessPackageName
+ORDER BY AvgHours DESC;
+```
+
+**Pending requests aging:**
+```sql
+SELECT * FROM vw_PendingRequestTimeline
+WHERE hoursPending > 48
+ORDER BY hoursPending DESC;
+```
+
+**Access review completion rates:**
+```sql
+SELECT * FROM vw_AccessReviewSummary
+WHERE completionRate < 80
+ORDER BY completionRate ASC;
+```
+
+#### Required Permissions
+
+For access package synchronization, you need:
+
+- `EntitlementManagement.Read.All` - Read access packages, catalogs, assignments
+- `AccessReview.Read.All` - Read access review definitions and decisions
+- `User.Read.All` - Read user information (for requestors, reviewers)
+- `Group.Read.All` - Read group information (for resources)
+
+Grant these permissions in Azure Portal → App registrations → API permissions, then grant admin consent.
 
 ---
 
