@@ -92,7 +92,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'accessPackageId'
 
         # Assignment settings
-        'allowedTargetScope'  # Who can be assigned (allMemberUsers, specificDirectoryUsers, etc.)
         'specificAllowedTargets'  # JSON array of specific users/groups if applicable
 
         # Automatic assignment
@@ -139,7 +138,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
-        'allowedTargetScope' = 'NVARCHAR(100)'
         'specificAllowedTargets' = 'NVARCHAR(MAX)'  # JSON array
         'automaticRequestSettings' = 'NVARCHAR(MAX)'  # JSON object
         'canExtend' = 'BIT'

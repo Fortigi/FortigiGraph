@@ -199,6 +199,12 @@ function Sync-FGAccessPackageResourceRoleScope {
             if ($scopes -and $scopes.Count -gt 0) {
                 # Flatten the complex structure into our desired format
                 foreach ($scope in $scopes) {
+                    # Skip scopes with null id (cannot be stored in SQL with NOT NULL constraint)
+                    if (-not $scope.id) {
+                        Write-Verbose "  Skipping scope with NULL id for package '$($package.displayName)'"
+                        continue
+                    }
+
                     $flatScope = [PSCustomObject]@{
                         id = $scope.id
                         accessPackageId = $package.id

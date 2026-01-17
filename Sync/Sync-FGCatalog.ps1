@@ -93,7 +93,6 @@ function Sync-FGCatalog {
 
         # Type & State
         'catalogType'  # userManaged, serviceDefault, serviceManaged
-        'state'        # published, unpublished
         'isExternallyVisible'
 
         # Metadata
@@ -136,7 +135,6 @@ function Sync-FGCatalog {
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
         'catalogType' = 'NVARCHAR(50)'
-        'state' = 'NVARCHAR(50)'
         'isExternallyVisible' = 'BIT'
         'createdDateTime' = 'DATETIME2'
         'modifiedDateTime' = 'DATETIME2'
