@@ -91,12 +91,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
         # Relationships
         'accessPackageId'
 
-        # Assignment settings
-        'specificAllowedTargets'  # JSON array of specific users/groups if applicable
-
-        # Automatic assignment
-        'automaticRequestSettings'  # JSON object defining automatic assignment rules
-
         # Request settings
         'canExtend'
         'durationInDays'
@@ -138,8 +132,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
-        'specificAllowedTargets' = 'NVARCHAR(MAX)'  # JSON array
-        'automaticRequestSettings' = 'NVARCHAR(MAX)'  # JSON object
         'canExtend' = 'BIT'
         'durationInDays' = 'INT'
         'createdDateTime' = 'DATETIME2'

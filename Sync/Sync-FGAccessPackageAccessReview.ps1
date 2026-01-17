@@ -200,7 +200,8 @@ function Sync-FGAccessPackageAccessReview {
             if ($instances -and $instances.Count -gt 0) {
                 # For each instance, get decisions
                 foreach ($instance in $instances) {
-                    $decisionsUri = "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($definition.id)/instances/$($instance.id)/decisions?`$expand=reviewedBy"
+                    # Note: reviewedBy is included by default as userIdentity object, no expansion needed
+                    $decisionsUri = "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($definition.id)/instances/$($instance.id)/decisions"
 
                     try {
                         $decisions = Invoke-FGGetRequest -URI $decisionsUri
