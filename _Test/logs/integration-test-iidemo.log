@@ -1,0 +1,74 @@
+**********************
+PowerShell transcript start
+Start time: 20260117085552
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 104776
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript logging to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\integration-test-iidemo.log
+
+Test 1: Module Import
+=====================
+  ✓ Import FortigiGraph module
+
+Loading Test Configuration
+==========================
+  ✓ Configuration loaded from .\Config\iidemo.json
+  → Validating configuration...
+  → Using Graph TenantId for Azure operations: 10b6a2c8-41f9-400d-8020-4ca96606899f
+  ✓ Configuration validated
+  → Loading secure credentials...
+  ✓ Secure credentials loaded
+
+Test 2: Azure Connection
+========================
+  → Checking Azure connection...
+  → Already connected to correct tenant and subscription
+  ✓ Azure connection established
+  → Verifying subscription context...
+  ✓ Subscription context verified
+
+Test 3: Microsoft Graph Connection
+==================================
+  → Checking for existing Graph token...
+  → Getting new Graph access token...
+  → TenantId: 10b6a2c8-41f9-400d-8020-4ca96606899f
+  → ClientId: ebb35403-0068-4cd2-bb80-73a19b3d9c7e
+  → Using ClientSecret: True
+  → Token obtained, testing Graph API access...
+  ✓ Graph access token obtained
+  ✓ Graph API connection verified
+
+Test 4: Cleanup Existing Test Resources
+=======================================
+  → Checking for existing SQL Server...
+  ✓ No existing SQL Server to remove
+
+Test 5: SQL Server Creation
+===========================
+  → Creating SQL Server: iisqlserver3...
+Setting Azure subscription context...
+Checking resource group: SQLServer2...
+  Resource group already exists
+Checking SQL Server: iisqlserver3...
+  Creating SQL Server: iisqlserver3 in northeurope...
+    This may take a few minutes...
+  SQL Server created successfully
+Configuring firewall rules...
+  Getting your current public IP...
+    Your IP: 143.178.133.160
+    Your IP added to firewall
+Checking database: GraphData...
+  Creating database: GraphData with SKU: Basic...
