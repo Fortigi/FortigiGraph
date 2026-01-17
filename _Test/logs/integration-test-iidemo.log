@@ -1,12 +1,12 @@
 **********************
 PowerShell transcript start
-Start time: 20260117093634
+Start time: 20260117122637
 Username: AzureAD\WimvandenHeijkant
 RunAs User: AzureAD\WimvandenHeijkant
 Configuration Name: 
 Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
 Host Application: C:\Program Files\PowerShell\7\pwsh.dll
-Process ID: 103004
+Process ID: 123460
 PSVersion: 7.5.4
 PSEdition: Core
 GitCommitId: 7.5.4
@@ -114,7 +114,7 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:47:49
+  Server Time: 01/17/2026 11:29:09
   ✓ SQL Server created
   ✓ SQL Server auto-connected
 
@@ -126,7 +126,7 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:47:49
+  Server Time: 01/17/2026 11:29:09
   ✓ SQL connection verified
 
 Test 7: Table Creation (Default Properties)
@@ -165,40 +165,40 @@ True
 Test 10: Data Sync (Default Properties)
 =======================================
   → Syncing users with default properties...
-[09:47:49] Using default attributes: 20 attributes
-[09:47:49] Table 'GraphUsers_DefaultTest' already exists. Checking schema...
-  [09:47:49] Found 15 new attribute(s) to add: lastSignInDateTime, employeeType, employeeHireDate, onPremisesSyncEnabled, employeeId, surname, onPremisesSamAccountName, createdDateTime, managerId, givenName, companyName, jobTitle, onPremisesDistinguishedName, department, userType
-  [09:47:49] Adding 15 column(s) to table 'GraphUsers_DefaultTest'...
-    [09:47:49] Adding column: lastSignInDateTime (DATETIME2)
-    [09:47:49] Adding column: employeeType (NVARCHAR(255))
-    [09:47:50] Adding column: employeeHireDate (DATETIME2)
-    [09:47:50] Adding column: onPremisesSyncEnabled (BIT)
-    [09:47:50] Adding column: employeeId (NVARCHAR(255))
-    [09:47:50] Adding column: surname (NVARCHAR(255))
-    [09:47:50] Adding column: onPremisesSamAccountName (NVARCHAR(255))
-    [09:47:50] Adding column: createdDateTime (DATETIME2)
-    [09:47:50] Adding column: managerId (UNIQUEIDENTIFIER)
-    [09:47:50] Adding column: givenName (NVARCHAR(255))
-    [09:47:50] Adding column: companyName (NVARCHAR(255))
-    [09:47:50] Adding column: jobTitle (NVARCHAR(255))
-    [09:47:50] Adding column: onPremisesDistinguishedName (NVARCHAR(1000))
-    [09:47:50] Adding column: department (NVARCHAR(255))
-    [09:47:50] Adding column: userType (NVARCHAR(50))
-  [09:47:51] Schema updated successfully
+[12:29:09] Using default attributes: 20 attributes
+[12:29:09] Table 'GraphUsers_DefaultTest' already exists. Checking schema...
+  [12:29:10] Found 15 new attribute(s) to add: employeeType, companyName, surname, managerId, lastSignInDateTime, givenName, employeeHireDate, jobTitle, createdDateTime, userType, department, onPremisesSamAccountName, employeeId, onPremisesDistinguishedName, onPremisesSyncEnabled
+  [12:29:10] Adding 15 column(s) to table 'GraphUsers_DefaultTest'...
+    [12:29:10] Adding column: employeeType (NVARCHAR(255))
+    [12:29:10] Adding column: companyName (NVARCHAR(255))
+    [12:29:10] Adding column: surname (NVARCHAR(255))
+    [12:29:10] Adding column: managerId (UNIQUEIDENTIFIER)
+    [12:29:10] Adding column: lastSignInDateTime (DATETIME2)
+    [12:29:10] Adding column: givenName (NVARCHAR(255))
+    [12:29:11] Adding column: employeeHireDate (DATETIME2)
+    [12:29:11] Adding column: jobTitle (NVARCHAR(255))
+    [12:29:11] Adding column: createdDateTime (DATETIME2)
+    [12:29:11] Adding column: userType (NVARCHAR(50))
+    [12:29:11] Adding column: department (NVARCHAR(255))
+    [12:29:11] Adding column: onPremisesSamAccountName (NVARCHAR(255))
+    [12:29:11] Adding column: employeeId (NVARCHAR(255))
+    [12:29:11] Adding column: onPremisesDistinguishedName (NVARCHAR(1000))
+    [12:29:11] Adding column: onPremisesSyncEnabled (BIT)
+  [12:29:11] Schema updated successfully
 
-[09:47:51] Fetching users from Microsoft Graph...
-[09:47:51] Total users fetched: 34 (took 0.3s)
+[12:29:11] Fetching users from Microsoft Graph...
+[12:29:12] Total users fetched: 34 (took 0.3s)
 
-[09:47:51] Syncing users to SQL Server...
-[09:47:51] Preparing data for bulk sync...
-[09:47:51] Database connection established
-[09:47:51] Starting transaction...
-[09:47:51] Bulk merging 34 users...
-[09:47:52] Bulk merge completed: 34 inserted, 0 updated (30.8 users/sec)
-[09:47:52] Checking for deleted users...
-  [09:47:52] No deleted users found
-[09:47:52] Committing transaction...
-[09:47:52] Transaction committed successfully (took 1.4s)
+[12:29:12] Syncing users to SQL Server...
+[12:29:12] Preparing data for bulk sync...
+[12:29:12] Database connection established
+[12:29:12] Starting transaction...
+[12:29:12] Bulk merging 34 users...
+[12:29:13] Bulk merge completed: 34 inserted, 0 updated (28.2 users/sec)
+[12:29:13] Checking for deleted users...
+  [12:29:13] No deleted users found
+[12:29:13] Committing transaction...
+[12:29:13] Transaction committed successfully (took 1.5s)
 
 ========================================
 Sync Complete!
@@ -215,12 +215,12 @@ All changes are automatically tracked in GraphUsers_DefaultTestHistory
 
 Name                           Value
 ----                           -----
+TableName                      GraphUsers_DefaultTest
+TotalUsers                     34
 Attributes                     {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
 SyncedCount                    34
 DeletedCount                   0
-TotalUsers                     34
 ErrorCount                     0
-TableName                      GraphUsers_DefaultTest
   ✓ User sync completed (default properties)
   → Verifying synced data...
   ✓ Data verification (default)
@@ -228,10 +228,10 @@ TableName                      GraphUsers_DefaultTest
 Test 11: Data Sync (Additional Attributes)
 ==========================================
   → Syncing users with Additional Attributes...
-[09:47:52] Using default attributes + 3 additional: Total 22 attributes
+[12:29:13] Using default attributes + 3 additional: Total 22 attributes
 WARNING: Unknown attribute 'extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfEmploymentUserID', using NVARCHAR(MAX). Consider adding to type map.
 WARNING: Unknown attribute 'extension_9dbfd777ae31443d9f207cb9c0b7f7ee_sfTeamID', using NVARCHAR(MAX). Consider adding to type map.
-[09:47:52] Table 'GraphUsers_AdditionalAttributes' does not exist. Will be created...
+[12:29:13] Table 'GraphUsers_AdditionalAttributes' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphUsers_AdditionalAttributes
   History table: dbo.GraphUsers_AdditionalAttributesHistory
   Primary Key: id
@@ -239,19 +239,19 @@ Successfully created temporal table: dbo.GraphUsers_AdditionalAttributes
   Created helper view: vw_GraphUsers_AdditionalAttributes_AllHistory
 True
 
-[09:47:53] Fetching users from Microsoft Graph...
-[09:47:53] Total users fetched: 34 (took 0.3s)
+[12:29:14] Fetching users from Microsoft Graph...
+[12:29:14] Total users fetched: 34 (took 0.3s)
 
-[09:47:53] Syncing users to SQL Server...
-[09:47:53] Preparing data for bulk sync...
-[09:47:53] Database connection established
-[09:47:53] Starting transaction...
-[09:47:53] Bulk merging 34 users...
-[09:47:53] Bulk merge completed: 34 inserted, 0 updated (147.3 users/sec)
-[09:47:53] Checking for deleted users...
-  [09:47:53] No deleted users found
-[09:47:53] Committing transaction...
-[09:47:54] Transaction committed successfully (took 0.5s)
+[12:29:14] Syncing users to SQL Server...
+[12:29:14] Preparing data for bulk sync...
+[12:29:14] Database connection established
+[12:29:14] Starting transaction...
+[12:29:14] Bulk merging 34 users...
+[12:29:15] Bulk merge completed: 34 inserted, 0 updated (58.8 users/sec)
+[12:29:15] Checking for deleted users...
+  [12:29:15] No deleted users found
+[12:29:15] Committing transaction...
+[12:29:15] Transaction committed successfully (took 0.8s)
 
 ========================================
 Sync Complete!
@@ -265,35 +265,35 @@ Attributes:      22
 
 All changes are automatically tracked in GraphUsers_AdditionalAttributesHistory
 ========================================
+TableName                      GraphUsers_AdditionalAttributes
+TotalUsers                     34
 Attributes                     {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
 SyncedCount                    34
 DeletedCount                   0
-TotalUsers                     34
 ErrorCount                     0
-TableName                      GraphUsers_AdditionalAttributes
   ✓ User sync completed (Additional Attributes)
   ✓ Data verification (Additional Attributes)
 
 Test 12: Data Sync (Custom Properties)
 ======================================
   → Syncing users with custom properties...
-[09:47:54] Using custom attributes: 6 attributes
-[09:47:54] Table 'GraphUsers_CustomTest' already exists. Checking schema...
-  [09:47:54] Schema is up to date
+[12:29:15] Using custom attributes: 6 attributes
+[12:29:15] Table 'GraphUsers_CustomTest' already exists. Checking schema...
+  [12:29:15] Schema is up to date
 
-[09:47:54] Fetching users from Microsoft Graph...
-[09:47:54] Total users fetched: 34 (took 0.1s)
+[12:29:15] Fetching users from Microsoft Graph...
+[12:29:15] Total users fetched: 34 (took 0.1s)
 
-[09:47:54] Syncing users to SQL Server...
-[09:47:54] Preparing data for bulk sync...
-[09:47:54] Database connection established
-[09:47:54] Starting transaction...
-[09:47:54] Bulk merging 34 users...
-[09:47:54] Bulk merge completed: 34 inserted, 0 updated (166.7 users/sec)
-[09:47:54] Checking for deleted users...
-  [09:47:55] No deleted users found
-[09:47:55] Committing transaction...
-[09:47:55] Transaction committed successfully (took 0.4s)
+[12:29:15] Syncing users to SQL Server...
+[12:29:15] Preparing data for bulk sync...
+[12:29:15] Database connection established
+[12:29:15] Starting transaction...
+[12:29:15] Bulk merging 34 users...
+[12:29:16] Bulk merge completed: 34 inserted, 0 updated (165.2 users/sec)
+[12:29:16] Checking for deleted users...
+  [12:29:16] No deleted users found
+[12:29:16] Committing transaction...
+[12:29:16] Transaction committed successfully (took 0.4s)
 
 ========================================
 Sync Complete!
@@ -307,12 +307,12 @@ Attributes:      7
 
 All changes are automatically tracked in GraphUsers_CustomTestHistory
 ========================================
+TableName                      GraphUsers_CustomTest
+TotalUsers                     34
 Attributes                     {id, userPrincipalName, displayName, givenName…}
 SyncedCount                    34
 DeletedCount                   0
-TotalUsers                     34
 ErrorCount                     0
-TableName                      GraphUsers_CustomTest
   ✓ User sync completed (custom properties)
   ✓ Data verification (custom)
 
@@ -324,9 +324,9 @@ Test 13: Query and Verify Results
 
 TableName               RecordCount FirstSync           LastSync
 ---------               ----------- ---------           --------
-GraphUsers_DefaultTest           34 17/01/2026 08:47:51 17/01/2026 08:47:51
+GraphUsers_DefaultTest           34 17/01/2026 11:29:12 17/01/2026 11:29:12
 GraphUsers_ExtendedTest           0                     
-GraphUsers_CustomTest            34 17/01/2026 08:47:55 17/01/2026 08:47:55
+GraphUsers_CustomTest            34 17/01/2026 11:29:15 17/01/2026 11:29:15
   ✓ Query execution successful
 
 Test 14: Temporal Table Features
@@ -355,8 +355,8 @@ David@iidemos.onmicrosoft.com                            David Marquess         
 Test 16: Group Sync (Default Properties)
 ========================================
   → Syncing groups with default properties...
-[09:47:55] Using default attributes: 20 attributes
-[09:47:55] Table 'GraphGroups_Test' does not exist. Will be created...
+[12:29:16] Using default attributes: 20 attributes
+[12:29:16] Table 'GraphGroups_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroups_Test
   History table: dbo.GraphGroups_TestHistory
   Primary Key: id
@@ -364,19 +364,19 @@ Successfully created temporal table: dbo.GraphGroups_Test
   Created helper view: vw_GraphGroups_Test_AllHistory
 True
 
-[09:47:55] Fetching groups from Microsoft Graph...
-[09:47:55] Total groups fetched: 68 (took 0.1s)
+[12:29:16] Fetching groups from Microsoft Graph...
+[12:29:17] Total groups fetched: 68 (took 0.1s)
 
-[09:47:55] Syncing groups to SQL Server...
-[09:47:55] Preparing data for bulk sync...
-[09:47:55] Database connection established
-[09:47:55] Starting transaction...
-[09:47:55] Bulk merging 68 groups...
-[09:47:55] Bulk merge completed: 68 inserted, 0 updated (288.4 groups/sec)
-[09:47:55] Checking for deleted groups...
-  [09:47:56] No deleted groups found
-[09:47:56] Committing transaction...
-[09:47:56] Transaction committed successfully (took 0.6s)
+[12:29:17] Syncing groups to SQL Server...
+[12:29:17] Preparing data for bulk sync...
+[12:29:17] Database connection established
+[12:29:17] Starting transaction...
+[12:29:17] Bulk merging 68 groups...
+[12:29:17] Bulk merge completed: 68 inserted, 0 updated (320.5 groups/sec)
+[12:29:17] Checking for deleted groups...
+  [12:29:17] No deleted groups found
+[12:29:17] Committing transaction...
+[12:29:17] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -390,11 +390,11 @@ Attributes:      20
 
 All changes are automatically tracked in GraphGroups_TestHistory
 ========================================
+TableName                      GraphGroups_Test
 Attributes                     {id, displayName, description, mail…}
 SyncedCount                    68
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphGroups_Test
 TotalGroups                    68
   ✓ Group sync completed (default properties)
   → Verifying synced group data...
@@ -403,8 +403,8 @@ TotalGroups                    68
 Test 17: Group Member Sync (Direct Memberships)
 ===============================================
   → Syncing direct group memberships...
-[09:47:56] Starting group membership sync...
-[09:47:56] Table 'GraphGroupMembers_Test' does not exist. Will be created...
+[12:29:17] Starting group membership sync...
+[12:29:17] Table 'GraphGroupMembers_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupMembers_Test
   History table: dbo.GraphGroupMembers_TestHistory
   Primary Key: groupId, memberId
@@ -412,23 +412,23 @@ Successfully created temporal table: dbo.GraphGroupMembers_Test
   Created helper view: vw_GraphGroupMembers_Test_AllHistory
 True
 
-[09:47:56] Fetching groups from Microsoft Graph...
-[09:47:56] Total groups to process: 68
+[12:29:17] Fetching groups from Microsoft Graph...
+[12:29:18] Total groups to process: 68
 
-[09:47:56] Fetching group memberships...
+[12:29:18] Fetching group memberships...
   This may take a while for tenants with many groups and members...
-[09:48:03] Total memberships fetched: 853 from 68 groups (took 7.1s)
+[12:29:25] Total memberships fetched: 853 from 68 groups (took 7.5s)
 
-[09:48:03] Syncing memberships to SQL Server...
-[09:48:03] Preparing data for bulk sync...
-[09:48:03] Database connection established
-[09:48:03] Starting transaction...
-[09:48:03] Bulk merging 853 memberships...
-[09:48:03] Bulk merge completed: 853 inserted, 0 updated (3706.6 memberships/sec)
-[09:48:03] Checking for deleted memberships...
-  [09:48:04] No deleted memberships found
-[09:48:04] Committing transaction...
-[09:48:04] Transaction committed successfully (took 0.6s)
+[12:29:25] Syncing memberships to SQL Server...
+[12:29:25] Preparing data for bulk sync...
+[12:29:25] Database connection established
+[12:29:25] Starting transaction...
+[12:29:25] Bulk merging 853 memberships...
+[12:29:25] Bulk merge completed: 853 inserted, 0 updated (3856.5 memberships/sec)
+[12:29:25] Checking for deleted memberships...
+  [12:29:26] No deleted memberships found
+[12:29:26] Committing transaction...
+[12:29:26] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -442,11 +442,11 @@ Errors:          0
 
 All changes are automatically tracked in GraphGroupMembers_TestHistory
 ========================================
+TableName                      GraphGroupMembers_Test
+TotalMemberships               853
 SyncedCount                    853
 DeletedCount                   0
 ErrorCount                     0
-TotalMemberships               853
-TableName                      GraphGroupMembers_Test
 TotalGroups                    68
   ✓ Direct group membership sync completed
   → Verifying synced membership data...
@@ -457,8 +457,8 @@ TotalGroups                    68
 Test 18: Group Owner Sync (Ownership Relationships)
 ===================================================
   → Syncing group ownership relationships...
-[09:48:05] Starting group ownership sync...
-[09:48:05] Table 'GraphGroupOwners_Test' does not exist. Will be created...
+[12:29:28] Starting group ownership sync...
+[12:29:28] Table 'GraphGroupOwners_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupOwners_Test
   History table: dbo.GraphGroupOwners_TestHistory
   Primary Key: groupId, ownerId
@@ -466,22 +466,22 @@ Successfully created temporal table: dbo.GraphGroupOwners_Test
   Created helper view: vw_GraphGroupOwners_Test_AllHistory
 True
 
-[09:48:06] Fetching groups from Microsoft Graph...
-[09:48:06] Total groups to process: 68
+[12:29:28] Fetching groups from Microsoft Graph...
+[12:29:28] Total groups to process: 68
 
-[09:48:06] Fetching ownership relationships...
-[09:48:12] Total ownership relationships fetched: 17
+[12:29:28] Fetching ownership relationships...
+[12:29:34] Total ownership relationships fetched: 17
 
-[09:48:12] Syncing ownership relationships to SQL Server...
-[09:48:12] Preparing data for bulk sync...
-[09:48:12] Database connection established
-[09:48:12] Starting transaction...
-[09:48:12] Bulk merging 17 ownership relationships...
-[09:48:12] Bulk merge completed: 17 inserted, 0 updated (89 ownerships/sec)
-[09:48:12] Checking for removed ownership relationships...
-  [09:48:12] No removed ownership relationships found
-[09:48:12] Committing transaction...
-[09:48:12] Transaction committed successfully (took 0.4s)
+[12:29:34] Syncing ownership relationships to SQL Server...
+[12:29:34] Preparing data for bulk sync...
+[12:29:34] Database connection established
+[12:29:34] Starting transaction...
+[12:29:34] Bulk merging 17 ownership relationships...
+[12:29:35] Bulk merge completed: 17 inserted, 0 updated (65.8 ownerships/sec)
+[12:29:35] Checking for removed ownership relationships...
+  [12:29:35] No removed ownership relationships found
+[12:29:35] Committing transaction...
+[12:29:35] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -495,11 +495,11 @@ Errors:                     0
 
 All changes are automatically tracked in GraphGroupOwners_TestHistory
 ========================================
-SyncedCount                    17
+TableName                      GraphGroupOwners_Test
 TotalOwnerships                17
+SyncedCount                    17
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphGroupOwners_Test
 TotalGroups                    68
   ✓ Group ownership sync completed
   → Verifying synced ownership data...
@@ -510,8 +510,8 @@ TotalGroups                    68
 Test 19: Group Transitive Member Sync (Nested Memberships)
 ==========================================================
   → Syncing transitive/nested group memberships...
-[09:48:13] Starting transitive group membership sync...
-[09:48:13] Table 'GraphGroupTransitiveMembers_Test' does not exist. Will be created...
+[12:29:36] Starting transitive group membership sync...
+[12:29:36] Table 'GraphGroupTransitiveMembers_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupTransitiveMembers_Test
   History table: dbo.GraphGroupTransitiveMembers_TestHistory
   Primary Key: groupId, memberId
@@ -519,23 +519,23 @@ Successfully created temporal table: dbo.GraphGroupTransitiveMembers_Test
   Created helper view: vw_GraphGroupTransitiveMembers_Test_AllHistory
 True
 
-[09:48:13] Fetching groups from Microsoft Graph...
-[09:48:14] Total groups to process: 68
+[12:29:37] Fetching groups from Microsoft Graph...
+[12:29:37] Total groups to process: 68
 
-[09:48:14] Fetching transitive group memberships...
+[12:29:37] Fetching transitive group memberships...
   This may take a while for tenants with many groups and nested structures...
-[09:48:21] Total transitive memberships fetched: 853 from 68 groups (took 7.3s)
+[12:29:44] Total transitive memberships fetched: 853 from 68 groups (took 7.2s)
 
-[09:48:21] Syncing transitive memberships to SQL Server...
-[09:48:21] Preparing data for bulk sync...
-[09:48:21] Database connection established
-[09:48:21] Starting transaction...
-[09:48:21] Bulk merging 853 transitive memberships...
-[09:48:21] Bulk merge completed: 853 inserted, 0 updated (2766.7 memberships/sec)
-[09:48:21] Checking for deleted transitive memberships...
-  [09:48:21] No deleted transitive memberships found
-[09:48:22] Committing transaction...
-[09:48:22] Transaction committed successfully (took 0.5s)
+[12:29:44] Syncing transitive memberships to SQL Server...
+[12:29:44] Preparing data for bulk sync...
+[12:29:44] Database connection established
+[12:29:44] Starting transaction...
+[12:29:44] Bulk merging 853 transitive memberships...
+[12:29:44] Bulk merge completed: 853 inserted, 0 updated (3714.3 memberships/sec)
+[12:29:44] Checking for deleted transitive memberships...
+  [12:29:44] No deleted transitive memberships found
+[12:29:44] Committing transaction...
+[12:29:45] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -549,11 +549,11 @@ Errors:                     0
 
 All changes are automatically tracked in GraphGroupTransitiveMembers_TestHistory
 ========================================
+TableName                      GraphGroupTransitiveMembers_Test
+TotalMemberships               853
 SyncedCount                    853
 DeletedCount                   0
 ErrorCount                     0
-TotalMemberships               853
-TableName                      GraphGroupTransitiveMembers_Test
 TotalGroups                    68
   ✓ Transitive group membership sync completed
   → Verifying synced transitive membership data...
@@ -572,21 +572,21 @@ Test 20: Group Eligible Member Sync (PIM Memberships)
 Test 21: Group Membership Analysis Views
 ========================================
   → Creating group membership analysis views...
-[09:48:22] Creating group membership analysis views...
+[12:29:45] Creating group membership analysis views...
 WARNING: Table 'GraphGroupEligibleMembers_Test' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional).
 WARNING: Table 'GraphGroupOwners' does not exist. Run Sync-FGGroupOwner to include owners in views (optional).
 
-[09:48:22] Creating view: vw_GraphGroupNestedMembers
+[12:29:45] Creating view: vw_GraphGroupNestedMembers
   Purpose: Shows only members with indirect/nested access (not direct members)
   ✅ Created: vw_GraphGroupNestedMembers
 
-[09:48:22] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)
+[12:29:45] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)
 
-[09:48:22] Creating view: vw_GraphGroupMembershipType
+[12:29:45] Creating view: vw_GraphGroupMembershipType
   Purpose: Shows all members with Direct/Indirect indicator
   ✅ Created: vw_GraphGroupMembershipType
 
-[09:48:22] Creating view: vw_GraphGroupMembersRecursive
+[12:29:45] Creating view: vw_GraphGroupMembersRecursive
   Purpose: Calculates ALL memberships with paths using ONLY direct members
   Benefit: Eliminates need for transitive members sync (75% faster!)
   ✅ Created: vw_GraphGroupMembersRecursive
@@ -644,79 +644,66 @@ Test 23: Group Sync Summary
 
 EntityType             TotalCount FirstSync           LastSync
 ----------             ---------- ---------           --------
-Groups                         68 17/01/2026 08:47:56 17/01/2026 08:47:56
-Direct Memberships            853 17/01/2026 08:48:04 17/01/2026 08:48:04
-Transitive Memberships        853 17/01/2026 08:48:21 17/01/2026 08:48:21
-Group Ownerships               17 17/01/2026 08:48:13 17/01/2026 08:48:13
+Groups                         68 17/01/2026 11:29:17 17/01/2026 11:29:17
+Direct Memberships            853 17/01/2026 11:29:25 17/01/2026 11:29:25
+Transitive Memberships        853 17/01/2026 11:29:44 17/01/2026 11:29:44
+Group Ownerships               17 17/01/2026 11:29:35 17/01/2026 11:29:35
   ✓ Group sync summary
 
 Test 24: Access Package Catalog Sync
 ====================================
   → Syncing access package catalogs...
-[09:48:23] Using default attributes: 9 attributes
-[09:48:23] Table 'GraphCatalogs_Test' does not exist. Will be created...
+[12:29:46] Using default attributes: 8 attributes
+[12:29:46] Table 'GraphCatalogs_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphCatalogs_Test
   History table: dbo.GraphCatalogs_TestHistory
   Primary Key: id
-  Columns: 9
+  Columns: 8
   Created helper view: vw_GraphCatalogs_Test_AllHistory
 True
 
-[09:48:23] Fetching catalogs from Microsoft Graph...
-PS>TerminatingError(Invoke-RestMethod): "
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:48:24",
-      "request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58",
-      "client-request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58"
-    }
-  }
-}"
->> TerminatingError(Invoke-RestMethod): "
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:48:24",
-      "request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58",
-      "client-request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58"
-    }
-  }
-}"
->> TerminatingError(): "Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:48:24",
-      "request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58",
-      "client-request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58"
-    }
-  }
-}"
-  ✗ Catalog sync - Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:48:24",
-      "request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58",
-      "client-request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58"
-    }
-  }
-}
+[12:29:47] Fetching catalogs from Microsoft Graph...
+[12:29:47] Total catalogs fetched: 11 (took 0.3s)
+
+[12:29:47] Syncing catalogs to SQL Server...
+[12:29:47] Preparing data for bulk sync...
+[12:29:47] Database connection established
+[12:29:47] Starting transaction...
+[12:29:47] Bulk merging 11 catalogs...
+[12:29:47] Bulk merge completed: 11 inserted, 0 updated (55.6 catalogs/sec)
+[12:29:47] Checking for deleted catalogs...
+  [12:29:47] No deleted catalogs found
+[12:29:47] Committing transaction...
+[12:29:47] Transaction committed successfully (took 0.4s)
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphCatalogs_Test
+Total Catalogs:  11
+Synced:          11
+Deleted:         0
+Errors:          0
+Attributes:      8
+
+All changes are automatically tracked in GraphCatalogs_Test_History
+========================================
+TableName                      GraphCatalogs_Test
+Attributes                     {id, displayName, description, catalogType…}
+SyncedCount                    11
+DeletedCount                   0
+ErrorCount                     0
+TotalCatalogs                  11
+  ✓ Catalog sync completed
+  → Verifying synced catalog data...
+  ✓ Catalogs synced: 11
+  ✓ Catalog data verification
 
 Test 25: Access Package Sync
 ============================
   → Syncing access packages...
-[09:48:23] Using default attributes: 8 attributes
-[09:48:23] Table 'GraphAccessPackages_Test' does not exist. Will be created...
+[12:29:48] Using default attributes: 8 attributes
+[12:29:48] Table 'GraphAccessPackages_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackages_Test
   History table: dbo.GraphAccessPackages_TestHistory
   Primary Key: id
@@ -724,19 +711,19 @@ Successfully created temporal table: dbo.GraphAccessPackages_Test
   Created helper view: vw_GraphAccessPackages_Test_AllHistory
 True
 
-[09:48:23] Fetching access packages from Microsoft Graph...
-[09:48:25] Total access packages fetched: 12 (took 1.2s)
+[12:29:48] Fetching access packages from Microsoft Graph...
+[12:29:50] Total access packages fetched: 12 (took 2.4s)
 
-[09:48:25] Syncing access packages to SQL Server...
-[09:48:25] Preparing data for bulk sync...
-[09:48:25] Database connection established
-[09:48:25] Starting transaction...
-[09:48:25] Bulk merging 12 access packages...
-[09:48:25] Bulk merge completed: 12 inserted, 0 updated (60 packages/sec)
-[09:48:25] Checking for deleted access packages...
-  [09:48:25] No deleted access packages found
-[09:48:25] Committing transaction...
-[09:48:25] Transaction committed successfully (took 0.5s)
+[12:29:50] Syncing access packages to SQL Server...
+[12:29:50] Preparing data for bulk sync...
+[12:29:50] Database connection established
+[12:29:50] Starting transaction...
+[12:29:50] Bulk merging 12 access packages...
+[12:29:51] Bulk merge completed: 12 inserted, 0 updated (58.8 packages/sec)
+[12:29:51] Checking for deleted access packages...
+  [12:29:51] No deleted access packages found
+[12:29:51] Committing transaction...
+[12:29:51] Transaction committed successfully (took 0.4s)
 
 ========================================
 Sync Complete!
@@ -750,12 +737,12 @@ Attributes:          8
 
 All changes are automatically tracked in GraphAccessPackages_Test_History
 ========================================
+TableName                      GraphAccessPackages_Test
 Attributes                     {id, displayName, description, catalogId…}
+TotalPackages                  12
 SyncedCount                    12
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphAccessPackages_Test
-TotalPackages                  12
   ✓ Access package sync completed
   → Verifying synced access package data...
   ✓ Access packages synced: 12
@@ -764,8 +751,8 @@ TotalPackages                  12
 Test 26: Access Package Assignment Sync
 =======================================
   → Syncing access package assignments...
-[09:48:25] Using default attributes: 7 attributes
-[09:48:25] Table 'GraphAccessPackageAssignments_Test' does not exist. Will be created...
+[12:29:51] Using default attributes: 7 attributes
+[12:29:51] Table 'GraphAccessPackageAssignments_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignments_Test
   History table: dbo.GraphAccessPackageAssignments_TestHistory
   Primary Key: id
@@ -773,19 +760,19 @@ Successfully created temporal table: dbo.GraphAccessPackageAssignments_Test
   Created helper view: vw_GraphAccessPackageAssignments_Test_AllHistory
 True
 
-[09:48:25] Fetching access package assignments from Microsoft Graph...
-[09:48:26] Total assignments fetched: 80 (took 0.4s)
+[12:29:51] Fetching access package assignments from Microsoft Graph...
+[12:29:52] Total assignments fetched: 80 (took 0.6s)
 
-[09:48:26] Syncing access package assignments to SQL Server...
-[09:48:26] Preparing data for bulk sync...
-[09:48:26] Database connection established
-[09:48:26] Starting transaction...
-[09:48:26] Bulk merging 80 access package assignments...
-[09:48:26] Bulk merge completed: 80 inserted, 0 updated (284.5 assignments/sec)
-[09:48:26] Checking for deleted assignments...
-  [09:48:26] No deleted assignments found
-[09:48:26] Committing transaction...
-[09:48:26] Transaction committed successfully (took 0.5s)
+[12:29:52] Syncing access package assignments to SQL Server...
+[12:29:52] Preparing data for bulk sync...
+[12:29:52] Database connection established
+[12:29:52] Starting transaction...
+[12:29:52] Bulk merging 80 access package assignments...
+[12:29:52] Bulk merge completed: 80 inserted, 0 updated (272.6 assignments/sec)
+[12:29:52] Checking for deleted assignments...
+  [12:29:52] No deleted assignments found
+[12:29:52] Committing transaction...
+[12:29:52] Transaction committed successfully (took 0.6s)
 
 ========================================
 Sync Complete!
@@ -799,12 +786,12 @@ Attributes:          7
 
 All changes are automatically tracked in GraphAccessPackageAssignments_Test_History
 ========================================
+TableName                      GraphAccessPackageAssignments_Test
 Attributes                     {id, accessPackageId, targetId, state…}
 SyncedCount                    80
 DeletedCount                   0
 TotalAssignments               80
 ErrorCount                     0
-TableName                      GraphAccessPackageAssignments_Test
   ✓ Access package assignment sync completed
   → Verifying synced assignment data...
   ✓ Assignments synced: 80
@@ -813,8 +800,8 @@ TableName                      GraphAccessPackageAssignments_Test
 Test 27: Access Package Resource Role Scope Sync
 ================================================
   → Syncing access package resource role scopes...
-[09:48:26] Using fixed attributes: 10 attributes
-[09:48:27] Table 'GraphAccessPackageResourceRoleScopes_Test' does not exist. Will be created...
+[12:29:52] Using fixed attributes: 10 attributes
+[12:29:52] Table 'GraphAccessPackageResourceRoleScopes_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageResourceRoleScopes_Test
   History table: dbo.GraphAccessPackageResourceRoleScopes_TestHistory
   Primary Key: id
@@ -822,33 +809,32 @@ Successfully created temporal table: dbo.GraphAccessPackageResourceRoleScopes_Te
   Created helper view: vw_GraphAccessPackageResourceRoleScopes_Test_AllHistory
 True
 
-[09:48:27] Fetching access packages from Microsoft Graph...
-[09:48:27] Found 12 access packages
+[12:29:53] Fetching access packages from Microsoft Graph...
+[12:29:53] Found 12 access packages
 
-[09:48:27] Fetching resource role scopes for each access package...
-  [09:48:27] Progress: 1/12 packages (8.3%)
-  [09:48:31] Progress: 10/12 packages (83.3%)
-  [09:48:31] Progress: 12/12 packages (100%)
-[09:48:32] Total resource role scopes fetched: 44 (took 4.8s)
+[12:29:53] Fetching resource role scopes for each access package...
+  [12:29:53] Progress: 1/12 packages (8.3%)
+  [12:29:57] Progress: 10/12 packages (83.3%)
+  [12:29:57] Progress: 12/12 packages (100%)
+[12:29:58] Total resource role scopes fetched: 44 (took 4.9s)
 
-[09:48:32] Syncing resource role scopes to SQL Server...
-[09:48:32] Preparing data for bulk sync...
-[09:48:32] Database connection established
-[09:48:32] Starting transaction...
-[09:48:32] Bulk merging 44 resource role scopes...
+[12:29:58] Syncing resource role scopes to SQL Server...
+[12:29:58] Preparing data for bulk sync...
+[12:29:58] Database connection established
+[12:29:58] Starting transaction...
+[12:29:58] Bulk merging 44 resource role scopes...
 PS>TerminatingError(): "Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails.""
 Write-Error: C:\Source\Fortigi\GitHub\FortigiGraph\SQL\Invoke-FGSQLCommand.ps1:66
 Line |
   66 |          $result = & $ScriptBlock $connection
      |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~
-     | [09:48:32] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails."
+     | [12:29:58] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails."
 Write-Error: C:\Source\Fortigi\GitHub\FortigiGraph\SQL\Invoke-FGSQLCommand.ps1:66
 Line |
   66 |          $result = & $ScriptBlock $connection
      |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~
-     | [09:48:32] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert
-     | the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does
-     | not allow nulls. UPDATE fails."
+     | [12:29:58] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table
+     | 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails."
 
 PS>TerminatingError(): "Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails.""
 >> TerminatingError(): "SQL command execution failed: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails.""
@@ -858,25 +844,25 @@ PS>TerminatingError(): "Bulk merge failed: Exception calling "Read" with "0" arg
 Test 28: Access Package Assignment Policy Sync
 ==============================================
   → Syncing access package assignment policies...
-[09:48:32] Using default attributes: 11 attributes
-[09:48:32] Table 'GraphAccessPackageAssignmentPolicies_Test' does not exist. Will be created...
+[12:29:58] Using default attributes: 10 attributes
+[12:29:58] Table 'GraphAccessPackageAssignmentPolicies_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignmentPolicies_Test
   History table: dbo.GraphAccessPackageAssignmentPolicies_TestHistory
   Primary Key: id
-  Columns: 11
+  Columns: 10
   Created helper view: vw_GraphAccessPackageAssignmentPolicies_Test_AllHistory
 True
 
-[09:48:32] Fetching access package assignment policies from Microsoft Graph...
+[12:29:59] Fetching access package assignment policies from Microsoft Graph...
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:48:33",
-      "request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71",
-      "client-request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71"
+      "date": "2026-01-17T11:29:59",
+      "request-id": "7d842440-37b5-4156-b799-187b01a8779c",
+      "client-request-id": "7d842440-37b5-4156-b799-187b01a8779c"
     }
   }
 }"
@@ -884,11 +870,11 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:48:33",
-      "request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71",
-      "client-request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71"
+      "date": "2026-01-17T11:29:59",
+      "request-id": "7d842440-37b5-4156-b799-187b01a8779c",
+      "client-request-id": "7d842440-37b5-4156-b799-187b01a8779c"
     }
   }
 }"
@@ -896,11 +882,11 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:48:33",
-      "request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71",
-      "client-request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71"
+      "date": "2026-01-17T11:29:59",
+      "request-id": "7d842440-37b5-4156-b799-187b01a8779c",
+      "client-request-id": "7d842440-37b5-4156-b799-187b01a8779c"
     }
   }
 }"
@@ -908,11 +894,11 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:48:33",
-      "request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71",
-      "client-request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71"
+      "date": "2026-01-17T11:29:59",
+      "request-id": "7d842440-37b5-4156-b799-187b01a8779c",
+      "client-request-id": "7d842440-37b5-4156-b799-187b01a8779c"
     }
   }
 }
@@ -920,8 +906,8 @@ PS>TerminatingError(Invoke-RestMethod): "
 Test 29: Access Package Assignment Request Sync
 ===============================================
   → Syncing access package assignment requests...
-[09:48:33] Using default attributes: 12 attributes
-[09:48:33] Table 'GraphAccessPackageAssignmentRequests_Test' does not exist. Will be created...
+[12:29:59] Using default attributes: 12 attributes
+[12:29:59] Table 'GraphAccessPackageAssignmentRequests_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignmentRequests_Test
   History table: dbo.GraphAccessPackageAssignmentRequests_TestHistory
   Primary Key: id
@@ -929,19 +915,19 @@ Successfully created temporal table: dbo.GraphAccessPackageAssignmentRequests_Te
   Created helper view: vw_GraphAccessPackageAssignmentRequests_Test_AllHistory
 True
 
-[09:48:33] Fetching access package assignment requests from Microsoft Graph...
-[09:48:33] Total requests fetched: 89 (took 0.4s)
+[12:29:59] Fetching access package assignment requests from Microsoft Graph...
+[12:29:59] Total requests fetched: 89 (took 0.6s)
 
-[09:48:33] Syncing assignment requests to SQL Server...
-[09:48:33] Preparing data for bulk sync...
-[09:48:33] Database connection established
-[09:48:33] Starting transaction...
-[09:48:33] Bulk merging 89 assignment requests...
-[09:48:33] Bulk merge completed: 89 inserted, 0 updated (333.9 requests/sec)
-[09:48:33] Checking for deleted requests...
-  [09:48:34] No deleted requests found
-[09:48:34] Committing transaction...
-[09:48:34] Transaction committed successfully (took 0.5s)
+[12:29:59] Syncing assignment requests to SQL Server...
+[12:29:59] Preparing data for bulk sync...
+[12:30:00] Database connection established
+[12:30:00] Starting transaction...
+[12:30:00] Bulk merging 89 assignment requests...
+[12:30:00] Bulk merge completed: 89 inserted, 0 updated (374.9 requests/sec)
+[12:30:00] Checking for deleted requests...
+  [12:30:00] No deleted requests found
+[12:30:00] Committing transaction...
+[12:30:00] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -955,12 +941,12 @@ Attributes:          12
 
 All changes are automatically tracked in GraphAccessPackageAssignmentRequests_Test_History
 ========================================
+TableName                      GraphAccessPackageAssignmentRequests_Test
 Attributes                     {id, accessPackageId, assignmentPolicyId, requestorId…}
 SyncedCount                    89
 DeletedCount                   0
-ErrorCount                     0
-TableName                      GraphAccessPackageAssignmentRequests_Test
 TotalRequests                  89
+ErrorCount                     0
   ✓ Assignment request sync completed
   → Verifying synced request data...
   ✓ Assignment requests synced: 89
@@ -969,8 +955,8 @@ TotalRequests                  89
 Test 30: Access Package Access Review Sync
 ==========================================
   → Syncing access package access review decisions...
-[09:48:34] Using fixed attributes: 15 attributes
-[09:48:34] Table 'GraphAccessPackageAccessReviewDecisions_Test' does not exist. Will be created...
+[12:30:00] Using fixed attributes: 15 attributes
+[12:30:00] Table 'GraphAccessPackageAccessReviewDecisions_Test' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAccessReviewDecisions_Test
   History table: dbo.GraphAccessPackageAccessReviewDecisions_TestHistory
   Primary Key: id
@@ -978,20 +964,20 @@ Successfully created temporal table: dbo.GraphAccessPackageAccessReviewDecisions
   Created helper view: vw_GraphAccessPackageAccessReviewDecisions_Test_AllHistory
 True
 
-[09:48:34] Fetching access review definitions from Microsoft Graph...
-[09:48:34] Found 5 review definitions
+[12:30:00] Fetching access review definitions from Microsoft Graph...
+[12:30:01] Found 5 review definitions
 
-[09:48:34] Fetching review instances and decisions...
-  [09:48:34] Progress: 1/5 definitions (20%)
+[12:30:01] Fetching review instances and decisions...
+  [12:30:01] Progress: 1/5 definitions (20%)
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515",
-      "client-request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515"
+      "date": "2026-01-17T11:30:01",
+      "request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239",
+      "client-request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239"
     }
   }
 }"
@@ -1001,21 +987,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515",
-      "client-request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515"
+      "date": "2026-01-17T11:30:01",
+      "request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239",
+      "client-request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239"
     }
   }
 }"
-WARNING:   [09:48:34] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
+WARNING:   [12:30:01] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515",
-      "client-request-id": "33bd6a29-ac78-48d7-a3e2-ceed216d1515"
+      "date": "2026-01-17T11:30:01",
+      "request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239",
+      "client-request-id": "d06f9292-0e60-47f1-bc21-33d22ee57239"
     }
   }
 }
@@ -1025,9 +1011,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "d1053744-e123-4775-bf38-1398522b11c7",
-      "client-request-id": "d1053744-e123-4775-bf38-1398522b11c7"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a",
+      "client-request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a"
     }
   }
 }"
@@ -1037,21 +1023,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "d1053744-e123-4775-bf38-1398522b11c7",
-      "client-request-id": "d1053744-e123-4775-bf38-1398522b11c7"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a",
+      "client-request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a"
     }
   }
 }"
-WARNING:   [09:48:34] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
+WARNING:   [12:30:01] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "d1053744-e123-4775-bf38-1398522b11c7",
-      "client-request-id": "d1053744-e123-4775-bf38-1398522b11c7"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a",
+      "client-request-id": "30bbb1db-aba9-45c8-99e9-e7cb46b6447a"
     }
   }
 }
@@ -1061,9 +1047,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "810c5173-b654-4884-bf80-d7a1032a5489",
-      "client-request-id": "810c5173-b654-4884-bf80-d7a1032a5489"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "899543cb-5f54-45ec-947d-91c695135e54",
+      "client-request-id": "899543cb-5f54-45ec-947d-91c695135e54"
     }
   }
 }"
@@ -1073,21 +1059,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "810c5173-b654-4884-bf80-d7a1032a5489",
-      "client-request-id": "810c5173-b654-4884-bf80-d7a1032a5489"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "899543cb-5f54-45ec-947d-91c695135e54",
+      "client-request-id": "899543cb-5f54-45ec-947d-91c695135e54"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
+WARNING:   [12:30:02] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "810c5173-b654-4884-bf80-d7a1032a5489",
-      "client-request-id": "810c5173-b654-4884-bf80-d7a1032a5489"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "899543cb-5f54-45ec-947d-91c695135e54",
+      "client-request-id": "899543cb-5f54-45ec-947d-91c695135e54"
     }
   }
 }
@@ -1097,9 +1083,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94",
-      "client-request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39",
+      "client-request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39"
     }
   }
 }"
@@ -1109,21 +1095,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94",
-      "client-request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39",
+      "client-request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
+WARNING:   [12:30:02] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94",
-      "client-request-id": "b2965e36-5ad0-4818-ac77-b5de72918b94"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39",
+      "client-request-id": "9c1f34c5-4a0f-4a4a-bd6d-19fca812ec39"
     }
   }
 }
@@ -1133,9 +1119,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833",
-      "client-request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6",
+      "client-request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6"
     }
   }
 }"
@@ -1145,21 +1131,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833",
-      "client-request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6",
+      "client-request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
+WARNING:   [12:30:02] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:35",
-      "request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833",
-      "client-request-id": "4ea4ae98-05c3-40eb-92a5-fb0451f97833"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6",
+      "client-request-id": "0b1c3673-1ef5-4084-8022-df92f359e5f6"
     }
   }
 }
@@ -1169,9 +1155,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d",
-      "client-request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283",
+      "client-request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283"
     }
   }
 }"
@@ -1181,21 +1167,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d",
-      "client-request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283",
+      "client-request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
+WARNING:   [12:30:02] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d",
-      "client-request-id": "dd552dc0-646c-44b0-aa07-1b45496ce11d"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283",
+      "client-request-id": "f5ad6311-e77a-48e2-b825-f717c13d2283"
     }
   }
 }
@@ -1205,9 +1191,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999",
-      "client-request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607",
+      "client-request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607"
     }
   }
 }"
@@ -1217,21 +1203,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999",
-      "client-request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607",
+      "client-request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
+WARNING:   [12:30:02] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999",
-      "client-request-id": "1eecce9b-b07c-4d2a-9de3-b88fe0847999"
+      "date": "2026-01-17T11:30:02",
+      "request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607",
+      "client-request-id": "3ac17329-b3e5-44e0-988d-0793ecfd2607"
     }
   }
 }
@@ -1241,9 +1227,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0",
-      "client-request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36",
+      "client-request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36"
     }
   }
 }"
@@ -1253,21 +1239,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0",
-      "client-request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36",
+      "client-request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
+WARNING:   [12:30:03] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0",
-      "client-request-id": "35d42f57-5f2c-4fd1-b9ba-42793b3be2b0"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36",
+      "client-request-id": "c73101da-d06f-4b8f-bc78-a3b3a7ca1b36"
     }
   }
 }
@@ -1277,9 +1263,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1",
-      "client-request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9",
+      "client-request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9"
     }
   }
 }"
@@ -1289,21 +1275,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1",
-      "client-request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9",
+      "client-request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
+WARNING:   [12:30:03] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1",
-      "client-request-id": "2aad5a54-4cc0-4699-978c-0e43fef786c1"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9",
+      "client-request-id": "df22541b-73e3-4885-bdc0-56487f57c7a9"
     }
   }
 }
@@ -1313,9 +1299,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7",
-      "client-request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "6a718414-4765-4845-947a-0b42a277a471",
+      "client-request-id": "6a718414-4765-4845-947a-0b42a277a471"
     }
   }
 }"
@@ -1325,34 +1311,34 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7",
-      "client-request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "6a718414-4765-4845-947a-0b42a277a471",
+      "client-request-id": "6a718414-4765-4845-947a-0b42a277a471"
     }
   }
 }"
-WARNING:   [09:48:35] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
+WARNING:   [12:30:03] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7",
-      "client-request-id": "a8bb40e5-fc18-4ddf-a092-89910f5798d7"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "6a718414-4765-4845-947a-0b42a277a471",
+      "client-request-id": "6a718414-4765-4845-947a-0b42a277a471"
     }
   }
 }
-  [09:48:35] Progress: 5/5 definitions (100%)
+  [12:30:03] Progress: 5/5 definitions (100%)
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248",
-      "client-request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "4184b376-4ae5-4074-bef7-84443aa990dc",
+      "client-request-id": "4184b376-4ae5-4074-bef7-84443aa990dc"
     }
   }
 }"
@@ -1362,21 +1348,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248",
-      "client-request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "4184b376-4ae5-4074-bef7-84443aa990dc",
+      "client-request-id": "4184b376-4ae5-4074-bef7-84443aa990dc"
     }
   }
 }"
-WARNING:   [09:48:36] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
+WARNING:   [12:30:03] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248",
-      "client-request-id": "754e7463-fd2a-487c-b14d-2eb91a05a248"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "4184b376-4ae5-4074-bef7-84443aa990dc",
+      "client-request-id": "4184b376-4ae5-4074-bef7-84443aa990dc"
     }
   }
 }
@@ -1386,9 +1372,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370",
-      "client-request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb",
+      "client-request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb"
     }
   }
 }"
@@ -1398,26 +1384,26 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370",
-      "client-request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb",
+      "client-request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb"
     }
   }
 }"
-WARNING:   [09:48:36] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
+WARNING:   [12:30:03] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:48:36",
-      "request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370",
-      "client-request-id": "7d08c2c6-9d45-4124-bb8d-24aa8e7ca370"
+      "date": "2026-01-17T11:30:03",
+      "request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb",
+      "client-request-id": "03c63ecb-d21e-409a-955a-4b8ca57ef7bb"
     }
   }
 }
-[09:48:36] Total review decisions fetched: 0 (took 1.4s)
-WARNING: [09:48:36] No review decisions found to sync.
+[12:30:03] Total review decisions fetched: 0 (took 2.1s)
+WARNING: [12:30:03] No review decisions found to sync.
   ✓ Access review sync completed
   → Verifying synced access review data...
   ⚠ No review decisions found (this is OK if no reviews conducted)
@@ -1426,40 +1412,40 @@ WARNING: [09:48:36] No review decisions found to sync.
 Test 31: Access Package Analysis Views
 ======================================
   → Creating access package analysis views...
-[09:48:36] Creating access package analysis views...
-  [09:48:36] Dropped existing view: vw_UserAccessPackages
-  [09:48:36] Created view: vw_UserAccessPackages
-  [09:48:36] Dropped existing view: vw_UserAccessPackageResources
-  [09:48:36] Created view: vw_UserAccessPackageResources
-  [09:48:36] Dropped existing view: vw_UserAccessPackageGroupMemberships
-  [09:48:36] Created view: vw_UserAccessPackageGroupMemberships
-  [09:48:36] Dropped existing view: vw_UserAccessPackageGroupOwnerships
-  [09:48:36] Created view: vw_UserAccessPackageGroupOwnerships
-  [09:48:36] Dropped existing view: vw_DirectGroupMemberships
-  [09:48:36] Created view: vw_DirectGroupMemberships
-  [09:48:36] Dropped existing view: vw_DirectGroupOwnerships
-  [09:48:36] Created view: vw_DirectGroupOwnerships
-  [09:48:36] Dropped existing view: vw_UnmanagedPermissions
-  [09:48:36] Created view: vw_UnmanagedPermissions
-  [09:48:36] Dropped existing view: vw_AccessPackageAssignmentDetails
-  [09:48:36] Created view: vw_AccessPackageAssignmentDetails
-  [09:48:36] Dropped existing view: vw_AutomaticAssignments
-  [09:48:36] Created view: vw_AutomaticAssignments
-  [09:48:36] Dropped existing view: vw_RequestedAssignments
-  [09:48:36] Created view: vw_RequestedAssignments
-  [09:48:37] Dropped existing view: vw_AdminAssignments
-  [09:48:37] Created view: vw_AdminAssignments
-  [09:48:37] Dropped existing view: vw_AccessPackageLastReview
-  [09:48:37] Created view: vw_AccessPackageLastReview
-  [09:48:37] Dropped existing view: vw_ApprovedRequestTimeline
-  [09:48:37] Created view: vw_ApprovedRequestTimeline
-  [09:48:37] Dropped existing view: vw_DeniedRequestTimeline
-  [09:48:37] Created view: vw_DeniedRequestTimeline
-  [09:48:37] Dropped existing view: vw_PendingRequestTimeline
-  [09:48:37] Created view: vw_PendingRequestTimeline
-  [09:48:37] Dropped existing view: vw_RequestResponseMetrics
-  [09:48:37] Created view: vw_RequestResponseMetrics
-[09:48:37] Access package views created successfully
+[12:30:03] Creating access package analysis views...
+  [12:30:03] Dropped existing view: vw_UserAccessPackages
+  [12:30:03] Created view: vw_UserAccessPackages
+  [12:30:03] Dropped existing view: vw_UserAccessPackageResources
+  [12:30:03] Created view: vw_UserAccessPackageResources
+  [12:30:03] Dropped existing view: vw_UserAccessPackageGroupMemberships
+  [12:30:03] Created view: vw_UserAccessPackageGroupMemberships
+  [12:30:03] Dropped existing view: vw_UserAccessPackageGroupOwnerships
+  [12:30:03] Created view: vw_UserAccessPackageGroupOwnerships
+  [12:30:03] Dropped existing view: vw_DirectGroupMemberships
+  [12:30:03] Created view: vw_DirectGroupMemberships
+  [12:30:04] Dropped existing view: vw_DirectGroupOwnerships
+  [12:30:04] Created view: vw_DirectGroupOwnerships
+  [12:30:04] Dropped existing view: vw_UnmanagedPermissions
+  [12:30:04] Created view: vw_UnmanagedPermissions
+  [12:30:04] Dropped existing view: vw_AccessPackageAssignmentDetails
+  [12:30:04] Created view: vw_AccessPackageAssignmentDetails
+  [12:30:04] Dropped existing view: vw_AutomaticAssignments
+  [12:30:04] Created view: vw_AutomaticAssignments
+  [12:30:04] Dropped existing view: vw_RequestedAssignments
+  [12:30:04] Created view: vw_RequestedAssignments
+  [12:30:04] Dropped existing view: vw_AdminAssignments
+  [12:30:04] Created view: vw_AdminAssignments
+  [12:30:04] Dropped existing view: vw_AccessPackageLastReview
+  [12:30:04] Created view: vw_AccessPackageLastReview
+  [12:30:04] Dropped existing view: vw_ApprovedRequestTimeline
+  [12:30:04] Created view: vw_ApprovedRequestTimeline
+  [12:30:04] Dropped existing view: vw_DeniedRequestTimeline
+  [12:30:04] Created view: vw_DeniedRequestTimeline
+  [12:30:04] Dropped existing view: vw_PendingRequestTimeline
+  [12:30:04] Created view: vw_PendingRequestTimeline
+  [12:30:04] Dropped existing view: vw_RequestResponseMetrics
+  [12:30:04] Created view: vw_RequestResponseMetrics
+[12:30:04] Access package views created successfully
   ✓ Access package views created
   → Verifying views were created...
   ✓ Views created: 16 / 16
@@ -1473,12 +1459,12 @@ Test 32: Access Package Sync Summary
 
 EntityType              TotalCount FirstSync           LastSync
 ----------              ---------- ---------           --------
-Catalogs                         0                     
-Access Packages                 12 17/01/2026 08:48:25 17/01/2026 08:48:25
-Assignments                     80 17/01/2026 08:48:26 17/01/2026 08:48:26
+Catalogs                        11 17/01/2026 11:29:47 17/01/2026 11:29:47
+Access Packages                 12 17/01/2026 11:29:50 17/01/2026 11:29:50
+Assignments                     80 17/01/2026 11:29:52 17/01/2026 11:29:52
 Resource Role Scopes             0                     
 Assignment Policies              0                     
-Assignment Requests             89 17/01/2026 08:48:34 17/01/2026 08:48:34
+Assignment Requests             89 17/01/2026 11:30:00 17/01/2026 11:30:00
 Access Review Decisions          0
   ✓ Access package sync summary
 
@@ -1490,7 +1476,7 @@ Test 33: Start-FGSync (Sequential Sync)
 ========================================
 FortigiGraph Daily Sync
 ========================================
-Started: 2026-01-17 09:48:38
+Started: 2026-01-17 12:30:07
 Config:  C:\Source\Fortigi\GitHub\FortigiGraph\_Test\config.startsync-test.json
 
 === Loading Configuration ===
@@ -1522,21 +1508,21 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:48:42
+  Server Time: 01/17/2026 11:30:10
 Already connected to iisqlserver.database.windows.net / GraphData
-ConnectionStatus               Connected
-Server                         iisqlserver.database.windows.net
-Edition                        SQL Azure
-Version                        12.0.2000.8
 Database                       GraphData
-CurrentTime                    17/01/2026 08:48:42
+CurrentTime                    17/01/2026 11:30:10
+Edition                        SQL Azure
+ConnectionStatus               Connected
+Version                        12.0.2000.8
+Server                         iisqlserver.database.windows.net
   ✓ Connected to SQL Server
 SQL Connection Test: SUCCESS
   Server: iisqlserver.database.windows.net
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:48:42
+  Server Time: 01/17/2026 11:30:10
   ✓ SQL connection verified: GraphData
 
 === Connecting to Microsoft Graph ===
@@ -1548,8 +1534,8 @@ SQL Connection Test: SUCCESS
   → Syncing users to SQL...
   → Using user filter: accountEnabled eq true
   → Additional attributes: officeLocation
-[09:48:42] Using default attributes + 1 additional: Total 21 attributes
-[09:48:42] Table 'GraphUsers_StartSync' does not exist. Will be created...
+[12:30:10] Using default attributes + 1 additional: Total 21 attributes
+[12:30:10] Table 'GraphUsers_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphUsers_StartSync
   History table: dbo.GraphUsers_StartSyncHistory
   Primary Key: id
@@ -1557,19 +1543,19 @@ Successfully created temporal table: dbo.GraphUsers_StartSync
   Created helper view: vw_GraphUsers_StartSync_AllHistory
 True
 
-[09:48:42] Fetching users from Microsoft Graph...
-[09:48:43] Total users fetched: 34 (took 0.5s)
+[12:30:10] Fetching users from Microsoft Graph...
+[12:30:11] Total users fetched: 34 (took 0.3s)
 
-[09:48:43] Syncing users to SQL Server...
-[09:48:43] Preparing data for bulk sync...
-[09:48:43] Database connection established
-[09:48:43] Starting transaction...
-[09:48:43] Bulk merging 34 users...
-[09:48:43] Bulk merge completed: 34 inserted, 0 updated (152.2 users/sec)
-[09:48:43] Checking for deleted users...
-  [09:48:43] No deleted users found
-[09:48:43] Committing transaction...
-[09:48:43] Transaction committed successfully (took 0.5s)
+[12:30:11] Syncing users to SQL Server...
+[12:30:11] Preparing data for bulk sync...
+[12:30:11] Database connection established
+[12:30:11] Starting transaction...
+[12:30:11] Bulk merging 34 users...
+[12:30:11] Bulk merge completed: 34 inserted, 0 updated (138.9 users/sec)
+[12:30:11] Checking for deleted users...
+  [12:30:11] No deleted users found
+[12:30:11] Committing transaction...
+[12:30:11] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -1583,16 +1569,16 @@ Attributes:      21
 
 All changes are automatically tracked in GraphUsers_StartSyncHistory
 ========================================
+TableName                      GraphUsers_StartSync
+TotalUsers                     34
 Attributes                     {id, userPrincipalName, onPremisesSamAccountName, employeeId…}
 SyncedCount                    34
 DeletedCount                   0
-TotalUsers                     34
 ErrorCount                     0
-TableName                      GraphUsers_StartSync
   ✓ Users synced: 34 (table: GraphUsers_StartSync)
   → Syncing groups to SQL...
-[09:48:43] Using default attributes: 20 attributes
-[09:48:43] Table 'GraphGroups_StartSync' does not exist. Will be created...
+[12:30:11] Using default attributes: 20 attributes
+[12:30:11] Table 'GraphGroups_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroups_StartSync
   History table: dbo.GraphGroups_StartSyncHistory
   Primary Key: id
@@ -1600,19 +1586,19 @@ Successfully created temporal table: dbo.GraphGroups_StartSync
   Created helper view: vw_GraphGroups_StartSync_AllHistory
 True
 
-[09:48:43] Fetching groups from Microsoft Graph...
-[09:48:43] Total groups fetched: 68 (took 0.1s)
+[12:30:11] Fetching groups from Microsoft Graph...
+[12:30:12] Total groups fetched: 68 (took 0.1s)
 
-[09:48:43] Syncing groups to SQL Server...
-[09:48:43] Preparing data for bulk sync...
-[09:48:43] Database connection established
-[09:48:43] Starting transaction...
-[09:48:43] Bulk merging 68 groups...
-[09:48:44] Bulk merge completed: 68 inserted, 0 updated (196.5 groups/sec)
-[09:48:44] Checking for deleted groups...
-  [09:48:44] No deleted groups found
-[09:48:44] Committing transaction...
-[09:48:44] Transaction committed successfully (took 0.6s)
+[12:30:12] Syncing groups to SQL Server...
+[12:30:12] Preparing data for bulk sync...
+[12:30:12] Database connection established
+[12:30:12] Starting transaction...
+[12:30:12] Bulk merging 68 groups...
+[12:30:12] Bulk merge completed: 68 inserted, 0 updated (215.6 groups/sec)
+[12:30:12] Checking for deleted groups...
+  [12:30:12] No deleted groups found
+[12:30:12] Committing transaction...
+[12:30:12] Transaction committed successfully (took 0.6s)
 
 ========================================
 Sync Complete!
@@ -1626,16 +1612,16 @@ Attributes:      20
 
 All changes are automatically tracked in GraphGroups_StartSyncHistory
 ========================================
+TableName                      GraphGroups_StartSync
 Attributes                     {id, displayName, description, mail…}
 SyncedCount                    68
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphGroups_StartSync
 TotalGroups                    68
   ✓ Groups synced: 68 (table: GraphGroups_StartSync)
   → Syncing direct group memberships...
-[09:48:44] Starting group membership sync...
-[09:48:44] Table 'GraphGroupMembers_StartSync' does not exist. Will be created...
+[12:30:12] Starting group membership sync...
+[12:30:12] Table 'GraphGroupMembers_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupMembers_StartSync
   History table: dbo.GraphGroupMembers_StartSyncHistory
   Primary Key: groupId, memberId
@@ -1643,23 +1629,23 @@ Successfully created temporal table: dbo.GraphGroupMembers_StartSync
   Created helper view: vw_GraphGroupMembers_StartSync_AllHistory
 True
 
-[09:48:44] Fetching groups from Microsoft Graph...
-[09:48:44] Total groups to process: 68
+[12:30:12] Fetching groups from Microsoft Graph...
+[12:30:13] Total groups to process: 68
 
-[09:48:44] Fetching group memberships...
+[12:30:13] Fetching group memberships...
   This may take a while for tenants with many groups and members...
-[09:48:52] Total memberships fetched: 853 from 68 groups (took 7.3s)
+[12:30:20] Total memberships fetched: 853 from 68 groups (took 7.3s)
 
-[09:48:52] Syncing memberships to SQL Server...
-[09:48:52] Preparing data for bulk sync...
-[09:48:52] Database connection established
-[09:48:52] Starting transaction...
-[09:48:52] Bulk merging 853 memberships...
-[09:48:52] Bulk merge completed: 853 inserted, 0 updated (3720.6 memberships/sec)
-[09:48:52] Checking for deleted memberships...
-  [09:48:52] No deleted memberships found
-[09:48:52] Committing transaction...
-[09:48:52] Transaction committed successfully (took 0.5s)
+[12:30:20] Syncing memberships to SQL Server...
+[12:30:20] Preparing data for bulk sync...
+[12:30:20] Database connection established
+[12:30:20] Starting transaction...
+[12:30:20] Bulk merging 853 memberships...
+[12:30:20] Bulk merge completed: 853 inserted, 0 updated (3470.3 memberships/sec)
+[12:30:20] Checking for deleted memberships...
+  [12:30:20] No deleted memberships found
+[12:30:20] Committing transaction...
+[12:30:20] Transaction committed successfully (took 0.6s)
 
 ========================================
 Sync Complete!
@@ -1673,16 +1659,16 @@ Errors:          0
 
 All changes are automatically tracked in GraphGroupMembers_StartSyncHistory
 ========================================
+TableName                      GraphGroupMembers_StartSync
+TotalMemberships               853
 SyncedCount                    853
 DeletedCount                   0
 ErrorCount                     0
-TotalMemberships               853
-TableName                      GraphGroupMembers_StartSync
 TotalGroups                    68
   ✓ Direct memberships synced: 853 (table: GraphGroupMembers_StartSync)
   → Syncing group ownership relationships...
-[09:48:52] Starting group ownership sync...
-[09:48:52] Table 'GraphGroupOwners_StartSync' does not exist. Will be created...
+[12:30:21] Starting group ownership sync...
+[12:30:21] Table 'GraphGroupOwners_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphGroupOwners_StartSync
   History table: dbo.GraphGroupOwners_StartSyncHistory
   Primary Key: groupId, ownerId
@@ -1690,22 +1676,22 @@ Successfully created temporal table: dbo.GraphGroupOwners_StartSync
   Created helper view: vw_GraphGroupOwners_StartSync_AllHistory
 True
 
-[09:48:53] Fetching groups from Microsoft Graph...
-[09:48:53] Total groups to process: 68
+[12:30:21] Fetching groups from Microsoft Graph...
+[12:30:21] Total groups to process: 68
 
-[09:48:53] Fetching ownership relationships...
-[09:48:59] Total ownership relationships fetched: 17
+[12:30:21] Fetching ownership relationships...
+[12:30:27] Total ownership relationships fetched: 17
 
-[09:48:59] Syncing ownership relationships to SQL Server...
-[09:48:59] Preparing data for bulk sync...
-[09:48:59] Database connection established
-[09:48:59] Starting transaction...
-[09:48:59] Bulk merging 17 ownership relationships...
-[09:48:59] Bulk merge completed: 17 inserted, 0 updated (89.9 ownerships/sec)
-[09:48:59] Checking for removed ownership relationships...
-  [09:48:59] No removed ownership relationships found
-[09:48:59] Committing transaction...
-[09:48:59] Transaction committed successfully (took 0.4s)
+[12:30:27] Syncing ownership relationships to SQL Server...
+[12:30:27] Preparing data for bulk sync...
+[12:30:27] Database connection established
+[12:30:27] Starting transaction...
+[12:30:28] Bulk merging 17 ownership relationships...
+[12:30:28] Bulk merge completed: 17 inserted, 0 updated (83.8 ownerships/sec)
+[12:30:28] Checking for removed ownership relationships...
+  [12:30:28] No removed ownership relationships found
+[12:30:28] Committing transaction...
+[12:30:28] Transaction committed successfully (took 0.4s)
 
 ========================================
 Sync Complete!
@@ -1719,76 +1705,59 @@ Errors:                     0
 
 All changes are automatically tracked in GraphGroupOwners_StartSyncHistory
 ========================================
-SyncedCount                    17
+TableName                      GraphGroupOwners_StartSync
 TotalOwnerships                17
+SyncedCount                    17
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphGroupOwners_StartSync
 TotalGroups                    68
   ✓ Group ownerships synced: 17 (table: GraphGroupOwners_StartSync)
   → Syncing access package catalogs...
-[09:49:00] Using default attributes: 9 attributes
-[09:49:00] Table 'GraphCatalogs_StartSync' does not exist. Will be created...
+[12:30:28] Using default attributes: 8 attributes
+[12:30:28] Table 'GraphCatalogs_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphCatalogs_StartSync
   History table: dbo.GraphCatalogs_StartSyncHistory
   Primary Key: id
-  Columns: 9
+  Columns: 8
   Created helper view: vw_GraphCatalogs_StartSync_AllHistory
 True
 
-[09:49:00] Fetching catalogs from Microsoft Graph...
-PS>TerminatingError(Invoke-RestMethod): "
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:49:00",
-      "request-id": "92050736-594e-4608-8687-12a6ff35b1b7",
-      "client-request-id": "92050736-594e-4608-8687-12a6ff35b1b7"
-    }
-  }
-}"
->> TerminatingError(Invoke-RestMethod): "
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:49:00",
-      "request-id": "92050736-594e-4608-8687-12a6ff35b1b7",
-      "client-request-id": "92050736-594e-4608-8687-12a6ff35b1b7"
-    }
-  }
-}"
->> TerminatingError(): "Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:49:00",
-      "request-id": "92050736-594e-4608-8687-12a6ff35b1b7",
-      "client-request-id": "92050736-594e-4608-8687-12a6ff35b1b7"
-    }
-  }
-}"
-  ✗ Catalog sync failed
-    Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:49:00",
-      "request-id": "92050736-594e-4608-8687-12a6ff35b1b7",
-      "client-request-id": "92050736-594e-4608-8687-12a6ff35b1b7"
-    }
-  }
-}
+[12:30:28] Fetching catalogs from Microsoft Graph...
+[12:30:28] Total catalogs fetched: 11 (took 0.2s)
+
+[12:30:28] Syncing catalogs to SQL Server...
+[12:30:28] Preparing data for bulk sync...
+[12:30:28] Database connection established
+[12:30:28] Starting transaction...
+[12:30:28] Bulk merging 11 catalogs...
+[12:30:29] Bulk merge completed: 11 inserted, 0 updated (53.7 catalogs/sec)
+[12:30:29] Checking for deleted catalogs...
+  [12:30:29] No deleted catalogs found
+[12:30:29] Committing transaction...
+[12:30:29] Transaction committed successfully (took 0.4s)
+
+========================================
+Sync Complete!
+========================================
+Table:           GraphCatalogs_StartSync
+Total Catalogs:  11
+Synced:          11
+Deleted:         0
+Errors:          0
+Attributes:      8
+
+All changes are automatically tracked in GraphCatalogs_StartSync_History
+========================================
+TableName                      GraphCatalogs_StartSync
+Attributes                     {id, displayName, description, catalogType…}
+SyncedCount                    11
+DeletedCount                   0
+ErrorCount                     0
+TotalCatalogs                  11
+  ✓ Catalogs synced: 11 (table: GraphCatalogs_StartSync)
   → Syncing access packages...
-[09:49:00] Using default attributes: 8 attributes
-[09:49:00] Table 'GraphAccessPackages_StartSync' does not exist. Will be created...
+[12:30:29] Using default attributes: 8 attributes
+[12:30:29] Table 'GraphAccessPackages_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackages_StartSync
   History table: dbo.GraphAccessPackages_StartSyncHistory
   Primary Key: id
@@ -1796,19 +1765,19 @@ Successfully created temporal table: dbo.GraphAccessPackages_StartSync
   Created helper view: vw_GraphAccessPackages_StartSync_AllHistory
 True
 
-[09:49:00] Fetching access packages from Microsoft Graph...
-[09:49:01] Total access packages fetched: 12 (took 1.1s)
+[12:30:29] Fetching access packages from Microsoft Graph...
+[12:30:29] Total access packages fetched: 12 (took 0.2s)
 
-[09:49:01] Syncing access packages to SQL Server...
-[09:49:01] Preparing data for bulk sync...
-[09:49:01] Database connection established
-[09:49:01] Starting transaction...
-[09:49:01] Bulk merging 12 access packages...
-[09:49:01] Bulk merge completed: 12 inserted, 0 updated (56.9 packages/sec)
-[09:49:01] Checking for deleted access packages...
-  [09:49:02] No deleted access packages found
-[09:49:02] Committing transaction...
-[09:49:02] Transaction committed successfully (took 0.5s)
+[12:30:29] Syncing access packages to SQL Server...
+[12:30:29] Preparing data for bulk sync...
+[12:30:29] Database connection established
+[12:30:29] Starting transaction...
+[12:30:29] Bulk merging 12 access packages...
+[12:30:30] Bulk merge completed: 12 inserted, 0 updated (58.2 packages/sec)
+[12:30:30] Checking for deleted access packages...
+  [12:30:30] No deleted access packages found
+[12:30:30] Committing transaction...
+[12:30:30] Transaction committed successfully (took 0.4s)
 
 ========================================
 Sync Complete!
@@ -1822,16 +1791,16 @@ Attributes:          8
 
 All changes are automatically tracked in GraphAccessPackages_StartSync_History
 ========================================
+TableName                      GraphAccessPackages_StartSync
 Attributes                     {id, displayName, description, catalogId…}
+TotalPackages                  12
 SyncedCount                    12
 DeletedCount                   0
 ErrorCount                     0
-TableName                      GraphAccessPackages_StartSync
-TotalPackages                  12
   ✓ Access packages synced: 12 (table: GraphAccessPackages_StartSync)
   → Syncing access package assignments...
-[09:49:02] Using default attributes: 7 attributes
-[09:49:02] Table 'GraphAccessPackageAssignments_StartSync' does not exist. Will be created...
+[12:30:30] Using default attributes: 7 attributes
+[12:30:30] Table 'GraphAccessPackageAssignments_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignments_StartSync
   History table: dbo.GraphAccessPackageAssignments_StartSyncHistory
   Primary Key: id
@@ -1839,19 +1808,19 @@ Successfully created temporal table: dbo.GraphAccessPackageAssignments_StartSync
   Created helper view: vw_GraphAccessPackageAssignments_StartSync_AllHistory
 True
 
-[09:49:02] Fetching access package assignments from Microsoft Graph...
-[09:49:02] Total assignments fetched: 80 (took 0.5s)
+[12:30:30] Fetching access package assignments from Microsoft Graph...
+[12:30:31] Total assignments fetched: 80 (took 0.7s)
 
-[09:49:02] Syncing access package assignments to SQL Server...
-[09:49:02] Preparing data for bulk sync...
-[09:49:02] Database connection established
-[09:49:02] Starting transaction...
-[09:49:02] Bulk merging 80 access package assignments...
-[09:49:03] Bulk merge completed: 80 inserted, 0 updated (266.7 assignments/sec)
-[09:49:03] Checking for deleted assignments...
-  [09:49:03] No deleted assignments found
-[09:49:03] Committing transaction...
-[09:49:03] Transaction committed successfully (took 0.5s)
+[12:30:31] Syncing access package assignments to SQL Server...
+[12:30:31] Preparing data for bulk sync...
+[12:30:31] Database connection established
+[12:30:31] Starting transaction...
+[12:30:31] Bulk merging 80 access package assignments...
+[12:30:31] Bulk merge completed: 80 inserted, 0 updated (399.2 assignments/sec)
+[12:30:31] Checking for deleted assignments...
+  [12:30:31] No deleted assignments found
+[12:30:31] Committing transaction...
+[12:30:31] Transaction committed successfully (took 0.4s)
 
 ========================================
 Sync Complete!
@@ -1865,16 +1834,16 @@ Attributes:          7
 
 All changes are automatically tracked in GraphAccessPackageAssignments_StartSync_History
 ========================================
+TableName                      GraphAccessPackageAssignments_StartSync
 Attributes                     {id, accessPackageId, targetId, state…}
 SyncedCount                    80
 DeletedCount                   0
 TotalAssignments               80
 ErrorCount                     0
-TableName                      GraphAccessPackageAssignments_StartSync
   ✓ Access package assignments synced: 80 (table: GraphAccessPackageAssignments_StartSync)
   → Syncing access package resource role scopes...
-[09:49:03] Using fixed attributes: 10 attributes
-[09:49:03] Table 'GraphAccessPackageResourceRoleScopes_StartSync' does not exist. Will be created...
+[12:30:31] Using fixed attributes: 10 attributes
+[12:30:31] Table 'GraphAccessPackageResourceRoleScopes_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageResourceRoleScopes_StartSync
   History table: dbo.GraphAccessPackageResourceRoleScopes_StartSyncHistory
   Primary Key: id
@@ -1882,47 +1851,47 @@ Successfully created temporal table: dbo.GraphAccessPackageResourceRoleScopes_St
   Created helper view: vw_GraphAccessPackageResourceRoleScopes_StartSync_AllHistory
 True
 
-[09:49:03] Fetching access packages from Microsoft Graph...
-[09:49:04] Found 12 access packages
+[12:30:32] Fetching access packages from Microsoft Graph...
+[12:30:32] Found 12 access packages
 
-[09:49:04] Fetching resource role scopes for each access package...
-  [09:49:04] Progress: 1/12 packages (8.3%)
-  [09:49:07] Progress: 10/12 packages (83.3%)
-  [09:49:08] Progress: 12/12 packages (100%)
-[09:49:08] Total resource role scopes fetched: 44 (took 4.7s)
+[12:30:32] Fetching resource role scopes for each access package...
+  [12:30:32] Progress: 1/12 packages (8.3%)
+  [12:30:35] Progress: 10/12 packages (83.3%)
+  [12:30:36] Progress: 12/12 packages (100%)
+[12:30:37] Total resource role scopes fetched: 44 (took 4.9s)
 
-[09:49:08] Syncing resource role scopes to SQL Server...
-[09:49:08] Preparing data for bulk sync...
-[09:49:08] Database connection established
-[09:49:08] Starting transaction...
-[09:49:08] Bulk merging 44 resource role scopes...
+[12:30:37] Syncing resource role scopes to SQL Server...
+[12:30:37] Preparing data for bulk sync...
+[12:30:37] Database connection established
+[12:30:37] Starting transaction...
+[12:30:37] Bulk merging 44 resource role scopes...
 PS>TerminatingError(): "Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
-PS>TerminatingError(): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: [09:49:09] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
->> TerminatingError(): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: [09:49:09] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
->> TerminatingError(): "SQL command execution failed: [09:49:09] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
->> TerminatingError(): "SQL command execution failed: [09:49:09] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
+PS>TerminatingError(): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: [12:30:37] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
+>> TerminatingError(): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: [12:30:37] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
+>> TerminatingError(): "SQL command execution failed: [12:30:37] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
+>> TerminatingError(): "SQL command execution failed: [12:30:37] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails.""
   ✗ Access package resource role scope sync failed
-    SQL command execution failed: [09:49:09] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails."
+    SQL command execution failed: [12:30:37] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_StartSync'; column does not allow nulls. UPDATE fails."
   → Syncing access package assignment policies...
-[09:49:09] Using default attributes: 11 attributes
-[09:49:09] Table 'GraphAccessPackageAssignmentPolicies_StartSync' does not exist. Will be created...
+[12:30:37] Using default attributes: 10 attributes
+[12:30:37] Table 'GraphAccessPackageAssignmentPolicies_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignmentPolicies_StartSync
   History table: dbo.GraphAccessPackageAssignmentPolicies_StartSyncHistory
   Primary Key: id
-  Columns: 11
+  Columns: 10
   Created helper view: vw_GraphAccessPackageAssignmentPolicies_StartSync_AllHistory
 True
 
-[09:49:09] Fetching access package assignment policies from Microsoft Graph...
+[12:30:37] Fetching access package assignment policies from Microsoft Graph...
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:49:09",
-      "request-id": "7f30f478-9451-42e9-8617-2a34491c3558",
-      "client-request-id": "7f30f478-9451-42e9-8617-2a34491c3558"
+      "date": "2026-01-17T11:30:37",
+      "request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974",
+      "client-request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974"
     }
   }
 }"
@@ -1930,11 +1899,11 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:49:09",
-      "request-id": "7f30f478-9451-42e9-8617-2a34491c3558",
-      "client-request-id": "7f30f478-9451-42e9-8617-2a34491c3558"
+      "date": "2026-01-17T11:30:37",
+      "request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974",
+      "client-request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974"
     }
   }
 }"
@@ -1942,11 +1911,11 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:49:09",
-      "request-id": "7f30f478-9451-42e9-8617-2a34491c3558",
-      "client-request-id": "7f30f478-9451-42e9-8617-2a34491c3558"
+      "date": "2026-01-17T11:30:37",
+      "request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974",
+      "client-request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974"
     }
   }
 }"
@@ -1955,17 +1924,17 @@ PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:49:09",
-      "request-id": "7f30f478-9451-42e9-8617-2a34491c3558",
-      "client-request-id": "7f30f478-9451-42e9-8617-2a34491c3558"
+      "date": "2026-01-17T11:30:37",
+      "request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974",
+      "client-request-id": "b72fbd88-ecf3-46d0-a003-d23411cf7974"
     }
   }
 }
   → Syncing access package assignment requests...
-[09:49:09] Using default attributes: 12 attributes
-[09:49:09] Table 'GraphAccessPackageAssignmentRequests_StartSync' does not exist. Will be created...
+[12:30:37] Using default attributes: 12 attributes
+[12:30:37] Table 'GraphAccessPackageAssignmentRequests_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAssignmentRequests_StartSync
   History table: dbo.GraphAccessPackageAssignmentRequests_StartSyncHistory
   Primary Key: id
@@ -1973,19 +1942,19 @@ Successfully created temporal table: dbo.GraphAccessPackageAssignmentRequests_St
   Created helper view: vw_GraphAccessPackageAssignmentRequests_StartSync_AllHistory
 True
 
-[09:49:09] Fetching access package assignment requests from Microsoft Graph...
-[09:49:10] Total requests fetched: 89 (took 0.5s)
+[12:30:38] Fetching access package assignment requests from Microsoft Graph...
+[12:30:38] Total requests fetched: 89 (took 0.5s)
 
-[09:49:10] Syncing assignment requests to SQL Server...
-[09:49:10] Preparing data for bulk sync...
-[09:49:10] Database connection established
-[09:49:10] Starting transaction...
-[09:49:10] Bulk merging 89 assignment requests...
-[09:49:10] Bulk merge completed: 89 inserted, 0 updated (228.3 requests/sec)
-[09:49:10] Checking for deleted requests...
-  [09:49:10] No deleted requests found
-[09:49:10] Committing transaction...
-[09:49:10] Transaction committed successfully (took 0.6s)
+[12:30:38] Syncing assignment requests to SQL Server...
+[12:30:38] Preparing data for bulk sync...
+[12:30:38] Database connection established
+[12:30:38] Starting transaction...
+[12:30:38] Bulk merging 89 assignment requests...
+[12:30:38] Bulk merge completed: 89 inserted, 0 updated (426.4 requests/sec)
+[12:30:38] Checking for deleted requests...
+  [12:30:39] No deleted requests found
+[12:30:39] Committing transaction...
+[12:30:39] Transaction committed successfully (took 0.5s)
 
 ========================================
 Sync Complete!
@@ -1999,16 +1968,16 @@ Attributes:          12
 
 All changes are automatically tracked in GraphAccessPackageAssignmentRequests_StartSync_History
 ========================================
+TableName                      GraphAccessPackageAssignmentRequests_StartSync
 Attributes                     {id, accessPackageId, assignmentPolicyId, requestorId…}
 SyncedCount                    89
 DeletedCount                   0
-ErrorCount                     0
-TableName                      GraphAccessPackageAssignmentRequests_StartSync
 TotalRequests                  89
+ErrorCount                     0
   ✓ Access package assignment requests synced: 89 (table: GraphAccessPackageAssignmentRequests_StartSync)
   → Syncing access package access reviews...
-[09:49:10] Using fixed attributes: 15 attributes
-[09:49:10] Table 'GraphAccessPackageAccessReviewDecisions_StartSync' does not exist. Will be created...
+[12:30:39] Using fixed attributes: 15 attributes
+[12:30:39] Table 'GraphAccessPackageAccessReviewDecisions_StartSync' does not exist. Will be created...
 Successfully created temporal table: dbo.GraphAccessPackageAccessReviewDecisions_StartSync
   History table: dbo.GraphAccessPackageAccessReviewDecisions_StartSyncHistory
   Primary Key: id
@@ -2016,20 +1985,20 @@ Successfully created temporal table: dbo.GraphAccessPackageAccessReviewDecisions
   Created helper view: vw_GraphAccessPackageAccessReviewDecisions_StartSync_AllHistory
 True
 
-[09:49:10] Fetching access review definitions from Microsoft Graph...
-[09:49:11] Found 5 review definitions
+[12:30:39] Fetching access review definitions from Microsoft Graph...
+[12:30:39] Found 5 review definitions
 
-[09:49:11] Fetching review instances and decisions...
-  [09:49:11] Progress: 1/5 definitions (20%)
+[12:30:39] Fetching review instances and decisions...
+  [12:30:39] Progress: 1/5 definitions (20%)
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18",
-      "client-request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc",
+      "client-request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc"
     }
   }
 }"
@@ -2039,21 +2008,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18",
-      "client-request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc",
+      "client-request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc"
     }
   }
 }"
-WARNING:   [09:49:11] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
+WARNING:   [12:30:39] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18",
-      "client-request-id": "3ecf573c-8de5-4cef-ac58-b6f1c2219a18"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc",
+      "client-request-id": "da26ac43-d724-42ef-9102-95d9eb8e5dcc"
     }
   }
 }
@@ -2063,9 +2032,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b",
-      "client-request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6",
+      "client-request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6"
     }
   }
 }"
@@ -2075,21 +2044,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b",
-      "client-request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6",
+      "client-request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6"
     }
   }
 }"
-WARNING:   [09:49:11] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
+WARNING:   [12:30:40] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b",
-      "client-request-id": "b507cf4d-96fc-4566-8cdb-4ddde1d1c09b"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6",
+      "client-request-id": "40349dbd-ab53-49ee-96af-a7fca27ba3c6"
     }
   }
 }
@@ -2099,9 +2068,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "af273e9a-8514-4d8d-a651-7a6100216e60",
-      "client-request-id": "af273e9a-8514-4d8d-a651-7a6100216e60"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76",
+      "client-request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76"
     }
   }
 }"
@@ -2111,21 +2080,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "af273e9a-8514-4d8d-a651-7a6100216e60",
-      "client-request-id": "af273e9a-8514-4d8d-a651-7a6100216e60"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76",
+      "client-request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76"
     }
   }
 }"
-WARNING:   [09:49:11] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
+WARNING:   [12:30:40] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "af273e9a-8514-4d8d-a651-7a6100216e60",
-      "client-request-id": "af273e9a-8514-4d8d-a651-7a6100216e60"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76",
+      "client-request-id": "78c8346a-b80a-4408-a54f-c57a2bc5fd76"
     }
   }
 }
@@ -2135,9 +2104,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418",
-      "client-request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "43911b87-08b9-4fea-8756-4f773d22178f",
+      "client-request-id": "43911b87-08b9-4fea-8756-4f773d22178f"
     }
   }
 }"
@@ -2147,21 +2116,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418",
-      "client-request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "43911b87-08b9-4fea-8756-4f773d22178f",
+      "client-request-id": "43911b87-08b9-4fea-8756-4f773d22178f"
     }
   }
 }"
-WARNING:   [09:49:11] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
+WARNING:   [12:30:40] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418",
-      "client-request-id": "a25a648f-79f1-4190-8dc5-00b9fe955418"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "43911b87-08b9-4fea-8756-4f773d22178f",
+      "client-request-id": "43911b87-08b9-4fea-8756-4f773d22178f"
     }
   }
 }
@@ -2171,9 +2140,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f",
-      "client-request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c",
+      "client-request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c"
     }
   }
 }"
@@ -2183,21 +2152,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f",
-      "client-request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c",
+      "client-request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
+WARNING:   [12:30:40] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f",
-      "client-request-id": "62a614d3-406d-4b1f-b4e8-aed33923d88f"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c",
+      "client-request-id": "111d50c8-53db-4932-9e6f-8d7d74de983c"
     }
   }
 }
@@ -2207,9 +2176,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3f128747-26cd-4e87-80f7-21090415405d",
-      "client-request-id": "3f128747-26cd-4e87-80f7-21090415405d"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82",
+      "client-request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82"
     }
   }
 }"
@@ -2219,21 +2188,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3f128747-26cd-4e87-80f7-21090415405d",
-      "client-request-id": "3f128747-26cd-4e87-80f7-21090415405d"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82",
+      "client-request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
+WARNING:   [12:30:40] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "3f128747-26cd-4e87-80f7-21090415405d",
-      "client-request-id": "3f128747-26cd-4e87-80f7-21090415405d"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82",
+      "client-request-id": "c3c0b1d5-1968-406d-8fd0-fa87a3838b82"
     }
   }
 }
@@ -2243,9 +2212,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282",
-      "client-request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8",
+      "client-request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8"
     }
   }
 }"
@@ -2255,21 +2224,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282",
-      "client-request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8",
+      "client-request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
+WARNING:   [12:30:40] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:12",
-      "request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282",
-      "client-request-id": "4b609fae-5e6d-4953-84a5-d42d4a59f282"
+      "date": "2026-01-17T11:30:40",
+      "request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8",
+      "client-request-id": "af6fc999-427b-4dc8-bc23-6453bd0dc4a8"
     }
   }
 }
@@ -2279,9 +2248,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c",
-      "client-request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "60897962-5559-4614-b0ae-1c71b121b948",
+      "client-request-id": "60897962-5559-4614-b0ae-1c71b121b948"
     }
   }
 }"
@@ -2291,21 +2260,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c",
-      "client-request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "60897962-5559-4614-b0ae-1c71b121b948",
+      "client-request-id": "60897962-5559-4614-b0ae-1c71b121b948"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
+WARNING:   [12:30:41] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c",
-      "client-request-id": "733fe1f4-b863-4e40-9fe4-5db5ffd4bb5c"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "60897962-5559-4614-b0ae-1c71b121b948",
+      "client-request-id": "60897962-5559-4614-b0ae-1c71b121b948"
     }
   }
 }
@@ -2315,9 +2284,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "74c235fa-289d-4153-b8dd-909213c844b9",
-      "client-request-id": "74c235fa-289d-4153-b8dd-909213c844b9"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229",
+      "client-request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229"
     }
   }
 }"
@@ -2327,21 +2296,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "74c235fa-289d-4153-b8dd-909213c844b9",
-      "client-request-id": "74c235fa-289d-4153-b8dd-909213c844b9"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229",
+      "client-request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
+WARNING:   [12:30:41] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "74c235fa-289d-4153-b8dd-909213c844b9",
-      "client-request-id": "74c235fa-289d-4153-b8dd-909213c844b9"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229",
+      "client-request-id": "7a8c0d57-fa89-4895-9288-e3e19d429229"
     }
   }
 }
@@ -2351,9 +2320,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "693faf89-5a29-444a-b294-9f646cce954e",
-      "client-request-id": "693faf89-5a29-444a-b294-9f646cce954e"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21",
+      "client-request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21"
     }
   }
 }"
@@ -2363,34 +2332,34 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "693faf89-5a29-444a-b294-9f646cce954e",
-      "client-request-id": "693faf89-5a29-444a-b294-9f646cce954e"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21",
+      "client-request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
+WARNING:   [12:30:41] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "693faf89-5a29-444a-b294-9f646cce954e",
-      "client-request-id": "693faf89-5a29-444a-b294-9f646cce954e"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21",
+      "client-request-id": "13adfae5-b43d-4008-810b-cf6a26be1d21"
     }
   }
 }
-  [09:49:12] Progress: 5/5 definitions (100%)
+  [12:30:41] Progress: 5/5 definitions (100%)
 PS>TerminatingError(Invoke-RestMethod): "
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430",
-      "client-request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e",
+      "client-request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e"
     }
   }
 }"
@@ -2400,21 +2369,21 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430",
-      "client-request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e",
+      "client-request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e"
     }
   }
 }"
-WARNING:   [09:49:12] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
+WARNING:   [12:30:41] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430",
-      "client-request-id": "14297ee7-edc0-4488-82ef-8a39f99e0430"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e",
+      "client-request-id": "4e9ae9b6-a5c0-4b2f-8c7b-5c2e1337336e"
     }
   }
 }
@@ -2424,9 +2393,9 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "c532b034-1ee0-4130-be0b-19bb336d152a",
-      "client-request-id": "c532b034-1ee0-4130-be0b-19bb336d152a"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a",
+      "client-request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a"
     }
   }
 }"
@@ -2436,31 +2405,31 @@ PS>TerminatingError(Invoke-RestMethod): "
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "c532b034-1ee0-4130-be0b-19bb336d152a",
-      "client-request-id": "c532b034-1ee0-4130-be0b-19bb336d152a"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a",
+      "client-request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a"
     }
   }
 }"
-WARNING:   [09:49:13] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
+WARNING:   [12:30:41] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:13",
-      "request-id": "c532b034-1ee0-4130-be0b-19bb336d152a",
-      "client-request-id": "c532b034-1ee0-4130-be0b-19bb336d152a"
+      "date": "2026-01-17T11:30:41",
+      "request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a",
+      "client-request-id": "341f69e0-5e26-4f28-9f79-c0e69acae91a"
     }
   }
 }
-[09:49:13] Total review decisions fetched: 0 (took 1.6s)
-WARNING: [09:49:13] No review decisions found to sync.
+[12:30:41] Total review decisions fetched: 0 (took 1.8s)
+WARNING: [12:30:41] No review decisions found to sync.
   ✓ Access package access reviews synced: 0 (table: GraphAccessPackageAccessReviewDecisions_StartSync)
 
 === Creating Analysis Views ===
   → Creating group membership analysis views...
-[09:49:13] Creating group membership analysis views...
+[12:30:41] Creating group membership analysis views...
 WARNING: Table 'GraphGroupTransitiveMembers' does not exist. Run Sync-FGGroupTransitiveMember first.
 WARNING: Table 'GraphGroupEligibleMembers' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional).
 PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMember and Sync-FGGroupTransitiveMember first."
@@ -2469,40 +2438,40 @@ PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMem
   ✗ Group membership view creation failed
     SQL command execution failed: Required tables do not exist. Please run Sync-FGGroupMember and Sync-FGGroupTransitiveMember first.
   → Creating access package analysis views...
-[09:49:13] Creating access package analysis views...
-  [09:49:13] Dropped existing view: vw_UserAccessPackages
-  [09:49:13] Created view: vw_UserAccessPackages
-  [09:49:13] Dropped existing view: vw_UserAccessPackageResources
-  [09:49:13] Created view: vw_UserAccessPackageResources
-  [09:49:13] Dropped existing view: vw_UserAccessPackageGroupMemberships
-  [09:49:13] Created view: vw_UserAccessPackageGroupMemberships
-  [09:49:13] Dropped existing view: vw_UserAccessPackageGroupOwnerships
-  [09:49:13] Created view: vw_UserAccessPackageGroupOwnerships
-  [09:49:13] Dropped existing view: vw_DirectGroupMemberships
-  [09:49:13] Created view: vw_DirectGroupMemberships
-  [09:49:13] Dropped existing view: vw_DirectGroupOwnerships
-  [09:49:13] Created view: vw_DirectGroupOwnerships
-  [09:49:13] Dropped existing view: vw_UnmanagedPermissions
-  [09:49:13] Created view: vw_UnmanagedPermissions
-  [09:49:13] Dropped existing view: vw_AccessPackageAssignmentDetails
-  [09:49:13] Created view: vw_AccessPackageAssignmentDetails
-  [09:49:13] Dropped existing view: vw_AutomaticAssignments
-  [09:49:13] Created view: vw_AutomaticAssignments
-  [09:49:13] Dropped existing view: vw_RequestedAssignments
-  [09:49:13] Created view: vw_RequestedAssignments
-  [09:49:14] Dropped existing view: vw_AdminAssignments
-  [09:49:14] Created view: vw_AdminAssignments
-  [09:49:14] Dropped existing view: vw_AccessPackageLastReview
-  [09:49:14] Created view: vw_AccessPackageLastReview
-  [09:49:14] Dropped existing view: vw_ApprovedRequestTimeline
-  [09:49:14] Created view: vw_ApprovedRequestTimeline
-  [09:49:14] Dropped existing view: vw_DeniedRequestTimeline
-  [09:49:14] Created view: vw_DeniedRequestTimeline
-  [09:49:14] Dropped existing view: vw_PendingRequestTimeline
-  [09:49:14] Created view: vw_PendingRequestTimeline
-  [09:49:14] Dropped existing view: vw_RequestResponseMetrics
-  [09:49:14] Created view: vw_RequestResponseMetrics
-[09:49:14] Access package views created successfully
+[12:30:41] Creating access package analysis views...
+  [12:30:41] Dropped existing view: vw_UserAccessPackages
+  [12:30:41] Created view: vw_UserAccessPackages
+  [12:30:41] Dropped existing view: vw_UserAccessPackageResources
+  [12:30:41] Created view: vw_UserAccessPackageResources
+  [12:30:41] Dropped existing view: vw_UserAccessPackageGroupMemberships
+  [12:30:41] Created view: vw_UserAccessPackageGroupMemberships
+  [12:30:41] Dropped existing view: vw_UserAccessPackageGroupOwnerships
+  [12:30:41] Created view: vw_UserAccessPackageGroupOwnerships
+  [12:30:42] Dropped existing view: vw_DirectGroupMemberships
+  [12:30:42] Created view: vw_DirectGroupMemberships
+  [12:30:42] Dropped existing view: vw_DirectGroupOwnerships
+  [12:30:42] Created view: vw_DirectGroupOwnerships
+  [12:30:42] Dropped existing view: vw_UnmanagedPermissions
+  [12:30:42] Created view: vw_UnmanagedPermissions
+  [12:30:42] Dropped existing view: vw_AccessPackageAssignmentDetails
+  [12:30:42] Created view: vw_AccessPackageAssignmentDetails
+  [12:30:42] Dropped existing view: vw_AutomaticAssignments
+  [12:30:42] Created view: vw_AutomaticAssignments
+  [12:30:42] Dropped existing view: vw_RequestedAssignments
+  [12:30:42] Created view: vw_RequestedAssignments
+  [12:30:42] Dropped existing view: vw_AdminAssignments
+  [12:30:42] Created view: vw_AdminAssignments
+  [12:30:42] Dropped existing view: vw_AccessPackageLastReview
+  [12:30:42] Created view: vw_AccessPackageLastReview
+  [12:30:42] Dropped existing view: vw_ApprovedRequestTimeline
+  [12:30:42] Created view: vw_ApprovedRequestTimeline
+  [12:30:42] Dropped existing view: vw_DeniedRequestTimeline
+  [12:30:42] Created view: vw_DeniedRequestTimeline
+  [12:30:42] Dropped existing view: vw_PendingRequestTimeline
+  [12:30:42] Created view: vw_PendingRequestTimeline
+  [12:30:42] Dropped existing view: vw_RequestResponseMetrics
+  [12:30:42] Created view: vw_RequestResponseMetrics
+[12:30:42] Access package views created successfully
   ✓ Access package analysis views created
 
 === Sync Summary ===
@@ -2513,13 +2482,13 @@ PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMem
   Groups:                  68
   Direct Memberships:      853
   Group Ownerships:        17
+  Catalogs:                11
   Access Packages:         12
   Package Assignments:     80
   Assignment Requests:     89
   Access Reviews:          0
 
-  Errors encountered: 4
-    - Catalog sync failed
+  Errors encountered: 3
     - Access package resource role scope sync failed
     - Access package assignment policy sync failed
     - Group membership view creation failed
@@ -2527,8 +2496,8 @@ PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMem
 ========================================
 Sync Complete!
 ========================================
-Completed: 2026-01-17 09:49:14
-  ✓ Start-FGSync completed in 35,56 seconds
+Completed: 2026-01-17 12:30:42
+  ✓ Start-FGSync completed in 35,94 seconds
   → Verifying synced tables...
 Retrieving table information from database: GraphData
 
@@ -2536,7 +2505,7 @@ Found 26 table(s):
 Summary:
   Total Tables: 26
   Temporal Tables: 26
-  Total Rows (approx): 3.227
+  Total Rows (approx): 3.249
   ✓ Table found: GraphUsers_StartSync
   ✓ Table found: GraphGroups_StartSync
   ✓ Table found: GraphGroupMembers_StartSync
@@ -2553,7 +2522,7 @@ Summary:
   ✓ Groups synced: 68
   ✓ Memberships synced: 853
   ✓ Ownerships synced: 17
-  ✓ Catalogs synced: 0
+  ✓ Catalogs synced: 11
   ✓ Access Packages synced: 12
   ✓ Assignments synced: 80
   ✓ Start-FGSync sequential
@@ -2566,7 +2535,7 @@ Test 34: Start-FGSync (Parallel Sync)
 ========================================
 FortigiGraph Daily Sync
 ========================================
-Started: 2026-01-17 09:49:15
+Started: 2026-01-17 12:30:44
 Config:  C:\Source\Fortigi\GitHub\FortigiGraph\_Test\config.startsync-parallel-test.json
 
 === Loading Configuration ===
@@ -2598,21 +2567,21 @@ SQL Connection Test: SUCCESS
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:49:18
+  Server Time: 01/17/2026 11:30:47
 Already connected to iisqlserver.database.windows.net / GraphData
-ConnectionStatus               Connected
-Server                         iisqlserver.database.windows.net
-Edition                        SQL Azure
-Version                        12.0.2000.8
 Database                       GraphData
-CurrentTime                    17/01/2026 08:49:18
+CurrentTime                    17/01/2026 11:30:47
+Edition                        SQL Azure
+ConnectionStatus               Connected
+Version                        12.0.2000.8
+Server                         iisqlserver.database.windows.net
   ✓ Connected to SQL Server
 SQL Connection Test: SUCCESS
   Server: iisqlserver.database.windows.net
   Database: GraphData
   Version: 12.0.2000.8
   Edition: SQL Azure
-  Server Time: 01/17/2026 08:49:18
+  Server Time: 01/17/2026 11:30:47
   ✓ SQL connection verified: GraphData
 
 === Connecting to Microsoft Graph ===
@@ -2637,22 +2606,10 @@ SQL Connection Test: SUCCESS
   ✓ Groups synced: 68 (table: GraphGroups_ParallelSync)
   ✓ Direct memberships synced: 853 (table: GraphGroupMembers_ParallelSync)
   ✓ Group ownerships synced: 17 (table: GraphGroupOwners_ParallelSync)
-  ✗ Catalogs sync failed
-    Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:49:23",
-      "request-id": "15845b2a-93e7-4e77-b5e7-f0d36f6f80d4",
-      "client-request-id": "15845b2a-93e7-4e77-b5e7-f0d36f6f80d4"
-    }
-  }
-}
+  ✓ Catalogs synced: 11 (table: GraphCatalogs_ParallelSync)
   ✓ Access packages synced: 12 (table: GraphAccessPackages_ParallelSync)
   ✓ Access package assignments synced: 80 (table: GraphAccessPackageAssignments_ParallelSync)
-  ⚠ AccessPackageResourceRoleScopes: [09:49:32] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_ParallelSync'; column does not allow nulls. UPDATE fails."
+  ⚠ AccessPackageResourceRoleScopes: [12:31:06] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_ParallelSync'; column does not allow nulls. UPDATE fails."
   ✗ AccessPackageResourceRoleScopes sync failed
     SQL command execution failed: Exception calling "Rollback" with "0" argument(s): "There is already an open DataReader associated with this Command which must be closed first."
   ✗ AccessPackageAssignmentPolicies sync failed
@@ -2660,165 +2617,165 @@ SQL Connection Test: SUCCESS
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:49:28",
-      "request-id": "1f6d91f5-ef52-43cd-afd9-61747163145f",
-      "client-request-id": "1f6d91f5-ef52-43cd-afd9-61747163145f"
+      "date": "2026-01-17T11:30:57",
+      "request-id": "cbccb182-4d22-4ebf-abb4-b8026ea7c294",
+      "client-request-id": "cbccb182-4d22-4ebf-abb4-b8026ea7c294"
     }
   }
 }
   ✓ Access package assignment requests synced: 89 (table: GraphAccessPackageAssignmentRequests_ParallelSync)
-WARNING:   [09:49:29] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
+WARNING:   [12:31:00] Failed to get decisions for instance 303c3d91-e518-4fb1-b592-1b79d5281070: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "a4834429-47e1-46e9-a692-9c1c64e514a9",
-      "client-request-id": "a4834429-47e1-46e9-a692-9c1c64e514a9"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "58367e80-88fd-4c87-b6ca-f19f7c24b98b",
+      "client-request-id": "58367e80-88fd-4c87-b6ca-f19f7c24b98b"
     }
   }
 }
-WARNING:   [09:49:29] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
+WARNING:   [12:31:00] Failed to get decisions for instance f66ca3ae-911f-4934-97ae-adc3baf5de0d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "fd1089f7-557b-45a5-94d8-9eba6ee2aa83",
-      "client-request-id": "fd1089f7-557b-45a5-94d8-9eba6ee2aa83"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "4bf5c2f0-3a3b-4ef1-9e3d-1487c01e503c",
+      "client-request-id": "4bf5c2f0-3a3b-4ef1-9e3d-1487c01e503c"
     }
   }
 }
-WARNING:   [09:49:29] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
+WARNING:   [12:31:00] Failed to get decisions for instance 6ce3291f-85dd-4acc-a943-252d057bd713: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "829c9d17-e0c2-4ace-9193-9d8119381f2b",
-      "client-request-id": "829c9d17-e0c2-4ace-9193-9d8119381f2b"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "a12b7a80-a3d1-4576-9ee6-755e74af194b",
+      "client-request-id": "a12b7a80-a3d1-4576-9ee6-755e74af194b"
     }
   }
 }
-WARNING:   [09:49:29] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
+WARNING:   [12:31:00] Failed to get decisions for instance da042e77-5554-4cae-b7b4-b45229bcb659: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "16f4930a-a125-46ac-9265-e9dfea89dbdd",
-      "client-request-id": "16f4930a-a125-46ac-9265-e9dfea89dbdd"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "9f444572-6c16-44cc-9bcf-1e54f010c53c",
+      "client-request-id": "9f444572-6c16-44cc-9bcf-1e54f010c53c"
     }
   }
 }
-WARNING:   [09:49:29] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
+WARNING:   [12:31:00] Failed to get decisions for instance 56819e07-67fa-4423-92fb-88917d9b05db: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "f5d7928f-47fc-429e-ab74-4cf73f34d582",
-      "client-request-id": "f5d7928f-47fc-429e-ab74-4cf73f34d582"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "b3a673ab-2b09-43d8-8d17-5d8786228c16",
+      "client-request-id": "b3a673ab-2b09-43d8-8d17-5d8786228c16"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
+WARNING:   [12:31:00] Failed to get decisions for instance 2339a618-0889-4183-9c78-81220bb90e62: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "e729bd35-1369-4074-bf8b-7a38bb70844f",
-      "client-request-id": "e729bd35-1369-4074-bf8b-7a38bb70844f"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "274b14a6-95c1-4366-989f-cb312737c660",
+      "client-request-id": "274b14a6-95c1-4366-989f-cb312737c660"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
+WARNING:   [12:31:00] Failed to get decisions for instance a9b4ac67-c86a-47b5-a8fe-120f3c694a8f: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "1711e83d-0f5a-4a88-9499-30e613cd7563",
-      "client-request-id": "1711e83d-0f5a-4a88-9499-30e613cd7563"
+      "date": "2026-01-17T11:31:00",
+      "request-id": "cb080698-55ac-411f-a224-5a6efc4ef93d",
+      "client-request-id": "cb080698-55ac-411f-a224-5a6efc4ef93d"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
+WARNING:   [12:31:00] Failed to get decisions for instance 4c5b8126-74f4-447b-beb8-fe2928ae388b: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "7e2d7a30-ed60-4ffc-86c5-439f09716b36",
-      "client-request-id": "7e2d7a30-ed60-4ffc-86c5-439f09716b36"
+      "date": "2026-01-17T11:31:01",
+      "request-id": "3d421d8c-414a-4f40-bd50-0fd483e88f85",
+      "client-request-id": "3d421d8c-414a-4f40-bd50-0fd483e88f85"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
+WARNING:   [12:31:01] Failed to get decisions for instance 6b38e3a9-1d7e-4c90-915c-32fee0768112: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "a6bf273b-c067-42a2-8a12-11cf02766abb",
-      "client-request-id": "a6bf273b-c067-42a2-8a12-11cf02766abb"
+      "date": "2026-01-17T11:31:01",
+      "request-id": "88d23cec-f309-4eff-a07d-fa789208456c",
+      "client-request-id": "88d23cec-f309-4eff-a07d-fa789208456c"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
+WARNING:   [12:31:01] Failed to get decisions for instance dcc261c1-5f5d-46e7-ac20-76a090376d9d: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:30",
-      "request-id": "5fae20f1-b79f-4488-91da-75efd6eab2dc",
-      "client-request-id": "5fae20f1-b79f-4488-91da-75efd6eab2dc"
+      "date": "2026-01-17T11:31:01",
+      "request-id": "b44d4219-269e-4a0e-8593-25f91e9bd057",
+      "client-request-id": "b44d4219-269e-4a0e-8593-25f91e9bd057"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
+WARNING:   [12:31:01] Failed to get decisions for instance 3305c113-9331-4da0-82c1-a35ada552378: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:31",
-      "request-id": "3d7b9178-7ac7-4251-abfe-70af7580a214",
-      "client-request-id": "3d7b9178-7ac7-4251-abfe-70af7580a214"
+      "date": "2026-01-17T11:31:01",
+      "request-id": "1f2918d0-75fa-466a-bb9f-4e6ccf5c7e9a",
+      "client-request-id": "1f2918d0-75fa-466a-bb9f-4e6ccf5c7e9a"
     }
   }
 }
-WARNING:   [09:49:30] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
+WARNING:   [12:31:01] Failed to get decisions for instance 70f00510-2f97-4eea-a742-45a727c0ed89: 
 {
   "error": {
     "code": "BadRequest",
     "message": "Parsing OData Select and Expand failed: Property \u0027reviewedBy\u0027 on type \u0027microsoft.graph.accessReviewInstanceDecisionItem\u0027 is not a navigation property or complex property. Only navigation properties can be expanded.",
     "innerError": {
-      "date": "2026-01-17T08:49:31",
-      "request-id": "03c44d2c-17ff-45d2-b495-b5ec74e81f92",
-      "client-request-id": "03c44d2c-17ff-45d2-b495-b5ec74e81f92"
+      "date": "2026-01-17T11:31:01",
+      "request-id": "1dc79521-19e9-49fc-ba26-a45d57ce8870",
+      "client-request-id": "1dc79521-19e9-49fc-ba26-a45d57ce8870"
     }
   }
 }
-WARNING: [09:49:30] No review decisions found to sync.
+WARNING: [12:31:01] No review decisions found to sync.
   ✓ Access package access reviews synced: 0 (table: GraphAccessPackageAccessReviewDecisions_ParallelSync)
 
 === Creating Analysis Views ===
   → Creating group membership analysis views...
-[09:49:32] Creating group membership analysis views...
+[12:31:06] Creating group membership analysis views...
 WARNING: Table 'GraphGroupTransitiveMembers' does not exist. Run Sync-FGGroupTransitiveMember first.
 WARNING: Table 'GraphGroupEligibleMembers' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional).
 PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMember and Sync-FGGroupTransitiveMember first."
@@ -2827,57 +2784,57 @@ PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMem
   ✗ Group membership view creation failed
     SQL command execution failed: Required tables do not exist. Please run Sync-FGGroupMember and Sync-FGGroupTransitiveMember first.
   → Creating access package analysis views...
-[09:49:32] Creating access package analysis views...
-  [09:49:33] Dropped existing view: vw_UserAccessPackages
-  [09:49:33] Created view: vw_UserAccessPackages
-  [09:49:33] Dropped existing view: vw_UserAccessPackageResources
-  [09:49:33] Created view: vw_UserAccessPackageResources
-  [09:49:33] Dropped existing view: vw_UserAccessPackageGroupMemberships
-  [09:49:33] Created view: vw_UserAccessPackageGroupMemberships
-  [09:49:33] Dropped existing view: vw_UserAccessPackageGroupOwnerships
-  [09:49:33] Created view: vw_UserAccessPackageGroupOwnerships
-  [09:49:33] Dropped existing view: vw_DirectGroupMemberships
-  [09:49:33] Created view: vw_DirectGroupMemberships
-  [09:49:33] Dropped existing view: vw_DirectGroupOwnerships
-  [09:49:33] Created view: vw_DirectGroupOwnerships
-  [09:49:33] Dropped existing view: vw_UnmanagedPermissions
-  [09:49:33] Created view: vw_UnmanagedPermissions
-  [09:49:33] Dropped existing view: vw_AccessPackageAssignmentDetails
-  [09:49:33] Created view: vw_AccessPackageAssignmentDetails
-  [09:49:33] Dropped existing view: vw_AutomaticAssignments
-  [09:49:33] Created view: vw_AutomaticAssignments
-  [09:49:33] Dropped existing view: vw_RequestedAssignments
-  [09:49:33] Created view: vw_RequestedAssignments
-  [09:49:33] Dropped existing view: vw_AdminAssignments
-  [09:49:33] Created view: vw_AdminAssignments
-  [09:49:33] Dropped existing view: vw_AccessPackageLastReview
-  [09:49:33] Created view: vw_AccessPackageLastReview
-  [09:49:33] Dropped existing view: vw_ApprovedRequestTimeline
-  [09:49:33] Created view: vw_ApprovedRequestTimeline
-  [09:49:34] Dropped existing view: vw_DeniedRequestTimeline
-  [09:49:34] Created view: vw_DeniedRequestTimeline
-  [09:49:34] Dropped existing view: vw_PendingRequestTimeline
-  [09:49:34] Created view: vw_PendingRequestTimeline
-  [09:49:34] Dropped existing view: vw_RequestResponseMetrics
-  [09:49:34] Created view: vw_RequestResponseMetrics
-[09:49:34] Access package views created successfully
+[12:31:07] Creating access package analysis views...
+  [12:31:07] Dropped existing view: vw_UserAccessPackages
+  [12:31:07] Created view: vw_UserAccessPackages
+  [12:31:07] Dropped existing view: vw_UserAccessPackageResources
+  [12:31:07] Created view: vw_UserAccessPackageResources
+  [12:31:07] Dropped existing view: vw_UserAccessPackageGroupMemberships
+  [12:31:07] Created view: vw_UserAccessPackageGroupMemberships
+  [12:31:07] Dropped existing view: vw_UserAccessPackageGroupOwnerships
+  [12:31:07] Created view: vw_UserAccessPackageGroupOwnerships
+  [12:31:07] Dropped existing view: vw_DirectGroupMemberships
+  [12:31:07] Created view: vw_DirectGroupMemberships
+  [12:31:07] Dropped existing view: vw_DirectGroupOwnerships
+  [12:31:07] Created view: vw_DirectGroupOwnerships
+  [12:31:07] Dropped existing view: vw_UnmanagedPermissions
+  [12:31:07] Created view: vw_UnmanagedPermissions
+  [12:31:07] Dropped existing view: vw_AccessPackageAssignmentDetails
+  [12:31:07] Created view: vw_AccessPackageAssignmentDetails
+  [12:31:07] Dropped existing view: vw_AutomaticAssignments
+  [12:31:07] Created view: vw_AutomaticAssignments
+  [12:31:08] Dropped existing view: vw_RequestedAssignments
+  [12:31:08] Created view: vw_RequestedAssignments
+  [12:31:08] Dropped existing view: vw_AdminAssignments
+  [12:31:08] Created view: vw_AdminAssignments
+  [12:31:08] Dropped existing view: vw_AccessPackageLastReview
+  [12:31:08] Created view: vw_AccessPackageLastReview
+  [12:31:08] Dropped existing view: vw_ApprovedRequestTimeline
+  [12:31:08] Created view: vw_ApprovedRequestTimeline
+  [12:31:08] Dropped existing view: vw_DeniedRequestTimeline
+  [12:31:08] Created view: vw_DeniedRequestTimeline
+  [12:31:08] Dropped existing view: vw_PendingRequestTimeline
+  [12:31:08] Created view: vw_PendingRequestTimeline
+  [12:31:08] Dropped existing view: vw_RequestResponseMetrics
+  [12:31:08] Created view: vw_RequestResponseMetrics
+[12:31:08] Access package views created successfully
   ✓ Access package analysis views created
 
 === Sync Summary ===
 
-  Sync Duration: 00:00:18
+  Sync Duration: 00:00:24
 
   Users:                   34
   Groups:                  68
   Direct Memberships:      853
   Group Ownerships:        17
+  Catalogs:                11
   Access Packages:         12
   Package Assignments:     80
   Assignment Requests:     89
   Access Reviews:          0
 
-  Errors encountered: 4
-    - Catalogs sync failed
+  Errors encountered: 3
     - AccessPackageResourceRoleScopes sync failed
     - AccessPackageAssignmentPolicies sync failed
     - Group membership view creation failed
@@ -2885,8 +2842,8 @@ PS>TerminatingError(): "Required tables do not exist. Please run Sync-FGGroupMem
 ========================================
 Sync Complete!
 ========================================
-Completed: 2026-01-17 09:49:34
-  ✓ Start-FGSync (parallel) completed in 18,68 seconds
+Completed: 2026-01-17 12:31:08
+  ✓ Start-FGSync (parallel) completed in 24,38 seconds
   → Verifying synced tables...
 Retrieving table information from database: GraphData
 
@@ -2894,7 +2851,7 @@ Found 37 table(s):
 Summary:
   Total Tables: 37
   Temporal Tables: 37
-  Total Rows (approx): 4.380
+  Total Rows (approx): 4.413
   ✓ Table found: GraphUsers_ParallelSync
   ✓ Table found: GraphGroups_ParallelSync
   ✓ Table found: GraphGroupMembers_ParallelSync
@@ -2911,7 +2868,7 @@ Summary:
   ✓ Groups synced: 68
   ✓ Memberships synced: 853
   ✓ Ownerships synced: 17
-  ✓ Catalogs synced: 0
+  ✓ Catalogs synced: 11
   ✓ Access Packages synced: 12
   ✓ Assignments synced: 80
   ✓ Start-FGSync parallel
@@ -2935,8 +2892,7 @@ ServerVersion                 : 12.0
 Tags                          : 
 Identity                      : 
 FullyQualifiedDomainName      : iisqlserver.database.windows.net
-ResourceId                    : /subscriptions/6af08f87-5594-49ed-a029-976707a2a70b/resourceGroups/SQLServer/providers/
-                                Microsoft.Sql/servers/iisqlserver
+ResourceId                    : /subscriptions/6af08f87-5594-49ed-a029-976707a2a70b/resourceGroups/SQLServer/providers/Microsoft.Sql/servers/iisqlserver
 MinimalTlsVersion             : 1.2
 PublicNetworkAccess           : Enabled
 RestrictOutboundNetworkAccess : Disabled
@@ -2951,12 +2907,12 @@ FederatedClientId             :
 Integration Test Summary
 ========================================
 
-Total Tests:  57
-Passed:       54
-Failed:       3
+Total Tests:  58
+Passed:       56
+Failed:       2
 
 Results by Category:
-  ✗ AccessPackageSync: 11/14 passed
+  ✗ AccessPackageSync: 13/15 passed
   ✓ Azure: 2/2 passed
   ✓ Cleanup: 2/2 passed
   ✓ Graph: 2/2 passed
@@ -2966,19 +2922,6 @@ Results by Category:
   ✓ Sync: 20/20 passed
 
 Failed Tests:
-  ✗ [AccessPackageSync] Catalog sync
-    Failed to fetch catalogs from Graph: 
-{
-  "error": {
-    "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027state\u0027 on type \u0027microsoft.graph.accessPackageCatalog\u0027.",
-    "innerError": {
-      "date": "2026-01-17T08:48:24",
-      "request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58",
-      "client-request-id": "41b35d9f-9fd2-4701-a276-c2ea82038b58"
-    }
-  }
-}
   ✗ [AccessPackageSync] Resource role scope sync
     SQL command execution failed: Bulk merge failed: Exception calling "Read" with "0" argument(s): "Cannot insert the value NULL into column 'id', table 'GraphData.dbo.GraphAccessPackageResourceRoleScopes_Test'; column does not allow nulls. UPDATE fails."
   ✗ [AccessPackageSync] Assignment policy sync
@@ -2986,11 +2929,11 @@ Failed Tests:
 {
   "error": {
     "code": "BadRequest",
-    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027allowedTargetScope\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
+    "message": "Parsing OData Select and Expand failed: Could not find a property named \u0027specificAllowedTargets\u0027 on type \u0027microsoft.graph.accessPackageAssignmentPolicy\u0027.",
     "innerError": {
-      "date": "2026-01-17T08:48:33",
-      "request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71",
-      "client-request-id": "ac5a99a6-079f-4e97-bd3c-d7f854b55b71"
+      "date": "2026-01-17T11:29:59",
+      "request-id": "7d842440-37b5-4156-b799-187b01a8779c",
+      "client-request-id": "7d842440-37b5-4156-b799-187b01a8779c"
     }
   }
 }
@@ -2998,5 +2941,5 @@ Failed Tests:
 ========================================
 **********************
 PowerShell transcript end
-End time: 20260117094950
+End time: 20260117123125
 **********************
