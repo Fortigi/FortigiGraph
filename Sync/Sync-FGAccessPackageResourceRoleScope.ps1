@@ -189,10 +189,12 @@ function Sync-FGAccessPackageResourceRoleScope {
         }
 
         # Get resource role scopes for this access package with expansion
-        $scopesUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages/$($package.id)/resourceRoleScopes?`$expand=role,resource"
+        # Using the correct endpoint pattern from Get-FGAccessPackagesResource
+        $scopesUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages/$($package.id)?`$expand=accessPackageResourceRoleScopes(`$expand=accessPackageResourceRole,accessPackageResourceScope)"
 
         try {
-            $scopes = Invoke-FGGetRequest -URI $scopesUri
+            $packageWithScopes = Invoke-FGGetRequest -URI $scopesUri
+            $scopes = $packageWithScopes.accessPackageResourceRoleScopes
 
             if ($scopes -and $scopes.Count -gt 0) {
                 # Flatten the complex structure into our desired format
@@ -200,13 +202,13 @@ function Sync-FGAccessPackageResourceRoleScope {
                     $flatScope = [PSCustomObject]@{
                         id = $scope.id
                         accessPackageId = $package.id
-                        resourceId = $scope.resource.id
-                        resourceDisplayName = $scope.resource.displayName
-                        resourceType = $scope.resource.resourceType
-                        resourceOriginSystem = $scope.resource.originSystem
-                        roleId = $scope.role.id
-                        roleDisplayName = $scope.role.displayName
-                        roleDescription = $scope.role.description
+                        resourceId = $scope.accessPackageResourceScope.accessPackageResource.id
+                        resourceDisplayName = $scope.accessPackageResourceScope.accessPackageResource.displayName
+                        resourceType = $scope.accessPackageResourceScope.accessPackageResource.resourceType
+                        resourceOriginSystem = $scope.accessPackageResourceScope.accessPackageResource.originSystem
+                        roleId = $scope.accessPackageResourceRole.id
+                        roleDisplayName = $scope.accessPackageResourceRole.displayName
+                        roleDescription = $scope.accessPackageResourceRole.description
                         createdDateTime = $scope.createdDateTime
                     }
                     $allResourceRoleScopes += $flatScope
