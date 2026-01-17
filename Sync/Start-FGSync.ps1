@@ -146,7 +146,16 @@ Command-line parameter overrides config file setting (Sync.Groups.AdditionalAttr
     [bool]$SyncAccessPackageAssignments = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncAccessPackageResourceRoleScopes = $true
+    [bool]$SyncAccessPackageResourceRoleScopes = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncAccessPackageAssignmentPolicies = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncAccessPackageAssignmentRequests = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncAccessPackageAccessReviews = $true
 )
 
     $ErrorActionPreference = "Stop"
@@ -170,6 +179,9 @@ Command-line parameter overrides config file setting (Sync.Groups.AdditionalAttr
     AccessPackages = $null
     AccessPackageAssignments = $null
     AccessPackageResourceRoleScopes = $null
+    AccessPackageAssignmentPolicies = $null
+    AccessPackageAssignmentRequests = $null
+    AccessPackageAccessReviews = $null
     Errors = @()
 }
 
@@ -490,6 +502,9 @@ function Write-SyncError {
     $accessPackagesTableName = if ($config.Sync.AccessPackages.TableName) { $config.Sync.AccessPackages.TableName } else { "GraphAccessPackages" }
     $accessPackageAssignmentsTableName = if ($config.Sync.AccessPackageAssignments.TableName) { $config.Sync.AccessPackageAssignments.TableName } else { "GraphAccessPackageAssignments" }
     $accessPackageResourceRoleScopesTableName = if ($config.Sync.AccessPackageResourceRoleScopes.TableName) { $config.Sync.AccessPackageResourceRoleScopes.TableName } else { "GraphAccessPackageResourceRoleScopes" }
+    $accessPackageAssignmentPoliciesTableName = if ($config.Sync.AccessPackageAssignmentPolicies.TableName) { $config.Sync.AccessPackageAssignmentPolicies.TableName } else { "GraphAccessPackageAssignmentPolicies" }
+    $accessPackageAssignmentRequestsTableName = if ($config.Sync.AccessPackageAssignmentRequests.TableName) { $config.Sync.AccessPackageAssignmentRequests.TableName } else { "GraphAccessPackageAssignmentRequests" }
+    $accessPackageAccessReviewsTableName = if ($config.Sync.AccessPackageAccessReviews.TableName) { $config.Sync.AccessPackageAccessReviews.TableName } else { "GraphAccessPackageAccessReviewDecisions" }
 
     if ($ParallelExecution) {
         # Parallel execution using runspaces
@@ -587,6 +602,21 @@ function Write-SyncError {
                     }
                     "AccessPackageResourceRoleScopes" {
                         $null = Sync-FGAccessPackageResourceRoleScope -TableName $TableName
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "AccessPackageAssignmentPolicies" {
+                        $null = Sync-FGAccessPackageAssignmentPolicy -TableName $TableName
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "AccessPackageAssignmentRequests" {
+                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "AccessPackageAccessReviews" {
+                        $null = Sync-FGAccessPackageAccessReview -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -864,6 +894,81 @@ function Write-SyncError {
             }
         }
 
+        # Create job for AccessPackageAssignmentPolicies sync
+        if ($SyncAccessPackageAssignmentPolicies) {
+            Write-SyncStep "Starting access package assignment policies sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "AccessPackageAssignmentPolicies")
+            [void]$ps.AddParameter("TableName", $accessPackageAssignmentPoliciesTableName)
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "AccessPackageAssignmentPolicies"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for AccessPackageAssignmentRequests sync
+        if ($SyncAccessPackageAssignmentRequests) {
+            Write-SyncStep "Starting access package assignment requests sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "AccessPackageAssignmentRequests")
+            [void]$ps.AddParameter("TableName", $accessPackageAssignmentRequestsTableName)
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "AccessPackageAssignmentRequests"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for AccessPackageAccessReviews sync
+        if ($SyncAccessPackageAccessReviews) {
+            Write-SyncStep "Starting access package access reviews sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "AccessPackageAccessReviews")
+            [void]$ps.AddParameter("TableName", $accessPackageAccessReviewsTableName)
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "AccessPackageAccessReviews"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
         # Wait for all jobs to complete and process results
         Write-SyncStep "Waiting for parallel jobs to complete..."
         foreach ($job in $jobs) {
@@ -933,6 +1038,18 @@ function Write-SyncError {
                         "AccessPackageResourceRoleScopes" {
                             $script:SyncStats.AccessPackageResourceRoleScopes = $result.Count
                             Write-SyncSuccess "Access package resource role scopes synced: $($result.Count) (table: $accessPackageResourceRoleScopesTableName)"
+                        }
+                        "AccessPackageAssignmentPolicies" {
+                            $script:SyncStats.AccessPackageAssignmentPolicies = $result.Count
+                            Write-SyncSuccess "Access package assignment policies synced: $($result.Count) (table: $accessPackageAssignmentPoliciesTableName)"
+                        }
+                        "AccessPackageAssignmentRequests" {
+                            $script:SyncStats.AccessPackageAssignmentRequests = $result.Count
+                            Write-SyncSuccess "Access package assignment requests synced: $($result.Count) (table: $accessPackageAssignmentRequestsTableName)"
+                        }
+                        "AccessPackageAccessReviews" {
+                            $script:SyncStats.AccessPackageAccessReviews = $result.Count
+                            Write-SyncSuccess "Access package access reviews synced: $($result.Count) (table: $accessPackageAccessReviewsTableName)"
                         }
                     }
                 } elseif ($result -and -not $result.Success) {
@@ -1140,6 +1257,48 @@ function Write-SyncError {
                 Write-SyncError "Access package resource role scope sync failed" $_.Exception.Message
             }
         }
+
+        # Sync Access Package Assignment Policies
+        if ($SyncAccessPackageAssignmentPolicies) {
+            Write-SyncStep "Syncing access package assignment policies..."
+            try {
+                Sync-FGAccessPackageAssignmentPolicy -TableName $accessPackageAssignmentPoliciesTableName
+
+                $policyCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentPoliciesTableName" -AsScalar
+                $script:SyncStats.AccessPackageAssignmentPolicies = $policyCount
+                Write-SyncSuccess "Access package assignment policies synced: $policyCount (table: $accessPackageAssignmentPoliciesTableName)"
+            } catch {
+                Write-SyncError "Access package assignment policy sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Access Package Assignment Requests
+        if ($SyncAccessPackageAssignmentRequests) {
+            Write-SyncStep "Syncing access package assignment requests..."
+            try {
+                Sync-FGAccessPackageAssignmentRequest -TableName $accessPackageAssignmentRequestsTableName
+
+                $requestCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentRequestsTableName" -AsScalar
+                $script:SyncStats.AccessPackageAssignmentRequests = $requestCount
+                Write-SyncSuccess "Access package assignment requests synced: $requestCount (table: $accessPackageAssignmentRequestsTableName)"
+            } catch {
+                Write-SyncError "Access package assignment request sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Access Package Access Reviews
+        if ($SyncAccessPackageAccessReviews) {
+            Write-SyncStep "Syncing access package access reviews..."
+            try {
+                Sync-FGAccessPackageAccessReview -TableName $accessPackageAccessReviewsTableName
+
+                $reviewCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAccessReviewsTableName" -AsScalar
+                $script:SyncStats.AccessPackageAccessReviews = $reviewCount
+                Write-SyncSuccess "Access package access reviews synced: $reviewCount (table: $accessPackageAccessReviewsTableName)"
+            } catch {
+                Write-SyncError "Access package access review sync failed" $_.Exception.Message
+            }
+        }
     }
     #endregion
 
@@ -1170,9 +1329,59 @@ function Write-SyncError {
 
             Initialize-FGGroupMembershipViews @viewParams
 
-            Write-SyncSuccess "Analysis views created"
+            Write-SyncSuccess "Group membership analysis views created"
         } catch {
-            Write-SyncError "View creation failed" $_.Exception.Message
+            Write-SyncError "Group membership view creation failed" $_.Exception.Message
+        }
+
+        # Create access package views
+        try {
+            Write-SyncStep "Creating access package analysis views..."
+
+            $apViewParams = @{
+                DropIfExists = $true
+            }
+
+            # Use configured table names
+            if ($SyncCatalogs) {
+                $apViewParams.CatalogsTable = $catalogsTableName
+            }
+            if ($SyncAccessPackages) {
+                $apViewParams.AccessPackagesTable = $accessPackagesTableName
+            }
+            if ($SyncAccessPackageAssignments) {
+                $apViewParams.AssignmentsTable = $accessPackageAssignmentsTableName
+            }
+            if ($SyncAccessPackageResourceRoleScopes) {
+                $apViewParams.ResourceRoleScopesTable = $accessPackageResourceRoleScopesTableName
+            }
+            if ($SyncUsers) {
+                $apViewParams.UsersTable = $userTableName
+            }
+            if ($SyncGroups) {
+                $apViewParams.GroupsTable = $groupTableName
+            }
+            if ($SyncGroupMembers) {
+                $apViewParams.GroupMembersTable = $groupMembersTableName
+            }
+            if ($SyncGroupOwners) {
+                $apViewParams.GroupOwnersTable = $groupOwnersTableName
+            }
+            if ($SyncAccessPackageAssignmentRequests) {
+                $apViewParams.AssignmentRequestsTable = $accessPackageAssignmentRequestsTableName
+            }
+            if ($SyncAccessPackageAssignmentPolicies) {
+                $apViewParams.AssignmentPoliciesTable = $accessPackageAssignmentPoliciesTableName
+            }
+            if ($SyncAccessPackageAccessReviews) {
+                $apViewParams.AccessReviewDecisionsTable = $accessPackageAccessReviewsTableName
+            }
+
+            Initialize-FGAccessPackageViews @apViewParams
+
+            Write-SyncSuccess "Access package analysis views created"
+        } catch {
+            Write-SyncError "Access package view creation failed" $_.Exception.Message
         }
     }
     #endregion
@@ -1216,6 +1425,15 @@ function Write-SyncError {
     }
     if ($SyncAccessPackageResourceRoleScopes -and $script:SyncStats.AccessPackageResourceRoleScopes -ne $null) {
         Write-Host "  Resource Role Scopes:    $($script:SyncStats.AccessPackageResourceRoleScopes)" -ForegroundColor White
+    }
+    if ($SyncAccessPackageAssignmentPolicies -and $script:SyncStats.AccessPackageAssignmentPolicies -ne $null) {
+        Write-Host "  Assignment Policies:     $($script:SyncStats.AccessPackageAssignmentPolicies)" -ForegroundColor White
+    }
+    if ($SyncAccessPackageAssignmentRequests -and $script:SyncStats.AccessPackageAssignmentRequests -ne $null) {
+        Write-Host "  Assignment Requests:     $($script:SyncStats.AccessPackageAssignmentRequests)" -ForegroundColor White
+    }
+    if ($SyncAccessPackageAccessReviews -and $script:SyncStats.AccessPackageAccessReviews -ne $null) {
+        Write-Host "  Access Reviews:          $($script:SyncStats.AccessPackageAccessReviews)" -ForegroundColor White
     }
 
     if ($script:SyncStats.Errors.Count -gt 0) {
