@@ -219,7 +219,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Build Graph API request - expand requestor to get user ID
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment requests from Microsoft Graph..." -ForegroundColor Cyan
 
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor"
+    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignmentRequests?`$expand=requestor"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"

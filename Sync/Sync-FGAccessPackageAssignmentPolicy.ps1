@@ -212,7 +212,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment policies from Microsoft Graph..." -ForegroundColor Cyan
 
     $selectProperties = $Attributes -join ','
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentPolicies?`$select=$selectProperties"
+    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies?`$select=$selectProperties"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"

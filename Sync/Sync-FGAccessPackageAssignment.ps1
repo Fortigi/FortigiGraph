@@ -214,7 +214,7 @@ function Sync-FGAccessPackageAssignment {
 
     # We need to expand 'target' to get the targetId (user id)
     # Note: We can't use $select with $expand in this case, so we'll get all properties and filter client-side
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignments?`$expand=target"
+    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$expand=target"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"

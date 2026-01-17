@@ -207,7 +207,7 @@ function Sync-FGCatalog {
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching catalogs from Microsoft Graph..." -ForegroundColor Cyan
 
     $selectProperties = $Attributes -join ','
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/catalogs?`$select=$selectProperties"
+    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageCatalogs?`$select=$selectProperties"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"
