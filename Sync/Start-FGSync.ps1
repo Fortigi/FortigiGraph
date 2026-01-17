@@ -68,6 +68,34 @@ Command-line parameter overrides config file setting (Sync.Groups.Filter)
 Additional group attributes to sync beyond defaults
 Command-line parameter overrides config file setting (Sync.Groups.AdditionalAttributes)
 
+.PARAMETER SyncCatalogs
+Sync access package catalogs. Default: Read from config (Sync.Catalogs.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackages
+Sync access packages. Default: Read from config (Sync.AccessPackages.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackageAssignments
+Sync access package assignments. Default: Read from config (Sync.AccessPackageAssignments.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackageResourceRoleScopes
+Sync access package resource role scopes. Default: Read from config (Sync.AccessPackageResourceRoleScopes.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackageAssignmentPolicies
+Sync access package assignment policies. Default: Read from config (Sync.AccessPackageAssignmentPolicies.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackageAssignmentRequests
+Sync access package assignment requests. Default: Read from config (Sync.AccessPackageAssignmentRequests.Enabled) or $true
+Command-line parameter overrides config file setting
+
+.PARAMETER SyncAccessPackageAccessReviews
+Sync access package access review decisions. Default: Read from config (Sync.AccessPackageAccessReviews.Enabled) or $true
+Command-line parameter overrides config file setting
+
 .EXAMPLE
     Start-FGSync -ConfigFile "C:\Config\config.production.json"
     Runs full sync with all default options
@@ -286,6 +314,15 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('SyncAccessPackageResourceRoleScopes') -eq $false -and $null -ne $config.Sync.AccessPackageResourceRoleScopes.Enabled) {
             $SyncAccessPackageResourceRoleScopes = $config.Sync.AccessPackageResourceRoleScopes.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('SyncAccessPackageAssignmentPolicies') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentPolicies.Enabled) {
+            $SyncAccessPackageAssignmentPolicies = $config.Sync.AccessPackageAssignmentPolicies.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('SyncAccessPackageAssignmentRequests') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentRequests.Enabled) {
+            $SyncAccessPackageAssignmentRequests = $config.Sync.AccessPackageAssignmentRequests.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('SyncAccessPackageAccessReviews') -eq $false -and $null -ne $config.Sync.AccessPackageAccessReviews.Enabled) {
+            $SyncAccessPackageAccessReviews = $config.Sync.AccessPackageAccessReviews.Enabled
         }
         if ($PSBoundParameters.ContainsKey('CreateViews') -eq $false -and $null -ne $config.Sync.Views.Enabled) {
             $CreateViews = $config.Sync.Views.Enabled
