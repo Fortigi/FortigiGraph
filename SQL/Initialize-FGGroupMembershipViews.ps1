@@ -32,6 +32,7 @@ function Initialize-FGGroupMembershipViews {
 
     .PARAMETER TransitiveMembersTable
     Name of the table containing transitive group memberships. Default: "GraphGroupTransitiveMembers"
+    NOTE: This table is DEPRECATED. Use vw_GraphGroupMembersRecursive instead for indirect membership calculation.
 
     .PARAMETER EligibleMembersTable
     Name of the table containing eligible group memberships (PIM). Default: "GraphGroupEligibleMembers"
@@ -56,15 +57,19 @@ function Initialize-FGGroupMembershipViews {
     Requires:
     - Connect-FGSQLServer to be called first
     - GraphGroupMembers table to exist (run Sync-FGGroupMember first)
-    - GraphGroupTransitiveMembers table to exist (run Sync-FGGroupTransitiveMember first)
     - GraphGroupOwners table (optional, run Sync-FGGroupOwner for owner tracking)
     - GraphGroupEligibleMembers table (optional, run Sync-FGGroupEligibleMember for PIM)
 
+    DEPRECATED:
+    - GraphGroupTransitiveMembers table is NO LONGER REQUIRED
+    - vw_GraphGroupNestedMembers will only be created if transitive table exists
+    - Use vw_GraphGroupMembersRecursive instead (calculates indirect memberships on-demand)
+
     Views Created:
-    - vw_GraphGroupNestedMembers: Only indirect/nested members
+    - vw_GraphGroupNestedMembers: Only indirect/nested members (requires transitive table - DEPRECATED)
     - vw_GraphGroupEligibleMembers: Only eligible members (PIM - if table exists)
     - vw_GraphGroupMembershipType: All members with Owner/Direct/Indirect/Eligible indicator
-    - vw_GraphGroupMembersRecursive: ALL memberships with paths (recursive, uses only direct table!)
+    - vw_GraphGroupMembersRecursive: ⭐ RECOMMENDED - ALL memberships with paths (recursive, uses only direct table!)
 
     Performance Tip:
     Use vw_GraphGroupMembersRecursive instead of syncing transitive members to save ~75% sync time.
@@ -117,33 +122,35 @@ SELECT
         $reader.Close()
 
         if (-not $directExists) {
-            Write-Warning "Table '$DirectMembersTable' does not exist. Run Sync-FGGroupMember first."
+            throw "Required table '$DirectMembersTable' does not exist. Please run Sync-FGGroupMember first."
         }
+
         if (-not $transitiveExists) {
-            Write-Warning "Table '$TransitiveMembersTable' does not exist. Run Sync-FGGroupTransitiveMember first."
+            Write-Warning "Table '$TransitiveMembersTable' does not exist. This is OK - use vw_GraphGroupMembersRecursive for indirect memberships instead."
+            Write-Warning "vw_GraphGroupNestedMembers will be skipped. vw_GraphGroupMembershipType may have incomplete data."
         }
+
         if (-not $eligibleExists) {
             Write-Warning "Table '$EligibleMembersTable' does not exist. Run Sync-FGGroupEligibleMember for PIM support (optional)."
         }
+
         if (-not $ownersExists) {
             Write-Warning "Table '$OwnersTable' does not exist. Run Sync-FGGroupOwner to include owners in views (optional)."
         }
 
-        if (-not $directExists -or -not $transitiveExists) {
-            throw "Required tables do not exist. Please run Sync-FGGroupMember and Sync-FGGroupTransitiveMember first."
-        }
+        # View 1: Nested Members Only (Indirect access) - DEPRECATED, requires transitive table
+        if ($transitiveExists) {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupNestedMembers" -ForegroundColor Cyan
+            Write-Host "  Purpose: Shows only members with indirect/nested access (not direct members)" -ForegroundColor Gray
+            Write-Host "  NOTE: This view is DEPRECATED. Use vw_GraphGroupMembersRecursive instead." -ForegroundColor Yellow
 
-        # View 1: Nested Members Only (Indirect access)
-        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupNestedMembers" -ForegroundColor Cyan
-        Write-Host "  Purpose: Shows only members with indirect/nested access (not direct members)" -ForegroundColor Gray
+            if ($DropIfExists) {
+                $dropView1Cmd = $connection.CreateCommand()
+                $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupNestedMembers') DROP VIEW dbo.vw_GraphGroupNestedMembers;"
+                $dropView1Cmd.ExecuteNonQuery() | Out-Null
+            }
 
-        if ($DropIfExists) {
-            $dropView1Cmd = $connection.CreateCommand()
-            $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupNestedMembers') DROP VIEW dbo.vw_GraphGroupNestedMembers;"
-            $dropView1Cmd.ExecuteNonQuery() | Out-Null
-        }
-
-        $createView1SQL = @"
+            $createView1SQL = @"
 CREATE VIEW dbo.vw_GraphGroupNestedMembers AS
 SELECT
     t.groupId,
@@ -160,10 +167,15 @@ WHERE d.memberId IS NULL  -- Not in direct members = nested only
     AND t.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
 "@
 
-        $createView1Cmd = $connection.CreateCommand()
-        $createView1Cmd.CommandText = $createView1SQL
-        $createView1Cmd.ExecuteNonQuery() | Out-Null
-        Write-Host "  ✅ Created: vw_GraphGroupNestedMembers" -ForegroundColor Green
+            $createView1Cmd = $connection.CreateCommand()
+            $createView1Cmd.CommandText = $createView1SQL
+            $createView1Cmd.ExecuteNonQuery() | Out-Null
+            Write-Host "  ✅ Created: vw_GraphGroupNestedMembers" -ForegroundColor Green
+        }
+        else {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Skipping view: vw_GraphGroupNestedMembers (transitive table doesn't exist)" -ForegroundColor Yellow
+            Write-Host "  Use vw_GraphGroupMembersRecursive instead for indirect membership analysis" -ForegroundColor Cyan
+        }
 
         # View 2: Eligible Members Only (PIM eligible, not active)
         if ($eligibleExists) {
@@ -197,20 +209,22 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)" -ForegroundColor Yellow
         }
 
-        # View 3: All Members with Membership Type Indicator
-        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
-        $types = @()
-        if ($ownersExists) { $types += "Owner" }
-        $types += "Direct"
-        if ($eligibleExists) { $types += "Eligible" }
-        $types += "Indirect"
-        Write-Host "  Purpose: Shows all members with $($types -join '/') indicator" -ForegroundColor Gray
+        # View 3: All Members with Membership Type Indicator - DEPRECATED, requires transitive table
+        if ($transitiveExists) {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
+            $types = @()
+            if ($ownersExists) { $types += "Owner" }
+            $types += "Direct"
+            if ($eligibleExists) { $types += "Eligible" }
+            $types += "Indirect"
+            Write-Host "  Purpose: Shows all members with $($types -join '/') indicator" -ForegroundColor Gray
+            Write-Host "  NOTE: This view is DEPRECATED. Use vw_GraphGroupMembersRecursive instead." -ForegroundColor Yellow
 
-        if ($DropIfExists) {
-            $dropView3Cmd = $connection.CreateCommand()
-            $dropView3Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
-            $dropView3Cmd.ExecuteNonQuery() | Out-Null
-        }
+            if ($DropIfExists) {
+                $dropView3Cmd = $connection.CreateCommand()
+                $dropView3Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
+                $dropView3Cmd.ExecuteNonQuery() | Out-Null
+            }
 
         # Build the view SQL based on which optional tables exist
         $createView3SQL = @"
@@ -335,10 +349,15 @@ WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'
             $createView3SQL += ";"
         }
 
-        $createView3Cmd = $connection.CreateCommand()
-        $createView3Cmd.CommandText = $createView3SQL
-        $createView3Cmd.ExecuteNonQuery() | Out-Null
-        Write-Host "  ✅ Created: vw_GraphGroupMembershipType" -ForegroundColor Green
+            $createView3Cmd = $connection.CreateCommand()
+            $createView3Cmd.CommandText = $createView3SQL
+            $createView3Cmd.ExecuteNonQuery() | Out-Null
+            Write-Host "  ✅ Created: vw_GraphGroupMembershipType" -ForegroundColor Green
+        }
+        else {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Skipping view: vw_GraphGroupMembershipType (transitive table doesn't exist)" -ForegroundColor Yellow
+            Write-Host "  Use vw_GraphGroupMembersRecursive instead - it includes membershipType (Direct/Indirect)" -ForegroundColor Cyan
+        }
 
         # View 4: Recursive Membership Paths (NEW!)
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembersRecursive" -ForegroundColor Cyan

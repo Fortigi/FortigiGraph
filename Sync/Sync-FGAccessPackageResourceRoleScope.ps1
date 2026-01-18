@@ -201,7 +201,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                 foreach ($scope in $scopes) {
                     # Skip scopes with null/empty id or invalid GUIDs (cannot be stored in SQL with NOT NULL UNIQUEIDENTIFIER constraint)
                     if (-not $scope.id -or [string]::IsNullOrWhiteSpace($scope.id)) {
-                        Write-Verbose "  Skipping scope with NULL/empty id for package '$($package.displayName)'"
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with NULL/empty id for package '$($package.displayName)'" -ForegroundColor Yellow
                         continue
                     }
 
@@ -210,7 +210,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                         $guidId = [guid]$scope.id
                     }
                     catch {
-                        Write-Verbose "  Skipping scope with invalid GUID id '$($scope.id)' for package '$($package.displayName)'"
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with invalid GUID id '$($scope.id)' for package '$($package.displayName)'" -ForegroundColor Yellow
                         continue
                     }
 
