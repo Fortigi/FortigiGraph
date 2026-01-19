@@ -368,7 +368,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('id')
+                -KeyColumns @('accessPackageId', 'id')
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount scopes that no longer exist in Graph" -ForegroundColor Yellow
