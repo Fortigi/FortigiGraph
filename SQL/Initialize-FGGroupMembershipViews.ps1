@@ -6,11 +6,7 @@ function Initialize-FGGroupMembershipViews {
     .DESCRIPTION
     Creates views that make it easy to work with group membership data:
 
-    1. vw_GraphGroupEligibleMembers
-       - Shows ONLY eligible members (PIM eligible, not active)
-       - Useful for finding who can activate membership
-
-    2. vw_GraphGroupMembersRecursive
+    1. vw_GraphGroupMembersRecursive
        - Calculates ALL memberships (direct + indirect) recursively using ONLY direct members
        - Eliminates need for transitive members sync (75% faster!)
        - Includes complete path showing how membership was obtained
@@ -18,7 +14,7 @@ function Initialize-FGGroupMembershipViews {
        - Includes depth and cycle detection
        - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
 
-    3. vw_GraphGroupMembershipType ⭐ RECOMMENDED
+    2. vw_GraphGroupMembershipType ⭐ RECOMMENDED
        - Comprehensive view combining ALL membership types in one place
        - Includes: Direct members, Indirect members, Owners, and Eligible members
        - Single query to get complete membership picture with type indicator
@@ -54,7 +50,6 @@ function Initialize-FGGroupMembershipViews {
     - GraphGroupEligibleMembers table (optional, run Sync-FGGroupEligibleMember for PIM)
 
     Views Created:
-    - vw_GraphGroupEligibleMembers: Only eligible members (PIM - if table exists)
     - vw_GraphGroupMembersRecursive: ALL memberships with paths and depth (recursive!)
     - vw_GraphGroupMembershipType: ⭐ RECOMMENDED - Comprehensive view with all types (Direct/Indirect/Owner/Eligible)
 
@@ -115,48 +110,17 @@ SELECT
             Write-Warning "Table '$OwnersTable' does not exist. Run Sync-FGGroupOwner for ownership tracking (optional)."
         }
 
-        # View 1: Eligible Members Only (PIM eligible, not active)
-        if ($eligibleExists) {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupEligibleMembers" -ForegroundColor Cyan
-            Write-Host "  Purpose: Shows only eligible members (PIM - can activate membership)" -ForegroundColor Gray
-
-            # Always drop view if exists to ensure clean recreation
-            $dropView1Cmd = $connection.CreateCommand()
-            $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupEligibleMembers') DROP VIEW dbo.vw_GraphGroupEligibleMembers;"
-            $dropView1Cmd.ExecuteNonQuery() | Out-Null
-
-            $createView1SQL = @"
-CREATE VIEW dbo.vw_GraphGroupEligibleMembers AS
-SELECT
-    e.groupId,
-    e.memberId,
-    e.memberType,
-    e.ValidFrom,
-    e.ValidTo
-FROM dbo.$EligibleMembersTable e
-WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
-"@
-
-            $createView1Cmd = $connection.CreateCommand()
-            $createView1Cmd.CommandText = $createView1SQL
-            $createView1Cmd.ExecuteNonQuery() | Out-Null
-            Write-Host "  ✅ Created: vw_GraphGroupEligibleMembers" -ForegroundColor Green
-        }
-        else {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Skipping vw_GraphGroupEligibleMembers (table doesn't exist)" -ForegroundColor Yellow
-        }
-
-        # View 2: Recursive Membership Paths (Calculates indirect memberships on-demand!)
+        # View 1: Recursive Membership Paths (Calculates indirect memberships on-demand!)
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembersRecursive" -ForegroundColor Cyan
         Write-Host "  Purpose: Calculates ALL memberships (direct + indirect) with paths" -ForegroundColor Gray
         Write-Host "  Benefit: Eliminates need for transitive members sync (75% faster!)" -ForegroundColor Gray
 
         # Always drop view if exists to ensure clean recreation
-        $dropView2Cmd = $connection.CreateCommand()
-        $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembersRecursive') DROP VIEW dbo.vw_GraphGroupMembersRecursive;"
-        $dropView2Cmd.ExecuteNonQuery() | Out-Null
+        $dropView1Cmd = $connection.CreateCommand()
+        $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembersRecursive') DROP VIEW dbo.vw_GraphGroupMembersRecursive;"
+        $dropView1Cmd.ExecuteNonQuery() | Out-Null
 
-        $createView2SQL = @"
+        $createView1SQL = @"
 CREATE VIEW dbo.vw_GraphGroupMembersRecursive AS
 WITH RecursiveMemberships AS (
     -- Anchor: Direct memberships (depth = 1)
@@ -224,12 +188,12 @@ FROM RecursiveMemberships
 ;
 "@
 
-        $createView2Cmd = $connection.CreateCommand()
-        $createView2Cmd.CommandText = $createView2SQL
-        $createView2Cmd.ExecuteNonQuery() | Out-Null
+        $createView1Cmd = $connection.CreateCommand()
+        $createView1Cmd.CommandText = $createView1SQL
+        $createView1Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupMembersRecursive" -ForegroundColor Green
 
-        # View 3: Comprehensive Membership Type View (Combines all membership types)
+        # View 2: Comprehensive Membership Type View (Combines all membership types)
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
 
         $types = @()
@@ -242,17 +206,17 @@ FROM RecursiveMemberships
         Write-Host "  Note: Uses vw_GraphGroupMembersRecursive for direct/indirect memberships" -ForegroundColor Gray
 
         # Always drop view if exists to ensure clean recreation
-        $dropView3Cmd = $connection.CreateCommand()
-        $dropView3Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
-        $dropView3Cmd.ExecuteNonQuery() | Out-Null
+        $dropView2Cmd = $connection.CreateCommand()
+        $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
+        $dropView2Cmd.ExecuteNonQuery() | Out-Null
 
         # Build the view SQL dynamically based on which tables exist
-        $createView3SQL = @"
+        $createView2SQL = @"
 CREATE VIEW dbo.vw_GraphGroupMembershipType AS
 "@
 
         # Always include direct and indirect memberships from recursive view
-        $createView3SQL += @"
+        $createView2SQL += @"
 -- Direct and Indirect Members (from recursive view)
 SELECT
     groupId,
@@ -270,7 +234,7 @@ WHERE ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current records
 
         # Add owners if table exists
         if ($ownersExists) {
-            $createView3SQL += @"
+            $createView2SQL += @"
 
 UNION ALL
 
@@ -297,7 +261,7 @@ WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current owners
 
         # Add eligible members if table exists
         if ($eligibleExists) {
-            $createView3SQL += @"
+            $createView2SQL += @"
 
 UNION ALL
 
@@ -322,24 +286,18 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current eligible
 "@
         }
 
-        $createView3SQL += ";"
+        $createView2SQL += ";"
 
-        $createView3Cmd = $connection.CreateCommand()
-        $createView3Cmd.CommandText = $createView3SQL
-        $createView3Cmd.ExecuteNonQuery() | Out-Null
+        $createView2Cmd = $connection.CreateCommand()
+        $createView2Cmd.CommandText = $createView2SQL
+        $createView2Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupMembershipType" -ForegroundColor Green
 
         Write-Host "`n========================================" -ForegroundColor Green
         Write-Host "Views Created Successfully!" -ForegroundColor Green
         Write-Host "========================================" -ForegroundColor Green
 
-        if ($eligibleExists) {
-            Write-Host "View 1: vw_GraphGroupEligibleMembers" -ForegroundColor White
-            Write-Host "  - Shows only eligible members (PIM)" -ForegroundColor Gray
-            Write-Host "  - Members who can activate access" -ForegroundColor Gray
-        }
-
-        Write-Host "`nView 2: vw_GraphGroupMembersRecursive" -ForegroundColor White
+        Write-Host "`nView 1: vw_GraphGroupMembersRecursive" -ForegroundColor White
         Write-Host "  - Calculates ALL memberships (direct + indirect) recursively" -ForegroundColor Gray
         Write-Host "  - Uses ONLY direct members table (no transitive sync needed!)" -ForegroundColor Gray
         Write-Host "  - Includes complete path for each membership" -ForegroundColor Gray
@@ -347,7 +305,7 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current eligible
         Write-Host "  - 75% faster: Eliminates need for Sync-FGGroupTransitiveMember" -ForegroundColor Gray
         Write-Host "  - Columns: groupId, memberId, memberType, membershipType, depth, path" -ForegroundColor Gray
 
-        Write-Host "`nView 3: vw_GraphGroupMembershipType ⭐ RECOMMENDED" -ForegroundColor White
+        Write-Host "`nView 2: vw_GraphGroupMembershipType ⭐ RECOMMENDED" -ForegroundColor White
         Write-Host "  - Comprehensive view combining ALL membership types" -ForegroundColor Gray
         Write-Host "  - Includes: $($types -join ', ')" -ForegroundColor Gray
         Write-Host "  - Single query to get complete membership picture" -ForegroundColor Gray
