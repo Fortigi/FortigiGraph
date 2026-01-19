@@ -150,20 +150,19 @@ SELECT
     u.userPrincipalName,
     u.displayName AS userDisplayName,
     a.id AS assignmentId,
-    a.state AS assignmentState,
-    a.status AS assignmentStatus,
+    a.assignmentState AS assignmentState,
+    a.assignmentStatus AS assignmentStatus,
     ap.id AS accessPackageId,
     ap.displayName AS accessPackageName,
     ap.description AS accessPackageDescription,
     c.id AS catalogId,
     c.displayName AS catalogName,
-    c.catalogType,
-    a.createdDateTime AS assignedDateTime
+    c.catalogType
 FROM dbo.$AssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
     INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
     INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
-WHERE a.state = 'delivered'  -- Only active assignments
+WHERE a.assignmentState = 'delivered'  -- Only active assignments
 "@
 
         # View 2: User Access Package Resources
@@ -186,15 +185,14 @@ SELECT
     rrs.scopeOriginSystem AS resourceType,
     rrs.roleId,
     rrs.roleDisplayName AS roleName,
-    rrs.roleDescription,
-    a.createdDateTime AS assignedDateTime
+    rrs.roleDescription
 FROM dbo.$AssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
     INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
     INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
     INNER JOIN dbo.$ResourceRoleScopesTable rrs ON ap.id = rrs.accessPackageId
     LEFT JOIN dbo.$GroupsTable g ON rrs.scopeOriginId = g.id
-WHERE a.state = 'delivered'  -- Only active assignments
+WHERE a.assignmentState = 'delivered'  -- Only active assignments
 "@
 
         # View 3: User Access Package Group Memberships
@@ -214,7 +212,6 @@ SELECT
     groupId,
     groupName,
     groupMail,
-    assignedDateTime,
     'AccessPackage' AS sourceType,
     catalogName + ' > ' + accessPackageName AS source
 FROM dbo.vw_UserAccessPackageResources
@@ -239,7 +236,6 @@ SELECT
     groupId,
     groupName,
     groupMail,
-    assignedDateTime,
     'AccessPackage' AS sourceType,
     catalogName + ' > ' + accessPackageName AS source
 FROM dbo.vw_UserAccessPackageResources
@@ -350,8 +346,7 @@ SELECT
     a.accessPackageId,
     ap.displayName AS accessPackageName,
     c.displayName AS catalogName,
-    a.state AS assignmentState,
-    a.createdDateTime AS assignedDateTime,
+    a.assignmentState AS assignmentState,
     COALESCE(req.requestType, 'Unknown') AS requestType,
     COALESCE(req.requestState, 'Unknown') AS requestState,
     COALESCE(req.requestStatus, 'Unknown') AS requestStatus,
@@ -373,7 +368,7 @@ FROM dbo.$AssignmentsTable a
         AND a.targetId = req.requestorId
         AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
         AND req.requestState = 'Delivered'
-WHERE a.state = 'delivered'
+WHERE a.assignmentState = 'delivered'
 "@
 
         # View 9: Automatic Assignments
@@ -392,7 +387,6 @@ SELECT
     accessPackageName,
     catalogName,
     assignmentState,
-    assignedDateTime,
     requestCreatedDateTime,
     'Automatic (Policy Rule)' AS assignmentMethod
 FROM dbo.vw_AccessPackageAssignmentDetails
@@ -415,7 +409,6 @@ SELECT
     accessPackageName,
     catalogName,
     assignmentState,
-    assignedDateTime,
     requestState,
     requestStatus,
     justification,
@@ -443,7 +436,6 @@ SELECT
     accessPackageName,
     catalogName,
     assignmentState,
-    assignedDateTime,
     requestCreatedDateTime,
     'Admin Assigned' AS assignmentMethod
 FROM dbo.vw_AccessPackageAssignmentDetails

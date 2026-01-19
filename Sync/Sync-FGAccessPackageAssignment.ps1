@@ -96,14 +96,12 @@ function Sync-FGAccessPackageAssignment {
         'targetId'  # This is not a direct property, we'll extract it
 
         # State
-        'state'
-        'status'
+        'assignmentStatus'
+        'assignmentState'
 
         # Schedule
         'schedule'  # Complex object with startDateTime, expiration, recurrence
 
-        # Metadata
-        'createdDateTime'
     )
 
     # Determine which attributes to use
@@ -141,8 +139,8 @@ function Sync-FGAccessPackageAssignment {
         'id' = 'UNIQUEIDENTIFIER'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
         'targetId' = 'UNIQUEIDENTIFIER'
-        'state' = 'NVARCHAR(50)'
-        'status' = 'NVARCHAR(50)'
+        'assignmentState' = 'NVARCHAR(50)'
+        'assignmentStatus' = 'NVARCHAR(50)'
         'schedule' = 'NVARCHAR(MAX)'  # JSON representation
         'createdDateTime' = 'DATETIME2'
         'isExtended' = 'BIT'

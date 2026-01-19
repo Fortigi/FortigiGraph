@@ -90,7 +90,8 @@ function Sync-FGAccessPackageAssignmentRequest {
 
         # Relationships
         'accessPackageId'
-        'assignmentPolicyId'
+        'accessPackage'
+        'requestor'
         'requestorId'  # We'll extract from expanded requestor object
 
         # Request details
@@ -151,6 +152,8 @@ function Sync-FGAccessPackageAssignmentRequest {
         'requestStatus' = 'NVARCHAR(100)'
         'isValidationOnly' = 'BIT'
         'justification' = 'NVARCHAR(MAX)'
+        'accessPackage' = 'NVARCHAR(MAX)'
+        'requestor' = 'NVARCHAR(MAX)'
         'schedule' = 'NVARCHAR(MAX)'  # JSON object
         'createdDateTime' = 'DATETIME2'
         'completedDateTime' = 'DATETIME2'
@@ -219,7 +222,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Build Graph API request - expand requestor to get user ID
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment requests from Microsoft Graph..." -ForegroundColor Cyan
 
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignmentRequests?`$expand=requestor"
+    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor,accessPackage"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"
@@ -276,6 +279,9 @@ function Sync-FGAccessPackageAssignmentRequest {
             # Special handling for requestorId - extract from expanded requestor object
             if ($attr -eq 'requestorId') {
                 $value = $request.requestor.id
+            }
+            elseif ($attr -eq 'accessPackageId') {
+                $value = $request.accessPackage.id
             }
             else {
                 $value = $request.$attr
