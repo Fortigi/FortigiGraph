@@ -8,6 +8,7 @@ function Start-FGSync {
 - Validates SQL Server exists (creates if needed on first run)
 - Connects to Azure and Microsoft Graph
 - Syncs all configured entity types (users, groups, memberships, access packages)
+- Creates performance indexes for optimal query performance
 - Creates helpful analysis views
 - Uses the same secure config file as integration tests
 - Reads sync configuration from config file (Sync section)
@@ -1335,6 +1336,40 @@ function Write-SyncError {
             } catch {
                 Write-SyncError "Access package access review sync failed" $_.Exception.Message
             }
+        }
+    }
+    #endregion
+
+    #region Create Performance Indexes
+    if ($CreateViews) {
+        Write-SyncHeader "Creating Performance Indexes"
+
+        try {
+            Write-SyncStep "Creating indexes for group membership tables..."
+
+            $indexParams = @{}
+
+            # Use configured table names
+            if ($SyncGroupMembers) {
+                $indexParams.DirectMembersTable = $groupMembersTableName
+            }
+            if ($SyncGroupEligibleMembers) {
+                $indexParams.EligibleMembersTable = $groupEligibleMembersTableName
+            }
+            if ($SyncGroupOwners) {
+                $indexParams.OwnersTable = $groupOwnersTableName
+            }
+
+            $indexResult = Initialize-FGGroupMembershipIndexes @indexParams
+
+            if ($indexResult.Created -gt 0) {
+                Write-SyncSuccess "Performance indexes created: $($indexResult.Created) created, $($indexResult.Skipped) already existed"
+            } else {
+                Write-SyncStep "All performance indexes already exist ($($indexResult.Skipped) indexes)"
+            }
+        } catch {
+            Write-SyncError "Performance index creation failed" $_.Exception.Message
+            Write-Host "  ⚠ Views will still be created but may perform slowly without indexes" -ForegroundColor Yellow
         }
     }
     #endregion
