@@ -211,61 +211,65 @@ FROM RecursiveMemberships
         $dropView2Cmd.ExecuteNonQuery() | Out-Null
 
         # Build the view SQL dynamically based on which tables exist
+        # OPTIMIZATION: Use LEFT JOIN anti-pattern instead of NOT EXISTS to avoid
+        # recalculating the recursive CTE multiple times
         $createView2SQL = @"
 CREATE VIEW dbo.vw_GraphGroupMembershipType AS
-"@
-
-        # Always include direct and indirect memberships from recursive view
-        $createView2SQL += @"
--- Direct and Indirect Members (from recursive view)
+WITH CurrentMembers AS (
+    -- Calculate recursive memberships once and materialize for reuse
+    SELECT
+        groupId,
+        memberId,
+        memberType,
+        CASE
+            WHEN membershipType = 'direct' THEN 'Direct'
+            WHEN membershipType = 'indirect' THEN 'Indirect'
+        END AS membershipType,
+        ValidFrom,
+        ValidTo
+    FROM dbo.vw_GraphGroupMembersRecursive
+    WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+)
 SELECT
     groupId,
     memberId,
     memberType,
-    CASE
-        WHEN membershipType = 'direct' THEN 'Direct'
-        WHEN membershipType = 'indirect' THEN 'Indirect'
-    END AS membershipType,
+    membershipType,
     ValidFrom,
     ValidTo
-FROM dbo.vw_GraphGroupMembersRecursive
-WHERE ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current records
+FROM CurrentMembers
 "@
 
-        # Add owners if table exists
+        # Add owners if table exists (using LEFT JOIN anti-pattern for performance)
         if ($ownersExists) {
             $createView2SQL += @"
 
 UNION ALL
 
--- Owners
+-- Owners (excluding those who are already members)
 SELECT
     o.groupId,
     o.ownerId AS memberId,
-    'user' AS memberType,  -- Owners are typically users
+    'user' AS memberType,
     'Owner' AS membershipType,
     o.ValidFrom,
     o.ValidTo
 FROM dbo.$OwnersTable o
-WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current owners
-    -- Only include owners who are NOT also members (to avoid duplicates)
-    AND NOT EXISTS (
-        SELECT 1
-        FROM dbo.vw_GraphGroupMembersRecursive r
-        WHERE r.groupId = o.groupId
-          AND r.memberId = o.ownerId
-          AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-    )
+LEFT JOIN CurrentMembers cm
+    ON cm.groupId = o.groupId
+    AND cm.memberId = o.ownerId
+WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'
+    AND cm.memberId IS NULL  -- Anti-join: owner is NOT a member
 "@
         }
 
-        # Add eligible members if table exists
+        # Add eligible members if table exists (using LEFT JOIN anti-pattern for performance)
         if ($eligibleExists) {
             $createView2SQL += @"
 
 UNION ALL
 
--- Eligible Members (PIM - can activate)
+-- Eligible Members (excluding those who are already active members)
 SELECT
     e.groupId,
     e.memberId,
@@ -274,15 +278,11 @@ SELECT
     e.ValidFrom,
     e.ValidTo
 FROM dbo.$EligibleMembersTable e
-WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current eligible
-    -- Only include eligible who are NOT already active members (to avoid duplicates)
-    AND NOT EXISTS (
-        SELECT 1
-        FROM dbo.vw_GraphGroupMembersRecursive r
-        WHERE r.groupId = e.groupId
-          AND r.memberId = e.memberId
-          AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-    )
+LEFT JOIN CurrentMembers cm
+    ON cm.groupId = e.groupId
+    AND cm.memberId = e.memberId
+WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
+    AND cm.memberId IS NULL  -- Anti-join: eligible is NOT already a member
 "@
         }
 
