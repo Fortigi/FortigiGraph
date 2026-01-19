@@ -242,7 +242,11 @@ function Sync-FGAccessPackageResourceRoleScope {
             }
         }
         catch {
-            Write-Warning "  [$(Get-Date -Format 'HH:mm:ss')] Failed to get scopes for package '$($package.displayName)' (ID: $($package.id)): $_"
+            Write-Warning "  [$(Get-Date -Format 'HH:mm:ss')] Failed to get scopes for package '$($package.displayName)' (ID: $($package.id))"
+            Write-Warning "    Error: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+                Write-Warning "    Status Code: $($_.Exception.Response.StatusCode.value__)"
+            }
             # Continue with next package
         }
     }
