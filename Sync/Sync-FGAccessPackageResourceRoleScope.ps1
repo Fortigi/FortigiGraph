@@ -194,11 +194,9 @@ function Sync-FGAccessPackageResourceRoleScope {
     foreach ($package in $allPackages) {
         $processedCount++
 
-        # Show progress every 10 packages or on first/last
-        if ($processedCount -eq 1 -or $processedCount -eq $allPackages.Count -or ($processedCount % 10) -eq 0) {
-            $percentComplete = [math]::Round(($processedCount / $allPackages.Count) * 100, 1)
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedCount/$($allPackages.Count) packages ($percentComplete%)" -ForegroundColor Gray
-        }
+        # Show progress bar
+        $percentComplete = [math]::Round(($processedCount / $allPackages.Count) * 100, 1)
+        Write-Progress -Activity "Fetching Resource Role Scopes" -Status "Processing package $processedCount of $($allPackages.Count) ($percentComplete%)" -PercentComplete $percentComplete
 
         # Get resource role scopes for this access package with expansion
         # Using the correct endpoint pattern from Get-FGAccessPackagesResource
@@ -247,6 +245,8 @@ function Sync-FGAccessPackageResourceRoleScope {
             # Continue with next package
         }
     }
+
+    Write-Progress -Activity "Fetching Resource Role Scopes" -Completed
 
     $graphElapsed = (Get-Date) - $graphStartTime
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total resource role scopes fetched: $($allResourceRoleScopes.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
