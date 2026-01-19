@@ -229,15 +229,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
         return
     }
 
-    # Deduplicate policies by ID (in case Graph API returns duplicates)
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating policies by ID..." -ForegroundColor Gray
-    $originalCount = $allPolicies.Count
-    $allPolicies = $allPolicies | Group-Object -Property id | ForEach-Object { $_.Group[0] }
-    $deduplicatedCount = $allPolicies.Count
-    if ($originalCount -ne $deduplicatedCount) {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) duplicate policy(ies)" -ForegroundColor Yellow
-    }
-
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing assignment policies to SQL Server..." -ForegroundColor Cyan
 

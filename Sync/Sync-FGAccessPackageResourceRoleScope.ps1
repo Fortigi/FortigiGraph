@@ -256,16 +256,6 @@ function Sync-FGAccessPackageResourceRoleScope {
     $graphElapsed = (Get-Date) - $graphStartTime
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total resource role scopes fetched: $($allResourceRoleScopes.Count) (took $([math]::Round($graphElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
 
-    # Deduplicate scopes by composite key (in case Graph API returns true duplicates)
-    # Note: Same role-scope CAN legitimately appear in multiple packages - that's not a duplicate!
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating scopes by composite key (accessPackageId + id)..." -ForegroundColor Gray
-    $originalCount = $allResourceRoleScopes.Count
-    $allResourceRoleScopes = $allResourceRoleScopes | Group-Object -Property accessPackageId,id | ForEach-Object { $_.Group[0] }
-    $deduplicatedCount = $allResourceRoleScopes.Count
-    if ($originalCount -ne $deduplicatedCount) {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) true duplicate(s)" -ForegroundColor Yellow
-    }
-
     if ($allResourceRoleScopes.Count -eq 0) {
         Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No resource role scopes found to sync."
         return

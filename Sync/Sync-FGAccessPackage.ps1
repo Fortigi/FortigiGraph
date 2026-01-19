@@ -232,15 +232,6 @@ function Sync-FGAccessPackage {
         return
     }
 
-    # Deduplicate packages by ID (in case Graph API returns duplicates)
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating packages by ID..." -ForegroundColor Gray
-    $originalCount = $allPackages.Count
-    $allPackages = $allPackages | Group-Object -Property id | ForEach-Object { $_.Group[0] }
-    $deduplicatedCount = $allPackages.Count
-    if ($originalCount -ne $deduplicatedCount) {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) duplicate package(s)" -ForegroundColor Yellow
-    }
-
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing access packages to SQL Server..." -ForegroundColor Cyan
 
