@@ -76,13 +76,59 @@ function Invoke-FGSQLBulkDelete {
     Write-Verbose "Creating temp table $tempTableName for bulk delete operation..."
 
     try {
+        # Query target table schema to get actual column types
+        $schemaQuery = @"
+SELECT
+    c.name AS ColumnName,
+    t.name AS DataType,
+    c.max_length,
+    c.precision,
+    c.scale
+FROM sys.columns c
+JOIN sys.types t ON c.user_type_id = t.user_type_id
+WHERE c.object_id = OBJECT_ID('dbo.$TargetTableName')
+    AND c.name IN ('$($KeyColumns -join "','")')
+"@
+
+        $schemaCmd = $Connection.CreateCommand()
+        if ($Transaction) {
+            $schemaCmd.Transaction = $Transaction
+        }
+        $schemaCmd.CommandText = $schemaQuery
+        $schemaReader = $schemaCmd.ExecuteReader()
+
+        $columnTypes = @{}
+        while ($schemaReader.Read()) {
+            $colName = $schemaReader["ColumnName"]
+            $dataType = $schemaReader["DataType"]
+            $maxLength = $schemaReader["max_length"]
+
+            # Build SQL type string
+            $sqlType = switch ($dataType) {
+                "nvarchar" { if ($maxLength -eq -1) { "NVARCHAR(MAX)" } else { "NVARCHAR($($maxLength / 2))" } }
+                "varchar" { if ($maxLength -eq -1) { "VARCHAR(MAX)" } else { "VARCHAR($maxLength)" } }
+                "uniqueidentifier" { "UNIQUEIDENTIFIER" }
+                "int" { "INT" }
+                "bigint" { "BIGINT" }
+                "bit" { "BIT" }
+                "datetime2" { "DATETIME2" }
+                "datetime" { "DATETIME" }
+                default { $dataType.ToUpper() }
+            }
+            $columnTypes[$colName] = $sqlType
+        }
+        $schemaReader.Close()
+        $schemaCmd.Dispose()
+
         # Build column list and CREATE TABLE statement
         # We only need the key columns in the temp table
         $columnDefs = @()
 
         foreach ($keyCol in $KeyColumns) {
-            # Determine column type by looking at target table
-            $columnDefs += "$keyCol UNIQUEIDENTIFIER"
+            if (-not $columnTypes.ContainsKey($keyCol)) {
+                throw "Key column '$keyCol' not found in target table '$TargetTableName'"
+            }
+            $columnDefs += "$keyCol $($columnTypes[$keyCol])"
         }
 
         $createTableSQL = @"
@@ -103,7 +149,18 @@ CREATE TABLE $tempTableName (
         if (-not $DataTable) {
             $dt = New-Object System.Data.DataTable
             foreach ($keyCol in $KeyColumns) {
-                $dt.Columns.Add($keyCol, [guid]) | Out-Null
+                # Determine .NET type from SQL type
+                $sqlType = $columnTypes[$keyCol]
+                $dotNetType = switch -Regex ($sqlType) {
+                    'UNIQUEIDENTIFIER' { [guid] }
+                    'NVARCHAR|VARCHAR' { [string] }
+                    'BIT' { [bool] }
+                    'INT' { [int] }
+                    'BIGINT' { [long] }
+                    'DATETIME2|DATETIME' { [datetime] }
+                    default { [string] }
+                }
+                $dt.Columns.Add($keyCol, $dotNetType) | Out-Null
             }
 
             foreach ($record in $CurrentData) {
