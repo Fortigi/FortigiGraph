@@ -180,11 +180,10 @@ SELECT
     ap.id AS accessPackageId,
     ap.displayName AS accessPackageName,
     c.displayName AS catalogName,
-    rrs.resourceId AS groupId,
+    rrs.scopeOriginId AS groupId,
     g.displayName AS groupName,
     g.mail AS groupMail,
-    rrs.resourceType,
-    rrs.resourceOriginSystem,
+    rrs.scopeOriginSystem AS resourceType,
     rrs.roleId,
     rrs.roleDisplayName AS roleName,
     rrs.roleDescription,
@@ -194,7 +193,7 @@ FROM dbo.$AssignmentsTable a
     INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
     INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
     INNER JOIN dbo.$ResourceRoleScopesTable rrs ON ap.id = rrs.accessPackageId
-    LEFT JOIN dbo.$GroupsTable g ON rrs.resourceId = g.id
+    LEFT JOIN dbo.$GroupsTable g ON rrs.scopeOriginId = g.id
 WHERE a.state = 'delivered'  -- Only active assignments
 "@
 
@@ -708,14 +707,11 @@ FROM ApprovalStats
 
         foreach ($view in $views) {
             try {
-                # Drop if exists (if requested)
-                if ($DropIfExists) {
-                    $dropCmd = $connection.CreateCommand()
-                    $dropCmd.CommandText = "IF OBJECT_ID('dbo.$($view.Name)', 'V') IS NOT NULL DROP VIEW dbo.$($view.Name)"
-                    [void]$dropCmd.ExecuteNonQuery()
-                    $dropCmd.Dispose()
-                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Dropped existing view: $($view.Name)" -ForegroundColor Gray
-                }
+                # Always drop if exists to ensure clean recreation
+                $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandText = "IF OBJECT_ID('dbo.$($view.Name)', 'V') IS NOT NULL DROP VIEW dbo.$($view.Name)"
+                [void]$dropCmd.ExecuteNonQuery()
+                $dropCmd.Dispose()
 
                 # Create view
                 $createCmd = $connection.CreateCommand()
