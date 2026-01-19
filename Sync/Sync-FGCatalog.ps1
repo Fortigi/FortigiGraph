@@ -232,6 +232,15 @@ function Sync-FGCatalog {
         return
     }
 
+    # Deduplicate catalogs by ID (in case Graph API returns duplicates)
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating catalogs by ID..." -ForegroundColor Gray
+    $originalCount = $allCatalogs.Count
+    $allCatalogs = $allCatalogs | Group-Object -Property id | ForEach-Object { $_.Group[0] }
+    $deduplicatedCount = $allCatalogs.Count
+    if ($originalCount -ne $deduplicatedCount) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) duplicate catalog(s)" -ForegroundColor Yellow
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing catalogs to SQL Server..." -ForegroundColor Cyan
 

@@ -256,6 +256,15 @@ function Sync-FGAccessPackageAccessReview {
         return
     }
 
+    # Deduplicate review decisions by ID (in case Graph API returns duplicates)
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deduplicating review decisions by ID..." -ForegroundColor Gray
+    $originalCount = $allReviewDecisions.Count
+    $allReviewDecisions = $allReviewDecisions | Group-Object -Property id | ForEach-Object { $_.Group[0] }
+    $deduplicatedCount = $allReviewDecisions.Count
+    if ($originalCount -ne $deduplicatedCount) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Removed $($originalCount - $deduplicatedCount) duplicate review decision(s)" -ForegroundColor Yellow
+    }
+
     # Sync to SQL using bulk operations
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing review decisions to SQL Server..." -ForegroundColor Cyan
 
