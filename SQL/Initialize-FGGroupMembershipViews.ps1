@@ -144,11 +144,10 @@ SELECT
             Write-Host "  Purpose: Shows only members with indirect/nested access (not direct members)" -ForegroundColor Gray
             Write-Host "  NOTE: This view is DEPRECATED. Use vw_GraphGroupMembersRecursive instead." -ForegroundColor Yellow
 
-            if ($DropIfExists) {
-                $dropView1Cmd = $connection.CreateCommand()
-                $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupNestedMembers') DROP VIEW dbo.vw_GraphGroupNestedMembers;"
-                $dropView1Cmd.ExecuteNonQuery() | Out-Null
-            }
+            # Always drop view if exists to ensure clean recreation
+            $dropView1Cmd = $connection.CreateCommand()
+            $dropView1Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupNestedMembers') DROP VIEW dbo.vw_GraphGroupNestedMembers;"
+            $dropView1Cmd.ExecuteNonQuery() | Out-Null
 
             $createView1SQL = @"
 CREATE VIEW dbo.vw_GraphGroupNestedMembers AS
@@ -182,11 +181,10 @@ WHERE d.memberId IS NULL  -- Not in direct members = nested only
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupEligibleMembers" -ForegroundColor Cyan
             Write-Host "  Purpose: Shows only eligible members (PIM - can activate membership)" -ForegroundColor Gray
 
-            if ($DropIfExists) {
-                $dropView2Cmd = $connection.CreateCommand()
-                $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupEligibleMembers') DROP VIEW dbo.vw_GraphGroupEligibleMembers;"
-                $dropView2Cmd.ExecuteNonQuery() | Out-Null
-            }
+            # Always drop view if exists to ensure clean recreation
+            $dropView2Cmd = $connection.CreateCommand()
+            $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupEligibleMembers') DROP VIEW dbo.vw_GraphGroupEligibleMembers;"
+            $dropView2Cmd.ExecuteNonQuery() | Out-Null
 
             $createView2SQL = @"
 CREATE VIEW dbo.vw_GraphGroupEligibleMembers AS
@@ -220,11 +218,10 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999';  -- Only current records
             Write-Host "  Purpose: Shows all members with $($types -join '/') indicator" -ForegroundColor Gray
             Write-Host "  NOTE: This view is DEPRECATED. Use vw_GraphGroupMembersRecursive instead." -ForegroundColor Yellow
 
-            if ($DropIfExists) {
-                $dropView3Cmd = $connection.CreateCommand()
-                $dropView3Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
-                $dropView3Cmd.ExecuteNonQuery() | Out-Null
-            }
+            # Always drop view if exists to ensure clean recreation
+            $dropView3Cmd = $connection.CreateCommand()
+            $dropView3Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
+            $dropView3Cmd.ExecuteNonQuery() | Out-Null
 
         # Build the view SQL based on which optional tables exist
         $createView3SQL = @"
@@ -364,11 +361,10 @@ WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'
         Write-Host "  Purpose: Calculates ALL memberships with paths using ONLY direct members" -ForegroundColor Gray
         Write-Host "  Benefit: Eliminates need for transitive members sync (75% faster!)" -ForegroundColor Gray
 
-        if ($DropIfExists) {
-            $dropView4Cmd = $connection.CreateCommand()
-            $dropView4Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembersRecursive') DROP VIEW dbo.vw_GraphGroupMembersRecursive;"
-            $dropView4Cmd.ExecuteNonQuery() | Out-Null
-        }
+        # Always drop view if exists to ensure clean recreation
+        $dropView4Cmd = $connection.CreateCommand()
+        $dropView4Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembersRecursive') DROP VIEW dbo.vw_GraphGroupMembersRecursive;"
+        $dropView4Cmd.ExecuteNonQuery() | Out-Null
 
         $createView4SQL = @"
 CREATE VIEW dbo.vw_GraphGroupMembersRecursive AS
