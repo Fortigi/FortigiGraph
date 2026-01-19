@@ -67,32 +67,44 @@ function Sync-FGAccessPackageResourceRoleScope {
     # Define fixed attributes for resource role scopes
     # These represent the flattened structure we'll store
     $Attributes = @(
-        'id'                          # Unique ID of the resource role scope
+        'id'                          # Composite ID (e.g., "guid1_guid2")
         'accessPackageId'             # Which access package this belongs to
-        'resourceId'                  # The resource (e.g., group) ID
-        'resourceDisplayName'         # The resource display name
-        'resourceType'                # The resource type (group, application, site)
-        'resourceOriginSystem'        # Where the resource comes from (AadGroup, AadApplication, etc.)
-        'roleId'                      # The role ID (member, owner, etc.)
-        'roleDisplayName'             # The role display name (Member, Owner)
-        'roleDescription'             # The role description
+        'roleId'                      # Role ID from accessPackageResourceRole.id
+        'roleDisplayName'             # Role display name (Member, Owner)
+        'roleDescription'             # Role description
+        'roleOriginSystem'            # Role origin (AadGroup, AadApplication)
+        'roleOriginId'                # Role origin ID (e.g., "Member_guid")
+        'scopeId'                     # Scope ID from accessPackageResourceScope.id
+        'scopeDisplayName'            # Scope display name
+        'scopeOriginId'               # Scope origin ID - THE ACTUAL GROUP/RESOURCE ID
+        'scopeOriginSystem'           # Scope origin system (AadGroup, AadApplication)
+        'scopeIsRootScope'            # Whether this is root scope
+        'createdBy'                   # Who created this scope
         'createdDateTime'             # When this was added to the access package
+        'modifiedBy'                  # Who last modified
+        'modifiedDateTime'            # When last modified
     )
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using fixed attributes: $($Attributes.Count) attributes" -ForegroundColor Cyan
 
     # Map attributes to SQL types
     $graphToSqlTypeMap = @{
-        'id' = 'UNIQUEIDENTIFIER'
+        'id' = 'NVARCHAR(255)'              # Composite ID, not a GUID
         'accessPackageId' = 'UNIQUEIDENTIFIER'
-        'resourceId' = 'UNIQUEIDENTIFIER'
-        'resourceDisplayName' = 'NVARCHAR(255)'
-        'resourceType' = 'NVARCHAR(100)'
-        'resourceOriginSystem' = 'NVARCHAR(100)'
-        'roleId' = 'UNIQUEIDENTIFIER'
+        'roleId' = 'NVARCHAR(100)'          # Can be GUID or other format
         'roleDisplayName' = 'NVARCHAR(255)'
         'roleDescription' = 'NVARCHAR(1024)'
+        'roleOriginSystem' = 'NVARCHAR(100)'
+        'roleOriginId' = 'NVARCHAR(255)'
+        'scopeId' = 'NVARCHAR(100)'         # Can be GUID or other format
+        'scopeDisplayName' = 'NVARCHAR(255)'
+        'scopeOriginId' = 'NVARCHAR(255)'   # The actual group/resource GUID
+        'scopeOriginSystem' = 'NVARCHAR(100)'
+        'scopeIsRootScope' = 'BIT'
+        'createdBy' = 'NVARCHAR(255)'
         'createdDateTime' = 'DATETIME2'
+        'modifiedBy' = 'NVARCHAR(255)'
+        'modifiedDateTime' = 'DATETIME2'
     }
 
     # Build column definitions
@@ -199,32 +211,32 @@ function Sync-FGAccessPackageResourceRoleScope {
             if ($scopes -and $scopes.Count -gt 0) {
                 # Flatten the complex structure into our desired format
                 foreach ($scope in $scopes) {
-                    # Skip scopes with null/empty id or invalid GUIDs (cannot be stored in SQL with NOT NULL UNIQUEIDENTIFIER constraint)
+                    # Skip scopes with null/empty id
                     if (-not $scope.id -or [string]::IsNullOrWhiteSpace($scope.id)) {
                         Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with NULL/empty id for package '$($package.displayName)'" -ForegroundColor Yellow
                         continue
                     }
 
-                    # Validate that id can be parsed as GUID
-                    try {
-                        $guidId = [guid]$scope.id
-                    }
-                    catch {
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with invalid GUID id '$($scope.id)' for package '$($package.displayName)'" -ForegroundColor Yellow
-                        continue
-                    }
+                    # Note: The ID is a composite string like "guid1_guid2", not a single GUID
+                    # This is expected and valid
 
                     $flatScope = [PSCustomObject]@{
                         id = $scope.id
                         accessPackageId = $package.id
-                        resourceId = $scope.accessPackageResourceScope.accessPackageResource.id
-                        resourceDisplayName = $scope.accessPackageResourceScope.accessPackageResource.displayName
-                        resourceType = $scope.accessPackageResourceScope.accessPackageResource.resourceType
-                        resourceOriginSystem = $scope.accessPackageResourceScope.accessPackageResource.originSystem
                         roleId = $scope.accessPackageResourceRole.id
                         roleDisplayName = $scope.accessPackageResourceRole.displayName
                         roleDescription = $scope.accessPackageResourceRole.description
+                        roleOriginSystem = $scope.accessPackageResourceRole.originSystem
+                        roleOriginId = $scope.accessPackageResourceRole.originId
+                        scopeId = $scope.accessPackageResourceScope.id
+                        scopeDisplayName = $scope.accessPackageResourceScope.displayName
+                        scopeOriginId = $scope.accessPackageResourceScope.originId
+                        scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
+                        scopeIsRootScope = $scope.accessPackageResourceScope.isRootScope
+                        createdBy = $scope.createdBy
                         createdDateTime = $scope.createdDateTime
+                        modifiedBy = $scope.modifiedBy
+                        modifiedDateTime = $scope.modifiedDateTime
                     }
                     $allResourceRoleScopes += $flatScope
                 }
