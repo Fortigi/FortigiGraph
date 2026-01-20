@@ -249,6 +249,37 @@ function Sync-FGAccessPackageAssignmentRequest {
         return
     }
 
+    # DIAGNOSTIC: Check for NULL or duplicate IDs in source data
+    $nullIds = $allRequests | Where-Object { -not $_.id -or [string]::IsNullOrWhiteSpace($_.id) }
+    if ($nullIds) {
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] CRITICAL: Found $($nullIds.Count) requests with NULL/empty IDs!"
+        Write-Warning "This will cause MERGE to fail. Removing NULL ID requests from sync."
+        $allRequests = $allRequests | Where-Object { $_.id -and -not [string]::IsNullOrWhiteSpace($_.id) }
+    }
+
+    $groupedById = $allRequests | Group-Object -Property id
+    $duplicates = $groupedById | Where-Object { $_.Count -gt 1 }
+
+    if ($duplicates) {
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] DIAGNOSTIC: Found $($duplicates.Count) request IDs with duplicates:" -ForegroundColor Yellow
+        foreach ($dup in $duplicates | Select-Object -First 3) {
+            Write-Host "  ID: $($dup.Name) appears $($dup.Count) times" -ForegroundColor Yellow
+            Write-Host "    Sample differences:" -ForegroundColor Gray
+
+            $firstItem = $dup.Group[0]
+            $secondItem = $dup.Group[1]
+
+            # Check key differences
+            Write-Host "      Item 1: requestState=$($firstItem.requestState), requestStatus=$($firstItem.requestStatus), accessPackageId=$($firstItem.accessPackageId), createdDateTime=$($firstItem.createdDateTime)" -ForegroundColor Gray
+            Write-Host "      Item 2: requestState=$($secondItem.requestState), requestStatus=$($secondItem.requestStatus), accessPackageId=$($secondItem.accessPackageId), createdDateTime=$($secondItem.createdDateTime)" -ForegroundColor Gray
+        }
+
+        Write-Warning "Source data contains duplicate request IDs!"
+        Write-Warning "Total requests: $($allRequests.Count), Unique IDs: $($groupedById.Count), Duplicates: $($allRequests.Count - $groupedById.Count)"
+        Write-Warning "If all attributes are identical, this is likely a Graph API pagination bug."
+        Write-Warning "If attributes differ, the PRIMARY KEY definition needs to include those columns."
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing assignment requests to SQL Server..." -ForegroundColor Cyan
 
