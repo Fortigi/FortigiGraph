@@ -178,9 +178,7 @@ SELECT
     path,
     ValidFrom,
     ValidTo
-FROM RecursiveMemberships
-OPTION (MAXRECURSION 10)  -- Match depth limit for safety
-;
+FROM RecursiveMemberships;
 "@
 
         $createView1Cmd = $connection.CreateCommand()
