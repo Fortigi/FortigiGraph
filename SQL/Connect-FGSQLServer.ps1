@@ -17,10 +17,10 @@ function Connect-FGSQLServer {
     When using -ConfigFile:
     - SubscriptionId is read from Azure.SubscriptionId
     - ResourceGroupName is read from Azure.ResourceGroupName
-    - ServerName is read from Azure.SQL.ServerName
-    - DatabaseName is read from Azure.SQL.DatabaseName (if present)
-    - AdminUsername is read from Azure.SQL.AdminUsername (defaults to "sqladmin")
-    - AdminPassword is read from Azure.SQL.AdminPassword (with DPAPI encryption support)
+    - ServerName is read from Azure.SQLServerName
+    - DatabaseName is read from Azure.DatabaseName (if present)
+    - AdminUsername is read from Azure.AdminUsername (defaults to "sqladmin")
+    - AdminPassword is read from Azure.AdminUserPassword (with DPAPI encryption support)
 
     .PARAMETER SubscriptionId
     The Azure Subscription ID where the SQL Server exists. Mandatory unless using -ConfigFile.
@@ -127,25 +127,25 @@ function Connect-FGSQLServer {
         $ResourceGroupName = $config.Azure.ResourceGroupName
 
         # Read ServerName
-        if (-not $config.Azure.SQL.ServerName) {
-            throw "Azure.SQL.ServerName not found in configuration file"
+        if (-not $config.Azure.SQLServerName) {
+            throw "Azure.SQLServerName not found in configuration file"
         }
-        $ServerName = $config.Azure.SQL.ServerName
+        $ServerName = $config.Azure.SQLServerName
 
         # Read optional DatabaseName
-        if ($config.Azure.SQL.DatabaseName) {
-            $DatabaseName = $config.Azure.SQL.DatabaseName
+        if ($config.Azure.DatabaseName) {
+            $DatabaseName = $config.Azure.DatabaseName
         }
 
         # Read optional AdminUsername (default to sqladmin)
-        if ($config.Azure.SQL.AdminUsername) {
-            $AdminUsername = $config.Azure.SQL.AdminUsername
+        if ($config.Azure.AdminUsername) {
+            $AdminUsername = $config.Azure.AdminUsername
         } else {
             $AdminUsername = "sqladmin"
         }
 
         # Read AdminPassword (with encryption support)
-        $passwordPlainText = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Azure.SQL.AdminPassword" -AllowEmpty
+        $passwordPlainText = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Azure.AdminUserPassword" -AllowEmpty
         if (-not [string]::IsNullOrWhiteSpace($passwordPlainText)) {
             $AdminPassword = ConvertTo-SecureString -String $passwordPlainText -AsPlainText -Force
         }
