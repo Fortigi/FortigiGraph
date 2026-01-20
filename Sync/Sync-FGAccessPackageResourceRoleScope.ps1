@@ -203,51 +203,85 @@ function Sync-FGAccessPackageResourceRoleScope {
         # Using the correct endpoint pattern from Get-FGAccessPackagesResource
         $scopesUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages/$($package.id)?`$expand=accessPackageResourceRoleScopes(`$expand=accessPackageResourceRole,accessPackageResourceScope)"
 
-        try {
-            $packageWithScopes = Invoke-FGGetRequest -URI $scopesUri
-            $scopes = $packageWithScopes.accessPackageResourceRoleScopes
+        # Retry logic for transient errors (504 Gateway Timeout, 503 Service Unavailable, 429 Too Many Requests)
+        $maxRetries = 3
+        $retryCount = 0
+        $retryDelays = @(5, 10, 20)  # Exponential backoff: 5s, 10s, 20s
+        $success = $false
 
-            if ($scopes -and $scopes.Count -gt 0) {
-                # Flatten the complex structure into our desired format
-                foreach ($scope in $scopes) {
-                    # Skip scopes with null/empty id
-                    if (-not $scope.id -or [string]::IsNullOrWhiteSpace($scope.id)) {
-                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with NULL/empty id for package '$($package.displayName)'" -ForegroundColor Yellow
-                        continue
+        while (-not $success -and $retryCount -le $maxRetries) {
+            try {
+                $packageWithScopes = Invoke-FGGetRequest -URI $scopesUri
+                $scopes = $packageWithScopes.accessPackageResourceRoleScopes
+                $success = $true
+
+                if ($scopes -and $scopes.Count -gt 0) {
+                    # Flatten the complex structure into our desired format
+                    foreach ($scope in $scopes) {
+                        # Skip scopes with null/empty id
+                        if (-not $scope.id -or [string]::IsNullOrWhiteSpace($scope.id)) {
+                            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] WARNING: Skipping scope with NULL/empty id for package '$($package.displayName)'" -ForegroundColor Yellow
+                            continue
+                        }
+
+                        # Note: The ID is a composite string like "guid1_guid2", not a single GUID
+                        # This is expected and valid
+
+                        $flatScope = [PSCustomObject]@{
+                            id = $scope.id
+                            accessPackageId = $package.id
+                            roleId = $scope.accessPackageResourceRole.id
+                            roleDisplayName = $scope.accessPackageResourceRole.displayName
+                            roleDescription = $scope.accessPackageResourceRole.description
+                            roleOriginSystem = $scope.accessPackageResourceRole.originSystem
+                            roleOriginId = $scope.accessPackageResourceRole.originId
+                            scopeId = $scope.accessPackageResourceScope.id
+                            scopeDisplayName = $scope.accessPackageResourceScope.displayName
+                            scopeOriginId = $scope.accessPackageResourceScope.originId
+                            scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
+                            scopeIsRootScope = $scope.accessPackageResourceScope.isRootScope
+                            createdBy = $scope.createdBy
+                            createdDateTime = $scope.createdDateTime
+                            modifiedBy = $scope.modifiedBy
+                            modifiedDateTime = $scope.modifiedDateTime
+                        }
+                        $allResourceRoleScopes += $flatScope
                     }
-
-                    # Note: The ID is a composite string like "guid1_guid2", not a single GUID
-                    # This is expected and valid
-
-                    $flatScope = [PSCustomObject]@{
-                        id = $scope.id
-                        accessPackageId = $package.id
-                        roleId = $scope.accessPackageResourceRole.id
-                        roleDisplayName = $scope.accessPackageResourceRole.displayName
-                        roleDescription = $scope.accessPackageResourceRole.description
-                        roleOriginSystem = $scope.accessPackageResourceRole.originSystem
-                        roleOriginId = $scope.accessPackageResourceRole.originId
-                        scopeId = $scope.accessPackageResourceScope.id
-                        scopeDisplayName = $scope.accessPackageResourceScope.displayName
-                        scopeOriginId = $scope.accessPackageResourceScope.originId
-                        scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
-                        scopeIsRootScope = $scope.accessPackageResourceScope.isRootScope
-                        createdBy = $scope.createdBy
-                        createdDateTime = $scope.createdDateTime
-                        modifiedBy = $scope.modifiedBy
-                        modifiedDateTime = $scope.modifiedDateTime
-                    }
-                    $allResourceRoleScopes += $flatScope
                 }
             }
-        }
-        catch {
-            Write-Warning "  [$(Get-Date -Format 'HH:mm:ss')] Failed to get scopes for package '$($package.displayName)' (ID: $($package.id))"
-            Write-Warning "    Error: $($_.Exception.Message)"
-            if ($_.Exception.Response) {
-                Write-Warning "    Status Code: $($_.Exception.Response.StatusCode.value__)"
+            catch {
+                $statusCode = $null
+                if ($_.Exception.Response) {
+                    $statusCode = $_.Exception.Response.StatusCode.value__
+                }
+
+                # Check if this is a transient error that should be retried
+                $isTransientError = $statusCode -in @(429, 503, 504)
+
+                if ($isTransientError -and $retryCount -lt $maxRetries) {
+                    $retryCount++
+                    $waitTime = $retryDelays[$retryCount - 1]
+
+                    Write-Warning "  [$(Get-Date -Format 'HH:mm:ss')] Transient error (Status $statusCode) for package '$($package.displayName)'"
+                    Write-Warning "    Retry attempt $retryCount of $maxRetries after ${waitTime}s..."
+
+                    Start-Sleep -Seconds $waitTime
+                    # Loop will retry
+                }
+                else {
+                    # Non-transient error or max retries reached
+                    Write-Warning "  [$(Get-Date -Format 'HH:mm:ss')] Failed to get scopes for package '$($package.displayName)' (ID: $($package.id))"
+                    Write-Warning "    Error: $($_.Exception.Message)"
+                    if ($statusCode) {
+                        Write-Warning "    Status Code: $statusCode"
+                    }
+                    if ($retryCount -gt 0) {
+                        Write-Warning "    After $retryCount retry attempt(s)"
+                    }
+                    # Break out of retry loop
+                    break
+                }
             }
-            # Continue with next package
         }
     }
 
