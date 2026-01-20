@@ -9,10 +9,10 @@ function Initialize-FGGroupMembershipViews {
     1. vw_GraphGroupMembersRecursive
        - Calculates ALL memberships (direct + indirect) recursively using ONLY direct members
        - Eliminates need for transitive members sync (75% faster!)
-       - PERFORMANCE OPTIMIZED: No expensive string operations (path tracking removed)
-       - Handles 250K+ members efficiently (10-100x faster than path-tracking version)
+       - Includes complete path showing how membership was obtained
+       - Shows depth level for each membership (how many groups deep)
        - Cycle prevention via depth limit (max 10 levels of nesting)
-       - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo
+       - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
 
     2. vw_UserPermissionAssignments ⭐ RECOMMENDED
        - Comprehensive view combining ALL membership types in one place
@@ -50,7 +50,7 @@ function Initialize-FGGroupMembershipViews {
     - GraphGroupEligibleMembers table (optional, run Sync-FGGroupEligibleMember for PIM)
 
     Views Created:
-    - vw_GraphGroupMembersRecursive: ALL memberships (direct + indirect) - PERFORMANCE OPTIMIZED for 250K+ members
+    - vw_GraphGroupMembersRecursive: ALL memberships with paths and depth (recursive!)
     - vw_UserPermissionAssignments: ⭐ RECOMMENDED - Comprehensive view with all types (Direct/Indirect/Owner/Eligible)
 
     Performance Tip:
@@ -110,10 +110,10 @@ SELECT
             Write-Warning "Table '$OwnersTable' does not exist. Run Sync-FGGroupOwner for ownership tracking (optional)."
         }
 
-        # View 1: Recursive Memberships (PERFORMANCE OPTIMIZED!)
+        # View 1: Recursive Membership Paths
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembersRecursive" -ForegroundColor Cyan
-        Write-Host "  Purpose: Calculates ALL memberships (direct + indirect) - OPTIMIZED for large datasets" -ForegroundColor Gray
-        Write-Host "  Benefit: 10-100x faster than path-tracking version, handles 250K+ members efficiently" -ForegroundColor Gray
+        Write-Host "  Purpose: Calculates ALL memberships (direct + indirect) with paths" -ForegroundColor Gray
+        Write-Host "  Benefit: Eliminates need for transitive members sync (75% faster!)" -ForegroundColor Gray
 
         # Always drop view if exists to ensure clean recreation
         $dropView1Cmd = $connection.CreateCommand()
@@ -121,8 +121,8 @@ SELECT
         $dropView1Cmd.ExecuteNonQuery() | Out-Null
 
         $createView1SQL = @"
--- PERFORMANCE OPTIMIZED: Removed expensive path tracking and string operations
--- For large datasets (250K+ members), this is 10-100x faster than version with path tracking
+-- Calculates ALL memberships (direct + indirect) with path tracking
+-- Performance improvements: Fixed recursion logic (memberType filter in WHERE, not JOIN)
 CREATE VIEW dbo.vw_GraphGroupMembersRecursive AS
 WITH RecursiveMemberships AS (
     -- Anchor: Direct memberships
@@ -132,6 +132,7 @@ WITH RecursiveMemberships AS (
         gm.memberType,
         CAST('direct' AS NVARCHAR(20)) AS membershipType,
         1 AS depth,
+        CAST(CAST(gm.groupId AS NVARCHAR(36)) + ' -> ' + CAST(gm.memberId AS NVARCHAR(36)) AS NVARCHAR(MAX)) AS path,
         gm.ValidFrom,
         gm.ValidTo
     FROM
@@ -142,13 +143,13 @@ WITH RecursiveMemberships AS (
     UNION ALL
 
     -- Recursive: Indirect memberships through nested groups
-    -- Performance: No string operations, relies on depth limit for cycle prevention
     SELECT
         rm.groupId,                 -- Target group (stays the same)
         gm2.memberId,               -- New member found through nested group
         gm2.memberType,             -- Member type of the nested member
         CAST('indirect' AS NVARCHAR(20)) AS membershipType,
         rm.depth + 1,               -- Increase depth
+        CAST(rm.path + ' -> ' + CAST(gm2.memberId AS NVARCHAR(36)) AS NVARCHAR(MAX)) AS path,
         -- ValidFrom: Later of the two dates (when both conditions became true)
         CASE
             WHEN rm.ValidFrom > gm2.ValidFrom THEN rm.ValidFrom
@@ -165,7 +166,7 @@ WITH RecursiveMemberships AS (
             ON rm.memberId = gm2.groupId  -- The member is itself a group
             AND gm2.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current memberships
     WHERE
-        rm.memberType = 'group'  -- Only recurse through groups
+        rm.memberType = 'group'  -- Only recurse through groups (CRITICAL for performance)
         AND rm.depth < 10  -- Limit recursion depth (prevents infinite loops)
 )
 SELECT
@@ -173,6 +174,8 @@ SELECT
     memberId,
     memberType,
     membershipType,
+    depth,
+    path,
     ValidFrom,
     ValidTo
 FROM RecursiveMemberships
@@ -291,11 +294,11 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
 
         Write-Host "`nView 1: vw_GraphGroupMembersRecursive" -ForegroundColor White
         Write-Host "  - Calculates ALL memberships (direct + indirect) recursively" -ForegroundColor Gray
-        Write-Host "  - PERFORMANCE OPTIMIZED: No expensive string operations" -ForegroundColor Gray
-        Write-Host "  - Handles 250K+ members efficiently (10-100x faster)" -ForegroundColor Gray
         Write-Host "  - Uses ONLY direct members table (no transitive sync needed!)" -ForegroundColor Gray
+        Write-Host "  - Includes complete path for each membership" -ForegroundColor Gray
+        Write-Host "  - Shows depth level (how many groups deep)" -ForegroundColor Gray
         Write-Host "  - Cycle prevention via depth limit (max 10 levels)" -ForegroundColor Gray
-        Write-Host "  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo" -ForegroundColor Gray
+        Write-Host "  - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo" -ForegroundColor Gray
 
         Write-Host "`nView 2: vw_UserPermissionAssignments ⭐ RECOMMENDED" -ForegroundColor White
         Write-Host "  - Comprehensive view combining ALL membership types" -ForegroundColor Gray
