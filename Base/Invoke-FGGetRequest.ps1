@@ -43,9 +43,19 @@ function Invoke-FGGetRequest {
     # Get the current (potentially refreshed) access token
     $AccessToken = $Global:AccessToken
 
+    # Extract resource name from URI for progress display
+    $resourceName = "Graph API data"
+    if ($URI -match '/([^/\?]+)(\?|$)') {
+        $resourceName = $matches[1]
+    }
+
     $ReturnValue = $Null
+    $pageCount = 0
+    $startTime = Get-Date
+
     Try {
         #Run request
+        $pageCount++
         $Result = Invoke-RestMethod -Method Get -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
     }
     Catch {
@@ -59,6 +69,9 @@ function Invoke-FGGetRequest {
     else {
         $ReturnValue += $Result
     }
+
+    # Show progress if there are multiple pages (nextLink exists)
+    $showProgress = $Result.'@odata.nextLink'
 
     #By default you only get 100 results... its paged
     While ($Result.'@odata.nextLink') {
@@ -84,12 +97,27 @@ function Invoke-FGGetRequest {
         }
 
         Try {
+            $pageCount++
             $Result = Invoke-RestMethod -Method Get -Uri $Result.'@odata.nextLink' -Headers @{"Authorization" = "Bearer $AccessToken" }
         }
         Catch {
             Throw $_
         }
         $ReturnValue += $Result.value
+
+        # Update progress
+        if ($showProgress) {
+            $elapsed = (Get-Date) - $startTime
+            $rate = if ($elapsed.TotalSeconds -gt 0) { [math]::Round($ReturnValue.Count / $elapsed.TotalSeconds, 1) } else { 0 }
+            Write-Progress -Activity "Fetching $resourceName" `
+                -Status "Page $pageCount - $($ReturnValue.Count) items ($rate items/sec)" `
+                -PercentComplete -1
+        }
+    }
+
+    # Clear progress if it was shown
+    if ($showProgress) {
+        Write-Progress -Activity "Fetching $resourceName" -Completed
     }
 
     return $ReturnValue

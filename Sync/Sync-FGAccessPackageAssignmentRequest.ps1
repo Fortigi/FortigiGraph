@@ -228,63 +228,16 @@ function Sync-FGAccessPackageAssignmentRequest {
         $uri += "&`$filter=$Filter"
     }
 
-    # Fetch all requests with pagination and progress reporting
+    # Fetch all requests using Invoke-FGGetRequest (handles token validation, pagination, and progress reporting)
     $graphStartTime = Get-Date
-    $allRequests = @()
-    $pageCount = 0
-    $nextLink = $uri
 
     try {
-        # Validate access token
-        if (-not $Global:AccessToken) {
-            throw "No Access Token found. Please run Get-FGAccessToken first."
-        }
-
-        # Manual pagination loop to show progress
-        while ($nextLink) {
-            $pageCount++
-
-            # Check token validity before each page
-            $tokenValid = Confirm-FGAccessTokenValidity
-            if (-not $tokenValid) {
-                if ($Global:ClientSecret) {
-                    Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $Global:ClientSecret
-                }
-                elseif ($Global:RefreshToken) {
-                    Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $Global:RefreshToken
-                }
-            }
-
-            # Fetch page
-            $result = Invoke-RestMethod -Method Get -Uri $nextLink -Headers @{"Authorization" = "Bearer $($Global:AccessToken)"}
-
-            # Extract data
-            if ($result.value) {
-                $allRequests += $result.value
-            }
-            else {
-                $allRequests += $result
-            }
-
-            # Update progress
-            $elapsed = (Get-Date) - $graphStartTime
-            $rate = if ($elapsed.TotalSeconds -gt 0) { [math]::Round($allRequests.Count / $elapsed.TotalSeconds, 1) } else { 0 }
-            Write-Progress -Activity "Fetching Assignment Requests from Graph API" `
-                -Status "Page $pageCount: $($allRequests.Count) requests fetched ($rate requests/sec)" `
-                -PercentComplete -1
-
-            # Get next page link
-            $nextLink = $result.'@odata.nextLink'
-        }
-
-        Write-Progress -Activity "Fetching Assignment Requests from Graph API" -Completed
-
+        $allRequests = Invoke-FGGetRequest -URI $uri
         if (-not $allRequests) {
             $allRequests = @()
         }
     }
     catch {
-        Write-Progress -Activity "Fetching Assignment Requests from Graph API" -Completed
         throw "Failed to fetch assignment requests from Graph: $_"
     }
 
