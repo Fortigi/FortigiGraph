@@ -228,16 +228,63 @@ function Sync-FGAccessPackageAssignmentRequest {
         $uri += "&`$filter=$Filter"
     }
 
-    # Fetch all requests using Invoke-FGGetRequest (handles token validation and pagination)
+    # Fetch all requests with pagination and progress reporting
     $graphStartTime = Get-Date
+    $allRequests = @()
+    $pageCount = 0
+    $nextLink = $uri
 
     try {
-        $allRequests = Invoke-FGGetRequest -URI $uri
+        # Validate access token
+        if (-not $Global:AccessToken) {
+            throw "No Access Token found. Please run Get-FGAccessToken first."
+        }
+
+        # Manual pagination loop to show progress
+        while ($nextLink) {
+            $pageCount++
+
+            # Check token validity before each page
+            $tokenValid = Confirm-FGAccessTokenValidity
+            if (-not $tokenValid) {
+                if ($Global:ClientSecret) {
+                    Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $Global:ClientSecret
+                }
+                elseif ($Global:RefreshToken) {
+                    Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $Global:RefreshToken
+                }
+            }
+
+            # Fetch page
+            $result = Invoke-RestMethod -Method Get -Uri $nextLink -Headers @{"Authorization" = "Bearer $($Global:AccessToken)"}
+
+            # Extract data
+            if ($result.value) {
+                $allRequests += $result.value
+            }
+            else {
+                $allRequests += $result
+            }
+
+            # Update progress
+            $elapsed = (Get-Date) - $graphStartTime
+            $rate = if ($elapsed.TotalSeconds -gt 0) { [math]::Round($allRequests.Count / $elapsed.TotalSeconds, 1) } else { 0 }
+            Write-Progress -Activity "Fetching Assignment Requests from Graph API" `
+                -Status "Page $pageCount: $($allRequests.Count) requests fetched ($rate requests/sec)" `
+                -PercentComplete -1
+
+            # Get next page link
+            $nextLink = $result.'@odata.nextLink'
+        }
+
+        Write-Progress -Activity "Fetching Assignment Requests from Graph API" -Completed
+
         if (-not $allRequests) {
             $allRequests = @()
         }
     }
     catch {
+        Write-Progress -Activity "Fetching Assignment Requests from Graph API" -Completed
         throw "Failed to fetch assignment requests from Graph: $_"
     }
 
@@ -270,14 +317,24 @@ function Sync-FGAccessPackageAssignmentRequest {
             $secondItem = $dup.Group[1]
 
             # Check key differences
-            Write-Host "      Item 1: requestState=$($firstItem.requestState), requestStatus=$($firstItem.requestStatus), accessPackageId=$($firstItem.accessPackageId), createdDateTime=$($firstItem.createdDateTime)" -ForegroundColor Gray
-            Write-Host "      Item 2: requestState=$($secondItem.requestState), requestStatus=$($secondItem.requestStatus), accessPackageId=$($secondItem.accessPackageId), createdDateTime=$($secondItem.createdDateTime)" -ForegroundColor Gray
+            Write-Host "      Item 1: requestType=$($firstItem.requestType), requestState=$($firstItem.requestState), accessPackageId=$($firstItem.accessPackage.id), requestorId=$($firstItem.requestor.id)" -ForegroundColor Gray
+            Write-Host "      Item 2: requestType=$($secondItem.requestType), requestState=$($secondItem.requestState), accessPackageId=$($secondItem.accessPackage.id), requestorId=$($secondItem.requestor.id)" -ForegroundColor Gray
+
+            # Check if accessPackage is null vs just the id
+            if ($null -eq $firstItem.accessPackage) {
+                Write-Host "      WARNING: accessPackage object is NULL (likely a removal request or deleted package)" -ForegroundColor Yellow
+            } elseif ([string]::IsNullOrWhiteSpace($firstItem.accessPackage.id)) {
+                Write-Host "      WARNING: accessPackage exists but .id is NULL/empty" -ForegroundColor Yellow
+            }
         }
 
         Write-Warning "Source data contains duplicate request IDs!"
         Write-Warning "Total requests: $($allRequests.Count), Unique IDs: $($groupedById.Count), Duplicates: $($allRequests.Count - $groupedById.Count)"
-        Write-Warning "If all attributes are identical, this is likely a Graph API pagination bug."
-        Write-Warning "If attributes differ, the PRIMARY KEY definition needs to include those columns."
+        Write-Warning "These duplicates are likely a Graph API pagination bug - will deduplicate before sync."
+
+        # Deduplicate by keeping only the first occurrence of each ID
+        $allRequests = $groupedById | ForEach-Object { $_.Group[0] }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] After deduplication: $($allRequests.Count) unique requests" -ForegroundColor Green
     }
 
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
