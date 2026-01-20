@@ -70,7 +70,7 @@ function Initialize-FGAccessPackageViews {
     - Access package sync tables to exist (run Sync-FGCatalog, Sync-FGAccessPackage, etc. first)
 
     Creates these views:
-    - vw_UserAccessPackageResources: User → Access Package → Group/Resource → Role mapping
+    - vw_UserPermissionAssignmentViaAccessPackage: User → Access Package → Group/Resource → Role mapping
     - vw_DirectGroupMemberships: Group memberships that exist but are NOT from access packages (ist vs soll gap)
     - vw_DirectGroupOwnerships: Group ownerships that exist but are NOT from access packages (ist vs soll gap)
     - vw_UnmanagedPermissions: Combined view of all direct permissions not managed by access packages
@@ -132,11 +132,11 @@ function Initialize-FGAccessPackageViews {
     Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
-        # View 1: User Access Package Resources
+        # View 1: User Permission Assignment Via Access Package
         # Shows: Which resources (groups) and roles users get from their access packages
-        $view1Name = "vw_UserAccessPackageResources"
+        $view1Name = "vw_UserPermissionAssignmentViaAccessPackage"
         $view1Sql = @"
--- User Access Package Resources View
+-- User Permission Assignment Via Access Package View
 -- Shows which resources (groups) and roles users receive from their access packages
 CREATE VIEW dbo.$view1Name AS
 SELECT
@@ -179,7 +179,7 @@ SELECT
 FROM dbo.$GroupMembersTable gm
     INNER JOIN dbo.$UsersTable u ON gm.memberId = u.id
     INNER JOIN dbo.$GroupsTable g ON gm.groupId = g.id
-    LEFT JOIN dbo.vw_UserAccessPackageResources ap
+    LEFT JOIN dbo.vw_UserPermissionAssignmentViaAccessPackage ap
         ON gm.memberId = ap.userId
         AND gm.groupId = ap.groupId
         AND ap.resourceType = 'AadGroup'
@@ -207,7 +207,7 @@ SELECT
 FROM dbo.$GroupOwnersTable go
     INNER JOIN dbo.$UsersTable u ON go.ownerId = u.id
     INNER JOIN dbo.$GroupsTable g ON go.groupId = g.id
-    LEFT JOIN dbo.vw_UserAccessPackageResources ap
+    LEFT JOIN dbo.vw_UserPermissionAssignmentViaAccessPackage ap
         ON go.ownerId = ap.userId
         AND go.groupId = ap.groupId
         AND ap.resourceType = 'AadGroup'
