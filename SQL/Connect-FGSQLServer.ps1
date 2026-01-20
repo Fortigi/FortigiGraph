@@ -44,31 +44,32 @@ function Connect-FGSQLServer {
     Path to a JSON configuration file containing Azure and SQL connection details.
     If specified, SubscriptionId, ResourceGroupName, ServerName, etc. are read from the config file.
 
-    .PARAMETER UpdateFirewall
-    If specified, updates the firewall to allow your current IP address.
+    .PARAMETER SkipFirewallUpdate
+    If specified, skips automatic firewall rule updates. By default, the function automatically
+    updates firewall rules to allow your current IP address for seamless connectivity.
 
     .PARAMETER Force
     If specified, forces a new connection even if already connected.
 
     .EXAMPLE
-    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -UpdateFirewall
+    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver"
 
-    Connects to the SQL Server and updates firewall with your current IP
+    Connects to the SQL Server and automatically updates firewall with your current IP
 
     .EXAMPLE
     Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -DatabaseName "GraphData"
 
-    Connects to a specific database
+    Connects to a specific database with automatic firewall update
 
     .EXAMPLE
     Connect-FGSQLServer -ConfigFile "config.json"
 
-    Connects using credentials and connection details from config file
+    Connects using credentials from config file with automatic firewall update
 
     .EXAMPLE
-    Connect-FGSQLServer -ConfigFile "config.json" -UpdateFirewall
+    Connect-FGSQLServer -ConfigFile "config.json" -SkipFirewallUpdate
 
-    Connects using config file and updates firewall rules
+    Connects using config file without updating firewall rules
 
     .NOTES
     Requires Az PowerShell module and being logged into Azure (Connect-AzAccount)
@@ -98,7 +99,7 @@ function Connect-FGSQLServer {
         [System.String]$ConfigFile,
 
         [Parameter(Mandatory = $false)]
-        [Switch]$UpdateFirewall,
+        [Switch]$SkipFirewallUpdate,
 
         [Parameter(Mandatory = $false)]
         [Switch]$Force
@@ -217,8 +218,8 @@ function Connect-FGSQLServer {
             }
         }
 
-        # Update firewall if requested
-        if ($UpdateFirewall) {
+        # Update firewall by default (unless explicitly skipped)
+        if (-not $SkipFirewallUpdate) {
             Write-Host "Updating firewall rules..." -ForegroundColor Cyan
             try {
                 # Get current public IP
@@ -243,6 +244,9 @@ function Connect-FGSQLServer {
                 Write-Warning "Failed to update firewall rule: $_"
                 Write-Host "You may need to manually add your IP address in the Azure Portal." -ForegroundColor Yellow
             }
+        }
+        else {
+            Write-Host "Skipping firewall update (use without -SkipFirewallUpdate to auto-update)" -ForegroundColor Yellow
         }
 
         # Check if already connected (verify connection actually works)
@@ -305,8 +309,8 @@ function Connect-FGSQLServer {
 
         # Provide helpful guidance
         Write-Host "`nTroubleshooting:" -ForegroundColor Yellow
-        Write-Host "  1. Check your firewall rules in Azure Portal" -ForegroundColor White
-        Write-Host "  2. Try running with -UpdateFirewall switch" -ForegroundColor White
+        Write-Host "  1. Firewall should have been updated automatically - check if it succeeded above" -ForegroundColor White
+        Write-Host "  2. Check your firewall rules in Azure Portal" -ForegroundColor White
         Write-Host "  3. Verify the SQL admin password is correct" -ForegroundColor White
         Write-Host "  4. Check that the database exists" -ForegroundColor White
 
