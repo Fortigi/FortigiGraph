@@ -70,10 +70,7 @@ function Initialize-FGAccessPackageViews {
     - Access package sync tables to exist (run Sync-FGCatalog, Sync-FGAccessPackage, etc. first)
 
     Creates these views:
-    - vw_UserAccessPackages: User → Access Package → Catalog mapping
     - vw_UserAccessPackageResources: User → Access Package → Group/Resource → Role mapping
-    - vw_UserAccessPackageGroupMemberships: Filtered view for group Member roles from access packages
-    - vw_UserAccessPackageGroupOwnerships: Filtered view for group Owner roles from access packages
     - vw_DirectGroupMemberships: Group memberships that exist but are NOT from access packages (ist vs soll gap)
     - vw_DirectGroupOwnerships: Group ownerships that exist but are NOT from access packages (ist vs soll gap)
     - vw_UnmanagedPermissions: Combined view of all direct permissions not managed by access packages
@@ -138,40 +135,13 @@ function Initialize-FGAccessPackageViews {
     Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
-        # View 1: User Access Packages with Catalog Info
-        # Shows: Which users have which access packages from which catalogs
-        $view1Name = "vw_UserAccessPackages"
-        $view1Sql = @"
--- User Access Packages View
--- Shows which access packages each user has and from which catalog
-CREATE VIEW dbo.$view1Name AS
-SELECT
-    a.targetId AS userId,
-    u.userPrincipalName,
-    u.displayName AS userDisplayName,
-    a.id AS assignmentId,
-    a.assignmentState AS assignmentState,
-    a.assignmentStatus AS assignmentStatus,
-    ap.id AS accessPackageId,
-    ap.displayName AS accessPackageName,
-    ap.description AS accessPackageDescription,
-    c.id AS catalogId,
-    c.displayName AS catalogName,
-    c.catalogType
-FROM dbo.$AssignmentsTable a
-    INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
-    INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
-    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
-WHERE a.assignmentState = 'delivered'  -- Only active assignments
-"@
-
-        # View 2: User Access Package Resources
+        # View 1: User Access Package Resources
         # Shows: Which resources (groups) and roles users get from their access packages
-        $view2Name = "vw_UserAccessPackageResources"
-        $view2Sql = @"
+        $view1Name = "vw_UserAccessPackageResources"
+        $view1Sql = @"
 -- User Access Package Resources View
 -- Shows which resources (groups) and roles users receive from their access packages
-CREATE VIEW dbo.$view2Name AS
+CREATE VIEW dbo.$view1Name AS
 SELECT
     a.targetId AS userId,
     u.userPrincipalName,
@@ -181,11 +151,8 @@ SELECT
     c.displayName AS catalogName,
     rrs.scopeOriginId AS groupId,
     g.displayName AS groupName,
-    g.mail AS groupMail,
     rrs.scopeOriginSystem AS resourceType,
-    rrs.roleId,
-    rrs.roleDisplayName AS roleName,
-    rrs.roleDescription
+    rrs.roleDisplayName AS roleName
 FROM dbo.$AssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
     INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
@@ -195,61 +162,13 @@ FROM dbo.$AssignmentsTable a
 WHERE a.assignmentState = 'delivered'  -- Only active assignments
 "@
 
-        # View 3: User Access Package Group Memberships
-        # Filtered view showing only Member roles for groups
-        $view3Name = "vw_UserAccessPackageGroupMemberships"
-        $view3Sql = @"
--- User Access Package Group Memberships View
--- Shows group Member roles that users receive from access packages
-CREATE VIEW dbo.$view3Name AS
-SELECT
-    userId,
-    userPrincipalName,
-    userDisplayName,
-    accessPackageId,
-    accessPackageName,
-    catalogName,
-    groupId,
-    groupName,
-    groupMail,
-    'AccessPackage' AS sourceType,
-    catalogName + ' > ' + accessPackageName AS source
-FROM dbo.vw_UserAccessPackageResources
-WHERE resourceType = 'AadGroup'
-    AND roleName = 'Member'
-"@
-
-        # View 4: User Access Package Group Ownerships
-        # Filtered view showing only Owner roles for groups
-        $view4Name = "vw_UserAccessPackageGroupOwnerships"
-        $view4Sql = @"
--- User Access Package Group Ownerships View
--- Shows group Owner roles that users receive from access packages
-CREATE VIEW dbo.$view4Name AS
-SELECT
-    userId,
-    userPrincipalName,
-    userDisplayName,
-    accessPackageId,
-    accessPackageName,
-    catalogName,
-    groupId,
-    groupName,
-    groupMail,
-    'AccessPackage' AS sourceType,
-    catalogName + ' > ' + accessPackageName AS source
-FROM dbo.vw_UserAccessPackageResources
-WHERE resourceType = 'AadGroup'
-    AND roleName = 'Owner'
-"@
-
-        # View 5: Direct Group Memberships (NOT from Access Packages)
+        # View 2: Direct Group Memberships (NOT from Access Packages)
         # Shows: The gap between "ist" (as-is) and "soll" (should-be) for memberships
-        $view5Name = "vw_DirectGroupMemberships"
-        $view5Sql = @"
+        $view2Name = "vw_DirectGroupMemberships"
+        $view2Sql = @"
 -- Direct Group Memberships View (IST vs SOLL Gap)
 -- Shows group memberships that exist but are NOT assigned via access packages
-CREATE VIEW dbo.$view5Name AS
+CREATE VIEW dbo.$view2Name AS
 SELECT
     gm.memberId AS userId,
     u.userPrincipalName,
@@ -263,19 +182,21 @@ SELECT
 FROM dbo.$GroupMembersTable gm
     INNER JOIN dbo.$UsersTable u ON gm.memberId = u.id
     INNER JOIN dbo.$GroupsTable g ON gm.groupId = g.id
-    LEFT JOIN dbo.vw_UserAccessPackageGroupMemberships ap
+    LEFT JOIN dbo.vw_UserAccessPackageResources ap
         ON gm.memberId = ap.userId
         AND gm.groupId = ap.groupId
+        AND ap.resourceType = 'AadGroup'
+        AND ap.roleName = 'Member'
 WHERE ap.userId IS NULL  -- No matching access package assignment
 "@
 
-        # View 6: Direct Group Ownerships (NOT from Access Packages)
+        # View 3: Direct Group Ownerships (NOT from Access Packages)
         # Shows: The gap between "ist" (as-is) and "soll" (should-be) for ownerships
-        $view6Name = "vw_DirectGroupOwnerships"
-        $view6Sql = @"
+        $view3Name = "vw_DirectGroupOwnerships"
+        $view3Sql = @"
 -- Direct Group Ownerships View (IST vs SOLL Gap)
 -- Shows group ownerships that exist but are NOT assigned via access packages
-CREATE VIEW dbo.$view6Name AS
+CREATE VIEW dbo.$view3Name AS
 SELECT
     go.ownerId AS userId,
     u.userPrincipalName,
@@ -289,19 +210,21 @@ SELECT
 FROM dbo.$GroupOwnersTable go
     INNER JOIN dbo.$UsersTable u ON go.ownerId = u.id
     INNER JOIN dbo.$GroupsTable g ON go.groupId = g.id
-    LEFT JOIN dbo.vw_UserAccessPackageGroupOwnerships ap
+    LEFT JOIN dbo.vw_UserAccessPackageResources ap
         ON go.ownerId = ap.userId
         AND go.groupId = ap.groupId
+        AND ap.resourceType = 'AadGroup'
+        AND ap.roleName = 'Owner'
 WHERE ap.userId IS NULL  -- No matching access package assignment
 "@
 
-        # View 7: Unmanaged Permissions (Combined)
+        # View 4: Unmanaged Permissions (Combined)
         # Shows: All direct permissions (memberships + ownerships) not managed by access packages
-        $view7Name = "vw_UnmanagedPermissions"
-        $view7Sql = @"
+        $view4Name = "vw_UnmanagedPermissions"
+        $view4Sql = @"
 -- Unmanaged Permissions View (IST vs SOLL Gap - Combined)
 -- Shows all group permissions that exist directly but are NOT managed by access packages
-CREATE VIEW dbo.$view7Name AS
+CREATE VIEW dbo.$view4Name AS
 SELECT
     userId,
     userPrincipalName,
@@ -333,11 +256,11 @@ FROM dbo.vw_DirectGroupOwnerships
 
         # View 8: Access Package Assignment Details (with Request Type)
         # Shows HOW each access package was assigned (automatic, requested, admin)
-        $view8Name = "vw_AccessPackageAssignmentDetails"
-        $view8Sql = @"
+        $view5Name = "vw_AccessPackageAssignmentDetails"
+        $view5Sql = @"
 -- Access Package Assignment Details View
 -- Shows how each access package assignment was granted (automatic, user-requested, or admin-assigned)
-CREATE VIEW dbo.$view8Name AS
+CREATE VIEW dbo.$view5Name AS
 SELECT
     a.id AS assignmentId,
     a.targetId AS userId,
@@ -373,11 +296,11 @@ WHERE a.assignmentState = 'delivered'
 
         # View 9: Automatic Assignments
         # Shows assignments automatically granted by system based on policy rules
-        $view9Name = "vw_AutomaticAssignments"
-        $view9Sql = @"
+        $view6Name = "vw_AutomaticAssignments"
+        $view6Sql = @"
 -- Automatic Assignments View
 -- Shows access package assignments that were automatically granted based on policy rules
-CREATE VIEW dbo.$view9Name AS
+CREATE VIEW dbo.$view6Name AS
 SELECT
     assignmentId,
     userId,
@@ -395,11 +318,11 @@ WHERE requestType = 'SystemAdd'
 
         # View 10: Requested Assignments
         # Shows assignments that were user-requested (may have required approval)
-        $view10Name = "vw_RequestedAssignments"
-        $view10Sql = @"
+        $view7Name = "vw_RequestedAssignments"
+        $view7Sql = @"
 -- Requested Assignments View
 -- Shows access package assignments that were requested by users (includes approval info)
-CREATE VIEW dbo.$view10Name AS
+CREATE VIEW dbo.$view7Name AS
 SELECT
     assignmentId,
     userId,
@@ -422,11 +345,11 @@ WHERE requestType = 'UserAdd'
 
         # View 11: Admin Assignments
         # Shows assignments directly made by administrators
-        $view11Name = "vw_AdminAssignments"
-        $view11Sql = @"
+        $view8Name = "vw_AdminAssignments"
+        $view8Sql = @"
 -- Admin Assignments View
 -- Shows access package assignments that were directly made by administrators
-CREATE VIEW dbo.$view11Name AS
+CREATE VIEW dbo.$view8Name AS
 SELECT
     assignmentId,
     userId,
@@ -444,11 +367,11 @@ WHERE requestType = 'AdminAdd'
 
         # View 12: Last Access Review Per Access Package
         # Shows when each access package was last reviewed and by whom
-        $view12Name = "vw_AccessPackageLastReview"
-        $view12Sql = @"
+        $view9Name = "vw_AccessPackageLastReview"
+        $view9Sql = @"
 -- Last Access Review View
 -- Shows when each access package was last reviewed and by which user (actual reviewer)
-CREATE VIEW dbo.$view12Name AS
+CREATE VIEW dbo.$view9Name AS
 WITH LatestReviews AS (
     SELECT
         r.accessPackageId,
@@ -487,11 +410,11 @@ WHERE lr.rn = 1  -- Only the most recent review
 
         # View 13: Approved Request Timeline
         # Shows approved requests with response time metrics
-        $view13Name = "vw_ApprovedRequestTimeline"
-        $view13Sql = @"
+        $view10Name = "vw_ApprovedRequestTimeline"
+        $view10Sql = @"
 -- Approved Request Timeline View
 -- Shows access package requests that were approved with response time metrics
-CREATE VIEW dbo.$view13Name AS
+CREATE VIEW dbo.$view10Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -528,11 +451,11 @@ WHERE req.requestState = 'Delivered'
 
         # View 14: Denied Request Timeline
         # Shows denied requests with response time metrics
-        $view14Name = "vw_DeniedRequestTimeline"
-        $view14Sql = @"
+        $view11Name = "vw_DeniedRequestTimeline"
+        $view11Sql = @"
 -- Denied Request Timeline View
 -- Shows access package requests that were denied with response time metrics
-CREATE VIEW dbo.$view14Name AS
+CREATE VIEW dbo.$view11Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -568,11 +491,11 @@ WHERE req.requestState = 'Denied'
 
         # View 15: Pending Request Timeline
         # Shows pending requests with days waiting
-        $view15Name = "vw_PendingRequestTimeline"
-        $view15Sql = @"
+        $view12Name = "vw_PendingRequestTimeline"
+        $view12Sql = @"
 -- Pending Request Timeline View
 -- Shows access package requests that are still pending approval with days waiting
-CREATE VIEW dbo.$view15Name AS
+CREATE VIEW dbo.$view12Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -609,11 +532,11 @@ WHERE req.requestState IN ('PendingApproval', 'Submitted', 'Accepted')
 
         # View 16: Request Response Metrics (Aggregate)
         # Shows aggregate response time metrics by access package and catalog
-        $view16Name = "vw_RequestResponseMetrics"
-        $view16Sql = @"
+        $view13Name = "vw_RequestResponseMetrics"
+        $view13Sql = @"
 -- Request Response Metrics View (Aggregate)
 -- Shows average, median, min, max response times and approval rates by access package
-CREATE VIEW dbo.$view16Name AS
+CREATE VIEW dbo.$view13Name AS
 WITH RequestMetrics AS (
     SELECT
         req.accessPackageId,
@@ -691,10 +614,7 @@ FROM ApprovalStats
             @{ Name = $view10Name; SQL = $view10Sql },
             @{ Name = $view11Name; SQL = $view11Sql },
             @{ Name = $view12Name; SQL = $view12Sql },
-            @{ Name = $view13Name; SQL = $view13Sql },
-            @{ Name = $view14Name; SQL = $view14Sql },
-            @{ Name = $view15Name; SQL = $view15Sql },
-            @{ Name = $view16Name; SQL = $view16Sql }
+            @{ Name = $view13Name; SQL = $view13Sql }
         )
 
         foreach ($view in $views) {
