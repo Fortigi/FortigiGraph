@@ -442,8 +442,7 @@ function Write-SyncError {
                 -ServerName $config.Azure.SQLServerName `
                 -DatabaseName $config.Azure.DatabaseName `
                 -AdminUsername $config.Azure.AdminUsername `
-                -AdminPassword $SecurePassword `
-                -UpdateFirewall
+                -AdminPassword $SecurePassword
 
             Write-SyncSuccess "Connected to SQL Server"
         }
@@ -457,8 +456,7 @@ function Write-SyncError {
             -ServerName $config.Azure.SQLServerName `
             -DatabaseName $config.Azure.DatabaseName `
             -AdminUsername $config.Azure.AdminUsername `
-            -AdminPassword $SecurePassword `
-            -UpdateFirewall
+            -AdminPassword $SecurePassword 
 
         Write-SyncSuccess "Connected to SQL Server"
     }
