@@ -249,6 +249,19 @@ function Sync-FGAccessPackageAssignmentRequest {
         return
     }
 
+    # Analyze requests with null accessPackageId by requestType
+    $nullAccessPackageRequests = $allRequests | Where-Object { $null -eq $_.accessPackage -or [string]::IsNullOrWhiteSpace($_.accessPackage.id) }
+    if ($nullAccessPackageRequests.Count -gt 0) {
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Analysis: Found $($nullAccessPackageRequests.Count) requests with null/empty accessPackageId:" -ForegroundColor Cyan
+        $byRequestType = $nullAccessPackageRequests | Group-Object -Property requestType | Sort-Object Count -Descending
+        foreach ($group in $byRequestType) {
+            $percentage = [math]::Round(($group.Count / $nullAccessPackageRequests.Count) * 100, 1)
+            Write-Host "  $($group.Name): $($group.Count) requests ($percentage%)" -ForegroundColor Gray
+        }
+        Write-Host "  This is normal for removal requests (UserRemove/AdminRemove/SystemRemove)" -ForegroundColor Gray
+        Write-Host "  These will sync with accessPackageId = NULL in SQL" -ForegroundColor Gray
+    }
+
     # DIAGNOSTIC: Check for NULL or duplicate IDs in source data
     $nullIds = $allRequests | Where-Object { -not $_.id -or [string]::IsNullOrWhiteSpace($_.id) }
     if ($nullIds) {
@@ -270,14 +283,18 @@ function Sync-FGAccessPackageAssignmentRequest {
             $secondItem = $dup.Group[1]
 
             # Check key differences
-            Write-Host "      Item 1: requestType=$($firstItem.requestType), requestState=$($firstItem.requestState), accessPackageId=$($firstItem.accessPackage.id), requestorId=$($firstItem.requestor.id)" -ForegroundColor Gray
-            Write-Host "      Item 2: requestType=$($secondItem.requestType), requestState=$($secondItem.requestState), accessPackageId=$($secondItem.accessPackage.id), requestorId=$($secondItem.requestor.id)" -ForegroundColor Gray
+            $apId1 = if ($firstItem.accessPackage) { $firstItem.accessPackage.id } else { "(NULL)" }
+            $apId2 = if ($secondItem.accessPackage) { $secondItem.accessPackage.id } else { "(NULL)" }
+
+            Write-Host "      Item 1: requestType=$($firstItem.requestType), requestState=$($firstItem.requestState), accessPackageId=$apId1, requestorId=$($firstItem.requestor.id)" -ForegroundColor Gray
+            Write-Host "      Item 2: requestType=$($secondItem.requestType), requestState=$($secondItem.requestState), accessPackageId=$apId2, requestorId=$($secondItem.requestor.id)" -ForegroundColor Gray
 
             # Check if accessPackage is null vs just the id
             if ($null -eq $firstItem.accessPackage) {
-                Write-Host "      WARNING: accessPackage object is NULL (likely a removal request or deleted package)" -ForegroundColor Yellow
+                Write-Host "      → Reason: accessPackage object is NULL" -ForegroundColor Cyan
+                Write-Host "        Common for: Removal requests (UserRemove/AdminRemove/SystemRemove)" -ForegroundColor Cyan
             } elseif ([string]::IsNullOrWhiteSpace($firstItem.accessPackage.id)) {
-                Write-Host "      WARNING: accessPackage exists but .id is NULL/empty" -ForegroundColor Yellow
+                Write-Host "      → Reason: accessPackage exists but .id is NULL/empty (unusual)" -ForegroundColor Yellow
             }
         }
 
