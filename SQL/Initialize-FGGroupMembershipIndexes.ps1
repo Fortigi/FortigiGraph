@@ -15,7 +15,7 @@ function Initialize-FGGroupMembershipIndexes {
     - GraphGroupEligibleMembers: IX_GroupEligibleMembers_GroupId_ValidTo (for PIM lookups)
 
     Performance Impact:
-    - Reduces vw_GraphGroupMembershipType query time from minutes to seconds
+    - Reduces vw_UserPermissionAssignments query time from minutes to seconds
     - Speeds up recursive membership calculations by 10-100x
     - Improves JOIN performance in all membership-related queries
 
@@ -233,7 +233,7 @@ WHERE name = '$indexName'
         Write-Host "Skipped: $skippedCount (already existed)" -ForegroundColor White
         Write-Host "Total: $totalCount" -ForegroundColor White
         Write-Host "`nPerformance Impact:" -ForegroundColor Cyan
-        Write-Host "  - vw_GraphGroupMembershipType queries should be 10-100x faster" -ForegroundColor Gray
+        Write-Host "  - vw_UserPermissionAssignments queries should be 10-100x faster" -ForegroundColor Gray
         Write-Host "  - Recursive membership calculations significantly improved" -ForegroundColor Gray
         Write-Host "  - JOIN operations on group membership data optimized" -ForegroundColor Gray
         Write-Host "========================================`n" -ForegroundColor Green

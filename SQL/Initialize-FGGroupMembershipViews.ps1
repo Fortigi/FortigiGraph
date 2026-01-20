@@ -14,7 +14,7 @@ function Initialize-FGGroupMembershipViews {
        - Includes depth and cycle detection
        - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
 
-    2. vw_GraphGroupMembershipType ⭐ RECOMMENDED
+    2. vw_UserPermissionAssignments ⭐ RECOMMENDED
        - Comprehensive view combining ALL membership types in one place
        - Includes: Direct members, Indirect members, Owners, and Eligible members
        - Single query to get complete membership picture with type indicator
@@ -51,7 +51,7 @@ function Initialize-FGGroupMembershipViews {
 
     Views Created:
     - vw_GraphGroupMembersRecursive: ALL memberships with paths and depth (recursive!)
-    - vw_GraphGroupMembershipType: ⭐ RECOMMENDED - Comprehensive view with all types (Direct/Indirect/Owner/Eligible)
+    - vw_UserPermissionAssignments: ⭐ RECOMMENDED - Comprehensive view with all types (Direct/Indirect/Owner/Eligible)
 
     Performance Tip:
     These views calculate indirect memberships on-demand from direct members only, eliminating
@@ -193,8 +193,8 @@ FROM RecursiveMemberships
         $createView1Cmd.ExecuteNonQuery() | Out-Null
         Write-Host "  ✅ Created: vw_GraphGroupMembersRecursive" -ForegroundColor Green
 
-        # View 2: Comprehensive Membership Type View (Combines all membership types)
-        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_GraphGroupMembershipType" -ForegroundColor Cyan
+        # View 2: User Permission Assignments (Combines all membership types)
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating view: vw_UserPermissionAssignments" -ForegroundColor Cyan
 
         $types = @()
         if ($ownersExists) { $types += "Owner" }
@@ -207,14 +207,14 @@ FROM RecursiveMemberships
 
         # Always drop view if exists to ensure clean recreation
         $dropView2Cmd = $connection.CreateCommand()
-        $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_GraphGroupMembershipType') DROP VIEW dbo.vw_GraphGroupMembershipType;"
+        $dropView2Cmd.CommandText = "IF EXISTS (SELECT * FROM sys.views WHERE name = 'vw_UserPermissionAssignments') DROP VIEW dbo.vw_UserPermissionAssignments;"
         $dropView2Cmd.ExecuteNonQuery() | Out-Null
 
         # Build the view SQL dynamically based on which tables exist
         # OPTIMIZATION: Use LEFT JOIN anti-pattern instead of NOT EXISTS to avoid
         # recalculating the recursive CTE multiple times
         $createView2SQL = @"
-CREATE VIEW dbo.vw_GraphGroupMembershipType AS
+CREATE VIEW dbo.vw_UserPermissionAssignments AS
 WITH CurrentMembers AS (
     -- Calculate recursive memberships once and materialize for reuse
     SELECT
@@ -291,7 +291,7 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
         $createView2Cmd = $connection.CreateCommand()
         $createView2Cmd.CommandText = $createView2SQL
         $createView2Cmd.ExecuteNonQuery() | Out-Null
-        Write-Host "  ✅ Created: vw_GraphGroupMembershipType" -ForegroundColor Green
+        Write-Host "  ✅ Created: vw_UserPermissionAssignments" -ForegroundColor Green
 
         Write-Host "`n========================================" -ForegroundColor Green
         Write-Host "Views Created Successfully!" -ForegroundColor Green
@@ -305,7 +305,7 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
         Write-Host "  - 75% faster: Eliminates need for Sync-FGGroupTransitiveMember" -ForegroundColor Gray
         Write-Host "  - Columns: groupId, memberId, memberType, membershipType, depth, path" -ForegroundColor Gray
 
-        Write-Host "`nView 2: vw_GraphGroupMembershipType ⭐ RECOMMENDED" -ForegroundColor White
+        Write-Host "`nView 2: vw_UserPermissionAssignments ⭐ RECOMMENDED" -ForegroundColor White
         Write-Host "  - Comprehensive view combining ALL membership types" -ForegroundColor Gray
         Write-Host "  - Includes: $($types -join ', ')" -ForegroundColor Gray
         Write-Host "  - Single query to get complete membership picture" -ForegroundColor Gray
