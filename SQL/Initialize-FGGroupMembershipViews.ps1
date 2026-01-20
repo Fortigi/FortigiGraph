@@ -167,10 +167,10 @@ WITH RecursiveMemberships AS (
         RecursiveMemberships rm
         INNER JOIN dbo.$DirectMembersTable gm2
             ON rm.memberId = gm2.groupId  -- The member is itself a group
-            AND gm2.memberType = 'group'  -- Only groups can have nested members
             AND gm2.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current memberships
     WHERE
-        rm.depth < 10  -- Limit recursion depth (safety)
+        rm.memberType = 'group'  -- Only recurse through groups
+        AND rm.depth < 10  -- Limit recursion depth (safety)
         -- Cycle detection: Don't revisit already-visited members in this path
         AND rm.visitedPath NOT LIKE '%|' + CAST(gm2.memberId AS NVARCHAR(36)) + '|%'
 )
