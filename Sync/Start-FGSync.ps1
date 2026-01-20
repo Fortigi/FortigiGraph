@@ -475,12 +475,15 @@ function Write-SyncError {
     $hasValidToken = $false
     if ($global:AccessToken) {
         try {
-            Write-SyncStep "Testing existing Graph token..."
-            $testUsers = Get-FGUser
-            $hasValidToken = $true
-            Write-SyncSuccess "Existing token is valid"
+            Write-SyncStep "Checking existing Graph token..."
+            $hasValidToken = Confirm-FGAccessTokenValidity
+            if ($hasValidToken) {
+                Write-SyncSuccess "Existing token is valid"
+            } else {
+                Write-SyncStep "Existing token is expired, getting new token..."
+            }
         } catch {
-            Write-SyncStep "Existing token invalid, getting new token..."
+            Write-SyncStep "Token validation failed, getting new token..."
         }
     }
 
