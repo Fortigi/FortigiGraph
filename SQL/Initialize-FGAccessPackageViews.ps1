@@ -75,9 +75,6 @@ function Initialize-FGAccessPackageViews {
     - vw_DirectGroupOwnerships: Group ownerships that exist but are NOT from access packages (ist vs soll gap)
     - vw_UnmanagedPermissions: Combined view of all direct permissions not managed by access packages
     - vw_AccessPackageAssignmentDetails: Shows HOW access was granted (automatic, requested, admin-assigned)
-    - vw_AutomaticAssignments: Assignments automatically granted by system based on policy rules
-    - vw_RequestedAssignments: Assignments that were user-requested (with approval status)
-    - vw_AdminAssignments: Assignments directly made by administrators
     - vw_AccessPackageLastReview: Shows when each access package was last reviewed and by whom
     - vw_ApprovedRequestTimeline: Shows approved requests with response time metrics (hours/days)
     - vw_DeniedRequestTimeline: Shows denied requests with response time metrics
@@ -294,84 +291,13 @@ FROM dbo.$AssignmentsTable a
 WHERE a.assignmentState = 'delivered'
 "@
 
-        # View 9: Automatic Assignments
-        # Shows assignments automatically granted by system based on policy rules
-        $view6Name = "vw_AutomaticAssignments"
-        $view6Sql = @"
--- Automatic Assignments View
--- Shows access package assignments that were automatically granted based on policy rules
-CREATE VIEW dbo.$view6Name AS
-SELECT
-    assignmentId,
-    userId,
-    userPrincipalName,
-    userDisplayName,
-    accessPackageId,
-    accessPackageName,
-    catalogName,
-    assignmentState,
-    requestCreatedDateTime,
-    'Automatic (Policy Rule)' AS assignmentMethod
-FROM dbo.vw_AccessPackageAssignmentDetails
-WHERE requestType = 'SystemAdd'
-"@
-
-        # View 10: Requested Assignments
-        # Shows assignments that were user-requested (may have required approval)
-        $view7Name = "vw_RequestedAssignments"
-        $view7Sql = @"
--- Requested Assignments View
--- Shows access package assignments that were requested by users (includes approval info)
-CREATE VIEW dbo.$view7Name AS
-SELECT
-    assignmentId,
-    userId,
-    userPrincipalName,
-    userDisplayName,
-    accessPackageId,
-    accessPackageName,
-    catalogName,
-    assignmentState,
-    requestState,
-    requestStatus,
-    justification,
-    requestCreatedDateTime,
-    requestCompletedDateTime,
-    DATEDIFF(day, requestCreatedDateTime, requestCompletedDateTime) AS daysToApprove,
-    'User Requested' AS assignmentMethod
-FROM dbo.vw_AccessPackageAssignmentDetails
-WHERE requestType = 'UserAdd'
-"@
-
-        # View 11: Admin Assignments
-        # Shows assignments directly made by administrators
-        $view8Name = "vw_AdminAssignments"
-        $view8Sql = @"
--- Admin Assignments View
--- Shows access package assignments that were directly made by administrators
-CREATE VIEW dbo.$view8Name AS
-SELECT
-    assignmentId,
-    userId,
-    userPrincipalName,
-    userDisplayName,
-    accessPackageId,
-    accessPackageName,
-    catalogName,
-    assignmentState,
-    requestCreatedDateTime,
-    'Admin Assigned' AS assignmentMethod
-FROM dbo.vw_AccessPackageAssignmentDetails
-WHERE requestType = 'AdminAdd'
-"@
-
-        # View 12: Last Access Review Per Access Package
+        # View 6: Last Access Review Per Access Package
         # Shows when each access package was last reviewed and by whom
-        $view9Name = "vw_AccessPackageLastReview"
-        $view9Sql = @"
+        $view6Name = "vw_AccessPackageLastReview"
+        $view6Sql = @"
 -- Last Access Review View
 -- Shows when each access package was last reviewed and by which user (actual reviewer)
-CREATE VIEW dbo.$view9Name AS
+CREATE VIEW dbo.$view6Name AS
 WITH LatestReviews AS (
     SELECT
         r.accessPackageId,
@@ -410,11 +336,11 @@ WHERE lr.rn = 1  -- Only the most recent review
 
         # View 13: Approved Request Timeline
         # Shows approved requests with response time metrics
-        $view10Name = "vw_ApprovedRequestTimeline"
-        $view10Sql = @"
+        $view7Name = "vw_ApprovedRequestTimeline"
+        $view7Sql = @"
 -- Approved Request Timeline View
 -- Shows access package requests that were approved with response time metrics
-CREATE VIEW dbo.$view10Name AS
+CREATE VIEW dbo.$view7Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -451,11 +377,11 @@ WHERE req.requestState = 'Delivered'
 
         # View 14: Denied Request Timeline
         # Shows denied requests with response time metrics
-        $view11Name = "vw_DeniedRequestTimeline"
-        $view11Sql = @"
+        $view8Name = "vw_DeniedRequestTimeline"
+        $view8Sql = @"
 -- Denied Request Timeline View
 -- Shows access package requests that were denied with response time metrics
-CREATE VIEW dbo.$view11Name AS
+CREATE VIEW dbo.$view8Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -491,11 +417,11 @@ WHERE req.requestState = 'Denied'
 
         # View 15: Pending Request Timeline
         # Shows pending requests with days waiting
-        $view12Name = "vw_PendingRequestTimeline"
-        $view12Sql = @"
+        $view9Name = "vw_PendingRequestTimeline"
+        $view9Sql = @"
 -- Pending Request Timeline View
 -- Shows access package requests that are still pending approval with days waiting
-CREATE VIEW dbo.$view12Name AS
+CREATE VIEW dbo.$view9Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
@@ -532,11 +458,11 @@ WHERE req.requestState IN ('PendingApproval', 'Submitted', 'Accepted')
 
         # View 16: Request Response Metrics (Aggregate)
         # Shows aggregate response time metrics by access package and catalog
-        $view13Name = "vw_RequestResponseMetrics"
-        $view13Sql = @"
+        $view10Name = "vw_RequestResponseMetrics"
+        $view10Sql = @"
 -- Request Response Metrics View (Aggregate)
 -- Shows average, median, min, max response times and approval rates by access package
-CREATE VIEW dbo.$view13Name AS
+CREATE VIEW dbo.$view10Name AS
 WITH RequestMetrics AS (
     SELECT
         req.accessPackageId,
@@ -611,10 +537,7 @@ FROM ApprovalStats
             @{ Name = $view7Name; SQL = $view7Sql },
             @{ Name = $view8Name; SQL = $view8Sql },
             @{ Name = $view9Name; SQL = $view9Sql },
-            @{ Name = $view10Name; SQL = $view10Sql },
-            @{ Name = $view11Name; SQL = $view11Sql },
-            @{ Name = $view12Name; SQL = $view12Sql },
-            @{ Name = $view13Name; SQL = $view13Sql }
+            @{ Name = $view10Name; SQL = $view10Sql }
         )
 
         foreach ($view in $views) {
