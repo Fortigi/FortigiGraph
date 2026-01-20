@@ -166,7 +166,7 @@ WITH RecursiveMemberships AS (
             ON rm.memberId = gm2.groupId  -- The member is itself a group
             AND gm2.ValidTo = '9999-12-31 23:59:59.9999999'  -- Only current memberships
     WHERE
-        rm.memberType = 'group'  -- Only recurse through groups (CRITICAL for performance)
+        rm.memberType = '#microsoft.graph.group'  -- Only recurse through groups (CRITICAL for performance)
         AND rm.depth < 10  -- Limit recursion depth (prevents infinite loops)
 )
 SELECT
