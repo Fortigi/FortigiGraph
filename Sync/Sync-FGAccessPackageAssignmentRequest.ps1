@@ -262,7 +262,7 @@ function Sync-FGAccessPackageAssignmentRequest {
         Write-Host "  These will sync with accessPackageId = NULL in SQL" -ForegroundColor Gray
     }
 
-    # DIAGNOSTIC: Check for NULL or duplicate IDs in source data
+    # Check for NULL or duplicate IDs in source data
     $nullIds = $allRequests | Where-Object { -not $_.id -or [string]::IsNullOrWhiteSpace($_.id) }
     if ($nullIds) {
         Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] CRITICAL: Found $($nullIds.Count) requests with NULL/empty IDs!"
@@ -274,33 +274,8 @@ function Sync-FGAccessPackageAssignmentRequest {
     $duplicates = $groupedById | Where-Object { $_.Count -gt 1 }
 
     if ($duplicates) {
-        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] DIAGNOSTIC: Found $($duplicates.Count) request IDs with duplicates:" -ForegroundColor Yellow
-        foreach ($dup in $duplicates | Select-Object -First 3) {
-            Write-Host "  ID: $($dup.Name) appears $($dup.Count) times" -ForegroundColor Yellow
-            Write-Host "    Sample differences:" -ForegroundColor Gray
-
-            $firstItem = $dup.Group[0]
-            $secondItem = $dup.Group[1]
-
-            # Check key differences
-            $apId1 = if ($firstItem.accessPackage) { $firstItem.accessPackage.id } else { "(NULL)" }
-            $apId2 = if ($secondItem.accessPackage) { $secondItem.accessPackage.id } else { "(NULL)" }
-
-            Write-Host "      Item 1: requestType=$($firstItem.requestType), requestState=$($firstItem.requestState), accessPackageId=$apId1, requestorId=$($firstItem.requestor.id)" -ForegroundColor Gray
-            Write-Host "      Item 2: requestType=$($secondItem.requestType), requestState=$($secondItem.requestState), accessPackageId=$apId2, requestorId=$($secondItem.requestor.id)" -ForegroundColor Gray
-
-            # Check if accessPackage is null vs just the id
-            if ($null -eq $firstItem.accessPackage) {
-                Write-Host "      → Reason: accessPackage object is NULL" -ForegroundColor Cyan
-                Write-Host "        Common for: Removal requests (UserRemove/AdminRemove/SystemRemove)" -ForegroundColor Cyan
-            } elseif ([string]::IsNullOrWhiteSpace($firstItem.accessPackage.id)) {
-                Write-Host "      → Reason: accessPackage exists but .id is NULL/empty (unusual)" -ForegroundColor Yellow
-            }
-        }
-
-        Write-Warning "Source data contains duplicate request IDs!"
+        Write-Warning "Source data contains duplicate request IDs (Graph API pagination bug)"
         Write-Warning "Total requests: $($allRequests.Count), Unique IDs: $($groupedById.Count), Duplicates: $($allRequests.Count - $groupedById.Count)"
-        Write-Warning "These duplicates are likely a Graph API pagination bug - will deduplicate before sync."
 
         # Deduplicate by keeping only the first occurrence of each ID
         $allRequests = $groupedById | ForEach-Object { $_.Group[0] }
