@@ -371,12 +371,13 @@ function Sync-FGAccessPackageResourceRoleScope {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) resource role scopes..." -ForegroundColor Cyan
 
             # Use bulk MERGE operation - much faster than row-by-row
+            # CRITICAL: Must use composite PRIMARY KEY (accessPackageId, id) to match correctly
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('id')
+                -KeyColumns @('accessPackageId', 'id')
 
             $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
