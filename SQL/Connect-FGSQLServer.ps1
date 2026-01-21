@@ -12,14 +12,24 @@ function Connect-FGSQLServer {
 
     This function calls New-FGSQLConnection internally to establish the actual connection.
 
+    Supports either explicit parameters or reading from a JSON configuration file.
+
+    When using -ConfigFile:
+    - SubscriptionId is read from Azure.SubscriptionId
+    - ResourceGroupName is read from Azure.ResourceGroupName
+    - ServerName is read from Azure.SQLServerName
+    - DatabaseName is read from Azure.DatabaseName (if present)
+    - AdminUsername is read from Azure.AdminUsername (defaults to "sqladmin")
+    - AdminPassword is read from Azure.AdminUserPassword (with DPAPI encryption support)
+
     .PARAMETER SubscriptionId
-    The Azure Subscription ID where the SQL Server exists.
+    The Azure Subscription ID where the SQL Server exists. Mandatory unless using -ConfigFile.
 
     .PARAMETER ResourceGroupName
-    The Resource Group name containing the SQL Server.
+    The Resource Group name containing the SQL Server. Mandatory unless using -ConfigFile.
 
     .PARAMETER ServerName
-    The SQL Server name (without .database.windows.net suffix).
+    The SQL Server name (without .database.windows.net suffix). Mandatory unless using -ConfigFile.
 
     .PARAMETER DatabaseName
     The database name. If not specified, uses the first database found or prompts.
@@ -30,52 +40,123 @@ function Connect-FGSQLServer {
     .PARAMETER AdminPassword
     SQL Server admin password (as SecureString). If not provided and not stored, will prompt.
 
-    .PARAMETER UpdateFirewall
-    If specified, updates the firewall to allow your current IP address.
+    .PARAMETER ConfigFile
+    Path to a JSON configuration file containing Azure and SQL connection details.
+    If specified, SubscriptionId, ResourceGroupName, ServerName, etc. are read from the config file.
+
+    .PARAMETER SkipFirewallUpdate
+    If specified, skips automatic firewall rule updates. By default, the function automatically
+    updates firewall rules to allow your current IP address for seamless connectivity.
 
     .PARAMETER Force
     If specified, forces a new connection even if already connected.
 
     .EXAMPLE
-    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -UpdateFirewall
+    Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver"
 
-    Connects to the SQL Server and updates firewall with your current IP
+    Connects to the SQL Server and automatically updates firewall with your current IP
 
     .EXAMPLE
     Connect-FGSQLServer -SubscriptionId "xxx" -ResourceGroupName "rg-graph" -ServerName "iisqlserver" -DatabaseName "GraphData"
 
-    Connects to a specific database
+    Connects to a specific database with automatic firewall update
+
+    .EXAMPLE
+    Connect-FGSQLServer -ConfigFile "config.json"
+
+    Connects using credentials from config file with automatic firewall update
+
+    .EXAMPLE
+    Connect-FGSQLServer -ConfigFile "config.json" -SkipFirewallUpdate
+
+    Connects using config file without updating firewall rules
 
     .NOTES
     Requires Az PowerShell module and being logged into Azure (Connect-AzAccount)
     #>
 
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Explicit')]
     Param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Explicit')]
         [System.String]$SubscriptionId,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Explicit')]
         [System.String]$ResourceGroupName,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Explicit')]
         [System.String]$ServerName,
 
         [Parameter(Mandatory = $false)]
         [System.String]$DatabaseName,
 
         [Parameter(Mandatory = $false)]
-        [System.String]$AdminUsername = "sqladmin",
+        [System.String]$AdminUsername,
 
         [Parameter(Mandatory = $false)]
         [SecureString]$AdminPassword,
 
+        [Parameter(Mandatory = $true, ParameterSetName = "ConfigFile")]
+        [System.String]$ConfigFile,
+
         [Parameter(Mandatory = $false)]
-        [Switch]$UpdateFirewall,
+        [Switch]$SkipFirewallUpdate,
 
         [Parameter(Mandatory = $false)]
         [Switch]$Force
     )
+
+    # If ConfigFile is specified, read connection details from config
+    if ($PSCmdlet.ParameterSetName -eq "ConfigFile") {
+        if (-not (Test-Path $ConfigFile)) {
+            throw "Configuration file not found: $ConfigFile"
+        }
+
+        # Load config
+        $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
+
+        # Read SubscriptionId
+        if (-not $config.Azure.SubscriptionId) {
+            throw "Azure.SubscriptionId not found in configuration file"
+        }
+        $SubscriptionId = $config.Azure.SubscriptionId
+
+        # Read ResourceGroupName
+        if (-not $config.Azure.ResourceGroupName) {
+            throw "Azure.ResourceGroupName not found in configuration file"
+        }
+        $ResourceGroupName = $config.Azure.ResourceGroupName
+
+        # Read ServerName
+        if (-not $config.Azure.SQLServerName) {
+            throw "Azure.SQLServerName not found in configuration file"
+        }
+        $ServerName = $config.Azure.SQLServerName
+
+        # Read optional DatabaseName
+        if ($config.Azure.DatabaseName) {
+            $DatabaseName = $config.Azure.DatabaseName
+        }
+
+        # Read optional AdminUsername (default to sqladmin)
+        if ($config.Azure.AdminUsername) {
+            $AdminUsername = $config.Azure.AdminUsername
+        } else {
+            $AdminUsername = "sqladmin"
+        }
+
+        # Read AdminPassword (with encryption support)
+        $passwordPlainText = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Azure.AdminUserPassword" -AllowEmpty
+        if (-not [string]::IsNullOrWhiteSpace($passwordPlainText)) {
+            $AdminPassword = ConvertTo-SecureString -String $passwordPlainText -AsPlainText -Force
+        }
+        # If no password in config, will prompt later
+    }
+    # Explicit parameter set - set default AdminUsername if not provided
+    else {
+        if (-not $AdminUsername) {
+            $AdminUsername = "sqladmin"
+        }
+    }
 
     # Check if Az module is available
     if (-not (Get-Module -ListAvailable -Name Az.Sql)) {
@@ -137,8 +218,8 @@ function Connect-FGSQLServer {
             }
         }
 
-        # Update firewall if requested
-        if ($UpdateFirewall) {
+        # Update firewall by default (unless explicitly skipped)
+        if (-not $SkipFirewallUpdate) {
             Write-Host "Updating firewall rules..." -ForegroundColor Cyan
             try {
                 # Get current public IP
@@ -163,6 +244,9 @@ function Connect-FGSQLServer {
                 Write-Warning "Failed to update firewall rule: $_"
                 Write-Host "You may need to manually add your IP address in the Azure Portal." -ForegroundColor Yellow
             }
+        }
+        else {
+            Write-Host "Skipping firewall update (use without -SkipFirewallUpdate to auto-update)" -ForegroundColor Yellow
         }
 
         # Check if already connected (verify connection actually works)
@@ -225,8 +309,8 @@ function Connect-FGSQLServer {
 
         # Provide helpful guidance
         Write-Host "`nTroubleshooting:" -ForegroundColor Yellow
-        Write-Host "  1. Check your firewall rules in Azure Portal" -ForegroundColor White
-        Write-Host "  2. Try running with -UpdateFirewall switch" -ForegroundColor White
+        Write-Host "  1. Firewall should have been updated automatically - check if it succeeded above" -ForegroundColor White
+        Write-Host "  2. Check your firewall rules in Azure Portal" -ForegroundColor White
         Write-Host "  3. Verify the SQL admin password is correct" -ForegroundColor White
         Write-Host "  4. Check that the database exists" -ForegroundColor White
 

@@ -936,8 +936,332 @@ FROM dbo.GraphGroupOwners_Test
     Add-TestResult -Category "Query" -TestName "Group sync summary" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 24: Start-FGSync function with config file (sequential sync)
-Write-TestHeader "Test 24: Start-FGSync (Sequential Sync)"
+# Test 24: Access Package Catalog Sync
+Write-TestHeader "Test 24: Access Package Catalog Sync"
+
+try {
+    Write-TestStep "Syncing access package catalogs..."
+
+    Sync-FGCatalog -TableName "GraphCatalogs_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Catalog sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced catalog data..."
+    $catalogCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphCatalogs_Test" -AsScalar
+
+    if ($catalogCount -gt 0) {
+        Write-TestSuccess "Catalogs synced: $catalogCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Catalog data verification" -Passed $true -Data $catalogCount
+    } else {
+        Write-Host "  ⚠ No catalogs found (this is OK if none exist in tenant)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Catalog data verification" -Passed $true -Data "0 (none in tenant)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphCatalogs_Test" -Details @{ Type = "Catalog"; Count = $catalogCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Catalog sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 25: Access Package Sync
+Write-TestHeader "Test 25: Access Package Sync"
+
+try {
+    Write-TestStep "Syncing access packages..."
+
+    Sync-FGAccessPackage -TableName "GraphAccessPackages_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced access package data..."
+    $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackages_Test" -AsScalar
+
+    if ($packageCount -gt 0) {
+        Write-TestSuccess "Access packages synced: $packageCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Access package data verification" -Passed $true -Data $packageCount
+    } else {
+        Write-Host "  ⚠ No access packages found (this is OK if none exist in tenant)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Access package data verification" -Passed $true -Data "0 (none in tenant)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackages_Test" -Details @{ Type = "AccessPackage"; Count = $packageCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 26: Access Package Assignment Sync
+Write-TestHeader "Test 26: Access Package Assignment Sync"
+
+try {
+    Write-TestStep "Syncing access package assignments..."
+
+    Sync-FGAccessPackageAssignment -TableName "GraphAccessPackageAssignments_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package assignment sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced assignment data..."
+    $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackageAssignments_Test" -AsScalar
+
+    if ($assignmentCount -gt 0) {
+        Write-TestSuccess "Assignments synced: $assignmentCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment data verification" -Passed $true -Data $assignmentCount
+    } else {
+        Write-Host "  ⚠ No assignments found (this is OK if none exist in tenant)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment data verification" -Passed $true -Data "0 (none in tenant)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackageAssignments_Test" -Details @{ Type = "Assignment"; Count = $assignmentCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package assignment sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 27: Access Package Resource Role Scope Sync
+Write-TestHeader "Test 27: Access Package Resource Role Scope Sync"
+
+try {
+    Write-TestStep "Syncing access package resource role scopes..."
+
+    Sync-FGAccessPackageResourceRoleScope -TableName "GraphAccessPackageResourceRoleScopes_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Resource role scope sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced resource role scope data..."
+    $scopeCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackageResourceRoleScopes_Test" -AsScalar
+
+    if ($scopeCount -gt 0) {
+        Write-TestSuccess "Resource role scopes synced: $scopeCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Resource role scope data verification" -Passed $true -Data $scopeCount
+    } else {
+        Write-Host "  ⚠ No resource role scopes found (this is OK if none configured)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Resource role scope data verification" -Passed $true -Data "0 (none configured)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackageResourceRoleScopes_Test" -Details @{ Type = "ResourceRoleScope"; Count = $scopeCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Resource role scope sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 28: Access Package Assignment Policy Sync
+Write-TestHeader "Test 28: Access Package Assignment Policy Sync"
+
+try {
+    Write-TestStep "Syncing access package assignment policies..."
+
+    Sync-FGAccessPackageAssignmentPolicy -TableName "GraphAccessPackageAssignmentPolicies_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Assignment policy sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced policy data..."
+    $policyCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackageAssignmentPolicies_Test" -AsScalar
+
+    if ($policyCount -gt 0) {
+        Write-TestSuccess "Assignment policies synced: $policyCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment policy data verification" -Passed $true -Data $policyCount
+    } else {
+        Write-Host "  ⚠ No policies found (this is OK if none configured)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment policy data verification" -Passed $true -Data "0 (none configured)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackageAssignmentPolicies_Test" -Details @{ Type = "Policy"; Count = $policyCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Assignment policy sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 29: Access Package Assignment Request Sync
+Write-TestHeader "Test 29: Access Package Assignment Request Sync"
+
+try {
+    Write-TestStep "Syncing access package assignment requests..."
+
+    Sync-FGAccessPackageAssignmentRequest -TableName "GraphAccessPackageAssignmentRequests_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Assignment request sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced request data..."
+    $requestCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackageAssignmentRequests_Test" -AsScalar
+
+    if ($requestCount -gt 0) {
+        Write-TestSuccess "Assignment requests synced: $requestCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment request data verification" -Passed $true -Data $requestCount
+    } else {
+        Write-Host "  ⚠ No requests found (this is OK if none exist)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Assignment request data verification" -Passed $true -Data "0 (none exist)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackageAssignmentRequests_Test" -Details @{ Type = "Request"; Count = $requestCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Assignment request sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 30: Access Package Access Review Sync
+Write-TestHeader "Test 30: Access Package Access Review Sync"
+
+try {
+    Write-TestStep "Syncing access package access review decisions..."
+
+    Sync-FGAccessPackageAccessReview -TableName "GraphAccessPackageAccessReviewDecisions_Test"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access review sync completed" -Passed $true
+
+    # Verify data was synced
+    Write-TestStep "Verifying synced access review data..."
+    $reviewCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphAccessPackageAccessReviewDecisions_Test" -AsScalar
+
+    if ($reviewCount -gt 0) {
+        Write-TestSuccess "Access review decisions synced: $reviewCount"
+        Add-TestResult -Category "AccessPackageSync" -TestName "Access review data verification" -Passed $true -Data $reviewCount
+    } else {
+        Write-Host "  ⚠ No review decisions found (this is OK if no reviews conducted)" -ForegroundColor Yellow
+        Add-TestResult -Category "AccessPackageSync" -TestName "Access review data verification" -Passed $true -Data "0 (no reviews conducted)"
+    }
+
+    Register-Resource -Type "Table" -Name "GraphAccessPackageAccessReviewDecisions_Test" -Details @{ Type = "AccessReview"; Count = $reviewCount }
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access review sync" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 31: Access Package Analysis Views
+Write-TestHeader "Test 31: Access Package Analysis Views"
+
+try {
+    Write-TestStep "Creating access package analysis views..."
+
+    Initialize-FGAccessPackageViews `
+        -DropIfExists `
+        -CatalogsTable "GraphCatalogs_Test" `
+        -AccessPackagesTable "GraphAccessPackages_Test" `
+        -AssignmentsTable "GraphAccessPackageAssignments_Test" `
+        -ResourceRoleScopesTable "GraphAccessPackageResourceRoleScopes_Test" `
+        -UsersTable "GraphUsers_DefaultTest" `
+        -GroupsTable "GraphGroups_Test" `
+        -GroupMembersTable "GraphGroupMembers_Test" `
+        -GroupOwnersTable "GraphGroupOwners_Test" `
+        -AssignmentRequestsTable "GraphAccessPackageAssignmentRequests_Test" `
+        -AssignmentPoliciesTable "GraphAccessPackageAssignmentPolicies_Test" `
+        -AccessReviewDecisionsTable "GraphAccessPackageAccessReviewDecisions_Test"
+
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package views created" -Passed $true
+
+    # Verify views exist
+    Write-TestStep "Verifying views were created..."
+    $expectedViews = @(
+        "vw_UserAccessPackages",
+        "vw_UserAccessPackageResources",
+        "vw_UserAccessPackageGroupMemberships",
+        "vw_UserAccessPackageGroupOwnerships",
+        "vw_DirectGroupMemberships",
+        "vw_DirectGroupOwnerships",
+        "vw_UnmanagedPermissions",
+        "vw_AccessPackageAssignmentDetails",
+        "vw_AutomaticAssignments",
+        "vw_RequestedAssignments",
+        "vw_AdminAssignments",
+        "vw_AccessPackageLastReview",
+        "vw_ApprovedRequestTimeline",
+        "vw_DeniedRequestTimeline",
+        "vw_PendingRequestTimeline",
+        "vw_RequestResponseMetrics"
+    )
+
+    $viewsFound = 0
+    foreach ($viewName in $expectedViews) {
+        $viewExists = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = '$viewName' AND TABLE_SCHEMA = 'dbo'" -AsScalar
+        if ($viewExists -gt 0) {
+            $viewsFound++
+        }
+    }
+
+    Write-TestSuccess "Views created: $viewsFound / $($expectedViews.Count)"
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package views verification" -Passed ($viewsFound -eq $expectedViews.Count) -Data "$viewsFound/$($expectedViews.Count)"
+
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package views" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 32: Access Package Sync Summary
+Write-TestHeader "Test 32: Access Package Sync Summary"
+
+try {
+    Write-TestStep "Generating comprehensive access package sync summary..."
+
+    $apSummaryQuery = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+
+        $query = @"
+SELECT
+    'Catalogs' as EntityType,
+    COUNT(*) as TotalCount,
+    MIN(ValidFrom) as FirstSync,
+    MAX(ValidFrom) as LastSync
+FROM dbo.GraphCatalogs_Test
+UNION ALL
+SELECT
+    'Access Packages',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackages_Test
+UNION ALL
+SELECT
+    'Assignments',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackageAssignments_Test
+UNION ALL
+SELECT
+    'Resource Role Scopes',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackageResourceRoleScopes_Test
+UNION ALL
+SELECT
+    'Assignment Policies',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackageAssignmentPolicies_Test
+UNION ALL
+SELECT
+    'Assignment Requests',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackageAssignmentRequests_Test
+UNION ALL
+SELECT
+    'Access Review Decisions',
+    COUNT(*),
+    MIN(ValidFrom),
+    MAX(ValidFrom)
+FROM dbo.GraphAccessPackageAccessReviewDecisions_Test
+"@
+
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = $query
+
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $dataset = New-Object System.Data.DataSet
+        $adapter.Fill($dataset) | Out-Null
+        return $dataset.Tables[0]
+    }
+
+    Write-Host "`n  Access Package Sync Summary:" -ForegroundColor Cyan
+    $apSummaryQuery | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Host $_ -ForegroundColor White }
+
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package sync summary" -Passed $true -Data $apSummaryQuery
+} catch {
+    Add-TestResult -Category "AccessPackageSync" -TestName "Access package sync summary" -Passed $false -Message $_.Exception.Message
+}
+
+# Test 33: Start-FGSync function with config file (sequential sync)
+Write-TestHeader "Test 33: Start-FGSync (Sequential Sync)"
 
 try {
     Write-TestStep "Testing Start-FGSync function with config file..."
@@ -985,8 +1309,36 @@ try {
                 Enabled = $true
                 TableName = "GraphGroupOwners_StartSync"
             }
+            Catalogs = @{
+                Enabled = $true
+                TableName = "GraphCatalogs_StartSync"
+            }
+            AccessPackages = @{
+                Enabled = $true
+                TableName = "GraphAccessPackages_StartSync"
+            }
+            AccessPackageAssignments = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignments_StartSync"
+            }
+            AccessPackageResourceRoleScopes = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageResourceRoleScopes_StartSync"
+            }
+            AccessPackageAssignmentPolicies = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignmentPolicies_StartSync"
+            }
+            AccessPackageAssignmentRequests = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignmentRequests_StartSync"
+            }
+            AccessPackageAccessReviews = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAccessReviewDecisions_StartSync"
+            }
             Views = @{
-                Enabled = $false
+                Enabled = $true
             }
             ParallelExecution = $false  # Explicitly test sequential mode
         }
@@ -1015,7 +1367,19 @@ try {
     # Verify tables were created
     Write-TestStep "Verifying synced tables..."
     $tables = Get-FGSQLTable
-    $expectedTables = @("GraphUsers_StartSync", "GraphGroups_StartSync", "GraphGroupMembers_StartSync", "GraphGroupOwners_StartSync")
+    $expectedTables = @(
+        "GraphUsers_StartSync",
+        "GraphGroups_StartSync",
+        "GraphGroupMembers_StartSync",
+        "GraphGroupOwners_StartSync",
+        "GraphCatalogs_StartSync",
+        "GraphAccessPackages_StartSync",
+        "GraphAccessPackageAssignments_StartSync",
+        "GraphAccessPackageResourceRoleScopes_StartSync",
+        "GraphAccessPackageAssignmentPolicies_StartSync",
+        "GraphAccessPackageAssignmentRequests_StartSync",
+        "GraphAccessPackageAccessReviewDecisions_StartSync"
+    )
 
     $allTablesExist = $true
     foreach ($tableName in $expectedTables) {
@@ -1034,11 +1398,17 @@ try {
         $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroups_StartSync" -AsScalar
         $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupMembers_StartSync" -AsScalar
         $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupOwners_StartSync" -AsScalar
+        $catalogCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphCatalogs_StartSync" -AsScalar
+        $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphAccessPackages_StartSync" -AsScalar
+        $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphAccessPackageAssignments_StartSync" -AsScalar
 
         Write-TestSuccess "Users synced: $userCount"
         Write-TestSuccess "Groups synced: $groupCount"
         Write-TestSuccess "Memberships synced: $memberCount"
         Write-TestSuccess "Ownerships synced: $ownerCount"
+        Write-TestSuccess "Catalogs synced: $catalogCount"
+        Write-TestSuccess "Access Packages synced: $packageCount"
+        Write-TestSuccess "Assignments synced: $assignmentCount"
 
         $syncPassed = ($userCount -gt 0) -and ($groupCount -gt 0)
     } else {
@@ -1055,8 +1425,8 @@ try {
     Add-TestResult -Category "Sync" -TestName "Start-FGSync sequential" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 25: Start-FGSync function with parallel execution
-Write-TestHeader "Test 25: Start-FGSync (Parallel Sync)"
+# Test 34: Start-FGSync function with parallel execution
+Write-TestHeader "Test 34: Start-FGSync (Parallel Sync)"
 
 try {
     Write-TestStep "Testing Start-FGSync function with parallel execution..."
@@ -1104,8 +1474,36 @@ try {
                 Enabled = $true
                 TableName = "GraphGroupOwners_ParallelSync"
             }
+            Catalogs = @{
+                Enabled = $true
+                TableName = "GraphCatalogs_ParallelSync"
+            }
+            AccessPackages = @{
+                Enabled = $true
+                TableName = "GraphAccessPackages_ParallelSync"
+            }
+            AccessPackageAssignments = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignments_ParallelSync"
+            }
+            AccessPackageResourceRoleScopes = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageResourceRoleScopes_ParallelSync"
+            }
+            AccessPackageAssignmentPolicies = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignmentPolicies_ParallelSync"
+            }
+            AccessPackageAssignmentRequests = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAssignmentRequests_ParallelSync"
+            }
+            AccessPackageAccessReviews = @{
+                Enabled = $true
+                TableName = "GraphAccessPackageAccessReviewDecisions_ParallelSync"
+            }
             Views = @{
-                Enabled = $false
+                Enabled = $true
             }
             ParallelExecution = $true  # Enable parallel mode
         }
@@ -1134,7 +1532,19 @@ try {
     # Verify tables were created
     Write-TestStep "Verifying synced tables..."
     $tables = Get-FGSQLTable
-    $expectedTables = @("GraphUsers_ParallelSync", "GraphGroups_ParallelSync", "GraphGroupMembers_ParallelSync", "GraphGroupOwners_ParallelSync")
+    $expectedTables = @(
+        "GraphUsers_ParallelSync",
+        "GraphGroups_ParallelSync",
+        "GraphGroupMembers_ParallelSync",
+        "GraphGroupOwners_ParallelSync",
+        "GraphCatalogs_ParallelSync",
+        "GraphAccessPackages_ParallelSync",
+        "GraphAccessPackageAssignments_ParallelSync",
+        "GraphAccessPackageResourceRoleScopes_ParallelSync",
+        "GraphAccessPackageAssignmentPolicies_ParallelSync",
+        "GraphAccessPackageAssignmentRequests_ParallelSync",
+        "GraphAccessPackageAccessReviewDecisions_ParallelSync"
+    )
 
     $allTablesExist = $true
     foreach ($tableName in $expectedTables) {
@@ -1153,11 +1563,17 @@ try {
         $groupCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroups_ParallelSync" -AsScalar
         $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupMembers_ParallelSync" -AsScalar
         $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphGroupOwners_ParallelSync" -AsScalar
+        $catalogCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphCatalogs_ParallelSync" -AsScalar
+        $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphAccessPackages_ParallelSync" -AsScalar
+        $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM GraphAccessPackageAssignments_ParallelSync" -AsScalar
 
         Write-TestSuccess "Users synced: $userCount"
         Write-TestSuccess "Groups synced: $groupCount"
         Write-TestSuccess "Memberships synced: $memberCount"
         Write-TestSuccess "Ownerships synced: $ownerCount"
+        Write-TestSuccess "Catalogs synced: $catalogCount"
+        Write-TestSuccess "Access Packages synced: $packageCount"
+        Write-TestSuccess "Assignments synced: $assignmentCount"
 
         $syncPassed = ($userCount -gt 0) -and ($groupCount -gt 0)
     } else {
@@ -1174,8 +1590,8 @@ try {
     Add-TestResult -Category "Sync" -TestName "Start-FGSync parallel" -Passed $false -Message $_.Exception.Message
 }
 
-# Test 26: Start-FGSync alias test
-Write-TestHeader "Test 26: Start-FGSync Alias (Daily-Sync)"
+# Test 35: Start-FGSync alias test
+Write-TestHeader "Test 35: Start-FGSync Alias (Daily-Sync)"
 
 try {
     Write-TestStep "Testing Daily-Sync alias..."
@@ -1197,7 +1613,7 @@ try {
 
 # Cleanup
 if (-not $SkipCleanup) {
-    Write-TestHeader "Test 27: Cleanup Test Resources"
+    Write-TestHeader "Test 36: Cleanup Test Resources"
 
     try {
         Write-TestStep "Removing test SQL Server and resources..."

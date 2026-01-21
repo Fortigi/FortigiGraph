@@ -50,8 +50,37 @@
       "Enabled": true,
       "TableName": "GraphGroupOwners"
     },
+    "Catalogs": {
+      "Enabled": true,
+      "TableName": "GraphCatalogs"
+    },
+    "AccessPackages": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackages"
+    },
+    "AccessPackageAssignments": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignments"
+    },
+    "AccessPackageResourceRoleScopes": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageResourceRoleScopes"
+    },
+    "AccessPackageAssignmentPolicies": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignmentPolicies"
+    },
+    "AccessPackageAssignmentRequests": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAssignmentRequests"
+    },
+    "AccessPackageAccessReviews": {
+      "Enabled": true,
+      "TableName": "GraphAccessPackageAccessReviewDecisions"
+    },
     "Views": {
       "Enabled": true
-    }
+    },
+    "ParallelExecution": true
   }
 }
