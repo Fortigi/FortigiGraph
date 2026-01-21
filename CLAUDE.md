@@ -21,14 +21,23 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - Pagination handling
 - CRUD operations for Azure AD/Entra ID resources
 
-### 2. Azure SQL Integration (NEW in dev)
+### 2. Azure SQL Integration
 - **Temporal Tables**: Automatic version history tracking for all data changes
 - **Point-in-Time Queries**: Query data as it existed at any time
-- **User Sync**: Sync Microsoft Graph users to SQL with automatic schema detection
+- **High-Performance Sync**: SqlBulkCopy-based operations (20-50x faster than row-by-row)
 - **Transaction-based**: Performance-optimized with batch operations
 - **Automatic Schema Evolution**: Add new columns without recreating tables
+- **ConfigFile Support**: Connect-FGSQLServer supports config files like Get-FGAccessToken
 
-### 3. Comprehensive Testing
+### 3. Identity Governance & Compliance Sync ⭐ NEW
+- **Complete Access Package Sync**: Catalogs, packages, assignments, policies, requests, reviews
+- **Group Membership Sync**: Direct, transitive, eligible (PIM), and owner relationships
+- **User & Group Sync**: Full user/group data with custom attributes
+- **Orchestrated Sync**: `Start-FGSync` orchestrates all operations from config file
+- **Analytical Views**: 20+ SQL views for IST vs SOLL analysis, approval metrics, access reviews
+- **Parallel Execution**: Sync multiple entity types concurrently for optimal performance
+
+### 4. Comprehensive Testing
 - Integration tests with parallel execution support
 - Secure credential storage using Windows DPAPI
 - Automated cleanup
@@ -54,16 +63,35 @@ FortigiGraph/
 │   ├── New-FG*.ps1         # Create operations
 │   ├── Set-FG*.ps1         # Update operations
 │   ├── Add-FG*.ps1         # Add operations (members, resources)
-│   ├── Remove-FG*.ps1      # Delete/remove operations
-│   └── Sync-FGUser.ps1     # ⭐ NEW: Sync users to SQL
+│   └── Remove-FG*.ps1      # Delete/remove operations
 │
-├── SQL/                    # ⭐ NEW: Azure SQL operations
+├── Sync/                   # ⭐ NEW: High-performance data sync operations
+│   ├── Start-FGSync.ps1                # Orchestrates all sync operations
+│   ├── Sync-FGUser.ps1                 # Sync users to SQL
+│   ├── Sync-FGGroup.ps1                # Sync groups to SQL
+│   ├── Sync-FGGroupMember.ps1          # Sync direct group memberships
+│   ├── Sync-FGGroupTransitiveMember.ps1 # Sync transitive memberships
+│   ├── Sync-FGGroupEligibleMember.ps1  # Sync PIM eligible memberships
+│   ├── Sync-FGGroupOwner.ps1           # Sync group owners
+│   ├── Sync-FGAccessPackage.ps1        # Sync access packages
+│   ├── Sync-FGAccessPackageAssignment.ps1 # Sync package assignments
+│   ├── Sync-FGAccessPackageResourceRoleScope.ps1 # Sync package resources
+│   ├── Sync-FGAccessPackageAssignmentPolicy.ps1 # Sync assignment policies
+│   ├── Sync-FGAccessPackageAssignmentRequest.ps1 # Sync access requests
+│   ├── Sync-FGAccessPackageAccessReview.ps1 # Sync access review decisions
+│   └── Sync-FGCatalog.ps1              # Sync catalogs
+│
+├── SQL/                    # Azure SQL operations
 │   ├── Invoke-FGSQLCommand.ps1         # Helper for connection lifecycle
 │   ├── New-FGAzureSQLServer.ps1        # Create SQL Server + Database
-│   ├── Connect-FGSQLServer.ps1         # Connect with firewall mgmt
+│   ├── Connect-FGSQLServer.ps1         # Connect with firewall mgmt & ConfigFile support
 │   ├── New-FGSQLConnection.ps1         # Low-level connection
 │   ├── Test-FGSQLConnection.ps1        # Validate connection
 │   ├── Initialize-FGSQLTable.ps1       # Create temporal tables
+│   ├── Initialize-FGAccessPackageViews.ps1 # Create access package analytical views
+│   ├── Initialize-FGAccessPackageIndexes.ps1 # Create access package indexes
+│   ├── Initialize-FGGroupMembershipViews.ps1 # Create group membership views
+│   ├── Initialize-FGGroupMembershipIndexes.ps1 # Create group membership indexes
 │   ├── Invoke-FGSQLQuery.ps1           # Simple query execution
 │   ├── Get-FGSQLTable.ps1              # List tables with details
 │   ├── Clear-FGSQLTable.ps1            # Clear table data
@@ -103,11 +131,12 @@ FortigiGraph/
 | Category | Count | Purpose |
 |----------|-------|---------|
 | **Base** | ~17 | Authentication, HTTP operations, token management |
-| **Generic** | ~47 | Graph API CRUD operations (including Sync-FGUser) |
-| **SQL** | 10 | Azure SQL database operations |
+| **Generic** | ~47 | Graph API CRUD operations |
+| **Sync** | 14 | High-performance data sync operations (Start-FGSync + 13 entity syncs) |
+| **SQL** | 14 | Azure SQL database operations (incl. views & indexes) |
 | **Specific** | ~10 | High-level idempotent helpers |
 | **Test/Runbooks** | 5 | Integration testing, daily sync, credential management |
-| **Total** | **~89 functions** | **~5,400+ lines of code** |
+| **Total** | **~107 functions** | **~11,000+ lines of code** |
 
 **Production Runbooks:**
 - `Daily-Sync.ps1` - Production-ready scheduled sync with config file support (~650 lines)
@@ -121,13 +150,14 @@ The module uses automatic function loading via dot-sourcing in `FortigiGraph.psm
 
 ```powershell
 # Get public and private function definition files
-$base    = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'base') -Include *.ps1 -Recurse )
-$generic = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'generic') -Include *.ps1 -Recurse )
+$base     = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'base') -Include *.ps1 -Recurse )
+$generic  = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'generic') -Include *.ps1 -Recurse )
 $specific = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'specific') -Include *.ps1 -Recurse )
-$SQL = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'SQL') -Include *.ps1 -Recurse )
+$SQL      = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'SQL') -Include *.ps1 -Recurse )
+$sync     = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'Sync') -Include *.ps1 -Recurse )
 
 # Dot source all function files
-foreach ($import in @($base + $generic + $specific + $SQL)) {
+foreach ($import in @($base + $generic + $specific + $SQL + $sync)) {
     . $import.fullname
 }
 ```
@@ -165,6 +195,46 @@ All functions follow PowerShell best practices:
    - Include bearer token in Authorization header
 
 ### 5. SQL Connection Management (NEW)
+
+#### Connection with ConfigFile Support
+
+`Connect-FGSQLServer` supports two parameter sets:
+
+**Explicit Parameters:**
+```powershell
+Connect-FGSQLServer `
+    -SubscriptionId "..." `
+    -ResourceGroupName "..." `
+    -ServerName "..." `
+    -DatabaseName "..." `
+    -AdminUsername "..." `
+    -AdminPassword (ConvertTo-SecureString "..." -AsPlainText -Force)
+```
+
+**ConfigFile Parameter (NEW):**
+```powershell
+# Read all connection details from config file (like Get-FGAccessToken)
+Connect-FGSQLServer -ConfigFile "C:\Config\production.json"
+```
+
+**Firewall Updates:**
+- **Default behavior**: Firewall rules are automatically updated to allow current IP
+- Use `-SkipFirewallUpdate` switch to skip firewall updates
+- This ensures smooth connections without manual firewall configuration
+
+**Config File Structure:**
+```json
+{
+  "Azure": {
+    "SubscriptionId": "...",
+    "ResourceGroupName": "...",
+    "SQLServerName": "...",
+    "DatabaseName": "...",
+    "AdminUsername": "...",
+    "AdminUserPassword": "..."  // Can be encrypted with DPAPI
+  }
+}
+```
 
 #### The Helper Pattern: `Invoke-FGSQLCommand`
 
@@ -723,6 +793,58 @@ Sync-FGUser -AdditionalAttributes @('employeeType')
    - Add to integration tests
    - Test with real Graph API and SQL Server
 6. **Update version:** Modify `_Build/CreatePSD.ps1` if publishing
+
+## Analytical Views
+
+FortigiGraph creates SQL views that provide instant insights into your identity governance data.
+
+### Access Package Views
+
+Created by `Initialize-FGAccessPackageViews`:
+
+**Permission Assignment Views:**
+- `vw_UserPermissionAssignmentViaAccessPackage` - Shows which users have which groups through access packages
+- `vw_UserPermissionAssignments` - Comprehensive view combining ALL permission assignments (direct, indirect, eligible, owner)
+- `vw_AccessPackageMembershipGaps` - IST vs SOLL: Direct memberships that should be via packages
+- `vw_AccessPackageEffectiveAssignments` - Current active access package assignments per user
+
+**Request Timeline Views:**
+- `vw_ApprovedRequestTimeline` - Approval times categorized by response speed
+- `vw_PendingRequestTimeline` - Aging analysis of pending requests
+- `vw_DeniedRequestTimeline` - Denial patterns and reasons
+- `vw_RequestResponseMetrics` - Aggregate approval statistics
+
+**Access Review Views:**
+- `vw_AccessReviewSummary` - Review completion and approval rates
+- `vw_PendingAccessReviews` - Overdue and pending reviews
+
+**Package Analytics:**
+- `vw_AccessPackageResourceSummary` - What resources each package grants
+- `vw_AccessPackageMembershipSummary` - Group membership distribution
+
+### Group Membership Views
+
+Created by `Initialize-FGGroupMembershipViews`:
+
+**Core Membership Views:**
+- `vw_GraphGroupMembersRecursive` - Calculates ALL memberships (direct + indirect) with paths
+  - Uses recursive CTE to traverse group nesting
+  - Shows depth and complete path for each membership
+  - **Important**: With 250K+ members, queries may take 5-10 minutes (view recalculates on-demand)
+  - Columns: groupId, memberId, memberType, membershipType, depth, path
+- `vw_GraphGroupNestedMembers` - Shows ONLY indirect/nested memberships
+- `vw_GraphGroupEligibleMembers` - Shows ONLY PIM eligible members
+
+**Performance Notes:**
+- The recursive view is always accurate (real-time calculation) but can be slow for large datasets
+- All views automatically filter to current data using ValidTo column
+- Proper indexes (via `Initialize-FGGroupMembershipIndexes`) are critical for performance
+
+**View Name Changes (Important):**
+- ❌ Old: `vw_GraphGroupMembershipType` → ✅ New: `vw_UserPermissionAssignments`
+- ❌ Old: `vw_UserAccessPackageResources` → ✅ New: `vw_UserPermissionAssignmentViaAccessPackage`
+
+These renames better reflect the views' purpose: showing user permission assignments rather than just group memberships.
 
 ## Key Functions Reference
 
