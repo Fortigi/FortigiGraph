@@ -122,3 +122,150 @@ WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfIsConti
 WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_WritebackEnabled', using NVARCHAR(MAX). Consider adding to type map.
   ✓ Groups synced: 9427 (table: GraphGroups)
   ✓ Direct memberships synced: 246022 (table: GraphGroupMembers)
+  ✓ Eligible memberships synced: 492 (table: GraphGroupEligibleMembers)
+  ✓ Group ownerships synced: 5888 (table: GraphGroupOwners)
+  ✓ Catalogs synced: 38 (table: GraphCatalogs)
+  ✓ Access packages synced: 419 (table: GraphAccessPackages)
+  ✓ Access package assignments synced: 15843 (table: GraphAccessPackageAssignments)
+  ✓ Access package resource role scopes synced: 1863 (table: GraphAccessPackageResourceRoleScopes)
+  ✓ Access package assignment policies synced: 486 (table: GraphAccessPackageAssignmentPolicies)
+  ✗ AccessPackageAssignmentRequests sync failed
+    Failed to fetch assignment requests from Graph: 
+{
+  "error": {
+    "code": "UnknownError",
+    "message": "",
+    "innerError": {
+      "date": "2026-02-02T12:10:15",
+      "request-id": "6aec24a0-f9bd-403e-a4e7-1825f022252c",
+      "client-request-id": "6aec24a0-f9bd-403e-a4e7-1825f022252c"
+    }
+  }
+}
+  ✓ Access package access reviews synced: 7710 (table: GraphAccessPackageAccessReviewDecisions)
+
+=== Creating Performance Indexes ===
+  → Creating indexes for group membership tables...
+[14:19:58] Creating performance indexes for group membership tables...
+
+[14:19:58] Processing index: IX_GroupMembers_GroupId_ValidTo on GraphGroupMembers
+  Purpose: Optimizes group member lookups (used by views)
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupMembers_MemberId_ValidTo on GraphGroupMembers
+  Purpose: Critical for recursive CTE joins (nested groups)
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupMembers_Current on GraphGroupMembers
+  Purpose: Filtered index for current memberships only
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupOwners_GroupId_ValidTo on GraphGroupOwners
+  Purpose: Optimizes owner lookups and NOT EXISTS checks
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupOwners_Current on GraphGroupOwners
+  Purpose: Filtered index for current owners only
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupEligibleMembers_GroupId_ValidTo on GraphGroupEligibleMembers
+  Purpose: Optimizes eligible member lookups and NOT EXISTS checks
+  ⏭️  Index already exists (skipping)
+
+[14:19:58] Processing index: IX_GroupEligibleMembers_Current on GraphGroupEligibleMembers
+  Purpose: Filtered index for current eligible members only
+  ⏭️  Index already exists (skipping)
+
+========================================
+Index Creation Complete!
+========================================
+Created: 0
+Skipped: 7 (already existed)
+Total: 7
+
+Performance Impact:
+  - vw_UserPermissionAssignments queries should be 10-100x faster
+  - Recursive membership calculations significantly improved
+  - JOIN operations on group membership data optimized
+========================================
+  → All performance indexes already exist (7 indexes)
+
+=== Creating Analysis Views ===
+  → Creating group membership analysis views...
+[14:19:59] Creating group membership analysis views...
+
+[14:19:59] Creating view: vw_GraphGroupMembersRecursive
+  Purpose: Calculates ALL memberships (direct + indirect) with paths
+  Benefit: Eliminates need for transitive members sync (75% faster!)
+  ✅ Created: vw_GraphGroupMembersRecursive
+
+[14:19:59] Creating view: vw_UserPermissionAssignments
+  Purpose: Shows ALL members with type indicator (Owner/Direct/Indirect/Eligible)
+  Note: Uses vw_GraphGroupMembersRecursive for direct/indirect memberships
+  ✅ Created: vw_UserPermissionAssignments
+
+========================================
+Views Created Successfully!
+========================================
+
+View 1: vw_GraphGroupMembersRecursive
+  - Calculates ALL memberships (direct + indirect) recursively
+  - Uses ONLY direct members table (no transitive sync needed!)
+  - Includes complete path for each membership
+  - Shows depth level (how many groups deep)
+  - Cycle prevention via depth limit (max 10 levels)
+  - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
+
+View 2: vw_UserPermissionAssignments ⭐ RECOMMENDED
+  - Comprehensive view combining ALL membership types
+  - Includes: Owner, Direct, Indirect, Eligible
+  - Single query to get complete membership picture
+  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo
+========================================
+True
+True
+  ✓ Group membership analysis views created
+  → Creating access package analysis views...
+[14:19:59] Creating access package analysis views...
+  [14:19:59] Created view: vw_UserPermissionAssignmentViaAccessPackage
+  [14:19:59] Created view: vw_DirectGroupMemberships
+  [14:19:59] Created view: vw_DirectGroupOwnerships
+  [14:19:59] Created view: vw_UnmanagedPermissions
+  [14:19:59] Created view: vw_AccessPackageAssignmentDetails
+  [14:19:59] Created view: vw_AccessPackageLastReview
+  [14:20:00] Created view: vw_ApprovedRequestTimeline
+  [14:20:00] Created view: vw_DeniedRequestTimeline
+  [14:20:00] Created view: vw_PendingRequestTimeline
+  [14:20:00] Created view: vw_RequestResponseMetrics
+[14:20:00] Access package views created successfully
+  ✓ Access package analysis views created
+
+=== Sync Summary ===
+
+  Sync Duration: 01:20:19
+
+  Users:                   4357
+  Groups:                  9427
+  Direct Memberships:      246022
+  Eligible Memberships:    492
+  Group Ownerships:        5888
+  Catalogs:                38
+  Access Packages:         419
+  Package Assignments:     15843
+  Resource Role Scopes:    1863
+  Assignment Policies:     486
+  Access Reviews:          7710
+
+  Errors encountered: 1
+    - AccessPackageAssignmentRequests sync failed
+
+========================================
+Sync Complete!
+========================================
+Completed: 2026-02-02 14:20:00
+
+Transcript saved to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\sync-portofrotterdam-20260202-125940.log
+**********************
+PowerShell transcript end
+End time: 20260202142000
+**********************
