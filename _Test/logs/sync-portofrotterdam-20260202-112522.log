@@ -1,0 +1,287 @@
+**********************
+PowerShell transcript start
+Start time: 20260202112522
+Username: AzureAD\WimvandenHeijkant
+RunAs User: AzureAD\WimvandenHeijkant
+Configuration Name: 
+Machine: WIM-LAPTOP (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 22876
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+
+========================================
+FortigiGraph Daily Sync
+========================================
+Started: 2026-02-02 11:25:22
+Config:  .\Config\portofrotterdam.json
+
+=== Loading Configuration ===
+  ✓ Configuration loaded
+  ✓ Configuration validated
+  → Reading sync configuration from config file...
+  ✓ Sync configuration read from config file
+  → Using separate Azure TenantId: portofrotterdam.onmicrosoft.com
+  → Loading secure credentials...
+  ✓ Secure credentials loaded
+
+=== Connecting to Azure ===
+  → Switching Azure context...
+  ✓ Connected to Azure: IAM DevTest (w.heijkant@portofrotterdam.onmicrosoft.com)
+
+=== Validating SQL Server ===
+  → Checking SQL Server: IdentityInsightsPor...
+  ✓ SQL Server exists: identityinsightspor
+  → Connecting to SQL Server...
+Setting Azure subscription context...
+Retrieving SQL Server details from Azure...
+  Found server: identityinsightspor
+  Location: northeurope
+  FQDN: identityinsightspor.database.windows.net
+Updating firewall rules...
+  Your current IP: 141.176.60.14
+  Updated existing firewall rule
+SQL Connection Test: SUCCESS
+  Server: identityinsightspor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 02/02/2026 10:25:26
+Already connected to identityinsightspor.database.windows.net / GraphData
+
+Name                           Value
+----                           -----
+ConnectionStatus               Connected
+Edition                        SQL Azure
+Version                        12.0.2000.8
+CurrentTime                    02/02/2026 10:25:26
+Database                       GraphData
+Server                         identityinsightspor.database.windows.net
+  ✓ Connected to SQL Server
+SQL Connection Test: SUCCESS
+  Server: identityinsightspor.database.windows.net
+  Database: GraphData
+  Version: 12.0.2000.8
+  Edition: SQL Azure
+  Server Time: 02/02/2026 10:25:26
+  ✓ SQL connection verified: GraphData
+
+=== Connecting to Microsoft Graph ===
+  → Checking existing Graph token...
+  → Existing token is expired, getting new token...
+  → Getting Graph access token...
+  ✓ Graph access token obtained
+
+=== Starting Data Synchronization (Parallel) ===
+  → Using parallel execution (up to 6 operations concurrently)
+  → Starting user sync job...
+  → Starting group sync job...
+  → Starting direct membership sync job...
+  → Starting eligible membership sync job...
+  → Starting group ownership sync job...
+  → Starting catalogs sync job...
+  → Starting access packages sync job...
+  → Starting access package assignments sync job...
+  → Starting access package resource role scopes sync job...
+  → Starting access package assignment policies sync job...
+  → Starting access package assignment requests sync job...
+  → Starting access package access reviews sync job...
+  → Waiting for parallel jobs to complete...
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentUserID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDepartmentID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfTeamName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfTeamID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfManagerID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfCostCenterID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBusinessUnitID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfDivisionName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfBirthName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfLastnamePrefix', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfFormalName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_employeeID', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_middleName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sAMAccountName', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_extensionAttribute3', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentEndDate', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfEmploymentStartDate', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfFromHR', using NVARCHAR(MAX). Consider adding to type map.
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_sfIsContingentWorker', using NVARCHAR(MAX). Consider adding to type map.
+  ✓ Users synced: 4356 (table: GraphUsers)
+WARNING: Unknown attribute 'extension_8ce8d3db3b314def88d829e15494e83f_WritebackEnabled', using NVARCHAR(MAX). Consider adding to type map.
+  ✓ Groups synced: 9428 (table: GraphGroups)
+WARNING: [12:01:35] Failed to fetch members for group 'Duurzame GWW Projecten' (f7f5d22e-a71a-4051-9aa8-c6fa30fa22b6): 
+{
+  "error": {
+    "code": "Request_ResourceNotFound",
+    "message": "Resource \u0027f7f5d22e-a71a-4051-9aa8-c6fa30fa22b6\u0027 does not exist or one of its queried reference-property objects are not present.",
+    "innerError": {
+      "date": "2026-02-02T11:01:34",
+      "request-id": "18c9fa17-2202-47eb-90c2-41720aaa0737",
+      "client-request-id": "18c9fa17-2202-47eb-90c2-41720aaa0737"
+    }
+  }
+}
+  ✓ Direct memberships synced: 245978 (table: GraphGroupMembers)
+  ✓ Eligible memberships synced: 513 (table: GraphGroupEligibleMembers)
+WARNING: Error processing group Duurzame GWW Projecten: 
+{
+  "error": {
+    "code": "Request_ResourceNotFound",
+    "message": "Resource \u0027f7f5d22e-a71a-4051-9aa8-c6fa30fa22b6\u0027 does not exist or one of its queried reference-property objects are not present.",
+    "innerError": {
+      "date": "2026-02-02T10:44:31",
+      "request-id": "ef52bc73-08e6-4287-8111-8725074afd94",
+      "client-request-id": "ef52bc73-08e6-4287-8111-8725074afd94"
+    }
+  }
+}
+  ✓ Group ownerships synced: 5888 (table: GraphGroupOwners)
+  ✓ Catalogs synced: 38 (table: GraphCatalogs)
+  ✓ Access packages synced: 419 (table: GraphAccessPackages)
+  ⚠ AccessPackageAssignments: [11:29:01] Failed during sync: Bulk merge failed: Exception calling "Read" with "0" argument(s): "The MERGE statement attempted to UPDATE or DELETE the same row more than once. This happens when a target row matches more than one source row. A MERGE statement cannot UPDATE/DELETE the same row of the target table multiple times. Refine the ON clause to ensure a target row matches at most one source row, or use the GROUP BY clause to group the source rows."
+  ✗ AccessPackageAssignments sync failed
+    SQL command execution failed: Exception calling "Rollback" with "0" argument(s): "There is already an open DataReader associated with this Command which must be closed first."
+  ✓ Access package resource role scopes synced: 1863 (table: GraphAccessPackageResourceRoleScopes)
+  ✓ Access package assignment policies synced: 486 (table: GraphAccessPackageAssignmentPolicies)
+WARNING: Source data contains duplicate request IDs (Graph API pagination bug)
+WARNING: Total requests: 27684, Unique IDs: 27680, Duplicates: 4
+  ✓ Access package assignment requests synced: 27680 (table: GraphAccessPackageAssignmentRequests)
+  ✓ Access package access reviews synced: 7710 (table: GraphAccessPackageAccessReviewDecisions)
+
+=== Creating Performance Indexes ===
+  → Creating indexes for group membership tables...
+[12:47:47] Creating performance indexes for group membership tables...
+
+[12:47:47] Processing index: IX_GroupMembers_GroupId_ValidTo on GraphGroupMembers
+  Purpose: Optimizes group member lookups (used by views)
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupMembers_MemberId_ValidTo on GraphGroupMembers
+  Purpose: Critical for recursive CTE joins (nested groups)
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupMembers_Current on GraphGroupMembers
+  Purpose: Filtered index for current memberships only
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupOwners_GroupId_ValidTo on GraphGroupOwners
+  Purpose: Optimizes owner lookups and NOT EXISTS checks
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupOwners_Current on GraphGroupOwners
+  Purpose: Filtered index for current owners only
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupEligibleMembers_GroupId_ValidTo on GraphGroupEligibleMembers
+  Purpose: Optimizes eligible member lookups and NOT EXISTS checks
+  ⏭️  Index already exists (skipping)
+
+[12:47:47] Processing index: IX_GroupEligibleMembers_Current on GraphGroupEligibleMembers
+  Purpose: Filtered index for current eligible members only
+  ⏭️  Index already exists (skipping)
+
+========================================
+Index Creation Complete!
+========================================
+Created: 0
+Skipped: 7 (already existed)
+Total: 7
+
+Performance Impact:
+  - vw_UserPermissionAssignments queries should be 10-100x faster
+  - Recursive membership calculations significantly improved
+  - JOIN operations on group membership data optimized
+========================================
+  → All performance indexes already exist (7 indexes)
+
+=== Creating Analysis Views ===
+  → Creating group membership analysis views...
+[12:47:47] Creating group membership analysis views...
+
+[12:47:47] Creating view: vw_GraphGroupMembersRecursive
+  Purpose: Calculates ALL memberships (direct + indirect) with paths
+  Benefit: Eliminates need for transitive members sync (75% faster!)
+  ✅ Created: vw_GraphGroupMembersRecursive
+
+[12:47:48] Creating view: vw_UserPermissionAssignments
+  Purpose: Shows ALL members with type indicator (Owner/Direct/Indirect/Eligible)
+  Note: Uses vw_GraphGroupMembersRecursive for direct/indirect memberships
+  ✅ Created: vw_UserPermissionAssignments
+
+========================================
+Views Created Successfully!
+========================================
+
+View 1: vw_GraphGroupMembersRecursive
+  - Calculates ALL memberships (direct + indirect) recursively
+  - Uses ONLY direct members table (no transitive sync needed!)
+  - Includes complete path for each membership
+  - Shows depth level (how many groups deep)
+  - Cycle prevention via depth limit (max 10 levels)
+  - Columns: groupId, memberId, memberType, membershipType, depth, path, ValidFrom, ValidTo
+
+View 2: vw_UserPermissionAssignments ⭐ RECOMMENDED
+  - Comprehensive view combining ALL membership types
+  - Includes: Owner, Direct, Indirect, Eligible
+  - Single query to get complete membership picture
+  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo
+========================================
+True
+True
+  ✓ Group membership analysis views created
+  → Creating access package analysis views...
+[12:47:48] Creating access package analysis views...
+  [12:47:48] Created view: vw_UserPermissionAssignmentViaAccessPackage
+  [12:47:48] Created view: vw_DirectGroupMemberships
+  [12:47:48] Created view: vw_DirectGroupOwnerships
+  [12:47:48] Created view: vw_UnmanagedPermissions
+  [12:47:48] Created view: vw_AccessPackageAssignmentDetails
+  [12:47:48] Created view: vw_AccessPackageLastReview
+  [12:47:48] Created view: vw_ApprovedRequestTimeline
+  [12:47:48] Created view: vw_DeniedRequestTimeline
+  [12:47:48] Created view: vw_PendingRequestTimeline
+  [12:47:48] Created view: vw_RequestResponseMetrics
+[12:47:48] Access package views created successfully
+  ✓ Access package analysis views created
+
+=== Sync Summary ===
+
+  Sync Duration: 01:22:26
+
+  Users:                   4356
+  Groups:                  9428
+  Direct Memberships:      245978
+  Eligible Memberships:    513
+  Group Ownerships:        5888
+  Catalogs:                38
+  Access Packages:         419
+  Resource Role Scopes:    1863
+  Assignment Policies:     486
+  Assignment Requests:     27680
+  Access Reviews:          7710
+
+  Errors encountered: 1
+    - AccessPackageAssignments sync failed
+
+========================================
+Sync Complete!
+========================================
+Completed: 2026-02-02 12:47:48
+
+Transcript saved to: C:\Source\Fortigi\GitHub\FortigiGraph\_Test\logs\sync-portofrotterdam-20260202-112522.log
+**********************
+PowerShell transcript end
+End time: 20260202124748
+**********************
