@@ -239,6 +239,26 @@ function Sync-FGAccessPackageAssignment {
         return
     }
 
+    # Check for NULL or duplicate IDs in source data (Graph API pagination bug)
+    $nullIds = $allAssignments | Where-Object { -not $_.id -or [string]::IsNullOrWhiteSpace($_.id) }
+    if ($nullIds) {
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] CRITICAL: Found $($nullIds.Count) assignments with NULL/empty IDs!"
+        Write-Warning "This will cause MERGE to fail. Removing NULL ID assignments from sync."
+        $allAssignments = $allAssignments | Where-Object { $_.id -and -not [string]::IsNullOrWhiteSpace($_.id) }
+    }
+
+    $groupedById = $allAssignments | Group-Object -Property id
+    $duplicates = $groupedById | Where-Object { $_.Count -gt 1 }
+
+    if ($duplicates) {
+        Write-Warning "Source data contains duplicate assignment IDs (Graph API pagination bug)"
+        Write-Warning "Total assignments: $($allAssignments.Count), Unique IDs: $($groupedById.Count), Duplicates: $($allAssignments.Count - $groupedById.Count)"
+
+        # Deduplicate by keeping only the first occurrence of each ID
+        $allAssignments = $groupedById | ForEach-Object { $_.Group[0] }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] After deduplication: $($allAssignments.Count) unique assignments" -ForegroundColor Green
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing access package assignments to SQL Server..." -ForegroundColor Cyan
 
