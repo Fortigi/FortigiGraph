@@ -30,10 +30,20 @@ function Sync-FGGroupMember {
     .PARAMETER IncludeTransitiveMembers
     If specified, includes transitive (nested) members. Default: false (direct members only)
 
+    .PARAMETER UseBatching
+    If specified, syncs each group's members to SQL immediately instead of collecting all in memory first.
+    This uses much less memory (constant vs linear) at the cost of more SQL operations.
+    Recommended for Azure Automation or other memory-constrained environments.
+
     .EXAMPLE
     Sync-FGGroupMember
 
-    Syncs all group memberships for all groups
+    Syncs all group memberships for all groups (fast, high memory usage)
+
+    .EXAMPLE
+    Sync-FGGroupMember -UseBatching
+
+    Syncs all group memberships using batched mode (slower, low memory usage)
 
     .EXAMPLE
     Sync-FGGroupMember -Filter "securityEnabled eq true"
@@ -68,7 +78,10 @@ function Sync-FGGroupMember {
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
-        [switch]$IncludeTransitiveMembers
+        [switch]$IncludeTransitiveMembers,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$UseBatching
     )
 
     # Check SQL connection
@@ -81,7 +94,8 @@ function Sync-FGGroupMember {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group membership sync..." -ForegroundColor Cyan
+    $syncMode = if ($UseBatching) { "batched (low memory)" } else { "bulk (high performance)" }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group membership sync ($syncMode)..." -ForegroundColor Cyan
 
     # Define attributes for the membership table
     $attributes = @('groupId', 'memberId', 'memberType')
@@ -91,6 +105,12 @@ function Sync-FGGroupMember {
         'groupId' = 'UNIQUEIDENTIFIER'
         'memberId' = 'UNIQUEIDENTIFIER'
         'memberType' = 'NVARCHAR(100)'  # e.g., #microsoft.graph.user
+    }
+
+    # Add syncBatchId for batching mode to track which records were seen
+    if ($UseBatching) {
+        $attributes += 'syncBatchId'
+        $graphToSqlTypeMap['syncBatchId'] = 'UNIQUEIDENTIFIER'
     }
 
     # Build column definitions
@@ -113,6 +133,15 @@ function Sync-FGGroupMember {
         }
         elseif ($tableExists) {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists." -ForegroundColor Cyan
+
+            # For batching mode, ensure syncBatchId column exists
+            if ($UseBatching) {
+                $existingColumns = Get-FGSQLTableSchema -TableName $TableName
+                if ($existingColumns -notcontains 'syncBatchId') {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Adding syncBatchId column for batching support..." -ForegroundColor Yellow
+                    Add-FGSQLTableColumn -TableName $TableName -Columns @{ 'syncBatchId' = 'UNIQUEIDENTIFIER' }
+                }
+            }
         }
         else {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' does not exist. Will be created..." -ForegroundColor Cyan
@@ -174,175 +203,366 @@ function Sync-FGGroupMember {
         return
     }
 
-    # Fetch all group memberships (iterating through each group)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching group memberships..." -ForegroundColor Cyan
-    Write-Host "  This may take a while for tenants with many groups and members..." -ForegroundColor Gray
+    # Different sync strategies based on batching mode
+    if ($UseBatching) {
+        # ============================================
+        # BATCHED MODE: Low memory, process per group
+        # ============================================
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Using batched sync mode (low memory)..." -ForegroundColor Cyan
+        Write-Host "  Each group's members will be synced to SQL immediately" -ForegroundColor Gray
 
-    $allMemberships = @()
-    $processedGroups = 0
-    $membershipStartTime = Get-Date
+        # Generate a unique batch ID for this sync run
+        $syncBatchId = [guid]::NewGuid()
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sync batch ID: $syncBatchId" -ForegroundColor Gray
 
-    foreach ($group in $groups) {
-        $processedGroups++
-        $percentComplete = [math]::Round(($processedGroups / $totalGroups) * 100, 1)
-
-        Write-Progress -Activity "Fetching Group Memberships" -Status "Processing group $processedGroups of $totalGroups ($percentComplete%)" -PercentComplete $percentComplete
-
-        # Choose members or transitiveMembers endpoint
-        if ($IncludeTransitiveMembers) {
-            $memberUri = "$graphUri/groups/$($group.id)/transitiveMembers?`$select=id"
-        }
-        else {
-            $memberUri = "$graphUri/groups/$($group.id)/members?`$select=id"
-        }
-
-        try {
-            # Fetch all members for this group using Invoke-FGGetRequest (handles token validation and pagination)
-            $members = Invoke-FGGetRequest -URI $memberUri
-            if (-not $members) {
-                $members = @()
-            }
-
-            # Create membership records
-            foreach ($member in $members) {
-                $membership = [PSCustomObject]@{
-                    groupId = $group.id
-                    memberId = $member.id
-                    memberType = $member.'@odata.type'
-                }
-                $allMemberships += $membership
-            }
-        }
-        catch {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch members for group '$($group.displayName)' ($($group.id)): $_"
-        }
-    }
-
-    Write-Progress -Activity "Fetching Group Memberships" -Completed
-
-    $membershipElapsed = (Get-Date) - $membershipStartTime
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total memberships fetched: $($allMemberships.Count) from $totalGroups groups (took $([math]::Round($membershipElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
-
-    if ($allMemberships.Count -eq 0) {
-        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No memberships found to sync."
-        return
-    }
-
-    # Sync to SQL using bulk operations (HIGH PERFORMANCE)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing memberships to SQL Server..." -ForegroundColor Cyan
-
-    # Build DataTable for bulk operations
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
-
-    $dataTable = New-Object System.Data.DataTable
-    $dataTable.Columns.Add("groupId", [guid]) | Out-Null
-    $dataTable.Columns.Add("memberId", [guid]) | Out-Null
-    $dataTable.Columns.Add("memberType", [string]) | Out-Null
-
-    foreach ($membership in $allMemberships) {
-        $row = $dataTable.NewRow()
-        $row["groupId"] = [guid]$membership.groupId
-        $row["memberId"] = [guid]$membership.memberId
-        $row["memberType"] = if ($membership.memberType) { $membership.memberType } else { [DBNull]::Value }
-        $dataTable.Rows.Add($row)
-    }
-
-    $syncResult = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Database connection established" -ForegroundColor Gray
-
-        # Start transaction
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
-        $transaction = $connection.BeginTransaction()
-
-        $syncedCount = 0
+        $processedGroups = 0
+        $totalMemberships = 0
+        $totalInserted = 0
+        $totalUpdated = 0
         $errorCount = 0
-        $deletedCount = 0
-        $syncStartTime = Get-Date
+        $membershipStartTime = Get-Date
 
-        try {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) memberships..." -ForegroundColor Cyan
+        foreach ($group in $groups) {
+            $processedGroups++
+            $percentComplete = [math]::Round(($processedGroups / $totalGroups) * 100, 1)
 
-            # Use bulk MERGE operation - much faster than row-by-row
-            $mergeResult = Invoke-FGSQLBulkMerge `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('groupId', 'memberId')
+            Write-Progress -Activity "Syncing Group Memberships (Batched)" `
+                -Status "Group $processedGroups of $totalGroups ($percentComplete%) - $totalMemberships members synced" `
+                -PercentComplete $percentComplete
 
-            $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
-
-            $syncElapsed = (Get-Date) - $syncStartTime
-            $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate memberships/sec)" -ForegroundColor Green
-
-            # Handle deletions using bulk delete (avoids massive VALUES clause)
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
-
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('groupId', 'memberId')
-
-            if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount memberships that no longer exist in Graph" -ForegroundColor Yellow
+            # Choose members or transitiveMembers endpoint
+            if ($IncludeTransitiveMembers) {
+                $memberUri = "$graphUri/groups/$($group.id)/transitiveMembers?`$select=id"
             }
             else {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted memberships found" -ForegroundColor Green
+                $memberUri = "$graphUri/groups/$($group.id)/members?`$select=id"
             }
 
-            # Commit transaction
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
-            $transaction.Commit()
+            try {
+                # Fetch members for this group
+                $members = Invoke-FGGetRequest -URI $memberUri
+                if (-not $members) {
+                    $members = @()
+                }
 
-            $totalElapsed = (Get-Date) - $syncStartTime
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($totalElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+                if ($members.Count -eq 0) {
+                    continue
+                }
 
-            # Cleanup
-            $transaction.Dispose()
+                # Build small DataTable for this group's members
+                $dataTable = New-Object System.Data.DataTable
+                $dataTable.Columns.Add("groupId", [guid]) | Out-Null
+                $dataTable.Columns.Add("memberId", [guid]) | Out-Null
+                $dataTable.Columns.Add("memberType", [string]) | Out-Null
+                $dataTable.Columns.Add("syncBatchId", [guid]) | Out-Null
 
-            return @{
-                SyncedCount = $syncedCount
-                ErrorCount = $errorCount
-                DeletedCount = $deletedCount
+                foreach ($member in $members) {
+                    $row = $dataTable.NewRow()
+                    $row["groupId"] = [guid]$group.id
+                    $row["memberId"] = [guid]$member.id
+                    $row["memberType"] = if ($member.'@odata.type') { $member.'@odata.type' } else { [DBNull]::Value }
+                    $row["syncBatchId"] = $syncBatchId
+                    $dataTable.Rows.Add($row)
+                }
+
+                $totalMemberships += $dataTable.Rows.Count
+
+                # Sync this batch to SQL immediately
+                $batchResult = Invoke-FGSQLCommand -ScriptBlock {
+                    param($connection)
+
+                    $transaction = $connection.BeginTransaction()
+
+                    try {
+                        # MERGE this group's members (updates syncBatchId for existing, inserts new)
+                        $mergeResult = Invoke-FGSQLBulkMerge `
+                            -Connection $connection `
+                            -Transaction $transaction `
+                            -TargetTableName $TableName `
+                            -DataTable $dataTable `
+                            -KeyColumns @('groupId', 'memberId')
+
+                        $transaction.Commit()
+                        $transaction.Dispose()
+
+                        return @{
+                            Inserted = $mergeResult.Inserted
+                            Updated = $mergeResult.Updated
+                        }
+                    }
+                    catch {
+                        if ($transaction) {
+                            $transaction.Rollback()
+                            $transaction.Dispose()
+                        }
+                        throw
+                    }
+                }
+
+                $totalInserted += $batchResult.Inserted
+                $totalUpdated += $batchResult.Updated
+
+                # Clear the DataTable to free memory
+                $dataTable.Clear()
+                $dataTable.Dispose()
+                $dataTable = $null
+            }
+            catch {
+                $errorCount++
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch members for group '$($group.displayName)' ($($group.id)): $_"
             }
         }
-        catch {
-            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during sync: $_"
-            if ($transaction) {
-                $transaction.Rollback()
+
+        Write-Progress -Activity "Syncing Group Memberships (Batched)" -Completed
+
+        $membershipElapsed = (Get-Date) - $membershipStartTime
+        $rate = if ($membershipElapsed.TotalSeconds -gt 0) { [math]::Round($totalMemberships / $membershipElapsed.TotalSeconds, 1) } else { 0 }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Batch sync completed: $totalInserted inserted, $totalUpdated updated ($rate memberships/sec)" -ForegroundColor Green
+
+        # Now delete records that weren't seen in this sync (stale memberships)
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
+
+        $deleteResult = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+
+            $transaction = $connection.BeginTransaction()
+
+            try {
+                # Delete records where syncBatchId doesn't match current batch (or is NULL for old records)
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.Transaction = $transaction
+                $deleteCmd.CommandText = @"
+                    DELETE FROM dbo.[$TableName]
+                    WHERE syncBatchId IS NULL OR syncBatchId <> @syncBatchId
+"@
+                $deleteCmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
+                $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+                $transaction.Commit()
                 $transaction.Dispose()
+
+                return $deletedCount
             }
-            throw
+            catch {
+                if ($transaction) {
+                    $transaction.Rollback()
+                    $transaction.Dispose()
+                }
+                throw
+            }
+        }
+
+        if ($deleteResult -gt 0) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deleteResult memberships that no longer exist in Graph" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted memberships found" -ForegroundColor Green
+        }
+
+        $syncedCount = $totalInserted + $totalUpdated
+        $deletedCount = $deleteResult
+
+        Write-Host "`n========================================" -ForegroundColor Green
+        Write-Host "Sync Complete! (Batched Mode)" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Green
+        Write-Host "Table:           $TableName" -ForegroundColor White
+        Write-Host "Groups:          $totalGroups" -ForegroundColor White
+        Write-Host "Memberships:     $totalMemberships" -ForegroundColor White
+        Write-Host "Inserted:        $totalInserted" -ForegroundColor White
+        Write-Host "Updated:         $totalUpdated" -ForegroundColor White
+        Write-Host "Deleted:         $deletedCount" -ForegroundColor White
+        Write-Host "Errors:          $errorCount" -ForegroundColor White
+        Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
+        Write-Host "========================================`n" -ForegroundColor Green
+
+        return @{
+            TableName = $TableName
+            TotalGroups = $totalGroups
+            TotalMemberships = $totalMemberships
+            SyncedCount = $syncedCount
+            InsertedCount = $totalInserted
+            UpdatedCount = $totalUpdated
+            DeletedCount = $deletedCount
+            ErrorCount = $errorCount
+            Mode = "Batched"
         }
     }
+    else {
+        # ============================================
+        # BULK MODE: High performance, high memory
+        # ============================================
 
-    $syncedCount = $syncResult.SyncedCount
-    $errorCount = $syncResult.ErrorCount
-    $deletedCount = $syncResult.DeletedCount
+        # Fetch all group memberships (iterating through each group)
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching group memberships..." -ForegroundColor Cyan
+        Write-Host "  This may take a while for tenants with many groups and members..." -ForegroundColor Gray
 
-    Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "Sync Complete!" -ForegroundColor Green
-    Write-Host "========================================" -ForegroundColor Green
-    Write-Host "Table:           $TableName" -ForegroundColor White
-    Write-Host "Groups:          $totalGroups" -ForegroundColor White
-    Write-Host "Memberships:     $($allMemberships.Count)" -ForegroundColor White
-    Write-Host "Synced:          $syncedCount" -ForegroundColor White
-    Write-Host "Deleted:         $deletedCount" -ForegroundColor White
-    Write-Host "Errors:          $errorCount" -ForegroundColor White
-    Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
-    Write-Host "========================================`n" -ForegroundColor Green
+        $allMemberships = @()
+        $processedGroups = 0
+        $membershipStartTime = Get-Date
 
-    return @{
-        TableName = $TableName
-        TotalGroups = $totalGroups
-        TotalMemberships = $allMemberships.Count
-        SyncedCount = $syncedCount
-        DeletedCount = $deletedCount
-        ErrorCount = $errorCount
+        foreach ($group in $groups) {
+            $processedGroups++
+            $percentComplete = [math]::Round(($processedGroups / $totalGroups) * 100, 1)
+
+            Write-Progress -Activity "Fetching Group Memberships" -Status "Processing group $processedGroups of $totalGroups ($percentComplete%)" -PercentComplete $percentComplete
+
+            # Choose members or transitiveMembers endpoint
+            if ($IncludeTransitiveMembers) {
+                $memberUri = "$graphUri/groups/$($group.id)/transitiveMembers?`$select=id"
+            }
+            else {
+                $memberUri = "$graphUri/groups/$($group.id)/members?`$select=id"
+            }
+
+            try {
+                # Fetch all members for this group using Invoke-FGGetRequest (handles token validation and pagination)
+                $members = Invoke-FGGetRequest -URI $memberUri
+                if (-not $members) {
+                    $members = @()
+                }
+
+                # Create membership records
+                foreach ($member in $members) {
+                    $membership = [PSCustomObject]@{
+                        groupId = $group.id
+                        memberId = $member.id
+                        memberType = $member.'@odata.type'
+                    }
+                    $allMemberships += $membership
+                }
+            }
+            catch {
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch members for group '$($group.displayName)' ($($group.id)): $_"
+            }
+        }
+
+        Write-Progress -Activity "Fetching Group Memberships" -Completed
+
+        $membershipElapsed = (Get-Date) - $membershipStartTime
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Total memberships fetched: $($allMemberships.Count) from $totalGroups groups (took $([math]::Round($membershipElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+
+        if ($allMemberships.Count -eq 0) {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No memberships found to sync."
+            return
+        }
+
+        # Sync to SQL using bulk operations (HIGH PERFORMANCE)
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing memberships to SQL Server..." -ForegroundColor Cyan
+
+        # Build DataTable for bulk operations
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
+
+        $dataTable = New-Object System.Data.DataTable
+        $dataTable.Columns.Add("groupId", [guid]) | Out-Null
+        $dataTable.Columns.Add("memberId", [guid]) | Out-Null
+        $dataTable.Columns.Add("memberType", [string]) | Out-Null
+
+        foreach ($membership in $allMemberships) {
+            $row = $dataTable.NewRow()
+            $row["groupId"] = [guid]$membership.groupId
+            $row["memberId"] = [guid]$membership.memberId
+            $row["memberType"] = if ($membership.memberType) { $membership.memberType } else { [DBNull]::Value }
+            $dataTable.Rows.Add($row)
+        }
+
+        $syncResult = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Database connection established" -ForegroundColor Gray
+
+            # Start transaction
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting transaction..." -ForegroundColor Gray
+            $transaction = $connection.BeginTransaction()
+
+            $syncedCount = 0
+            $errorCount = 0
+            $deletedCount = 0
+            $syncStartTime = Get-Date
+
+            try {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) memberships..." -ForegroundColor Cyan
+
+                # Use bulk MERGE operation - much faster than row-by-row
+                $mergeResult = Invoke-FGSQLBulkMerge `
+                    -Connection $connection `
+                    -Transaction $transaction `
+                    -TargetTableName $TableName `
+                    -DataTable $dataTable `
+                    -KeyColumns @('groupId', 'memberId')
+
+                $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
+
+                $syncElapsed = (Get-Date) - $syncStartTime
+                $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate memberships/sec)" -ForegroundColor Green
+
+                # Handle deletions using bulk delete (avoids massive VALUES clause)
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
+
+                $deletedCount = Invoke-FGSQLBulkDelete `
+                    -Connection $connection `
+                    -Transaction $transaction `
+                    -TargetTableName $TableName `
+                    -DataTable $dataTable `
+                    -KeyColumns @('groupId', 'memberId')
+
+                if ($deletedCount -gt 0) {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount memberships that no longer exist in Graph" -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted memberships found" -ForegroundColor Green
+                }
+
+                # Commit transaction
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Committing transaction..." -ForegroundColor Cyan
+                $transaction.Commit()
+
+                $totalElapsed = (Get-Date) - $syncStartTime
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Transaction committed successfully (took $([math]::Round($totalElapsed.TotalSeconds, 1))s)" -ForegroundColor Green
+
+                # Cleanup
+                $transaction.Dispose()
+
+                return @{
+                    SyncedCount = $syncedCount
+                    ErrorCount = $errorCount
+                    DeletedCount = $deletedCount
+                }
+            }
+            catch {
+                Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during sync: $_"
+                if ($transaction) {
+                    $transaction.Rollback()
+                    $transaction.Dispose()
+                }
+                throw
+            }
+        }
+
+        $syncedCount = $syncResult.SyncedCount
+        $errorCount = $syncResult.ErrorCount
+        $deletedCount = $syncResult.DeletedCount
+
+        Write-Host "`n========================================" -ForegroundColor Green
+        Write-Host "Sync Complete!" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Green
+        Write-Host "Table:           $TableName" -ForegroundColor White
+        Write-Host "Groups:          $totalGroups" -ForegroundColor White
+        Write-Host "Memberships:     $($allMemberships.Count)" -ForegroundColor White
+        Write-Host "Synced:          $syncedCount" -ForegroundColor White
+        Write-Host "Deleted:         $deletedCount" -ForegroundColor White
+        Write-Host "Errors:          $errorCount" -ForegroundColor White
+        Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
+        Write-Host "========================================`n" -ForegroundColor Green
+
+        return @{
+            TableName = $TableName
+            TotalGroups = $totalGroups
+            TotalMemberships = $allMemberships.Count
+            SyncedCount = $syncedCount
+            DeletedCount = $deletedCount
+            ErrorCount = $errorCount
+            Mode = "Bulk"
+        }
     }
 }

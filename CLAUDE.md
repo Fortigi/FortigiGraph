@@ -979,7 +979,7 @@ The config file supports a comprehensive `Sync` section:
       ]
     },
     "Groups": { "Enabled": true, "Filter": "" },
-    "GroupMembers": { "Enabled": true },
+    "GroupMembers": { "Enabled": true, "UseBatching": false },
     "GroupTransitiveMembers": { "Enabled": true },
     "GroupEligibleMembers": { "Enabled": false },
     "GroupOwners": { "Enabled": true },
@@ -995,6 +995,20 @@ The config file supports a comprehensive `Sync` section:
 - **[SYNC-CONFIG-GUIDE.md](_Test/SYNC-CONFIG-GUIDE.md)** - Config options and scenarios
 - **[config.dailysync-example.json](_Test/config.dailysync-example.json)** - Working example
 
+### GroupMembers UseBatching Option
+
+The `GroupMembers.UseBatching` option enables low-memory sync mode:
+
+| Mode | Memory Usage | Speed | When to Use |
+|------|--------------|-------|-------------|
+| `false` (default) | High (~250K records in memory) | Fast | Local machine, plenty of RAM |
+| `true` | Constant (one group at a time) | Slower | Azure Automation, memory-constrained environments |
+
+**How batching works:**
+- Default mode: Fetches ALL memberships → builds one big DataTable → single MERGE
+- Batching mode: For each group: fetch members → MERGE immediately → free memory
+- Uses a `syncBatchId` column to track which records were seen, then deletes stale records
+
 ### Benefits for Large Environments
 
 Perfect for environments with:
@@ -1002,6 +1016,7 @@ Perfect for environments with:
 - Multiple environments (dev/test/prod) with different configs
 - Need for centralized, version-controlled sync configuration
 - Requirements for audit logging and error tracking
+- **Memory-constrained execution** (Azure Automation sandbox has 400 MB limit)
 
 ## Testing Infrastructure
 

@@ -184,7 +184,10 @@ Command-line parameter overrides config file setting
     [bool]$SyncAccessPackageAssignmentRequests = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncAccessPackageAccessReviews = $true
+    [bool]$SyncAccessPackageAccessReviews = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$GroupMembersUseBatching = $false
 )
 
     $ErrorActionPreference = "Stop"
@@ -294,6 +297,9 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('SyncGroupMembers') -eq $false -and $null -ne $config.Sync.GroupMembers.Enabled) {
             $SyncGroupMembers = $config.Sync.GroupMembers.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('GroupMembersUseBatching') -eq $false -and $null -ne $config.Sync.GroupMembers.UseBatching) {
+            $GroupMembersUseBatching = $config.Sync.GroupMembers.UseBatching
         }
         if ($PSBoundParameters.ContainsKey('SyncGroupTransitiveMembers') -eq $false -and $null -ne $config.Sync.GroupTransitiveMembers.Enabled) {
             $SyncGroupTransitiveMembers = $config.Sync.GroupTransitiveMembers.Enabled
@@ -605,7 +611,7 @@ function Write-SyncError {
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupMembers" {
-                        $null = Sync-FGGroupMember -TableName $TableName
+                        $null = Sync-FGGroupMember -TableName $TableName @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -736,6 +742,9 @@ function Write-SyncError {
         # Create job for GroupMembers sync
         if ($SyncGroupMembers) {
             Write-SyncStep "Starting direct membership sync job..."
+            $groupMemberSyncParams = @{}
+            if ($GroupMembersUseBatching) { $groupMemberSyncParams.UseBatching = $true }
+
             $ps = [PowerShell]::Create()
             $ps.RunspacePool = $runspacePool
             [void]$ps.AddScript($syncScriptBlock)
@@ -750,6 +759,7 @@ function Write-SyncError {
             [void]$ps.AddParameter("ClientId", $graphClientId)
             [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
             [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+            [void]$ps.AddParameter("SyncParams", $groupMemberSyncParams)
 
             $jobs += @{
                 Name = "GroupMembers"
@@ -1170,9 +1180,13 @@ function Write-SyncError {
 
         # Sync Group Members (Direct)
         if ($SyncGroupMembers) {
-            Write-SyncStep "Syncing direct group memberships..."
+            $batchingMode = if ($GroupMembersUseBatching) { " (batched mode)" } else { "" }
+            Write-SyncStep "Syncing direct group memberships$batchingMode..."
             try {
-                Sync-FGGroupMember -TableName $groupMembersTableName
+                $syncParams = @{ TableName = $groupMembersTableName }
+                if ($GroupMembersUseBatching) { $syncParams.UseBatching = $true }
+
+                Sync-FGGroupMember @syncParams
 
                 $memberCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupMembersTableName" -AsScalar
                 $script:SyncStats.DirectMembers = $memberCount
