@@ -62,14 +62,20 @@ function New-FGAzureAutomationAccount {
     If specified, skips importing Az modules. Useful if you want to import FortigiGraph manually.
 
     .EXAMPLE
-    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -SubscriptionId "xxx" -ResourceGroupName "rg-fortigraph" -AutomationAccountName "aa-fortigraph" -CreateRunbooks
+    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -CreateRunbooks
 
-    Creates Automation Account using credentials from config file and creates runbooks.
+    Creates Automation Account using all settings from config file (SubscriptionId, ResourceGroupName,
+    AutomationAccountName, credentials) and creates runbooks.
+
+    .EXAMPLE
+    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -AutomationAccountName "aa-custom-name" -CreateRunbooks
+
+    Creates Automation Account using config file but overriding the AutomationAccountName.
 
     .EXAMPLE
     New-FGAzureAutomationAccount -SubscriptionId "xxx" -ResourceGroupName "rg-fortigraph" -AutomationAccountName "aa-fortigraph" -GraphTenantId "xxx" -GraphClientId "xxx" -GraphClientSecret "xxx" -SQLServerName "sql-fortigraph" -SQLDatabaseName "GraphDB" -SQLAdminUsername "sqladmin" -SQLAdminPassword "xxx"
 
-    Creates Automation Account with explicit credentials.
+    Creates Automation Account with all explicit parameters (no config file).
 
     .NOTES
     Requires Az PowerShell module (Install-Module -Name Az)
@@ -82,17 +88,17 @@ function New-FGAzureAutomationAccount {
     [CmdletBinding(DefaultParameterSetName = 'ConfigFile')]
     [Alias("New-AutomationAccount")]
     Param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [string]$SubscriptionId,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [string]$ResourceGroupName,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [string]$AutomationAccountName,
 
         [Parameter(Mandatory = $false)]
-        [string]$Location = "northeurope",
+        [string]$Location,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ConfigFile')]
         [string]$ConfigFile,
@@ -150,8 +156,22 @@ function New-FGAzureAutomationAccount {
             throw "Config file not found: $ConfigFile"
         }
 
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Loading credentials from config file..." -ForegroundColor Cyan
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Loading configuration from config file..." -ForegroundColor Cyan
         $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
+
+        # Extract Azure settings (only if not provided via command line)
+        if (-not $SubscriptionId -and $config.Azure.SubscriptionId) {
+            $SubscriptionId = $config.Azure.SubscriptionId
+        }
+        if (-not $ResourceGroupName -and $config.Azure.ResourceGroupName) {
+            $ResourceGroupName = $config.Azure.ResourceGroupName
+        }
+        if (-not $AutomationAccountName -and $config.Azure.AutomationAccountName) {
+            $AutomationAccountName = $config.Azure.AutomationAccountName
+        }
+        if (-not $Location -and $config.Azure.Location) {
+            $Location = $config.Azure.Location
+        }
 
         # Extract Graph credentials
         $GraphTenantId = $config.Graph.TenantId
@@ -165,6 +185,9 @@ function New-FGAzureAutomationAccount {
         $SQLAdminPassword = $config.Azure.AdminUserPassword
 
         # Validate required fields
+        if (-not $SubscriptionId) { throw "SubscriptionId not provided and not found in config (Azure.SubscriptionId)" }
+        if (-not $ResourceGroupName) { throw "ResourceGroupName not provided and not found in config (Azure.ResourceGroupName)" }
+        if (-not $AutomationAccountName) { throw "AutomationAccountName not provided and not found in config (Azure.AutomationAccountName)" }
         if (-not $GraphTenantId) { throw "Config file missing: Graph.TenantId" }
         if (-not $GraphClientId) { throw "Config file missing: Graph.ClientId" }
         if (-not $GraphClientSecret) { throw "Config file missing: Graph.ClientSecret" }
@@ -173,7 +196,17 @@ function New-FGAzureAutomationAccount {
         if (-not $SQLAdminUsername) { throw "Config file missing: Azure.AdminUsername" }
         if (-not $SQLAdminPassword) { throw "Config file missing: Azure.AdminUserPassword" }
 
-        Write-Host "  Credentials loaded successfully" -ForegroundColor Green
+        # Default location if not specified
+        if (-not $Location) { $Location = "northeurope" }
+
+        Write-Host "  Configuration loaded successfully" -ForegroundColor Green
+    }
+    else {
+        # Explicit parameter set - validate required parameters
+        if (-not $SubscriptionId) { throw "SubscriptionId is required when not using ConfigFile" }
+        if (-not $ResourceGroupName) { throw "ResourceGroupName is required when not using ConfigFile" }
+        if (-not $AutomationAccountName) { throw "AutomationAccountName is required when not using ConfigFile" }
+        if (-not $Location) { $Location = "northeurope" }
     }
 
     try {
