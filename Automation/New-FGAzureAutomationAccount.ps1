@@ -173,16 +173,16 @@ function New-FGAzureAutomationAccount {
             $Location = $config.Azure.Location
         }
 
-        # Extract Graph credentials
+        # Extract Graph credentials (use Get-FGSecureConfigValue for secrets)
         $GraphTenantId = $config.Graph.TenantId
         $GraphClientId = $config.Graph.ClientId
-        $GraphClientSecret = $config.Graph.ClientSecret
+        $GraphClientSecret = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Graph.ClientSecret" -PromptMessage "Enter Graph Client Secret"
 
-        # Extract SQL credentials
+        # Extract SQL credentials (use Get-FGSecureConfigValue for password)
         $SQLServerName = $config.Azure.SQLServerName
         $SQLDatabaseName = $config.Azure.DatabaseName
         $SQLAdminUsername = $config.Azure.AdminUsername
-        $SQLAdminPassword = $config.Azure.AdminUserPassword
+        $SQLAdminPassword = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Azure.AdminUserPassword" -PromptMessage "Enter SQL Admin Password"
 
         # Validate required fields
         if (-not $SubscriptionId) { throw "SubscriptionId not provided and not found in config (Azure.SubscriptionId)" }
@@ -190,11 +190,11 @@ function New-FGAzureAutomationAccount {
         if (-not $AutomationAccountName) { throw "AutomationAccountName not provided and not found in config (Azure.AutomationAccountName)" }
         if (-not $GraphTenantId) { throw "Config file missing: Graph.TenantId" }
         if (-not $GraphClientId) { throw "Config file missing: Graph.ClientId" }
-        if (-not $GraphClientSecret) { throw "Config file missing: Graph.ClientSecret" }
+        if (-not $GraphClientSecret) { throw "Config file missing: Graph.ClientSecret (or Graph.ClientSecret_Encrypted)" }
         if (-not $SQLServerName) { throw "Config file missing: Azure.SQLServerName" }
         if (-not $SQLDatabaseName) { throw "Config file missing: Azure.DatabaseName" }
         if (-not $SQLAdminUsername) { throw "Config file missing: Azure.AdminUsername" }
-        if (-not $SQLAdminPassword) { throw "Config file missing: Azure.AdminUserPassword" }
+        if (-not $SQLAdminPassword) { throw "Config file missing: Azure.AdminUserPassword (or Azure.AdminUserPassword_Encrypted)" }
 
         # Default location if not specified
         if (-not $Location) { $Location = "northeurope" }
