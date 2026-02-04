@@ -100,6 +100,9 @@ FortigiGraph/
 ├── Specific/               # Higher-level helper functions
 │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation (~10 functions)
 │
+├── Automation/             # ⭐ Azure Automation Account setup
+│   └── New-FGAzureAutomationAccount.ps1  # Create Automation Account with runbooks
+│
 ├── _Test/                  # ⭐ Testing & Production Runbooks
 │   ├── Daily-Sync.ps1                  # ⭐ Production daily sync runbook
 │   ├── Test-Integration.ps1            # Full end-to-end test
@@ -1017,6 +1020,65 @@ Perfect for environments with:
 - Need for centralized, version-controlled sync configuration
 - Requirements for audit logging and error tracking
 - **Memory-constrained execution** (Azure Automation sandbox has 400 MB limit)
+
+## Azure Automation Setup
+
+For running syncs automatically in Azure without a local machine, use `New-FGAzureAutomationAccount`:
+
+### Quick Setup
+
+```powershell
+# Using config file (recommended)
+New-FGAzureAutomationAccount `
+    -ConfigFile ".\config.production.json" `
+    -SubscriptionId "your-subscription-id" `
+    -ResourceGroupName "rg-fortigraph" `
+    -AutomationAccountName "aa-fortigraph-sync" `
+    -CreateRunbooks `
+    -CreateSchedules
+```
+
+### What It Creates
+
+| Component | Details |
+|-----------|---------|
+| **Automation Account** | Azure Automation Account in specified resource group |
+| **Variables** | GraphTenantId, GraphClientId, GraphClientSecret (encrypted), SQLServerName, SQLDatabaseName, SQLAdminUsername, SQLAdminPassword (encrypted) |
+| **Modules** | Az.Accounts, Az.Sql (FortigiGraph must be imported manually) |
+| **Runbooks** | Sync-FGUsers, Sync-FGGroups, Sync-FGGroupMembers, Sync-FGCatalogs, Sync-FGAccessPackages, Sync-FGAccessPackageAssignments |
+| **Schedules** | Daily schedules for each runbook (optional) |
+
+### Runbooks Created
+
+Each runbook is self-contained and:
+- Reads credentials from Automation Variables
+- Authenticates to Graph API using ClientID/Secret
+- Connects to SQL using username/password
+- Runs the appropriate sync function
+
+| Runbook | Sync Function | Notes |
+|---------|---------------|-------|
+| Sync-FGUsers | `Sync-FGUser` | ~4K users, memory-safe |
+| Sync-FGGroups | `Sync-FGGroup` | ~9K groups, memory-safe |
+| Sync-FGGroupMembers | `Sync-FGGroupMember -UseBatching` | Uses batching for low memory |
+| Sync-FGCatalogs | `Sync-FGCatalog` | Access package catalogs |
+| Sync-FGAccessPackages | `Sync-FGAccessPackage` | Access packages |
+| Sync-FGAccessPackageAssignments | `Sync-FGAccessPackageAssignment` | Package assignments |
+
+### Post-Setup Steps
+
+1. **Import FortigiGraph module** - Go to Azure Portal > Automation Account > Modules > Browse Gallery > Search "FortigiGraph"
+2. **Wait for module imports** - Check that all modules show "Succeeded" status
+3. **Test runbooks manually** - Run each runbook once to verify it works
+4. **Enable schedules** - Schedules are created but may need to be enabled
+
+### Memory Considerations
+
+Azure Automation sandbox has a **400 MB memory limit**. The runbooks are designed to work within this:
+
+- `Sync-FGGroupMembers` uses `-UseBatching` flag for constant memory usage
+- Other syncs (Users, Groups) typically fit within the limit
+- For very large datasets, consider running on a Hybrid Runbook Worker
 
 ## Testing Infrastructure
 
