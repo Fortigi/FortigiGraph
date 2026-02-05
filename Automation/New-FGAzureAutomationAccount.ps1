@@ -269,6 +269,66 @@ function New-FGAzureAutomationAccount {
             Write-Host "  Automation Account already exists" -ForegroundColor Green
         }
 
+        # Check/Configure SQL Server firewall for Azure Services
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking SQL Server firewall configuration..." -ForegroundColor Cyan
+
+        # Get the SQL Server's resource group (may be different from Automation Account's RG)
+        $sqlServer = Get-AzSqlServer | Where-Object { $_.ServerName -eq $SQLServerName } | Select-Object -First 1
+
+        if ($sqlServer) {
+            $sqlResourceGroup = $sqlServer.ResourceGroupName
+
+            # Check if AllowAzureServices rule exists
+            $azureServicesRule = Get-AzSqlServerFirewallRule `
+                -ResourceGroupName $sqlResourceGroup `
+                -ServerName $SQLServerName `
+                -ErrorAction SilentlyContinue | Where-Object {
+                    $_.StartIpAddress -eq "0.0.0.0" -and $_.EndIpAddress -eq "0.0.0.0"
+                }
+
+            if ($azureServicesRule) {
+                Write-Host "  SQL firewall already allows Azure services" -ForegroundColor Green
+            }
+            else {
+                Write-Host ""
+                Write-Host "  ========================================" -ForegroundColor Yellow
+                Write-Host "  SQL Server Firewall Configuration Required" -ForegroundColor Yellow
+                Write-Host "  ========================================" -ForegroundColor Yellow
+                Write-Host "  Azure Automation runbooks need to connect to your SQL Server." -ForegroundColor White
+                Write-Host "  This requires enabling 'Allow Azure services' on the SQL firewall." -ForegroundColor White
+                Write-Host ""
+                Write-Host "  SQL Server: $SQLServerName" -ForegroundColor White
+                Write-Host "  Resource Group: $sqlResourceGroup" -ForegroundColor White
+                Write-Host "  ========================================" -ForegroundColor Yellow
+
+                $firewallConfirm = Read-Host "  Add firewall rule to allow Azure services? (Y/N)"
+                if ($firewallConfirm -match '^[Yy]') {
+                    try {
+                        New-AzSqlServerFirewallRule `
+                            -ResourceGroupName $sqlResourceGroup `
+                            -ServerName $SQLServerName `
+                            -FirewallRuleName "AllowAzureServices" `
+                            -StartIpAddress "0.0.0.0" `
+                            -EndIpAddress "0.0.0.0" | Out-Null
+
+                        Write-Host "  Firewall rule added successfully" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Warning "  Failed to add firewall rule: $_"
+                        Write-Warning "  You may need to add it manually in Azure Portal"
+                    }
+                }
+                else {
+                    Write-Host "  Skipping firewall configuration" -ForegroundColor Yellow
+                    Write-Host "  NOTE: Runbooks will fail to connect to SQL until this is configured" -ForegroundColor Yellow
+                }
+            }
+        }
+        else {
+            Write-Warning "  Could not find SQL Server '$SQLServerName' in current subscription"
+            Write-Warning "  You may need to configure the firewall manually"
+        }
+
         # Create Variables
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating Automation Variables..." -ForegroundColor Cyan
 
