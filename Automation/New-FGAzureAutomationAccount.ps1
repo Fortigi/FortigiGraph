@@ -51,26 +51,25 @@ function New-FGAzureAutomationAccount {
     .PARAMETER SQLAdminPassword
     SQL Server admin password. Required if ConfigFile not provided.
 
-    .PARAMETER CreateRunbooks
-    If specified, creates runbook scripts for each sync type.
+    .PARAMETER SkipRunbooks
+    If specified, skips creating runbooks. By default, runbooks are created.
 
     .PARAMETER CreateSchedules
     If specified, creates schedules for the runbooks.
-    Requires -CreateRunbooks to also be specified.
 
     .PARAMETER SkipModuleImport
     If specified, skips importing Az modules. Useful if you want to import FortigiGraph manually.
 
     .EXAMPLE
-    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -CreateRunbooks
+    New-FGAzureAutomationAccount -ConfigFile ".\config.json"
 
     Creates Automation Account using all settings from config file (SubscriptionId, ResourceGroupName,
-    AutomationAccountName, credentials) and creates runbooks.
+    AutomationAccountName, credentials), creates variables, imports modules, and creates runbooks.
 
     .EXAMPLE
-    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -AutomationAccountName "aa-custom-name" -CreateRunbooks
+    New-FGAzureAutomationAccount -ConfigFile ".\config.json" -SkipRunbooks
 
-    Creates Automation Account using config file but overriding the AutomationAccountName.
+    Creates Automation Account with variables and modules, but skips creating runbooks.
 
     .EXAMPLE
     New-FGAzureAutomationAccount -SubscriptionId "xxx" -ResourceGroupName "rg-fortigraph" -AutomationAccountName "aa-fortigraph" -GraphTenantId "xxx" -GraphClientId "xxx" -GraphClientSecret "xxx" -SQLServerName "sql-fortigraph" -SQLDatabaseName "GraphDB" -SQLAdminUsername "sqladmin" -SQLAdminPassword "xxx"
@@ -125,7 +124,7 @@ function New-FGAzureAutomationAccount {
         [string]$SQLAdminPassword,
 
         [Parameter(Mandatory = $false)]
-        [switch]$CreateRunbooks,
+        [switch]$SkipRunbooks,
 
         [Parameter(Mandatory = $false)]
         [switch]$CreateSchedules,
@@ -344,8 +343,8 @@ function New-FGAzureAutomationAccount {
             Write-Host "  Search for 'FortigiGraph' and import it" -ForegroundColor Yellow
         }
 
-        # Create Runbooks
-        if ($CreateRunbooks) {
+        # Create Runbooks (by default, unless -SkipRunbooks is specified)
+        if (-not $SkipRunbooks) {
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating runbooks..." -ForegroundColor Cyan
 
             $runbooks = @(
@@ -483,7 +482,7 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
         }
 
         # Create Schedules
-        if ($CreateSchedules -and $CreateRunbooks) {
+        if ($CreateSchedules -and -not $SkipRunbooks) {
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating schedules..." -ForegroundColor Cyan
             Write-Host "  Note: Schedules start tomorrow at the specified times" -ForegroundColor Gray
 
@@ -536,8 +535,8 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                 }
             }
         }
-        elseif ($CreateSchedules -and -not $CreateRunbooks) {
-            Write-Warning "Schedules require runbooks. Use -CreateRunbooks with -CreateSchedules."
+        elseif ($CreateSchedules -and $SkipRunbooks) {
+            Write-Warning "Schedules require runbooks. Remove -SkipRunbooks to create schedules."
         }
 
         # Summary
@@ -558,14 +557,14 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             Write-Host "  - Az.Accounts, Az.Sql (may take a few minutes)" -ForegroundColor White
         }
 
-        if ($CreateRunbooks) {
+        if (-not $SkipRunbooks) {
             Write-Host ""
             Write-Host "Runbooks Created:" -ForegroundColor Cyan
             Write-Host "  - Sync-FGUsers, Sync-FGGroups, Sync-FGGroupMembers" -ForegroundColor White
             Write-Host "  - Sync-FGCatalogs, Sync-FGAccessPackages, Sync-FGAccessPackageAssignments" -ForegroundColor White
         }
 
-        if ($CreateSchedules -and $CreateRunbooks) {
+        if ($CreateSchedules -and -not $SkipRunbooks) {
             Write-Host ""
             Write-Host "Schedules Created:" -ForegroundColor Cyan
             Write-Host "  - Daily schedules starting tomorrow (6AM-8AM)" -ForegroundColor White
@@ -583,8 +582,8 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             AutomationAccountName = $AutomationAccountName
             ResourceGroupName = $ResourceGroupName
             Location = $Location
-            RunbooksCreated = $CreateRunbooks.IsPresent
-            SchedulesCreated = ($CreateSchedules.IsPresent -and $CreateRunbooks.IsPresent)
+            RunbooksCreated = (-not $SkipRunbooks.IsPresent)
+            SchedulesCreated = ($CreateSchedules.IsPresent -and -not $SkipRunbooks.IsPresent)
         }
     }
     catch {
