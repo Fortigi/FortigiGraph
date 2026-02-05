@@ -273,15 +273,17 @@ function New-FGAzureAutomationAccount {
         Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking SQL Server firewall configuration..." -ForegroundColor Cyan
 
         # Get the SQL Server's resource group (may be different from Automation Account's RG)
-        $sqlServer = Get-AzSqlServer | Where-Object { $_.ServerName -eq $SQLServerName } | Select-Object -First 1
+        # Use case-insensitive comparison since Azure normalizes server names to lowercase
+        $sqlServer = Get-AzSqlServer | Where-Object { $_.ServerName -ieq $SQLServerName } | Select-Object -First 1
 
         if ($sqlServer) {
             $sqlResourceGroup = $sqlServer.ResourceGroupName
+            $sqlServerNameActual = $sqlServer.ServerName  # Use the actual lowercase name from Azure
 
             # Check if AllowAzureServices rule exists
             $azureServicesRule = Get-AzSqlServerFirewallRule `
                 -ResourceGroupName $sqlResourceGroup `
-                -ServerName $SQLServerName `
+                -ServerName $sqlServerNameActual `
                 -ErrorAction SilentlyContinue | Where-Object {
                     $_.StartIpAddress -eq "0.0.0.0" -and $_.EndIpAddress -eq "0.0.0.0"
                 }
@@ -297,7 +299,7 @@ function New-FGAzureAutomationAccount {
                 Write-Host "  Azure Automation runbooks need to connect to your SQL Server." -ForegroundColor White
                 Write-Host "  This requires enabling 'Allow Azure services' on the SQL firewall." -ForegroundColor White
                 Write-Host ""
-                Write-Host "  SQL Server: $SQLServerName" -ForegroundColor White
+                Write-Host "  SQL Server: $sqlServerNameActual" -ForegroundColor White
                 Write-Host "  Resource Group: $sqlResourceGroup" -ForegroundColor White
                 Write-Host "  ========================================" -ForegroundColor Yellow
 
@@ -306,7 +308,7 @@ function New-FGAzureAutomationAccount {
                     try {
                         New-AzSqlServerFirewallRule `
                             -ResourceGroupName $sqlResourceGroup `
-                            -ServerName $SQLServerName `
+                            -ServerName $sqlServerNameActual `
                             -FirewallRuleName "AllowAzureServices" `
                             -StartIpAddress "0.0.0.0" `
                             -EndIpAddress "0.0.0.0" | Out-Null
