@@ -191,6 +191,23 @@ function New-FGAzureAutomationAccount {
         $SQLAdminUsername = $config.Azure.AdminUsername
         $SQLAdminPassword = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "Azure.AdminUserPassword" -PromptMessage "Enter SQL Admin Password"
 
+        # Extract sync configuration (optional)
+        $syncConfig = @{
+            UsersAdditionalAttributes = @()
+            UsersFilter = ""
+            GroupsFilter = ""
+        }
+
+        if ($config.Sync.Users.AdditionalAttributes) {
+            $syncConfig.UsersAdditionalAttributes = @($config.Sync.Users.AdditionalAttributes)
+        }
+        if ($config.Sync.Users.Filter) {
+            $syncConfig.UsersFilter = $config.Sync.Users.Filter
+        }
+        if ($config.Sync.Groups.Filter) {
+            $syncConfig.GroupsFilter = $config.Sync.Groups.Filter
+        }
+
         # Validate required fields
         if (-not $SubscriptionId) { throw "SubscriptionId not provided and not found in config (Azure.SubscriptionId)" }
         if (-not $ResourceGroupName) { throw "ResourceGroupName not provided and not found in config (Azure.ResourceGroupName)" }
@@ -344,6 +361,20 @@ function New-FGAzureAutomationAccount {
             @{ Name = "SQLAdminPassword"; Value = $SQLAdminPassword; Encrypted = $true; Description = "SQL Server admin password" }
         )
 
+        # Add sync configuration variables if config file was used
+        if ($PSCmdlet.ParameterSetName -eq 'ConfigFile') {
+            # Store additional attributes as comma-separated string
+            $additionalAttributesString = if ($syncConfig.UsersAdditionalAttributes.Count -gt 0) {
+                $syncConfig.UsersAdditionalAttributes -join ","
+            } else { "" }
+
+            $variables += @(
+                @{ Name = "SyncUsersAdditionalAttributes"; Value = $additionalAttributesString; Encrypted = $false; Description = "Additional user attributes to sync (comma-separated)" }
+                @{ Name = "SyncUsersFilter"; Value = $syncConfig.UsersFilter; Encrypted = $false; Description = "OData filter for user sync" }
+                @{ Name = "SyncGroupsFilter"; Value = $syncConfig.GroupsFilter; Encrypted = $false; Description = "OData filter for group sync" }
+            )
+        }
+
         foreach ($var in $variables) {
             $existingVar = Get-AzAutomationVariable -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $var.Name -ErrorAction SilentlyContinue
 
@@ -418,11 +449,13 @@ function New-FGAzureAutomationAccount {
                     Name = "Sync-FGUsers"
                     Description = "Syncs Microsoft Graph users to Azure SQL"
                     SyncFunction = "Sync-FGUser"
+                    HasSyncConfig = $true
                 }
                 @{
                     Name = "Sync-FGGroups"
                     Description = "Syncs Microsoft Graph groups to Azure SQL"
                     SyncFunction = "Sync-FGGroup"
+                    HasGroupFilter = $true
                 }
                 @{
                     Name = "Sync-FGGroupMembers"
@@ -450,7 +483,60 @@ function New-FGAzureAutomationAccount {
             foreach ($runbook in $runbooks) {
                 Write-Host "  Creating runbook: $($runbook.Name)..." -ForegroundColor Cyan
 
-                $extraParams = if ($runbook.ExtraParams) { " $($runbook.ExtraParams)" } else { "" }
+                # Build the sync command based on runbook type
+                if ($runbook.HasSyncConfig) {
+                    # Users runbook - includes additional attributes and filter
+                    $syncCommand = @'
+# Get sync configuration
+$additionalAttributesRaw = Get-AutomationVariable -Name 'SyncUsersAdditionalAttributes' -ErrorAction SilentlyContinue
+$userFilter = Get-AutomationVariable -Name 'SyncUsersFilter' -ErrorAction SilentlyContinue
+
+# Build sync parameters
+$syncParams = @{}
+if ($additionalAttributesRaw -and $additionalAttributesRaw.Trim() -ne "") {
+    $additionalAttributes = $additionalAttributesRaw -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+    if ($additionalAttributes.Count -gt 0) {
+        $syncParams.AdditionalAttributes = $additionalAttributes
+        Write-Output "  Additional attributes: $($additionalAttributes -join ', ')"
+    }
+}
+if ($userFilter -and $userFilter.Trim() -ne "") {
+    $syncParams.Filter = $userFilter
+    Write-Output "  Filter: $userFilter"
+}
+
+# Run sync
+Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running Sync-FGUser..."
+Sync-FGUser @syncParams
+'@
+                }
+                elseif ($runbook.HasGroupFilter) {
+                    # Groups runbook - includes filter
+                    $syncCommand = @'
+# Get sync configuration
+$groupFilter = Get-AutomationVariable -Name 'SyncGroupsFilter' -ErrorAction SilentlyContinue
+
+# Build sync parameters
+$syncParams = @{}
+if ($groupFilter -and $groupFilter.Trim() -ne "") {
+    $syncParams.Filter = $groupFilter
+    Write-Output "  Filter: $groupFilter"
+}
+
+# Run sync
+Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running Sync-FGGroup..."
+Sync-FGGroup @syncParams
+'@
+                }
+                else {
+                    # Standard runbook
+                    $extraParams = if ($runbook.ExtraParams) { " $($runbook.ExtraParams)" } else { "" }
+                    $syncCommand = @"
+# Run sync
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running $($runbook.SyncFunction)..."
+$($runbook.SyncFunction)$extraParams
+"@
+                }
 
                 $runbookContent = @"
 <#
@@ -494,9 +580,7 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Azure S
 `$Global:FGSQLServerName = `$sqlServerName
 `$Global:FGSQLDatabaseName = `$sqlDatabaseName
 
-# Run sync
-Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running $($runbook.SyncFunction)..."
-$($runbook.SyncFunction)$extraParams
+$syncCommand
 
 Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) completed successfully"
 "@
