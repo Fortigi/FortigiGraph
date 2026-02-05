@@ -449,13 +449,14 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                         Write-Host "    Updating existing runbook..." -ForegroundColor Yellow
                     }
 
-                    # Import runbook
+                    # Import runbook (PowerShell 7.2 runtime)
                     Import-AzAutomationRunbook `
                         -ResourceGroupName $ResourceGroupName `
                         -AutomationAccountName $AutomationAccountName `
                         -Name $runbook.Name `
                         -Path $tempFile `
                         -Type PowerShell `
+                        -RuntimeVersion "7.2" `
                         -Description $runbook.Description `
                         -Force | Out-Null
 
