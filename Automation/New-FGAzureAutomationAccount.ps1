@@ -60,6 +60,10 @@ function New-FGAzureAutomationAccount {
     .PARAMETER SkipModuleImport
     If specified, skips importing Az modules. Useful if you want to import FortigiGraph manually.
 
+    .PARAMETER RunbookType
+    The PowerShell runtime type for runbooks. Default: "PowerShell72" (PowerShell 7.2).
+    Options: "PowerShell" (5.1), "PowerShell72" (7.2).
+
     .EXAMPLE
     New-FGAzureAutomationAccount -ConfigFile ".\config.json"
 
@@ -133,8 +137,8 @@ function New-FGAzureAutomationAccount {
         [switch]$SkipModuleImport,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet("5.1", "7.2")]
-        [string]$RuntimeVersion = "7.2"
+        [ValidateSet("PowerShell", "PowerShell72")]
+        [string]$RunbookType = "PowerShell72"
     )
 
     # Check if Az.Automation module is available
@@ -452,14 +456,13 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                         Write-Host "    Updating existing runbook..." -ForegroundColor Yellow
                     }
 
-                    # Import runbook (PowerShell runtime version)
+                    # Import runbook (PowerShell72 = PowerShell 7.2, PowerShell = 5.1)
                     Import-AzAutomationRunbook `
                         -ResourceGroupName $ResourceGroupName `
                         -AutomationAccountName $AutomationAccountName `
                         -Name $runbook.Name `
                         -Path $tempFile `
-                        -Type PowerShell `
-                        -RuntimeVersion $RuntimeVersion `
+                        -Type $RunbookType `
                         -Description $runbook.Description `
                         -Force | Out-Null
 
