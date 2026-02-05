@@ -131,7 +131,11 @@ function New-FGAzureAutomationAccount {
         [switch]$CreateSchedules,
 
         [Parameter(Mandatory = $false)]
-        [switch]$SkipModuleImport
+        [switch]$SkipModuleImport,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("5.1", "7.2")]
+        [string]$RuntimeVersion = "7.2"
     )
 
     # Check if Az.Automation module is available
@@ -449,14 +453,14 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                         Write-Host "    Updating existing runbook..." -ForegroundColor Yellow
                     }
 
-                    # Import runbook (PowerShell 7.2 runtime)
+                    # Import runbook (PowerShell runtime version)
                     Import-AzAutomationRunbook `
                         -ResourceGroupName $ResourceGroupName `
                         -AutomationAccountName $AutomationAccountName `
                         -Name $runbook.Name `
                         -Path $tempFile `
                         -Type PowerShell `
-                        -RuntimeVersion "7.2" `
+                        -RuntimeVersion $RuntimeVersion `
                         -Description $runbook.Description `
                         -Force | Out-Null
 
