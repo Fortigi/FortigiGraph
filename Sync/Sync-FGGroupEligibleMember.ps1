@@ -57,6 +57,12 @@ function Sync-FGGroupEligibleMember {
         [switch]$RecreateTable
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
@@ -66,6 +72,8 @@ function Sync-FGGroupEligibleMember {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting eligible group membership sync (PIM)..." -ForegroundColor Cyan
 
@@ -341,6 +349,21 @@ function Sync-FGGroupEligibleMember {
     Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
     Write-Host "Note: Only groups with eligible members (actual PIM-enabled groups) are processed" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
+
+    # Set sync status for logging
+    $syncRecordCount = $allEligibleMembers.Count
+    $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "GroupEligibleMembers" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+    }
 
     return @{
         TableName = $TableName

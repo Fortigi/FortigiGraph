@@ -56,9 +56,18 @@ function New-FGAzureAutomationAccount {
 
     .PARAMETER CreateSchedules
     If specified, creates schedules for the runbooks.
+    When using ConfigFile, schedules are created automatically if Schedules.Enabled is true in the config.
 
     .PARAMETER SkipModuleImport
     If specified, skips importing Az modules. Useful if you want to import FortigiGraph manually.
+
+    .PARAMETER SkipModuleUpload
+    If specified, skips uploading the local FortigiGraph module. By default, the module is uploaded.
+    Use this if you prefer to import from PowerShell Gallery manually.
+
+    .PARAMETER ModulePath
+    Path to the FortigiGraph module folder. If not specified, automatically detected from the loaded
+    FortigiGraph module. Falls back to the parent folder of this script's location.
 
     .PARAMETER RunbookType
     The PowerShell runtime type for runbooks. Default: "PowerShell72" (PowerShell 7.2).
@@ -137,6 +146,12 @@ function New-FGAzureAutomationAccount {
         [switch]$SkipModuleImport,
 
         [Parameter(Mandatory = $false)]
+        [switch]$SkipModuleUpload,
+
+        [Parameter(Mandatory = $false)]
+        [string]$ModulePath,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet("PowerShell", "PowerShell72")]
         [string]$RunbookType = "PowerShell72"
     )
@@ -195,6 +210,7 @@ function New-FGAzureAutomationAccount {
         $syncConfig = @{
             UsersAdditionalAttributes = @()
             UsersFilter = ""
+            GroupsAdditionalAttributes = @()
             GroupsFilter = ""
         }
 
@@ -204,8 +220,130 @@ function New-FGAzureAutomationAccount {
         if ($config.Sync.Users.Filter) {
             $syncConfig.UsersFilter = $config.Sync.Users.Filter
         }
+        if ($config.Sync.Groups.AdditionalAttributes) {
+            $syncConfig.GroupsAdditionalAttributes = @($config.Sync.Groups.AdditionalAttributes)
+        }
         if ($config.Sync.Groups.Filter) {
             $syncConfig.GroupsFilter = $config.Sync.Groups.Filter
+        }
+
+        # Extract schedule configuration from within each Sync entity
+        $scheduleConfig = @{
+            Enabled = $false
+            TimeZone = "UTC"
+            Schedules = @()
+        }
+
+        # Get time zone from Sync section
+        if ($config.Sync.ScheduleTimeZone) {
+            $scheduleConfig.TimeZone = $config.Sync.ScheduleTimeZone
+        }
+
+        # Map runbook names to sync config keys
+        $scheduleMapping = @{
+            "Sync-FGUsers" = "Users"
+            "Sync-FGGroups" = "Groups"
+            "Sync-FGGroupMembers" = "GroupMembers"
+            "Sync-FGGroupEligibleMembers" = "GroupEligibleMembers"
+            "Sync-FGGroupOwners" = "GroupOwners"
+            "Sync-FGCatalogs" = "Catalogs"
+            "Sync-FGAccessPackages" = "AccessPackages"
+            "Sync-FGAccessPackageAssignments" = "AccessPackageAssignments"
+            "Sync-FGAccessPackageResourceRoleScopes" = "AccessPackageResourceRoleScopes"
+            "Sync-FGAccessPackageAssignmentPolicies" = "AccessPackageAssignmentPolicies"
+            "Sync-FGAccessPackageAssignmentRequests" = "AccessPackageAssignmentRequests"
+            "Sync-FGAccessPackageAccessReviews" = "AccessPackageAccessReviews"
+        }
+
+        foreach ($runbookName in $scheduleMapping.Keys) {
+            $configKey = $scheduleMapping[$runbookName]
+            $syncEntry = $config.Sync.$configKey
+
+            # Check if this sync entity has a Schedule sub-section
+            if ($syncEntry -and $syncEntry.Schedule) {
+                # Handle both single schedule object and array of schedules
+                $scheduleEntries = @()
+                if ($syncEntry.Schedule -is [Array]) {
+                    $scheduleEntries = $syncEntry.Schedule
+                }
+                else {
+                    $scheduleEntries = @($syncEntry.Schedule)
+                }
+
+                foreach ($scheduleEntry in $scheduleEntries) {
+                    if ($scheduleEntry.Enabled -eq $true) {
+                        $scheduleConfig.Enabled = $true  # At least one schedule is enabled
+                        $time = if ($scheduleEntry.Time) { $scheduleEntry.Time } else { "06:00" }
+                        $frequency = if ($scheduleEntry.Frequency) { $scheduleEntry.Frequency } else { "Daily" }
+
+                        $scheduleConfig.Schedules += @{
+                            RunbookName = $runbookName
+                            ConfigKey = $configKey
+                            Time = $time
+                            Frequency = $frequency
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($scheduleConfig.Schedules.Count -gt 0) {
+            Write-Host "  Schedule configuration: $($scheduleConfig.Schedules.Count) schedules configured" -ForegroundColor Cyan
+        }
+        else {
+            # No schedules configured - ask if user wants to add default daily schedules
+            Write-Host ""
+            Write-Host "  No schedules configured in config file." -ForegroundColor Yellow
+            $addSchedules = Read-Host "  Would you like to add daily schedules (6AM) and save to config? (Y/N)"
+
+            if ($addSchedules -match '^[Yy]') {
+                # Ask for time zone
+                $defaultTz = "W. Europe Standard Time"
+                $tzInput = Read-Host "  Enter time zone (default: $defaultTz)"
+                $selectedTz = if ($tzInput.Trim()) { $tzInput.Trim() } else { $defaultTz }
+
+                # Build default schedules for all runbooks
+                $scheduleConfig.Enabled = $true
+                $scheduleConfig.TimeZone = $selectedTz
+
+                foreach ($runbookName in $scheduleMapping.Keys) {
+                    $configKey = $scheduleMapping[$runbookName]
+                    $scheduleConfig.Schedules += @{
+                        RunbookName = $runbookName
+                        ConfigKey = $configKey
+                        Time = "06:00"
+                        Frequency = "Daily"
+                    }
+                }
+
+                # Update the config file with schedules
+                try {
+                    # Add ScheduleTimeZone to Sync section
+                    if (-not $config.Sync.ScheduleTimeZone) {
+                        $config.Sync | Add-Member -NotePropertyName "ScheduleTimeZone" -NotePropertyValue $selectedTz -Force
+                    }
+
+                    # Add Schedule to each sync entity that has a runbook
+                    foreach ($configKey in $scheduleMapping.Values) {
+                        if ($config.Sync.$configKey) {
+                            $defaultSchedule = [PSCustomObject]@{
+                                Enabled = $true
+                                Time = "06:00"
+                                Frequency = "Daily"
+                            }
+                            $config.Sync.$configKey | Add-Member -NotePropertyName "Schedule" -NotePropertyValue $defaultSchedule -Force
+                        }
+                    }
+
+                    # Save updated config
+                    $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
+                    Write-Host "  Config file updated with daily schedules at 06:00 ($selectedTz)" -ForegroundColor Green
+                }
+                catch {
+                    Write-Warning "  Failed to update config file: $_"
+                    Write-Host "  Schedules will still be created, but config file was not updated" -ForegroundColor Yellow
+                }
+            }
         }
 
         # Validate required fields
@@ -363,14 +501,19 @@ function New-FGAzureAutomationAccount {
 
         # Add sync configuration variables if config file was used
         if ($PSCmdlet.ParameterSetName -eq 'ConfigFile') {
-            # Store additional attributes as comma-separated string
-            $additionalAttributesString = if ($syncConfig.UsersAdditionalAttributes.Count -gt 0) {
+            # Store additional attributes as comma-separated strings
+            $usersAdditionalAttributesString = if ($syncConfig.UsersAdditionalAttributes.Count -gt 0) {
                 $syncConfig.UsersAdditionalAttributes -join ","
             } else { "" }
 
+            $groupsAdditionalAttributesString = if ($syncConfig.GroupsAdditionalAttributes.Count -gt 0) {
+                $syncConfig.GroupsAdditionalAttributes -join ","
+            } else { "" }
+
             $variables += @(
-                @{ Name = "SyncUsersAdditionalAttributes"; Value = $additionalAttributesString; Encrypted = $false; Description = "Additional user attributes to sync (comma-separated)" }
+                @{ Name = "SyncUsersAdditionalAttributes"; Value = $usersAdditionalAttributesString; Encrypted = $false; Description = "Additional user attributes to sync (comma-separated)" }
                 @{ Name = "SyncUsersFilter"; Value = $syncConfig.UsersFilter; Encrypted = $false; Description = "OData filter for user sync" }
+                @{ Name = "SyncGroupsAdditionalAttributes"; Value = $groupsAdditionalAttributesString; Encrypted = $false; Description = "Additional group attributes to sync (comma-separated)" }
                 @{ Name = "SyncGroupsFilter"; Value = $syncConfig.GroupsFilter; Encrypted = $false; Description = "OData filter for group sync" }
             )
         }
@@ -435,9 +578,243 @@ function New-FGAzureAutomationAccount {
                 }
             }
 
-            Write-Host "`n  IMPORTANT: You need to manually import FortigiGraph module" -ForegroundColor Yellow
-            Write-Host "  Go to: Azure Portal > Automation Account > Modules > Browse Gallery" -ForegroundColor Yellow
-            Write-Host "  Search for 'FortigiGraph' and import it" -ForegroundColor Yellow
+            # Handle FortigiGraph module (upload by default unless -SkipModuleUpload)
+            if (-not $SkipModuleUpload) {
+                Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking FortigiGraph module..." -ForegroundColor Cyan
+
+                # Determine module path - try auto-detection first
+                if (-not $ModulePath) {
+                    # Try to detect from loaded module
+                    $loadedModule = Get-Module -Name FortigiGraph -ErrorAction SilentlyContinue
+                    if ($loadedModule) {
+                        $ModulePath = Split-Path -Parent $loadedModule.Path
+                        Write-Host "  Auto-detected module path from loaded module" -ForegroundColor Gray
+                    }
+                    else {
+                        # Fall back to parent folder of Automation folder (where this script is)
+                        $scriptPath = $PSScriptRoot
+                        if ($scriptPath) {
+                            $ModulePath = Split-Path -Parent $scriptPath
+                        }
+                        else {
+                            $ModulePath = Split-Path -Parent (Get-Location)
+                        }
+                        Write-Host "  Using script location for module path" -ForegroundColor Gray
+                    }
+                }
+
+                # Verify module exists
+                $psdPath = Join-Path $ModulePath "FortigiGraph.psd1"
+                if (-not (Test-Path $psdPath)) {
+                    Write-Warning "  FortigiGraph.psd1 not found at: $ModulePath"
+                    Write-Warning "  Please specify -ModulePath or import the module manually"
+                    Write-Host "  Use -SkipModuleUpload to skip module upload" -ForegroundColor Gray
+                }
+                else {
+                    # Get local module version
+                    $localManifest = Import-PowerShellDataFile -Path $psdPath
+                    $localVersion = [Version]$localManifest.ModuleVersion
+                    Write-Host "  Local module version: $localVersion" -ForegroundColor Cyan
+
+                    # Check if FortigiGraph module already exists in Automation Account
+                    $existingFGModule = Get-AzAutomationModule `
+                        -ResourceGroupName $ResourceGroupName `
+                        -AutomationAccountName $AutomationAccountName `
+                        -Name "FortigiGraph" `
+                        -RuntimeVersion "7.2" `
+                        -ErrorAction SilentlyContinue
+
+                    $shouldUpload = $true
+                    if ($existingFGModule -and $existingFGModule.ProvisioningState -eq "Succeeded") {
+                        $deployedVersion = [Version]$existingFGModule.Version
+                        Write-Host "  Deployed module version: $deployedVersion" -ForegroundColor Cyan
+
+                        if ($localVersion -le $deployedVersion) {
+                            Write-Host "  Module is up to date (deployed: $deployedVersion >= local: $localVersion)" -ForegroundColor Green
+                            $shouldUpload = $false
+                        }
+                        else {
+                            Write-Host "  Newer version available (local: $localVersion > deployed: $deployedVersion)" -ForegroundColor Yellow
+                        }
+                    }
+                    elseif ($existingFGModule) {
+                        Write-Host "  Existing module state: $($existingFGModule.ProvisioningState)" -ForegroundColor Yellow
+                    }
+                    else {
+                        Write-Host "  No existing FortigiGraph module found in Automation Account" -ForegroundColor Yellow
+                    }
+
+                    if ($shouldUpload) {
+                        Write-Host "  Uploading FortigiGraph module..." -ForegroundColor Cyan
+
+                        try {
+                            # Create temp ZIP file
+                            $tempZipPath = Join-Path ([System.IO.Path]::GetTempPath()) "FortigiGraph_$(Get-Date -Format 'yyyyMMddHHmmss').zip"
+
+                            Write-Host "  Module path: $ModulePath" -ForegroundColor Gray
+                            Write-Host "  Creating ZIP archive..." -ForegroundColor Gray
+
+                            # Get all module files (exclude _Test, _Build, .git, etc.)
+                            $filesToInclude = Get-ChildItem -Path $ModulePath -Recurse -File | Where-Object {
+                                $_.FullName -notmatch '[\\/](_Test|_Build|\.git|\.vscode|Config)[\\/]' -and
+                                $_.Name -notmatch '^\.' -and
+                                $_.Extension -in @('.ps1', '.psm1', '.psd1', '.ps1xml', '.dll', '.txt', '.md')
+                            }
+
+                            # Create a temp folder with proper module structure
+                            $tempModuleFolder = Join-Path ([System.IO.Path]::GetTempPath()) "FortigiGraph"
+                            if (Test-Path $tempModuleFolder) {
+                                Remove-Item -Path $tempModuleFolder -Recurse -Force
+                            }
+                            New-Item -Path $tempModuleFolder -ItemType Directory -Force | Out-Null
+
+                            # Copy files maintaining relative structure
+                            foreach ($file in $filesToInclude) {
+                                $relativePath = $file.FullName.Substring($ModulePath.Length).TrimStart('\', '/')
+                                $destPath = Join-Path $tempModuleFolder $relativePath
+                                $destFolder = Split-Path -Parent $destPath
+                                if (-not (Test-Path $destFolder)) {
+                                    New-Item -Path $destFolder -ItemType Directory -Force | Out-Null
+                                }
+                                Copy-Item -Path $file.FullName -Destination $destPath -Force
+                            }
+
+                            # Create ZIP
+                            if (Test-Path $tempZipPath) {
+                                Remove-Item -Path $tempZipPath -Force
+                            }
+                            Compress-Archive -Path $tempModuleFolder -DestinationPath $tempZipPath -Force
+
+                            Write-Host "  ZIP created: $([math]::Round((Get-Item $tempZipPath).Length / 1KB, 1)) KB" -ForegroundColor Gray
+
+                            # For PowerShell 7.2 runtime, we need to upload via blob storage
+                            if ($RunbookType -eq "PowerShell72") {
+                                # Create a temporary storage account for module upload
+                                $storageAccountName = "fgtemp$((Get-Date).Ticks % 10000000000)"
+                                $storageAccountName = $storageAccountName.Substring(0, [Math]::Min(24, $storageAccountName.Length)).ToLower()
+
+                                Write-Host "  Creating temporary storage account for upload..." -ForegroundColor Gray
+
+                                try {
+                                    # Create storage account
+                                    $storageAccount = New-AzStorageAccount `
+                                        -ResourceGroupName $ResourceGroupName `
+                                        -Name $storageAccountName `
+                                        -Location $Location `
+                                        -SkuName Standard_LRS `
+                                        -Kind StorageV2 `
+                                        -AllowBlobPublicAccess $true `
+                                        -ErrorAction Stop
+
+                                    $storageContext = $storageAccount.Context
+
+                                    # Create container
+                                    $containerName = "modules"
+                                    New-AzStorageContainer -Name $containerName -Context $storageContext -Permission Blob -ErrorAction SilentlyContinue | Out-Null
+
+                                    # Upload ZIP
+                                    $blobName = "FortigiGraph.zip"
+                                    Set-AzStorageBlobContent -File $tempZipPath -Container $containerName -Blob $blobName -Context $storageContext -Force | Out-Null
+
+                                    # Get blob URL
+                                    $blobUrl = "https://$storageAccountName.blob.core.windows.net/$containerName/$blobName"
+
+                                    Write-Host "  Blob URL: $blobUrl" -ForegroundColor Gray
+
+                                    # Import new module (will replace existing if present)
+                                    New-AzAutomationModule `
+                                        -ResourceGroupName $ResourceGroupName `
+                                        -AutomationAccountName $AutomationAccountName `
+                                        -Name "FortigiGraph" `
+                                        -ContentLinkUri $blobUrl `
+                                        -RuntimeVersion "7.2" | Out-Null
+
+                                    Write-Host "  FortigiGraph module v$localVersion import started (PowerShell 7.2)" -ForegroundColor Green
+
+                                    # Wait for module import to complete before deleting storage
+                                    Write-Host "  Waiting for module import to complete..." -ForegroundColor Gray
+                                    $maxWaitSeconds = 180  # 3 minutes max
+                                    $waitedSeconds = 0
+                                    $importComplete = $false
+
+                                    while (-not $importComplete -and $waitedSeconds -lt $maxWaitSeconds) {
+                                        Start-Sleep -Seconds 10
+                                        $waitedSeconds += 10
+
+                                        $moduleStatus = Get-AzAutomationModule `
+                                            -ResourceGroupName $ResourceGroupName `
+                                            -AutomationAccountName $AutomationAccountName `
+                                            -Name "FortigiGraph" `
+                                            -RuntimeVersion "7.2" `
+                                            -ErrorAction SilentlyContinue
+
+                                        if ($moduleStatus) {
+                                            $state = $moduleStatus.ProvisioningState
+                                            Write-Host "    Module state: $state ($waitedSeconds s)" -ForegroundColor Gray
+
+                                            if ($state -eq "Succeeded") {
+                                                $importComplete = $true
+                                                Write-Host "  Module import completed successfully!" -ForegroundColor Green
+                                            }
+                                            elseif ($state -eq "Failed") {
+                                                Write-Warning "  Module import failed!"
+                                                break
+                                            }
+                                            # Continue waiting for Creating/ContentValidated states
+                                        }
+                                    }
+
+                                    if (-not $importComplete -and $waitedSeconds -ge $maxWaitSeconds) {
+                                        Write-Host "  Module import still in progress after $maxWaitSeconds seconds" -ForegroundColor Yellow
+                                        Write-Host "  Storage account will be kept - please delete manually after import completes:" -ForegroundColor Yellow
+                                        Write-Host "    Storage Account: $storageAccountName" -ForegroundColor Gray
+                                    }
+                                    else {
+                                        # Clean up storage account
+                                        Write-Host "  Cleaning up temporary storage account..." -ForegroundColor Gray
+                                        $null = Remove-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $storageAccountName -Force -ErrorAction SilentlyContinue *>&1
+                                    }
+                                }
+                                catch {
+                                    Write-Warning "  Failed to upload module via storage account: $_"
+                                    Write-Host "  Falling back to PowerShell Gallery import..." -ForegroundColor Yellow
+
+                                    # Try importing from gallery as fallback
+                                    try {
+                                        New-AzAutomationModule `
+                                            -ResourceGroupName $ResourceGroupName `
+                                            -AutomationAccountName $AutomationAccountName `
+                                            -Name "FortigiGraph" `
+                                            -ContentLinkUri "https://www.powershellgallery.com/api/v2/package/FortigiGraph" `
+                                            -RuntimeVersion "7.2" -ErrorAction SilentlyContinue | Out-Null
+                                        Write-Host "  FortigiGraph imported from PowerShell Gallery (may be older version)" -ForegroundColor Yellow
+                                    }
+                                    catch {
+                                        Write-Warning "  Could not import from gallery either. Please import manually."
+                                    }
+                                }
+                            }
+                            else {
+                                # PowerShell 5.1 - simpler approach
+                                Write-Warning "  Local module upload not yet supported for PowerShell 5.1 runtime"
+                                Write-Host "  Please import FortigiGraph manually from PowerShell Gallery" -ForegroundColor Yellow
+                            }
+
+                            # Cleanup temp files
+                            Remove-Item -Path $tempZipPath -Force -ErrorAction SilentlyContinue
+                            Remove-Item -Path $tempModuleFolder -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                        catch {
+                            Write-Warning "  Failed to upload local module: $_"
+                            Write-Host "  Please import FortigiGraph manually" -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+            else {
+                Write-Host "`n  Skipping FortigiGraph module upload (-SkipModuleUpload)" -ForegroundColor Yellow
+                Write-Host "  Import manually from PowerShell Gallery if needed" -ForegroundColor Gray
+            }
         }
 
         # Create Runbooks (by default, unless -SkipRunbooks is specified)
@@ -445,6 +822,7 @@ function New-FGAzureAutomationAccount {
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating runbooks..." -ForegroundColor Cyan
 
             $runbooks = @(
+                # User & Group sync
                 @{
                     Name = "Sync-FGUsers"
                     Description = "Syncs Microsoft Graph users to Azure SQL"
@@ -455,14 +833,26 @@ function New-FGAzureAutomationAccount {
                     Name = "Sync-FGGroups"
                     Description = "Syncs Microsoft Graph groups to Azure SQL"
                     SyncFunction = "Sync-FGGroup"
-                    HasGroupFilter = $true
+                    HasGroupSyncConfig = $true
                 }
+                # Group membership sync
                 @{
                     Name = "Sync-FGGroupMembers"
                     Description = "Syncs Microsoft Graph group memberships to Azure SQL"
                     SyncFunction = "Sync-FGGroupMember"
                     ExtraParams = "-UseBatching"
                 }
+                @{
+                    Name = "Sync-FGGroupEligibleMembers"
+                    Description = "Syncs Microsoft Graph PIM eligible group memberships to Azure SQL"
+                    SyncFunction = "Sync-FGGroupEligibleMember"
+                }
+                @{
+                    Name = "Sync-FGGroupOwners"
+                    Description = "Syncs Microsoft Graph group owners to Azure SQL"
+                    SyncFunction = "Sync-FGGroupOwner"
+                }
+                # Access package sync
                 @{
                     Name = "Sync-FGCatalogs"
                     Description = "Syncs access package catalogs to Azure SQL"
@@ -477,6 +867,28 @@ function New-FGAzureAutomationAccount {
                     Name = "Sync-FGAccessPackageAssignments"
                     Description = "Syncs access package assignments to Azure SQL"
                     SyncFunction = "Sync-FGAccessPackageAssignment"
+                    ExtraParams = "-UseBatching"
+                }
+                @{
+                    Name = "Sync-FGAccessPackageResourceRoleScopes"
+                    Description = "Syncs access package resource role scopes to Azure SQL"
+                    SyncFunction = "Sync-FGAccessPackageResourceRoleScope"
+                }
+                @{
+                    Name = "Sync-FGAccessPackageAssignmentPolicies"
+                    Description = "Syncs access package assignment policies to Azure SQL"
+                    SyncFunction = "Sync-FGAccessPackageAssignmentPolicy"
+                }
+                @{
+                    Name = "Sync-FGAccessPackageAssignmentRequests"
+                    Description = "Syncs access package assignment requests to Azure SQL"
+                    SyncFunction = "Sync-FGAccessPackageAssignmentRequest"
+                    ExtraParams = "-UseBatching"
+                }
+                @{
+                    Name = "Sync-FGAccessPackageAccessReviews"
+                    Description = "Syncs access package access review decisions to Azure SQL"
+                    SyncFunction = "Sync-FGAccessPackageAccessReview"
                 }
             )
 
@@ -510,14 +922,22 @@ Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running Sync-FGUser...
 Sync-FGUser @syncParams
 '@
                 }
-                elseif ($runbook.HasGroupFilter) {
-                    # Groups runbook - includes filter
+                elseif ($runbook.HasGroupSyncConfig) {
+                    # Groups runbook - includes additional attributes and filter
                     $syncCommand = @'
 # Get sync configuration
+$additionalAttributesRaw = Get-AutomationVariable -Name 'SyncGroupsAdditionalAttributes' -ErrorAction SilentlyContinue
 $groupFilter = Get-AutomationVariable -Name 'SyncGroupsFilter' -ErrorAction SilentlyContinue
 
 # Build sync parameters
 $syncParams = @{}
+if ($additionalAttributesRaw -and $additionalAttributesRaw.Trim() -ne "") {
+    $additionalAttributes = $additionalAttributesRaw -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+    if ($additionalAttributes.Count -gt 0) {
+        $syncParams.AdditionalAttributes = $additionalAttributes
+        Write-Output "  Additional attributes: $($additionalAttributes -join ', ')"
+    }
+}
 if ($groupFilter -and $groupFilter.Trim() -ne "") {
     $syncParams.Filter = $groupFilter
     Write-Output "  Filter: $groupFilter"
@@ -631,28 +1051,159 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
         }
 
         # Create Schedules
-        if ($CreateSchedules -and -not $SkipRunbooks) {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Creating schedules..." -ForegroundColor Cyan
-            Write-Host "  Note: Schedules start tomorrow at the specified times" -ForegroundColor Gray
+        # Schedules are created if: (1) -CreateSchedules switch is used, OR (2) config file has Schedules.Enabled = true
+        $shouldCreateSchedules = $CreateSchedules -or ($PSCmdlet.ParameterSetName -eq 'ConfigFile' -and $scheduleConfig.Enabled)
 
-            $schedules = @(
-                @{ RunbookName = "Sync-FGUsers"; ScheduleName = "Daily-Users-6AM"; Hour = 6; Frequency = "Day" }
-                @{ RunbookName = "Sync-FGGroups"; ScheduleName = "Daily-Groups-6AM"; Hour = 6; Frequency = "Day" }
-                @{ RunbookName = "Sync-FGGroupMembers"; ScheduleName = "Daily-GroupMembers-7AM"; Hour = 7; Frequency = "Day" }
-                @{ RunbookName = "Sync-FGCatalogs"; ScheduleName = "Daily-Catalogs-6AM"; Hour = 6; Frequency = "Day" }
-                @{ RunbookName = "Sync-FGAccessPackages"; ScheduleName = "Daily-AccessPackages-6AM"; Hour = 6; Frequency = "Day" }
-                @{ RunbookName = "Sync-FGAccessPackageAssignments"; ScheduleName = "Daily-Assignments-8AM"; Hour = 8; Frequency = "Day" }
-            )
+        if ($shouldCreateSchedules -and -not $SkipRunbooks) {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking existing schedules..." -ForegroundColor Cyan
+
+            # Get all existing schedules in the Automation Account
+            $existingSchedules = Get-AzAutomationSchedule `
+                -ResourceGroupName $ResourceGroupName `
+                -AutomationAccountName $AutomationAccountName `
+                -ErrorAction SilentlyContinue
+
+            # Get all existing schedule-runbook links
+            $existingLinks = @()
+            foreach ($rb in $runbooks) {
+                $links = Get-AzAutomationScheduledRunbook `
+                    -ResourceGroupName $ResourceGroupName `
+                    -AutomationAccountName $AutomationAccountName `
+                    -RunbookName $rb.Name `
+                    -ErrorAction SilentlyContinue
+                if ($links) {
+                    $existingLinks += $links
+                }
+            }
+
+            if ($existingSchedules -and $existingSchedules.Count -gt 0) {
+                Write-Host "  Found $($existingSchedules.Count) existing schedule(s) in Automation Account" -ForegroundColor Cyan
+            }
+
+            # Determine schedule source: config file or defaults
+            if ($PSCmdlet.ParameterSetName -eq 'ConfigFile' -and $scheduleConfig.Schedules.Count -gt 0) {
+                Write-Host "  Using schedule configuration from config file" -ForegroundColor Cyan
+                Write-Host "  Time zone: $($scheduleConfig.TimeZone)" -ForegroundColor Gray
+
+                $schedulesToCreate = @()
+                foreach ($sched in $scheduleConfig.Schedules) {
+                    # Parse time string (e.g., "06:00" or "06:15")
+                    $timeParts = $sched.Time -split ':'
+                    $hour = [int]$timeParts[0]
+                    $minute = if ($timeParts.Count -gt 1) { [int]$timeParts[1] } else { 0 }
+
+                    # Build schedule name based on frequency
+                    $freqPrefix = if ($sched.Frequency -eq "Hourly") { "Hourly" } else { "Daily" }
+                    $scheduleName = "$freqPrefix-$($sched.ConfigKey)-$($hour.ToString('00'))$($minute.ToString('00'))"
+
+                    $schedulesToCreate += @{
+                        RunbookName = $sched.RunbookName
+                        ScheduleName = $scheduleName
+                        Hour = $hour
+                        Minute = $minute
+                        Frequency = $sched.Frequency
+                        TimeZone = $scheduleConfig.TimeZone
+                    }
+                }
+            }
+            else {
+                Write-Host "  Using default schedule configuration" -ForegroundColor Cyan
+                Write-Host "  Note: Schedules start tomorrow at the specified times (UTC)" -ForegroundColor Gray
+
+                $schedulesToCreate = @(
+                    # User & Group sync
+                    @{ RunbookName = "Sync-FGUsers"; ScheduleName = "Daily-Users-0600"; Hour = 6; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGGroups"; ScheduleName = "Daily-Groups-0600"; Hour = 6; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    # Group membership sync
+                    @{ RunbookName = "Sync-FGGroupMembers"; ScheduleName = "Daily-GroupMembers-0700"; Hour = 7; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGGroupEligibleMembers"; ScheduleName = "Daily-GroupEligibleMembers-0800"; Hour = 8; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGGroupOwners"; ScheduleName = "Daily-GroupOwners-0630"; Hour = 6; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    # Access package sync
+                    @{ RunbookName = "Sync-FGCatalogs"; ScheduleName = "Daily-Catalogs-0600"; Hour = 6; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackages"; ScheduleName = "Daily-AccessPackages-0615"; Hour = 6; Minute = 15; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackageAssignments"; ScheduleName = "Daily-AccessPackageAssignments-0830"; Hour = 8; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackageResourceRoleScopes"; ScheduleName = "Daily-AccessPackageResourceRoleScopes-0630"; Hour = 6; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackageAssignmentPolicies"; ScheduleName = "Daily-AccessPackageAssignmentPolicies-0645"; Hour = 6; Minute = 45; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackageAssignmentRequests"; ScheduleName = "Daily-AccessPackageAssignmentRequests-0900"; Hour = 9; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGAccessPackageAccessReviews"; ScheduleName = "Daily-AccessPackageAccessReviews-0930"; Hour = 9; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                )
+            }
+
+            # Check for existing schedules that are not in the current configuration
+            # These could be from previous config changes or manually added schedules
+            $newScheduleNames = $schedulesToCreate | ForEach-Object { $_.ScheduleName }
+
+            # Find FortigiGraph-related schedules (Daily-* or Hourly-* patterns for our runbooks)
+            $fgSchedulePattern = '^(Daily|Hourly)-(Users|Groups|GroupMembers|GroupEligibleMembers|GroupOwners|Catalogs|AccessPackages|AccessPackageAssignments|AccessPackageResourceRoleScopes|AccessPackageAssignmentPolicies|AccessPackageAssignmentRequests|AccessPackageAccessReviews)-'
+
+            $orphanedSchedules = @()
+            $additionalSchedules = @()
+
+            if ($existingSchedules) {
+                foreach ($existingSched in $existingSchedules) {
+                    # Check if this is a FortigiGraph schedule
+                    if ($existingSched.Name -match $fgSchedulePattern) {
+                        if ($newScheduleNames -notcontains $existingSched.Name) {
+                            $orphanedSchedules += $existingSched
+                        }
+                    }
+                    # Check for schedules linked to our runbooks but with custom names
+                    elseif ($existingLinks | Where-Object { $_.ScheduleName -eq $existingSched.Name }) {
+                        $additionalSchedules += $existingSched
+                    }
+                }
+            }
+
+            # Warn about orphaned schedules (FortigiGraph schedules not in current config)
+            if ($orphanedSchedules.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  ========================================" -ForegroundColor Yellow
+                Write-Host "  WARNING: Found $($orphanedSchedules.Count) orphaned schedule(s)" -ForegroundColor Yellow
+                Write-Host "  ========================================" -ForegroundColor Yellow
+                Write-Host "  These schedules appear to be from previous configurations" -ForegroundColor Yellow
+                Write-Host "  and are NOT in your current config file:" -ForegroundColor Yellow
+                Write-Host ""
+                foreach ($orphan in $orphanedSchedules) {
+                    $status = if ($orphan.IsEnabled) { "Enabled" } else { "Disabled" }
+                    Write-Host "    - $($orphan.Name) ($status)" -ForegroundColor Yellow
+                }
+                Write-Host ""
+                Write-Host "  Consider removing these manually if no longer needed:" -ForegroundColor Gray
+                Write-Host "  Azure Portal > Automation Account > Schedules" -ForegroundColor Gray
+                Write-Host "  ========================================" -ForegroundColor Yellow
+                Write-Host ""
+            }
+
+            # Warn about additional custom schedules linked to our runbooks
+            if ($additionalSchedules.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  ========================================" -ForegroundColor Cyan
+                Write-Host "  INFO: Found $($additionalSchedules.Count) additional schedule(s)" -ForegroundColor Cyan
+                Write-Host "  ========================================" -ForegroundColor Cyan
+                Write-Host "  These custom schedules are linked to FortigiGraph runbooks:" -ForegroundColor Cyan
+                Write-Host ""
+                foreach ($additional in $additionalSchedules) {
+                    $status = if ($additional.IsEnabled) { "Enabled" } else { "Disabled" }
+                    $linkedRunbooks = ($existingLinks | Where-Object { $_.ScheduleName -eq $additional.Name } | ForEach-Object { $_.RunbookName }) -join ", "
+                    Write-Host "    - $($additional.Name) ($status) -> $linkedRunbooks" -ForegroundColor Cyan
+                }
+                Write-Host ""
+                Write-Host "  These will be kept as-is (not modified by this script)" -ForegroundColor Gray
+                Write-Host "  ========================================" -ForegroundColor Cyan
+                Write-Host ""
+            }
+
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Creating $($schedulesToCreate.Count) schedule(s)..." -ForegroundColor Cyan
 
             $startDate = (Get-Date).AddDays(1).Date
 
-            foreach ($schedule in $schedules) {
+            foreach ($schedule in $schedulesToCreate) {
                 Write-Host "  Creating schedule: $($schedule.ScheduleName)..." -ForegroundColor Cyan
 
                 try {
-                    $startTime = $startDate.AddHours($schedule.Hour)
+                    $startTime = $startDate.AddHours($schedule.Hour).AddMinutes($schedule.Minute)
 
-                    # Create schedule
+                    # Check if schedule exists
                     $existingSchedule = Get-AzAutomationSchedule `
                         -ResourceGroupName $ResourceGroupName `
                         -AutomationAccountName $AutomationAccountName `
@@ -660,13 +1211,33 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                         -ErrorAction SilentlyContinue
 
                     if (-not $existingSchedule) {
-                        New-AzAutomationSchedule `
-                            -ResourceGroupName $ResourceGroupName `
-                            -AutomationAccountName $AutomationAccountName `
-                            -Name $schedule.ScheduleName `
-                            -StartTime $startTime `
-                            -DayInterval 1 `
-                            -Description "Daily schedule for $($schedule.RunbookName)" | Out-Null
+                        # Create schedule with time zone support
+                        $scheduleParams = @{
+                            ResourceGroupName = $ResourceGroupName
+                            AutomationAccountName = $AutomationAccountName
+                            Name = $schedule.ScheduleName
+                            StartTime = $startTime
+                        }
+
+                        # Set interval based on frequency
+                        if ($schedule.Frequency -eq "Hourly") {
+                            $scheduleParams.HourInterval = 1
+                            $scheduleParams.Description = "Hourly schedule for $($schedule.RunbookName)"
+                        }
+                        else {
+                            $scheduleParams.DayInterval = 1
+                            $scheduleParams.Description = "Daily schedule for $($schedule.RunbookName)"
+                        }
+
+                        # Add time zone if specified and not UTC
+                        if ($schedule.TimeZone -and $schedule.TimeZone -ne "UTC") {
+                            $scheduleParams.TimeZone = $schedule.TimeZone
+                        }
+
+                        New-AzAutomationSchedule @scheduleParams | Out-Null
+                    }
+                    else {
+                        Write-Host "    Schedule already exists, updating link..." -ForegroundColor Yellow
                     }
 
                     # Link schedule to runbook
@@ -677,14 +1248,16 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                         -ScheduleName $schedule.ScheduleName `
                         -ErrorAction SilentlyContinue | Out-Null
 
-                    Write-Host "    Schedule created: $($schedule.Frequency) at $($schedule.Hour):00" -ForegroundColor Green
+                    $timeDisplay = "$($schedule.Hour.ToString('00')):$($schedule.Minute.ToString('00'))"
+                    $tzDisplay = if ($schedule.TimeZone -and $schedule.TimeZone -ne "UTC") { " ($($schedule.TimeZone))" } else { " (UTC)" }
+                    Write-Host "    Schedule created: $($schedule.Frequency) at $timeDisplay$tzDisplay" -ForegroundColor Green
                 }
                 catch {
                     Write-Warning "    Failed to create schedule $($schedule.ScheduleName): $_"
                 }
             }
         }
-        elseif ($CreateSchedules -and $SkipRunbooks) {
+        elseif ($shouldCreateSchedules -and $SkipRunbooks) {
             Write-Warning "Schedules require runbooks. Remove -SkipRunbooks to create schedules."
         }
 
@@ -704,27 +1277,46 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             Write-Host ""
             Write-Host "Modules Importing:" -ForegroundColor Cyan
             Write-Host "  - Az.Accounts, Az.Sql (may take a few minutes)" -ForegroundColor White
+            if (-not $SkipModuleUpload) {
+                Write-Host "  - FortigiGraph (uploaded from local path)" -ForegroundColor White
+            }
         }
 
         if (-not $SkipRunbooks) {
             Write-Host ""
-            Write-Host "Runbooks Created:" -ForegroundColor Cyan
-            Write-Host "  - Sync-FGUsers, Sync-FGGroups, Sync-FGGroupMembers" -ForegroundColor White
-            Write-Host "  - Sync-FGCatalogs, Sync-FGAccessPackages, Sync-FGAccessPackageAssignments" -ForegroundColor White
+            Write-Host "Runbooks Created ($($runbooks.Count) total):" -ForegroundColor Cyan
+            Write-Host "  Users & Groups:    Sync-FGUsers, Sync-FGGroups" -ForegroundColor White
+            Write-Host "  Group Membership:  Sync-FGGroupMembers, Sync-FGGroupEligibleMembers," -ForegroundColor White
+            Write-Host "                     Sync-FGGroupOwners" -ForegroundColor White
+            Write-Host "  Access Packages:   Sync-FGCatalogs, Sync-FGAccessPackages," -ForegroundColor White
+            Write-Host "                     Sync-FGAccessPackageAssignments, Sync-FGAccessPackageResourceRoleScopes," -ForegroundColor White
+            Write-Host "                     Sync-FGAccessPackageAssignmentPolicies, Sync-FGAccessPackageAssignmentRequests," -ForegroundColor White
+            Write-Host "                     Sync-FGAccessPackageAccessReviews" -ForegroundColor White
         }
 
-        if ($CreateSchedules -and -not $SkipRunbooks) {
+        if ($shouldCreateSchedules -and -not $SkipRunbooks) {
             Write-Host ""
             Write-Host "Schedules Created:" -ForegroundColor Cyan
-            Write-Host "  - Daily schedules starting tomorrow (6AM-8AM)" -ForegroundColor White
+            if ($PSCmdlet.ParameterSetName -eq 'ConfigFile' -and $scheduleConfig.Schedules.Count -gt 0) {
+                Write-Host "  - $($scheduleConfig.Schedules.Count) schedules from config file ($($scheduleConfig.TimeZone))" -ForegroundColor White
+            }
+            else {
+                Write-Host "  - $($schedulesToCreate.Count) daily schedules starting tomorrow (6AM-9:30AM UTC)" -ForegroundColor White
+            }
         }
 
         Write-Host ""
         Write-Host "NEXT STEPS:" -ForegroundColor Yellow
-        Write-Host "1. Import FortigiGraph module from PowerShell Gallery" -ForegroundColor White
-        Write-Host "   (Azure Portal > Automation Account > Modules > Browse Gallery)" -ForegroundColor Gray
-        Write-Host "2. Wait for module imports to complete (check Modules status)" -ForegroundColor White
-        Write-Host "3. Test runbooks manually before enabling schedules" -ForegroundColor White
+        if (-not $SkipModuleUpload) {
+            Write-Host "1. Wait for module imports to complete (check Modules status)" -ForegroundColor White
+            Write-Host "2. Test runbooks manually before enabling schedules" -ForegroundColor White
+        }
+        else {
+            Write-Host "1. Import FortigiGraph module from PowerShell Gallery" -ForegroundColor White
+            Write-Host "   (Azure Portal > Automation Account > Modules > Browse Gallery)" -ForegroundColor Gray
+            Write-Host "2. Wait for module imports to complete (check Modules status)" -ForegroundColor White
+            Write-Host "3. Test runbooks manually before enabling schedules" -ForegroundColor White
+        }
         Write-Host "========================================`n" -ForegroundColor Cyan
 
         return @{
@@ -732,7 +1324,8 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             ResourceGroupName = $ResourceGroupName
             Location = $Location
             RunbooksCreated = (-not $SkipRunbooks.IsPresent)
-            SchedulesCreated = ($CreateSchedules.IsPresent -and -not $SkipRunbooks.IsPresent)
+            SchedulesCreated = ($shouldCreateSchedules -and -not $SkipRunbooks.IsPresent)
+            ScheduleCount = if ($shouldCreateSchedules -and -not $SkipRunbooks.IsPresent) { $schedulesToCreate.Count } else { 0 }
         }
     }
     catch {

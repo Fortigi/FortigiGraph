@@ -71,6 +71,12 @@ function Sync-FGAccessPackageAssignmentPolicy {
         [int]$BatchSize = 100
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
@@ -80,6 +86,8 @@ function Sync-FGAccessPackageAssignmentPolicy {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     # Define default attributes
     $defaultAttributes = @(
@@ -386,6 +394,21 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Write-Host "Attributes:          $($Attributes.Count)" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
+
+    # Set sync status for logging
+    $syncRecordCount = $allPolicies.Count
+    $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "AccessPackageAssignmentPolicies" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+    }
 
     return @{
         TableName = $TableName

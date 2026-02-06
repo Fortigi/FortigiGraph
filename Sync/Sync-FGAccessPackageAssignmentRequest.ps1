@@ -33,6 +33,15 @@ function Sync-FGAccessPackageAssignmentRequest {
     .PARAMETER BatchSize
     Number of requests to process at once. Default: 100
 
+    .PARAMETER UseBatching
+    If specified, fetches and processes requests in batches by access package.
+    This uses less memory and is recommended for Azure Automation runbooks or large environments.
+    Instead of loading all requests at once, it fetches requests per access package.
+
+    .PARAMETER PageSize
+    Number of records per Graph API page when using batching. Default: 500.
+    Reduce this if you're hitting timeouts.
+
     .EXAMPLE
     Sync-FGAccessPackageAssignmentRequest
 
@@ -70,8 +79,20 @@ function Sync-FGAccessPackageAssignmentRequest {
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
-        [int]$BatchSize = 100
+        [int]$BatchSize = 100,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$UseBatching,
+
+        [Parameter(Mandatory = $false)]
+        [int]$PageSize = 500
     )
+
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
 
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
@@ -82,6 +103,8 @@ function Sync-FGAccessPackageAssignmentRequest {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     # Define default attributes
     $defaultAttributes = @(
@@ -222,23 +245,93 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Build Graph API request - expand requestor to get user ID
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment requests from Microsoft Graph..." -ForegroundColor Cyan
 
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor,accessPackage"
-
-    if ($Filter) {
-        $uri += "&`$filter=$Filter"
-    }
-
-    # Fetch all requests using Invoke-FGGetRequest (handles token validation, pagination, and progress reporting)
     $graphStartTime = Get-Date
+    $allRequests = @()
 
-    try {
-        $allRequests = Invoke-FGGetRequest -URI $uri
-        if (-not $allRequests) {
-            $allRequests = @()
+    if ($UseBatching) {
+        # BATCHING MODE: Fetch requests per access package to reduce memory usage
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using batching mode (per access package)..." -ForegroundColor Cyan
+
+        # First, get all access packages
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fetching access packages list..." -ForegroundColor Gray
+        $accessPackagesUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages?`$select=id,displayName"
+        $accessPackages = Invoke-FGGetRequest -URI $accessPackagesUri
+
+        if (-not $accessPackages -or $accessPackages.Count -eq 0) {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No access packages found."
+            return
         }
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($accessPackages.Count) access packages to process" -ForegroundColor Cyan
+
+        $packageCount = 0
+        foreach ($package in $accessPackages) {
+            $packageCount++
+            $packageName = if ($package.displayName.Length -gt 30) { $package.displayName.Substring(0, 30) + "..." } else { $package.displayName }
+            Write-Host "  [$packageCount/$($accessPackages.Count)] Processing: $packageName" -ForegroundColor Gray
+
+            # Build URI for this package's requests
+            $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor,accessPackage&`$filter=accessPackage/id eq '$($package.id)'"
+            if ($Filter) {
+                $uri += " and ($Filter)"
+            }
+            $uri += "&`$top=$PageSize"
+
+            try {
+                $packageRequests = Invoke-FGGetRequest -URI $uri
+                if ($packageRequests) {
+                    $allRequests += $packageRequests
+                    Write-Host "    Found $($packageRequests.Count) requests" -ForegroundColor Gray
+                }
+            }
+            catch {
+                Write-Warning "    Failed to fetch requests for package $($package.id): $_"
+            }
+
+            # Trigger garbage collection periodically to free memory
+            if ($packageCount % 50 -eq 0) {
+                [System.GC]::Collect()
+            }
+        }
+
+        # Also fetch requests without access package (removal requests)
+        Write-Host "  [Extra] Fetching requests without access package (removals)..." -ForegroundColor Gray
+        try {
+            $removalUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor&`$filter=requestType eq 'userRemove' or requestType eq 'adminRemove' or requestType eq 'systemRemove'"
+            if ($Filter) {
+                $removalUri += " and ($Filter)"
+            }
+            $removalUri += "&`$top=$PageSize"
+            $removalRequests = Invoke-FGGetRequest -URI $removalUri
+            if ($removalRequests) {
+                $allRequests += $removalRequests
+                Write-Host "    Found $($removalRequests.Count) removal requests" -ForegroundColor Gray
+            }
+        }
+        catch {
+            Write-Warning "    Failed to fetch removal requests: $_"
+        }
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Batching complete" -ForegroundColor Green
     }
-    catch {
-        throw "Failed to fetch assignment requests from Graph: $_"
+    else {
+        # STANDARD MODE: Fetch all requests at once (faster but uses more memory)
+        $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentRequests?`$expand=requestor,accessPackage"
+
+        if ($Filter) {
+            $uri += "&`$filter=$Filter"
+        }
+
+        # Fetch all requests using Invoke-FGGetRequest (handles token validation, pagination, and progress reporting)
+        try {
+            $allRequests = Invoke-FGGetRequest -URI $uri
+            if (-not $allRequests) {
+                $allRequests = @()
+            }
+        }
+        catch {
+            throw "Failed to fetch assignment requests from Graph: $_"
+        }
     }
 
     $graphElapsed = (Get-Date) - $graphStartTime
@@ -448,6 +541,21 @@ function Sync-FGAccessPackageAssignmentRequest {
     Write-Host "Attributes:          $($Attributes.Count)" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
+
+    # Set sync status for logging
+    $syncRecordCount = $allRequests.Count
+    $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "AccessPackageAssignmentRequests" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+    }
 
     return @{
         TableName = $TableName

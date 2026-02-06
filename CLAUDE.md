@@ -1,5 +1,10 @@
 # FortigiGraph - AI Assistant Development Guide
 
+> **⚠️ IMPORTANT: After making ANY code changes, you MUST update the module version!**
+> 1. Edit `_Build/CreatePSD.ps1` and update the version number (format: `Major.Minor.yyyyMMdd.HHmm`)
+> 2. Run `_Build/CreatePSD.ps1` to regenerate `FortigiGraph.psd1`
+> This ensures changes are properly tracked and the module can be re-imported.
+
 ## Project Overview
 
 FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph API and syncing data to Azure SQL databases with temporal versioning. It provides a comprehensive set of cmdlets for managing Azure AD/Entra ID resources (users, groups, devices, access packages, catalogs, access reviews) and persisting this data to SQL with automatic change tracking.
@@ -11,7 +16,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
-- **Current Version:** 1.1.20250515.1420
+- **Current Version:** 2.1.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
 
 ## Major Features
 
@@ -95,13 +100,18 @@ FortigiGraph/
 │   ├── Invoke-FGSQLQuery.ps1           # Simple query execution
 │   ├── Get-FGSQLTable.ps1              # List tables with details
 │   ├── Clear-FGSQLTable.ps1            # Clear table data
-│   └── Remove-FGAzureSQLServer.ps1     # Delete SQL Server
+│   ├── Remove-FGAzureSQLServer.ps1     # Delete SQL Server
+│   ├── Write-FGSyncLog.ps1             # Log sync operations to SQL
+│   └── New-FGSQLReadOnlyUser.ps1       # Create read-only SQL user for Power BI
 │
 ├── Specific/               # Higher-level helper functions
 │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation (~10 functions)
 │
-├── Automation/             # ⭐ Azure Automation Account setup
-│   └── New-FGAzureAutomationAccount.ps1  # Create Automation Account with runbooks
+├── Automation/             # ⭐ Azure Automation Account management
+│   ├── New-FGAzureAutomationAccount.ps1  # Create Automation Account with runbooks
+│   ├── Get-FGAutomationRunbook.ps1       # List runbooks in Automation Account
+│   ├── Start-FGAutomationRunbook.ps1     # Start a runbook on-demand
+│   └── Get-FGAutomationJob.ps1           # Monitor runbook job status
 │
 ├── _Test/                  # ⭐ Testing & Production Runbooks
 │   ├── Daily-Sync.ps1                  # ⭐ Production daily sync runbook
@@ -136,10 +146,11 @@ FortigiGraph/
 | **Base** | ~17 | Authentication, HTTP operations, token management |
 | **Generic** | ~47 | Graph API CRUD operations |
 | **Sync** | 14 | High-performance data sync operations (Start-FGSync + 13 entity syncs) |
-| **SQL** | 14 | Azure SQL database operations (incl. views & indexes) |
+| **SQL** | 16 | Azure SQL database operations (incl. views, indexes, sync logging) |
+| **Automation** | 4 | Azure Automation Account management (create, list, start, monitor) |
 | **Specific** | ~10 | High-level idempotent helpers |
 | **Test/Runbooks** | 5 | Integration testing, daily sync, credential management |
-| **Total** | **~107 functions** | **~11,000+ lines of code** |
+| **Total** | **~113 functions** | **~12,000+ lines of code** |
 
 **Production Runbooks:**
 - `Daily-Sync.ps1` - Production-ready scheduled sync with config file support (~650 lines)
@@ -522,13 +533,28 @@ Write-Host "Sync Complete!" -ForegroundColor Green
      ```
 
 3. **Version Updates:**
+
+   ⚠️ **IMPORTANT: Always update the version after making ANY changes to the module!**
+
+   This is critical because `New-FGAzureAutomationAccount` checks version numbers and only uploads the module if the local version is newer than the deployed version.
+
    - Version format: `Major.Minor.yyyyMMdd.HHmm`
    - Update in `_Build/CreatePSD.ps1`:
      ```powershell
-     $VersionMajor = "1"
+     $VersionMajor = "2"
      $VersionMinor = "1"
      ```
-   - Script auto-generates timestamp
+   - Then run `_Build/CreatePSD.ps1` to regenerate the `.psd1` with the new version
+   - The script auto-generates the timestamp portion: `yyyyMMdd.HHmm`
+
+   **Quick version update command:**
+   ```powershell
+   # In _Build/CreatePSD.ps1, the version is built like this:
+   $VersionMajor = "2"
+   $VersionMinor = "1"
+   $Version = $VersionMajor + "." + $VersionMinor + "." + (Get-Date -Format "yyyyMMdd") + "." + (Get-Date -Format "HHmm")
+   # Result example: 2.1.20260205.1430
+   ```
 
 4. **Building the Module:**
    - Run `_Build/CreatePSD.ps1` to regenerate `FortigiGraph.psd1`
@@ -786,6 +812,7 @@ Sync-FGUser -AdditionalAttributes @('employeeType')
 2. **Determine correct location:**
    - Direct Graph API call → `Generic/`
    - Azure SQL operation → `SQL/`
+   - Azure Automation operation → `Automation/`
    - Combines multiple operations → `Specific/`
    - Core HTTP/auth → `Base/` (rarely needed)
 3. **Follow the pattern:** Look at similar existing functions
@@ -795,7 +822,11 @@ Sync-FGUser -AdditionalAttributes @('employeeType')
 5. **Test thoroughly:**
    - Add to integration tests
    - Test with real Graph API and SQL Server
-6. **Update version:** Modify `_Build/CreatePSD.ps1` if publishing
+6. **⚠️ ALWAYS update module version after making changes:**
+   - Edit `_Build/CreatePSD.ps1` and update the version
+   - Version format: `Major.Minor.yyyyMMdd.HHmm` (e.g., `2.1.20260206.1445`)
+   - Run `_Build/CreatePSD.ps1` to regenerate `FortigiGraph.psd1`
+   - This is **REQUIRED** for every change, not just publishing
 
 ## Analytical Views
 
