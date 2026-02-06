@@ -454,7 +454,6 @@ function New-FGConfig {
         Users = @{ Enabled = $true; TableName = "GraphUsers"; Filter = ""; AdditionalAttributes = @() }
         Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = "" }
         GroupMembers = @{ Enabled = $true; TableName = "GraphGroupMembers" }
-        GroupTransitiveMembers = @{ Enabled = $true; TableName = "GraphGroupTransitiveMembers" }
         GroupEligibleMembers = @{ Enabled = $false }
         GroupOwners = @{ Enabled = $true; TableName = "GraphGroupOwners" }
         Catalogs = @{ Enabled = $true; TableName = "GraphCatalogs" }
@@ -477,7 +476,6 @@ function New-FGConfig {
         $syncConfig.Users.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Users" -Default $true)
         $syncConfig.Groups.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Groups" -Default $true)
         $syncConfig.GroupMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Members (direct)" -Default $true)
-        $syncConfig.GroupTransitiveMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Transitive Members (nested)" -Default $true)
         $syncConfig.GroupEligibleMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Eligible Members (PIM)" -Default $false)
         $syncConfig.GroupOwners.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Owners" -Default $true)
 
@@ -556,10 +554,6 @@ function New-FGConfig {
             GroupMembers                     = [ordered]@{
                 Enabled   = $syncConfig.GroupMembers.Enabled
                 TableName = $syncConfig.GroupMembers.TableName
-            }
-            GroupTransitiveMembers           = [ordered]@{
-                Enabled   = $syncConfig.GroupTransitiveMembers.Enabled
-                TableName = $syncConfig.GroupTransitiveMembers.TableName
             }
             GroupEligibleMembers             = [ordered]@{
                 Enabled = $syncConfig.GroupEligibleMembers.Enabled

@@ -55,10 +55,6 @@
         "Frequency": "Daily"
       }
     },
-    "GroupTransitiveMembers": {
-      "Enabled": true,
-      "TableName": "GraphGroupTransitiveMembers"
-    },
     "GroupEligibleMembers": {
       "Enabled": true,
       "_Comment": "PIM not configured in this environment"
