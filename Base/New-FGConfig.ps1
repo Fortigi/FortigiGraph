@@ -313,24 +313,136 @@ function New-FGConfig {
     # Graph API Settings
     # ============================================================
     Write-Host "--- Graph API Settings ---" -ForegroundColor Cyan
-    Write-Host "  (From your Azure AD App Registration)" -ForegroundColor Gray
-    Write-Host "  Using Tenant: $tenantId" -ForegroundColor Green
 
     $graphTenantId = $tenantId
 
-    $clientId = Read-Host "  Client ID (Application ID)"
-    if ([string]::IsNullOrWhiteSpace($clientId)) {
-        Write-Host "  Client ID is required." -ForegroundColor Red
-        return
-    }
+    Write-Host ""
+    Write-Host "  [1] Create a new App Registration (recommended for new setups)" -ForegroundColor White
+    Write-Host "  [2] Use an existing App Registration" -ForegroundColor White
+    Write-Host ""
 
-    Write-Host "  Client Secret: " -ForegroundColor Gray -NoNewline
-    $clientSecret = Read-Host -AsSecureString
+    do {
+        $appChoice = Read-Host "  Select option (1-2)"
+        $validAppChoice = ($appChoice -eq '1' -or $appChoice -eq '2')
+        if (-not $validAppChoice) {
+            Write-Host "  Please enter 1 or 2" -ForegroundColor Yellow
+        }
+    } while (-not $validAppChoice)
 
-    # Encrypt the secret
-    $clientSecretEncrypted = ""
-    if ($clientSecret.Length -gt 0) {
-        $clientSecretEncrypted = $clientSecret | ConvertFrom-SecureString
+    if ($appChoice -eq '1') {
+        # Create new App Registration
+        $appNameInput = Read-Host "  App Registration name [FortigiGraph]"
+        $appName = if ([string]::IsNullOrWhiteSpace($appNameInput)) { "FortigiGraph" } else { $appNameInput }
+
+        Write-Host ""
+        Write-Host "  Creating App Registration: $appName..." -ForegroundColor Cyan
+
+        try {
+            $app = New-AzADApplication -DisplayName $appName -ErrorAction Stop
+            $clientId = $app.AppId
+            Write-Host "  App created: $clientId" -ForegroundColor Green
+        } catch {
+            Write-Host "  Failed to create App Registration: $_" -ForegroundColor Red
+            Write-Host "  You may not have permission to create apps in this tenant." -ForegroundColor Yellow
+            Write-Host "  Falling back to manual entry." -ForegroundColor Yellow
+            Write-Host ""
+
+            $clientId = Read-Host "  Client ID (Application ID)"
+            if ([string]::IsNullOrWhiteSpace($clientId)) {
+                Write-Host "  Client ID is required." -ForegroundColor Red
+                return
+            }
+
+            Write-Host "  Client Secret: " -ForegroundColor Gray -NoNewline
+            $clientSecretRaw = Read-Host -AsSecureString
+            $clientSecretEncrypted = ""
+            if ($clientSecretRaw.Length -gt 0) {
+                $clientSecretEncrypted = $clientSecretRaw | ConvertFrom-SecureString
+            }
+
+            # Skip to after the app creation block
+            $appCreated = $false
+        }
+
+        if (-not (Test-Path variable:appCreated) -or $appCreated -ne $false) {
+            $appCreated = $true
+
+            # Create Service Principal
+            Write-Host "  Creating Service Principal..." -ForegroundColor Cyan
+            try {
+                New-AzADServicePrincipal -ApplicationId $clientId -ErrorAction Stop | Out-Null
+                Write-Host "  Service Principal created" -ForegroundColor Green
+            } catch {
+                if ($_.Exception.Message -like "*already exists*") {
+                    Write-Host "  Service Principal already exists" -ForegroundColor Green
+                } else {
+                    Write-Host "  Warning: Could not create Service Principal: $_" -ForegroundColor Yellow
+                }
+            }
+
+            # Generate Client Secret (valid for 2 years)
+            Write-Host "  Generating client secret (valid for 2 years)..." -ForegroundColor Cyan
+            try {
+                $endDate = (Get-Date).AddYears(2)
+                $credential = New-AzADAppCredential -ApplicationId $clientId -EndDate $endDate -ErrorAction Stop
+                $clientSecretPlain = $credential.SecretText
+                $clientSecretEncrypted = ($clientSecretPlain | ConvertTo-SecureString -AsPlainText -Force) | ConvertFrom-SecureString
+                Write-Host "  Client secret generated and stored encrypted" -ForegroundColor Green
+            } catch {
+                Write-Host "  Failed to generate client secret: $_" -ForegroundColor Red
+                Write-Host "  You can add a secret manually in the Azure Portal." -ForegroundColor Yellow
+                $clientSecretEncrypted = ""
+            }
+
+            # Add Graph API permissions
+            Write-Host "  Adding Microsoft Graph API permissions..." -ForegroundColor Cyan
+
+            $graphApiId = '00000003-0000-0000-c000-000000000000'
+            $permissions = @(
+                @{ Name = 'User.Read.All';                  Id = 'df021288-bdef-4463-88db-98f22de89214' }
+                @{ Name = 'Group.Read.All';                 Id = '5b567255-7703-4780-807c-7be8301ae99b' }
+                @{ Name = 'GroupMember.Read.All';           Id = '98830695-27a2-44f7-8c18-0c3ebc9698f6' }
+                @{ Name = 'Directory.Read.All';             Id = '7ab1d382-f21e-4acd-a863-ba3e13f7da61' }
+                @{ Name = 'EntitlementManagement.Read.All'; Id = 'c74fd47d-ed3c-45c3-9a9e-b8676de685d2' }
+                @{ Name = 'AccessReview.Read.All';          Id = 'd07a8cc0-3d51-4b77-b3b0-32704d1f69fa' }
+            )
+
+            foreach ($perm in $permissions) {
+                try {
+                    Add-AzADAppPermission -ApplicationId $clientId -ApiId $graphApiId -PermissionId $perm.Id -Type Role -ErrorAction Stop
+                    Write-Host "    + $($perm.Name)" -ForegroundColor Green
+                } catch {
+                    if ($_.Exception.Message -like "*already been assigned*") {
+                        Write-Host "    + $($perm.Name) (already assigned)" -ForegroundColor Green
+                    } else {
+                        Write-Host "    ! $($perm.Name) - failed: $_" -ForegroundColor Yellow
+                    }
+                }
+            }
+
+            Write-Host ""
+            Write-Host "  IMPORTANT: An admin must grant consent for these permissions." -ForegroundColor Yellow
+            Write-Host "  Open the Azure Portal to grant admin consent:" -ForegroundColor Yellow
+            Write-Host "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/$clientId" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Press Enter after granting admin consent (or grant it later)..." -ForegroundColor Gray
+            Read-Host | Out-Null
+        }
+    } else {
+        # Use existing App Registration
+        $clientId = Read-Host "  Client ID (Application ID)"
+        if ([string]::IsNullOrWhiteSpace($clientId)) {
+            Write-Host "  Client ID is required." -ForegroundColor Red
+            return
+        }
+
+        Write-Host "  Client Secret: " -ForegroundColor Gray -NoNewline
+        $clientSecretRaw = Read-Host -AsSecureString
+
+        $clientSecretEncrypted = ""
+        if ($clientSecretRaw.Length -gt 0) {
+            $clientSecretEncrypted = $clientSecretRaw | ConvertFrom-SecureString
+        }
     }
 
     Write-Host ""
