@@ -216,21 +216,22 @@ function New-FGConfig {
         } while (-not $validChoice)
 
         if ($sqlIndex -eq -1) {
-            $sqlServerName = Read-Host "  SQL Server Name (without .database.windows.net)"
+            $defaultSqlName = New-FGRandomSqlName
+            $sqlInput = Read-Host "  SQL Server Name [$defaultSqlName]"
+            $sqlServerName = if ([string]::IsNullOrWhiteSpace($sqlInput)) { $defaultSqlName } else { $sqlInput }
         } else {
             $sqlServerName = $sqlServers[$sqlIndex - 1].ServerName
             Write-Host "  Selected: $sqlServerName" -ForegroundColor Green
         }
     } else {
+        $defaultSqlName = New-FGRandomSqlName
         Write-Host "  No SQL Servers found in $resourceGroupName." -ForegroundColor Gray
-        Write-Host "  Enter a name (Start-FGSync will create it automatically on first run)." -ForegroundColor Gray
-        $sqlServerName = Read-Host "  SQL Server Name"
+        Write-Host "  A new one will be created automatically on first sync." -ForegroundColor Gray
+        $sqlInput = Read-Host "  SQL Server Name [$defaultSqlName]"
+        $sqlServerName = if ([string]::IsNullOrWhiteSpace($sqlInput)) { $defaultSqlName } else { $sqlInput }
     }
 
-    if ([string]::IsNullOrWhiteSpace($sqlServerName)) {
-        Write-Host "  SQL Server Name is required." -ForegroundColor Red
-        return
-    }
+    Write-Host "  Server: $sqlServerName" -ForegroundColor Green
 
     # Database name
     $databaseName = "GraphData"
@@ -569,4 +570,21 @@ function New-FGRandomPassword {
     $password = ($password | Sort-Object { [System.Security.Cryptography.RandomNumberGenerator]::GetInt32([int]::MaxValue) }) -join ''
 
     return $password
+}
+
+function New-FGRandomSqlName {
+    <#
+    .SYNOPSIS
+        Internal helper for New-FGConfig. Generates a unique SQL Server name suggestion.
+    #>
+
+    [cmdletbinding()]
+    Param()
+
+    $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    $bytes = [byte[]]::new(5)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+
+    return "sql-fortigraph-$suffix"
 }
