@@ -5,7 +5,8 @@ function New-FGConfig {
 
     .DESCRIPTION
         Walks you through setting up a FortigiGraph configuration file step by step.
-        Asks for Azure, Graph API, and Sync settings with sensible defaults.
+        Uses Connect-AzAccount to authenticate and then lets you pick your subscription,
+        resource group, and SQL server from lists - no manual GUID typing needed.
         Passwords and secrets are encrypted using Windows DPAPI automatically.
 
         The generated config file works with:
@@ -30,6 +31,7 @@ function New-FGConfig {
         Creates a config file asking only for essential credentials.
 
     .NOTES
+        - Requires Az PowerShell module (Install-Module Az)
         - Passwords are encrypted using Windows DPAPI (user-specific, machine-specific)
         - The config file can be further customized by editing the JSON directly
         - Use Get-FGSecureConfigValue to read encrypted values programmatically
@@ -65,43 +67,223 @@ function New-FGConfig {
     Write-Host ""
     Write-Host "=== FortigiGraph Configuration Setup ===" -ForegroundColor Cyan
     Write-Host "This wizard will help you create a config file." -ForegroundColor Gray
-    Write-Host "Press Enter to accept [default values]." -ForegroundColor Gray
     Write-Host ""
 
     # ============================================================
-    # Azure Settings
+    # Azure Login
     # ============================================================
-    Write-Host "--- Azure Settings ---" -ForegroundColor Cyan
+    Write-Host "--- Azure Login ---" -ForegroundColor Cyan
 
-    $tenantId = Read-Host "  TenantId (e.g. contoso.onmicrosoft.com)"
-    if ([string]::IsNullOrWhiteSpace($tenantId)) {
-        Write-Host "  TenantId is required." -ForegroundColor Red
-        return
+    # Check if already logged in
+    $azContext = $null
+    try {
+        $azContext = Get-AzContext -ErrorAction Stop
+    } catch { }
+
+    if ($azContext) {
+        Write-Host "  Already logged in as: $($azContext.Account.Id)" -ForegroundColor Green
+        $relogin = Read-Host "  Use this account? (Y/n)"
+        if ($relogin -eq 'n' -or $relogin -eq 'N') {
+            Write-Host "  Opening Azure login..." -ForegroundColor Cyan
+            Connect-AzAccount | Out-Null
+            $azContext = Get-AzContext
+        }
+    } else {
+        Write-Host "  Opening Azure login..." -ForegroundColor Cyan
+        Connect-AzAccount | Out-Null
+        $azContext = Get-AzContext
     }
 
-    $subscriptionId = Read-Host "  SubscriptionId (Azure subscription GUID)"
-    if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-        Write-Host "  SubscriptionId is required." -ForegroundColor Red
+    $tenantId = $azContext.Tenant.Id
+    Write-Host "  Tenant: $tenantId" -ForegroundColor Green
+    Write-Host ""
+
+    # ============================================================
+    # Select Subscription
+    # ============================================================
+    Write-Host "--- Select Subscription ---" -ForegroundColor Cyan
+
+    $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction Stop | Sort-Object Name)
+
+    if ($subscriptions.Count -eq 0) {
+        Write-Host "  No subscriptions found for this tenant." -ForegroundColor Red
         return
+    } elseif ($subscriptions.Count -eq 1) {
+        $selectedSub = $subscriptions[0]
+        Write-Host "  Found 1 subscription: $($selectedSub.Name)" -ForegroundColor Green
+    } else {
+        Write-Host ""
+        for ($i = 0; $i -lt $subscriptions.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($subscriptions[$i].Name) ($($subscriptions[$i].Id))" -ForegroundColor White
+        }
+        Write-Host ""
+
+        do {
+            $subChoice = Read-Host "  Select subscription (1-$($subscriptions.Count))"
+            $subIndex = 0
+            $validChoice = [int]::TryParse($subChoice, [ref]$subIndex) -and $subIndex -ge 1 -and $subIndex -le $subscriptions.Count
+            if (-not $validChoice) {
+                Write-Host "  Please enter a number between 1 and $($subscriptions.Count)" -ForegroundColor Yellow
+            }
+        } while (-not $validChoice)
+
+        $selectedSub = $subscriptions[$subIndex - 1]
     }
 
-    $resourceGroupName = Read-Host "  ResourceGroupName"
-    if ([string]::IsNullOrWhiteSpace($resourceGroupName)) {
-        Write-Host "  ResourceGroupName is required." -ForegroundColor Red
-        return
+    $subscriptionId = $selectedSub.Id
+    Set-AzContext -SubscriptionId $subscriptionId | Out-Null
+    Write-Host "  Selected: $($selectedSub.Name)" -ForegroundColor Green
+    Write-Host ""
+
+    # ============================================================
+    # Select Resource Group
+    # ============================================================
+    Write-Host "--- Select Resource Group ---" -ForegroundColor Cyan
+
+    $resourceGroups = @(Get-AzResourceGroup -ErrorAction Stop | Sort-Object ResourceGroupName)
+
+    if ($resourceGroups.Count -eq 0) {
+        Write-Host "  No resource groups found. Enter a name for a new one:" -ForegroundColor Yellow
+        $resourceGroupName = Read-Host "  Resource Group Name"
+        $location = Read-Host "  Location [northeurope]"
+        if ([string]::IsNullOrWhiteSpace($location)) { $location = "northeurope" }
+    } else {
+        Write-Host ""
+        for ($i = 0; $i -lt $resourceGroups.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($resourceGroups[$i].ResourceGroupName) ($($resourceGroups[$i].Location))" -ForegroundColor White
+        }
+        Write-Host "  [N] Create new resource group" -ForegroundColor White
+        Write-Host ""
+
+        do {
+            $rgChoice = Read-Host "  Select resource group (1-$($resourceGroups.Count)) or N for new"
+            if ($rgChoice -eq 'n' -or $rgChoice -eq 'N') {
+                $validChoice = $true
+                $rgIndex = -1
+            } else {
+                $rgIndex = 0
+                $validChoice = [int]::TryParse($rgChoice, [ref]$rgIndex) -and $rgIndex -ge 1 -and $rgIndex -le $resourceGroups.Count
+            }
+            if (-not $validChoice) {
+                Write-Host "  Please enter a number between 1 and $($resourceGroups.Count), or N" -ForegroundColor Yellow
+            }
+        } while (-not $validChoice)
+
+        if ($rgIndex -eq -1) {
+            $resourceGroupName = Read-Host "  New Resource Group Name"
+            $location = Read-Host "  Location [northeurope]"
+            if ([string]::IsNullOrWhiteSpace($location)) { $location = "northeurope" }
+        } else {
+            $selectedRg = $resourceGroups[$rgIndex - 1]
+            $resourceGroupName = $selectedRg.ResourceGroupName
+            $location = $selectedRg.Location
+            Write-Host "  Selected: $resourceGroupName ($location)" -ForegroundColor Green
+        }
+    }
+    Write-Host ""
+
+    # ============================================================
+    # SQL Server
+    # ============================================================
+    Write-Host "--- SQL Server ---" -ForegroundColor Cyan
+
+    # Try to find existing SQL servers in the selected resource group
+    $sqlServers = @()
+    try {
+        $sqlServers = @(Get-AzSqlServer -ResourceGroupName $resourceGroupName -ErrorAction SilentlyContinue | Sort-Object ServerName)
+    } catch { }
+
+    if ($sqlServers.Count -gt 0) {
+        Write-Host ""
+        for ($i = 0; $i -lt $sqlServers.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($sqlServers[$i].ServerName) ($($sqlServers[$i].Location))" -ForegroundColor White
+        }
+        Write-Host "  [N] Enter a new SQL Server name" -ForegroundColor White
+        Write-Host ""
+
+        do {
+            $sqlChoice = Read-Host "  Select SQL Server (1-$($sqlServers.Count)) or N for new"
+            if ($sqlChoice -eq 'n' -or $sqlChoice -eq 'N') {
+                $validChoice = $true
+                $sqlIndex = -1
+            } else {
+                $sqlIndex = 0
+                $validChoice = [int]::TryParse($sqlChoice, [ref]$sqlIndex) -and $sqlIndex -ge 1 -and $sqlIndex -le $sqlServers.Count
+            }
+            if (-not $validChoice) {
+                Write-Host "  Please enter a number between 1 and $($sqlServers.Count), or N" -ForegroundColor Yellow
+            }
+        } while (-not $validChoice)
+
+        if ($sqlIndex -eq -1) {
+            $sqlServerName = Read-Host "  SQL Server Name (without .database.windows.net)"
+        } else {
+            $sqlServerName = $sqlServers[$sqlIndex - 1].ServerName
+            Write-Host "  Selected: $sqlServerName" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  No SQL Servers found in $resourceGroupName." -ForegroundColor Gray
+        Write-Host "  Enter a name (Start-FGSync will create it automatically on first run)." -ForegroundColor Gray
+        $sqlServerName = Read-Host "  SQL Server Name"
     }
 
-    $locationInput = Read-Host "  Location [northeurope]"
-    $location = if ([string]::IsNullOrWhiteSpace($locationInput)) { "northeurope" } else { $locationInput }
-
-    $sqlServerName = Read-Host "  SQL Server Name (without .database.windows.net)"
     if ([string]::IsNullOrWhiteSpace($sqlServerName)) {
         Write-Host "  SQL Server Name is required." -ForegroundColor Red
         return
     }
 
-    $databaseNameInput = Read-Host "  Database Name [GraphData]"
-    $databaseName = if ([string]::IsNullOrWhiteSpace($databaseNameInput)) { "GraphData" } else { $databaseNameInput }
+    # Database name
+    $databaseName = "GraphData"
+    $selectedSqlServer = $sqlServers | Where-Object { $_.ServerName -eq $sqlServerName }
+    if ($selectedSqlServer) {
+        $databases = @()
+        try {
+            $databases = @(Get-AzSqlDatabase -ResourceGroupName $resourceGroupName -ServerName $sqlServerName -ErrorAction SilentlyContinue |
+                Where-Object { $_.DatabaseName -ne 'master' } | Sort-Object DatabaseName)
+        } catch { }
+
+        if ($databases.Count -gt 0) {
+            Write-Host ""
+            for ($i = 0; $i -lt $databases.Count; $i++) {
+                Write-Host "  [$($i + 1)] $($databases[$i].DatabaseName)" -ForegroundColor White
+            }
+            Write-Host "  [N] Enter a new database name" -ForegroundColor White
+            Write-Host ""
+
+            do {
+                $dbChoice = Read-Host "  Select database (1-$($databases.Count)) or N for new"
+                if ($dbChoice -eq 'n' -or $dbChoice -eq 'N') {
+                    $validChoice = $true
+                    $dbIndex = -1
+                } else {
+                    $dbIndex = 0
+                    $validChoice = [int]::TryParse($dbChoice, [ref]$dbIndex) -and $dbIndex -ge 1 -and $dbIndex -le $databases.Count
+                }
+                if (-not $validChoice) {
+                    Write-Host "  Please enter a number between 1 and $($databases.Count), or N" -ForegroundColor Yellow
+                }
+            } while (-not $validChoice)
+
+            if ($dbIndex -eq -1) {
+                $dbInput = Read-Host "  Database Name [GraphData]"
+                if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+            } else {
+                $databaseName = $databases[$dbIndex - 1].DatabaseName
+                Write-Host "  Selected: $databaseName" -ForegroundColor Green
+            }
+        } else {
+            $dbInput = Read-Host "  Database Name [GraphData]"
+            if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+        }
+    } else {
+        $dbInput = Read-Host "  Database Name [GraphData]"
+        if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+    }
+
+    Write-Host ""
+
+    # SQL credentials
+    Write-Host "--- SQL Credentials ---" -ForegroundColor Cyan
 
     $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
     $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
