@@ -11,7 +11,8 @@
     "DatabaseName": "GraphData",
     "AdminUsername": "sqladmin",
     "AdminUserPassword": "",
-    "AdminUserPassword_Encrypted": "01000000d08c9ddf0115d1118c7a00c04fc297eb01000000f36f5b454c58b24899cddcf62bd1cfb100000000020000000000106600000001000020000000f61ff5e8b95960fc82c5f543c83ea72bd93bb3ef08f05b5e22a448886dd3d2f6000000000e8000000002000020000000ccc029b9093b11fcb51172e8ca742fc8372c2dd0c2686998fb32e221e8ddd6f330000000f54a3ebbb630a8dde6b79828b25483cd095d0654ed575becb28c05cbbf8fdca19e74119d51506292fb4f49af4c03674b400000004438efd79431a9db7320d1a75d69b24906f12ad1dcb142248e02aef8321789431a9a128631626b4be0285ac130679e2a6a3c74049599bc93f87a004149c22e41"
+    "AdminUserPassword_Encrypted": "01000000d08c9ddf0115d1118c7a00c04fc297eb01000000f36f5b454c58b24899cddcf62bd1cfb100000000020000000000106600000001000020000000f61ff5e8b95960fc82c5f543c83ea72bd93bb3ef08f05b5e22a448886dd3d2f6000000000e8000000002000020000000ccc029b9093b11fcb51172e8ca742fc8372c2dd0c2686998fb32e221e8ddd6f330000000f54a3ebbb630a8dde6b79828b25483cd095d0654ed575becb28c05cbbf8fdca19e74119d51506292fb4f49af4c03674b400000004438efd79431a9db7320d1a75d69b24906f12ad1dcb142248e02aef8321789431a9a128631626b4be0285ac130679e2a6a3c74049599bc93f87a004149c22e41",
+    "AutomationAccountName": "aa-fortigraph"
   },
   "Graph": {
     "TenantId": "yourtenant.onmicrosoft.com",
@@ -19,6 +20,7 @@
     "ClientSecret": "your-client-secret"
   },
   "Sync": {
+    "ScheduleTimeZone": "W. Europe Standard Time",
     "Users": {
       "Enabled": true,
       "TableName": "GraphUsers",
@@ -27,16 +29,31 @@
         "streetAddress",
         "usageLocation",
         "state"
-      ]
+      ],
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
     },
     "Groups": {
       "Enabled": true,
       "TableName": "GraphGroups",
-      "Filter": ""
+      "Filter": "",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
     },
     "GroupMembers": {
       "Enabled": true,
-      "TableName": "GraphGroupMembers"
+      "TableName": "GraphGroupMembers",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "07:00",
+        "Frequency": "Daily"
+      }
     },
     "GroupTransitiveMembers": {
       "Enabled": true,
@@ -52,15 +69,30 @@
     },
     "Catalogs": {
       "Enabled": true,
-      "TableName": "GraphCatalogs"
+      "TableName": "GraphCatalogs",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
     },
     "AccessPackages": {
       "Enabled": true,
-      "TableName": "GraphAccessPackages"
+      "TableName": "GraphAccessPackages",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:15",
+        "Frequency": "Daily"
+      }
     },
     "AccessPackageAssignments": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageAssignments"
+      "TableName": "GraphAccessPackageAssignments",
+      "Schedule": [
+        { "Enabled": true, "Time": "06:00", "Frequency": "Daily" },
+        { "Enabled": true, "Time": "12:00", "Frequency": "Daily" },
+        { "Enabled": true, "Time": "18:00", "Frequency": "Daily" }
+      ]
     },
     "AccessPackageResourceRoleScopes": {
       "Enabled": true,

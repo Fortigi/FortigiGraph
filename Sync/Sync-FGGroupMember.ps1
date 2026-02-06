@@ -84,6 +84,12 @@ function Sync-FGGroupMember {
         [switch]$UseBatching
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
@@ -93,6 +99,8 @@ function Sync-FGGroupMember {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     $syncMode = if ($UseBatching) { "batched (low memory)" } else { "bulk (high performance)" }
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group membership sync ($syncMode)..." -ForegroundColor Cyan
@@ -375,6 +383,10 @@ function Sync-FGGroupMember {
         Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
         Write-Host "========================================`n" -ForegroundColor Green
 
+        # Set sync status for logging (batched mode)
+        $syncRecordCount = $totalMemberships
+        $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
         return @{
             TableName = $TableName
             TotalGroups = $totalGroups
@@ -555,6 +567,10 @@ function Sync-FGGroupMember {
         Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
         Write-Host "========================================`n" -ForegroundColor Green
 
+        # Set sync status for logging
+        $syncRecordCount = $allMemberships.Count
+        $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
         return @{
             TableName = $TableName
             TotalGroups = $totalGroups
@@ -564,5 +580,16 @@ function Sync-FGGroupMember {
             ErrorCount = $errorCount
             Mode = "Bulk"
         }
+    }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "GroupMembers" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
     }
 }

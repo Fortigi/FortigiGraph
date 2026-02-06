@@ -4,6 +4,237 @@
 
 FortigiGraph syncs Microsoft Graph data to Azure SQL with temporal versioning, enabling powerful governance insights, access analysis, and identity auditing that simply aren't possible through the Entra ID portal alone.
 
+---
+
+## 🚀 Getting Started (Step-by-Step)
+
+This guide will take you from zero to automated scheduled syncs in three phases:
+1. **Phase 1**: Create your config file
+2. **Phase 2**: Run your first sync locally (creates SQL infrastructure automatically)
+3. **Phase 3**: Set up Azure Automation for scheduled syncs
+
+### Prerequisites
+
+Before starting, ensure you have:
+- PowerShell 7+ (recommended) or PowerShell 5.1
+- Azure subscription with Contributor access
+- Azure AD App Registration with these permissions:
+  - `User.Read.All`, `Group.Read.All`, `GroupMember.Read.All` (for basic sync)
+  - `EntitlementManagement.Read.All`, `AccessReview.Read.All` (for access packages)
+- Az PowerShell module: `Install-Module Az -Scope CurrentUser`
+
+---
+
+### Phase 1: Create Your Config File
+
+The config file is the heart of FortigiGraph. It contains all your Azure, SQL, and Graph settings in one place.
+
+**Step 1.1**: Install the module
+
+```powershell
+# From PowerShell Gallery
+Install-Module -Name FortigiGraph -Scope CurrentUser
+
+# Or clone and import locally
+git clone https://github.com/Fortigi/FortigiGraph.git
+cd FortigiGraph
+Import-Module .\FortigiGraph.psd1
+```
+
+**Step 1.2**: Copy the template
+
+```powershell
+# Copy the template to your own config file
+Copy-Item "Config\tenantname.json.template" "Config\mycompany.json"
+```
+
+**Step 1.3**: Edit your config file
+
+Open `Config\mycompany.json` in your editor and fill in these sections:
+
+```json
+{
+  "Azure": {
+    "SubscriptionId": "12345678-1234-1234-1234-123456789012",
+    "ResourceGroupName": "rg-fortigraph",
+    "Location": "westeurope",
+    "SQLServerName": "mycompany-graph-sql",
+    "SQLDatabaseName": "GraphData",
+    "SQLServerAdminUsername": "sqladmin",
+    "SQLServerAdminPassword": "",
+    "SkuName": "Basic"
+  },
+  "Graph": {
+    "TenantId": "mycompany.onmicrosoft.com",
+    "ClientId": "your-app-registration-client-id",
+    "ClientSecret": ""
+  },
+  "Sync": {
+    "Users": { "Enabled": true },
+    "Groups": { "Enabled": true },
+    "GroupMembers": { "Enabled": true },
+    "Catalogs": { "Enabled": true },
+    "AccessPackages": { "Enabled": true },
+    "AccessPackageAssignments": { "Enabled": true }
+  }
+}
+```
+
+> **💡 Tip**: Leave passwords empty. On first run, you'll be prompted to enter them, and they'll be encrypted automatically using Windows DPAPI.
+
+---
+
+### Phase 2: Run Your First Sync Locally
+
+This phase creates your SQL Server and database automatically, then syncs your Graph data.
+
+**Step 2.1**: Log in to Azure
+
+```powershell
+# Connect to Azure (opens browser for login)
+Connect-AzAccount
+
+# If you have multiple subscriptions, select the right one
+Set-AzContext -SubscriptionId "your-subscription-id"
+```
+
+**Step 2.2**: Run the sync
+
+```powershell
+Import-Module FortigiGraph
+
+# First run - creates SQL Server, database, and syncs data
+# You'll be prompted for passwords (they'll be encrypted and saved)
+Start-FGSync -ConfigFile ".\Config\mycompany.json"
+```
+
+**What happens on first run:**
+1. ✅ Prompts for SQL admin password and Graph client secret (encrypted and saved)
+2. ✅ Creates the Azure SQL Server (if it doesn't exist)
+3. ✅ Creates the database with temporal tables
+4. ✅ Adds your IP to the SQL Server firewall
+5. ✅ Authenticates to Microsoft Graph API
+6. ✅ Syncs all enabled entity types (users, groups, memberships, etc.)
+7. ✅ Creates analytical SQL views
+8. ✅ Logs sync statistics to `GraphSyncLog` table
+
+**Step 2.3**: Verify your data
+
+```powershell
+# Connect to SQL (uses settings from config file)
+Connect-FGSQLServer -ConfigFile ".\Config\mycompany.json"
+
+# Check what tables were created
+Get-FGSQLTable
+
+# Query some data
+Invoke-FGSQLQuery -Query "SELECT COUNT(*) AS UserCount FROM GraphUsers"
+Invoke-FGSQLQuery -Query "SELECT TOP 5 displayName, userPrincipalName FROM GraphUsers"
+
+# Check sync log
+Invoke-FGSQLQuery -Query "SELECT * FROM GraphSyncLog ORDER BY StartTime DESC"
+```
+
+**Step 2.4**: (Optional) Create a read-only user for Power BI
+
+```powershell
+# Create a read-only SQL user for Power BI or other reporting tools
+New-FGSQLReadOnlyUser -ConfigFile ".\Config\mycompany.json"
+
+# Output shows:
+# - Server name
+# - Database name
+# - Username (default: PowerBIReader)
+# - Generated password (save this!)
+# - Ready-to-use connection string
+```
+
+---
+
+### Phase 3: Set Up Azure Automation for Scheduled Syncs
+
+Now that local sync works, let's automate it with Azure Automation so it runs daily without a local machine.
+
+**Step 3.1**: Create the Automation Account
+
+```powershell
+# Create Automation Account with all runbooks and schedules
+New-FGAzureAutomationAccount `
+    -ConfigFile ".\Config\mycompany.json" `
+    -AutomationAccountName "aa-fortigraph-sync" `
+    -CreateRunbooks `
+    -CreateSchedules
+```
+
+**What this creates:**
+- Azure Automation Account
+- Encrypted variables for credentials (Graph and SQL)
+- 12 runbooks (one per sync type)
+- Daily schedules for each runbook
+
+**Step 3.2**: Import the FortigiGraph module
+
+1. Go to **Azure Portal** → **Automation Accounts** → **aa-fortigraph-sync**
+2. Click **Modules** → **Browse gallery**
+3. Search for **FortigiGraph**
+4. Click **Import** and wait for completion
+
+**Step 3.3**: Test a runbook manually
+
+```powershell
+# List available runbooks
+Get-FGAutomationRunbook -ConfigFile ".\Config\mycompany.json"
+
+# Start a runbook manually
+Start-FGAutomationRunbook -ConfigFile ".\Config\mycompany.json" -RunbookName "Sync-FGUsers"
+
+# Check job status
+Get-FGAutomationJob -ConfigFile ".\Config\mycompany.json" -Running
+
+# Wait for completion and see output
+Start-FGAutomationRunbook -ConfigFile ".\Config\mycompany.json" -RunbookName "Sync-FGUsers" -Wait
+```
+
+**Step 3.4**: Enable schedules (optional)
+
+Schedules are created but may need to be enabled in the Azure Portal:
+1. Go to **Automation Account** → **Schedules**
+2. Click each schedule and toggle to **Enabled**
+
+---
+
+### What's Next?
+
+Now that you have automated syncs running, you can:
+
+1. **Query your data with Power BI**
+   - Use the read-only credentials from `New-FGSQLReadOnlyUser`
+   - Connect Power BI Desktop to Azure SQL
+   - Schedule cloud refreshes
+
+2. **Analyze governance gaps**
+   ```sql
+   -- Find direct memberships that should be via access packages
+   SELECT * FROM vw_AccessPackageMembershipGaps;
+
+   -- Check pending access requests
+   SELECT * FROM vw_PendingRequestTimeline WHERE hoursPending > 24;
+   ```
+
+3. **Add more sync types**
+   - Edit your config file to enable additional sync types
+   - Re-run `Start-FGSync` locally, or let schedules pick up changes
+
+4. **Historical analysis**
+   ```sql
+   -- Who had access on January 15th?
+   SELECT * FROM GraphGroupMembers
+   FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00'
+   WHERE groupId = 'your-group-id';
+   ```
+
+---
+
 ## Why FortigiGraph?
 
 ### 🎯 Identity Governance Insights You Can't Get from Entra ID
@@ -312,12 +543,14 @@ FortigiGraph creates 16 analytical views automatically:
 
 ## Table of Contents
 
+- [Getting Started (Step-by-Step)](#-getting-started-step-by-step)
+  - [Phase 1: Create Your Config File](#phase-1-create-your-config-file)
+  - [Phase 2: Run Your First Sync Locally](#phase-2-run-your-first-sync-locally)
+  - [Phase 3: Set Up Azure Automation](#phase-3-set-up-azure-automation-for-scheduled-syncs)
 - [Why FortigiGraph?](#why-fortigraph)
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-  - [5-Minute Quickstart](#5-minute-quickstart)
-  - [Production Quickstart (Daily Sync)](#production-quickstart-daily-sync)
 - [Authentication](#authentication)
 - [Azure SQL Server](#azure-sql-server)
   - [Creating SQL Server](#creating-sql-server)

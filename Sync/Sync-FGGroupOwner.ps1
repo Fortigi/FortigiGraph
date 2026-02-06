@@ -62,6 +62,12 @@ function Sync-FGGroupOwner {
         [switch]$RecreateTable
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
@@ -71,6 +77,8 @@ function Sync-FGGroupOwner {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group ownership sync..." -ForegroundColor Cyan
 
@@ -302,6 +310,21 @@ function Sync-FGGroupOwner {
     Write-Host "Errors:                     $errorCount" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
+
+    # Set sync status for logging
+    $syncRecordCount = $allOwnerships.Count
+    $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "GroupOwners" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+    }
 
     return @{
         TableName = $TableName

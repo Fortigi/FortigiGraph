@@ -31,6 +31,15 @@ function Sync-FGAccessPackageAssignment {
     .PARAMETER BatchSize
     Number of assignments to process at once. Default: 100
 
+    .PARAMETER UseBatching
+    If specified, fetches and processes assignments in batches by access package.
+    This uses less memory and is recommended for Azure Automation runbooks or large environments.
+    Instead of loading all assignments at once, it fetches assignments per access package.
+
+    .PARAMETER PageSize
+    Number of records per Graph API page when using batching. Default: 500.
+    Reduce this if you're hitting timeouts.
+
     .EXAMPLE
     Sync-FGAccessPackageAssignment
 
@@ -73,8 +82,20 @@ function Sync-FGAccessPackageAssignment {
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
-        [int]$BatchSize = 100
+        [int]$BatchSize = 100,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$UseBatching,
+
+        [Parameter(Mandatory = $false)]
+        [int]$PageSize = 500
     )
+
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
 
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
@@ -85,6 +106,8 @@ function Sync-FGAccessPackageAssignment {
     if (-not $global:AccessToken) {
         throw "No Graph access token found. Please run Get-FGAccessToken first."
     }
+
+    try {
 
     # Define default attributes
     $defaultAttributes = @(
@@ -210,25 +233,77 @@ function Sync-FGAccessPackageAssignment {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignments from Microsoft Graph..." -ForegroundColor Cyan
 
-    # We need to expand 'target' to get the targetId (user id)
-    # Note: We can't use $select with $expand in this case, so we'll get all properties and filter client-side
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$expand=target"
-
-    if ($Filter) {
-        $uri += "&`$filter=$Filter"
-    }
-
-    # Fetch all assignments using Invoke-FGGetRequest (handles token validation and pagination)
     $graphStartTime = Get-Date
+    $allAssignments = @()
 
-    try {
-        $allAssignments = Invoke-FGGetRequest -URI $uri
-        if (-not $allAssignments) {
-            $allAssignments = @()
+    if ($UseBatching) {
+        # BATCHING MODE: Fetch assignments per access package to reduce memory usage
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using batching mode (per access package)..." -ForegroundColor Cyan
+
+        # First, get all access packages
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Fetching access packages list..." -ForegroundColor Gray
+        $accessPackagesUri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages?`$select=id,displayName"
+        $accessPackages = Invoke-FGGetRequest -URI $accessPackagesUri
+
+        if (-not $accessPackages -or $accessPackages.Count -eq 0) {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No access packages found."
+            return
         }
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($accessPackages.Count) access packages to process" -ForegroundColor Cyan
+
+        $packageCount = 0
+        foreach ($package in $accessPackages) {
+            $packageCount++
+            $packageName = if ($package.displayName.Length -gt 30) { $package.displayName.Substring(0, 30) + "..." } else { $package.displayName }
+            Write-Host "  [$packageCount/$($accessPackages.Count)] Processing: $packageName" -ForegroundColor Gray
+
+            # Build URI for this package's assignments
+            $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$expand=target&`$filter=accessPackageId eq '$($package.id)'"
+            if ($Filter) {
+                $uri += " and ($Filter)"
+            }
+            $uri += "&`$top=$PageSize"
+
+            try {
+                $packageAssignments = Invoke-FGGetRequest -URI $uri
+                if ($packageAssignments) {
+                    $allAssignments += $packageAssignments
+                    Write-Host "    Found $($packageAssignments.Count) assignments" -ForegroundColor Gray
+                }
+            }
+            catch {
+                Write-Warning "    Failed to fetch assignments for package $($package.id): $_"
+            }
+
+            # Trigger garbage collection periodically to free memory
+            if ($packageCount % 50 -eq 0) {
+                [System.GC]::Collect()
+            }
+        }
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Batching complete" -ForegroundColor Green
     }
-    catch {
-        throw "Failed to fetch access package assignments from Graph: $_"
+    else {
+        # STANDARD MODE: Fetch all assignments at once (faster but uses more memory)
+        # We need to expand 'target' to get the targetId (user id)
+        # Note: We can't use $select with $expand in this case, so we'll get all properties and filter client-side
+        $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$expand=target"
+
+        if ($Filter) {
+            $uri += "&`$filter=$Filter"
+        }
+
+        # Fetch all assignments using Invoke-FGGetRequest (handles token validation and pagination)
+        try {
+            $allAssignments = Invoke-FGGetRequest -URI $uri
+            if (-not $allAssignments) {
+                $allAssignments = @()
+            }
+        }
+        catch {
+            throw "Failed to fetch access package assignments from Graph: $_"
+        }
     }
 
     $graphElapsed = (Get-Date) - $graphStartTime
@@ -422,6 +497,21 @@ function Sync-FGAccessPackageAssignment {
     Write-Host "Attributes:          $($Attributes.Count)" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
+
+    # Set sync status for logging
+    $syncRecordCount = $allAssignments.Count
+    $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        # Write sync log entry
+        Write-FGSyncLog -SyncType "AccessPackageAssignments" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+    }
 
     return @{
         TableName = $TableName
