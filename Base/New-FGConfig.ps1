@@ -80,8 +80,9 @@ function New-FGConfig {
         $azContext = Get-AzContext -ErrorAction Stop
     } catch { }
 
-    if ($azContext) {
-        Write-Host "  Already logged in as: $($azContext.Account.Id)" -ForegroundColor Green
+    if ($azContext -and $azContext.Account) {
+        Write-Host "  Logged in as: $($azContext.Account.Id)" -ForegroundColor Green
+        Write-Host "  Tenant:       $($azContext.Tenant.Id)" -ForegroundColor Green
         $relogin = Read-Host "  Use this account? (Y/n)"
         if ($relogin -eq 'n' -or $relogin -eq 'N') {
             Write-Host "  Opening Azure login..." -ForegroundColor Cyan
@@ -89,13 +90,12 @@ function New-FGConfig {
             $azContext = Get-AzContext
         }
     } else {
-        Write-Host "  Opening Azure login..." -ForegroundColor Cyan
+        Write-Host "  Not logged in. Opening Azure login..." -ForegroundColor Cyan
         Connect-AzAccount | Out-Null
         $azContext = Get-AzContext
     }
 
     $tenantId = $azContext.Tenant.Id
-    Write-Host "  Tenant: $tenantId" -ForegroundColor Green
     Write-Host ""
 
     # ============================================================
@@ -288,8 +288,17 @@ function New-FGConfig {
     $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
     $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
 
-    Write-Host "  SQL Admin Password: " -ForegroundColor Gray -NoNewline
-    $adminPassword = Read-Host -AsSecureString
+    # Auto-generate a complex password by default
+    $generatedPassword = New-FGRandomPassword
+    Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
+    $useGenerated = Read-Host "  Use this password? (Y/n)"
+
+    if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
+        Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
+        $adminPassword = Read-Host -AsSecureString
+    } else {
+        $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
+    }
 
     # Encrypt the password
     $adminPasswordEncrypted = ""
@@ -304,9 +313,9 @@ function New-FGConfig {
     # ============================================================
     Write-Host "--- Graph API Settings ---" -ForegroundColor Cyan
     Write-Host "  (From your Azure AD App Registration)" -ForegroundColor Gray
+    Write-Host "  Using Tenant: $tenantId" -ForegroundColor Green
 
-    $graphTenantIdInput = Read-Host "  Graph TenantId [$tenantId]"
-    $graphTenantId = if ([string]::IsNullOrWhiteSpace($graphTenantIdInput)) { $tenantId } else { $graphTenantIdInput }
+    $graphTenantId = $tenantId
 
     $clientId = Read-Host "  Client ID (Application ID)"
     if ([string]::IsNullOrWhiteSpace($clientId)) {
@@ -517,4 +526,47 @@ function Read-FGConfigYesNo {
     }
 
     return ($answer -eq 'y' -or $answer -eq 'Y')
+}
+
+function New-FGRandomPassword {
+    <#
+    .SYNOPSIS
+        Internal helper for New-FGConfig. Generates a cryptographically random complex password.
+    #>
+
+    [cmdletbinding()]
+    Param(
+        [int]$Length = 24
+    )
+
+    $upper   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    $lower   = 'abcdefghijklmnopqrstuvwxyz'
+    $digits  = '0123456789'
+    $special = '!@#$%^&*'
+    $all     = $upper + $lower + $digits + $special
+
+    # Ensure at least one of each category
+    $bytes = [byte[]]::new(4)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $password = @(
+        $upper[$bytes[0] % $upper.Length]
+        $lower[$bytes[1] % $lower.Length]
+        $digits[$bytes[2] % $digits.Length]
+        $special[$bytes[3] % $special.Length]
+    )
+
+    # Fill the rest randomly
+    $remaining = $Length - 4
+    $bytes = [byte[]]::new($remaining)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    for ($i = 0; $i -lt $remaining; $i++) {
+        $password += $all[$bytes[$i] % $all.Length]
+    }
+
+    # Shuffle the password so the guaranteed chars aren't always at the start
+    $shuffleBytes = [byte[]]::new($password.Count)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($shuffleBytes)
+    $password = ($password | Sort-Object { [System.Security.Cryptography.RandomNumberGenerator]::GetInt32([int]::MaxValue) }) -join ''
+
+    return $password
 }
