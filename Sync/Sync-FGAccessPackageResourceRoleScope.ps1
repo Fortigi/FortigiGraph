@@ -235,22 +235,28 @@ function Sync-FGAccessPackageResourceRoleScope {
                         # Note: The ID is a composite string like "guid1_guid2", not a single GUID
                         # This is expected and valid
 
-                        # Normalize scopeOriginId to uppercase - Microsoft Graph returns lowercase GUIDs
-                        # for this field, but all other GUID fields (e.g., group IDs) are uppercase.
-                        # Without this, JOINs between scopeOriginId and group IDs will fail.
+                        # Normalize GUID fields to uppercase - Microsoft Graph returns lowercase GUIDs
+                        # for several fields in this endpoint, but all other endpoints use uppercase.
+                        # Without this, JOINs between these fields and other tables will fail.
                         $normalizedScopeOriginId = if ($scope.accessPackageResourceScope.originId) {
                             $scope.accessPackageResourceScope.originId.ToUpper()
+                        } else { $null }
+                        $normalizedScopeId = if ($scope.accessPackageResourceScope.id) {
+                            $scope.accessPackageResourceScope.id.ToUpper()
+                        } else { $null }
+                        $normalizedRoleId = if ($scope.accessPackageResourceRole.id) {
+                            $scope.accessPackageResourceRole.id.ToUpper()
                         } else { $null }
 
                         $flatScope = [PSCustomObject]@{
                             id = $scope.id
                             accessPackageId = $package.id
-                            roleId = $scope.accessPackageResourceRole.id
+                            roleId = $normalizedRoleId
                             roleDisplayName = $scope.accessPackageResourceRole.displayName
                             roleDescription = $scope.accessPackageResourceRole.description
                             roleOriginSystem = $scope.accessPackageResourceRole.originSystem
                             roleOriginId = $scope.accessPackageResourceRole.originId
-                            scopeId = $scope.accessPackageResourceScope.id
+                            scopeId = $normalizedScopeId
                             scopeDisplayName = $scope.accessPackageResourceScope.displayName
                             scopeOriginId = $normalizedScopeOriginId
                             scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
