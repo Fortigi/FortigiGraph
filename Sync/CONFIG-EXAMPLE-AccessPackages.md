@@ -35,11 +35,6 @@ Add these sections to your `config.json` file under the `Sync` object:
       "TableName": "GraphGroupMembers"
     },
 
-    "GroupTransitiveMembers": {
-      "Enabled": false,
-      "TableName": "GraphGroupTransitiveMembers"
-    },
-
     "GroupEligibleMembers": {
       "Enabled": true,
       "TableName": "GraphGroupEligibleMembers"
