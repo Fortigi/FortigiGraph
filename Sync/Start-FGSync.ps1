@@ -478,16 +478,21 @@ function Write-SyncError {
     # Check for existing valid token
     $hasValidToken = $false
     if ($global:AccessToken) {
-        try {
-            Write-SyncStep "Checking existing Graph token..."
-            $hasValidToken = Confirm-FGAccessTokenValidity
-            if ($hasValidToken) {
-                Write-SyncSuccess "Existing token is valid"
-            } else {
-                Write-SyncStep "Existing token is expired, getting new token..."
+        # Check if existing token belongs to the same app as the config file
+        if ($global:ClientId -and $config.Graph.ClientId -and $global:ClientId -ne $config.Graph.ClientId) {
+            Write-SyncStep "Config uses different Client ID ($($config.Graph.ClientId)), getting new token..."
+        } else {
+            try {
+                Write-SyncStep "Checking existing Graph token..."
+                $hasValidToken = Confirm-FGAccessTokenValidity
+                if ($hasValidToken) {
+                    Write-SyncSuccess "Existing token is valid"
+                } else {
+                    Write-SyncStep "Existing token is expired, getting new token..."
+                }
+            } catch {
+                Write-SyncStep "Token validation failed, getting new token..."
             }
-        } catch {
-            Write-SyncStep "Token validation failed, getting new token..."
         }
     }
 
