@@ -208,29 +208,7 @@ function New-FGConfig {
     # ============================================================
     Write-Host "--- SQL Server ---" -ForegroundColor Cyan
 
-    # SQL credentials (needed before creating the server)
-    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
-    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
-
-    $generatedPassword = New-FGRandomPassword
-    Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
-    $useGenerated = Read-Host "  Use this password? (Y/n)"
-
-    if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
-        Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
-        $adminPassword = Read-Host -AsSecureString
-    } else {
-        $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
-    }
-
-    $adminPasswordEncrypted = ""
-    if ($adminPassword.Length -gt 0) {
-        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
-    }
-
-    Write-Host ""
-
-    # Try to find existing SQL servers in the resource group
+    # First check for existing SQL servers before asking for credentials
     $sqlServers = @()
     try {
         $sqlServers = @(Get-AzSqlServer -ResourceGroupName $resourceGroupName -ErrorAction SilentlyContinue | Sort-Object ServerName)
@@ -269,6 +247,36 @@ function New-FGConfig {
     } else {
         $createNewSql = $true
     }
+
+    # Now ask for credentials - context depends on new vs existing server
+    Write-Host ""
+    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
+    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
+
+    if ($createNewSql) {
+        # New server: offer auto-generated password
+        $generatedPassword = New-FGRandomPassword
+        Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
+        $useGenerated = Read-Host "  Use this password? (Y/n)"
+
+        if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
+            Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
+            $adminPassword = Read-Host -AsSecureString
+        } else {
+            $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
+        }
+    } else {
+        # Existing server: ask for the current password
+        Write-Host "  SQL Admin Password: " -ForegroundColor Gray -NoNewline
+        $adminPassword = Read-Host -AsSecureString
+    }
+
+    $adminPasswordEncrypted = ""
+    if ($adminPassword.Length -gt 0) {
+        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
+    }
+
+    Write-Host ""
 
     if ($createNewSql) {
         $defaultSqlName = New-FGRandomSqlName
