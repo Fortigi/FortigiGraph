@@ -413,12 +413,19 @@ function New-FGAzureAutomationAccount {
 
         if (-not $automationAccount) {
             Write-Host "  Creating Automation Account: $AutomationAccountName..." -ForegroundColor Yellow
-            $automationAccount = New-AzAutomationAccount `
-                -ResourceGroupName $ResourceGroupName `
-                -Name $AutomationAccountName `
-                -Location $Location
+            try {
+                $automationAccount = New-AzAutomationAccount `
+                    -ResourceGroupName $ResourceGroupName `
+                    -Name $AutomationAccountName `
+                    -Location $Location `
+                    -ErrorAction Stop
 
-            Write-Host "  Automation Account created successfully" -ForegroundColor Green
+                Write-Host "  Automation Account created successfully" -ForegroundColor Green
+            } catch {
+                Write-Host "  Failed to create Automation Account: $_" -ForegroundColor Red
+                Write-Host "  Please create the Automation Account manually in the Azure Portal and try again." -ForegroundColor Yellow
+                return
+            }
         }
         else {
             Write-Host "  Automation Account already exists" -ForegroundColor Green
