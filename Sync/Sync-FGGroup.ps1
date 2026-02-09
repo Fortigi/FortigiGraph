@@ -113,6 +113,9 @@ function Sync-FGGroup {
         'renewedDateTime'
         'expirationDateTime'
 
+        # Provisioning
+        'resourceProvisioningOptions'  # Array - "Team" for Teams-connected groups
+
         # Advanced
         'isAssignableToRole'
         'membershipRule'
@@ -184,6 +187,9 @@ function Sync-FGGroup {
         'proxyAddresses' = 'NVARCHAR(MAX)'
     }
 
+    # Add calculated field (not a Graph attribute, computed during sync)
+    $calculatedField = 'groupTypeCalculated'
+
     # Build column definitions
     $columns = @{}
     foreach ($attr in $Attributes) {
@@ -194,6 +200,8 @@ function Sync-FGGroup {
         }
         $columns[$attr] = $sqlType
     }
+    # Add calculated column
+    $columns[$calculatedField] = 'NVARCHAR(100)'
 
     # Check if table exists and handle schema
     try {
@@ -205,9 +213,9 @@ function Sync-FGGroup {
             # Get existing columns
             $existingColumns = Get-FGSQLTableSchema -TableName $TableName
 
-            # Find missing columns
+            # Find missing columns (including calculated field)
             $missingColumns = @{}
-            foreach ($attr in $Attributes) {
+            foreach ($attr in ($Attributes + @($calculatedField))) {
                 if ($existingColumns -notcontains $attr) {
                     $missingColumns[$attr] = $columns[$attr]
                 }
@@ -247,7 +255,14 @@ function Sync-FGGroup {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching groups from Microsoft Graph..." -ForegroundColor Cyan
 
-    $selectProperties = $Attributes -join ','
+    # Ensure attributes needed for groupTypeCalculated are always fetched from Graph
+    $graphAttributes = $Attributes
+    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions')) {
+        if ($graphAttributes -notcontains $required) {
+            $graphAttributes += $required
+        }
+    }
+    $selectProperties = $graphAttributes -join ','
     $uri = "https://graph.microsoft.com/v1.0/groups?`$select=$selectProperties"
 
     if ($Filter) {
@@ -284,7 +299,8 @@ function Sync-FGGroup {
     $dataTable = New-Object System.Data.DataTable
 
     # Add columns based on attributes and their SQL types
-    foreach ($attr in $Attributes) {
+    $allColumns = $Attributes + @($calculatedField)
+    foreach ($attr in $allColumns) {
         $sqlType = $columns[$attr]
         $dotNetType = switch -Regex ($sqlType) {
             'UNIQUEIDENTIFIER' { [guid] }
@@ -334,6 +350,27 @@ function Sync-FGGroup {
                     $row[$attr] = [DBNull]::Value
                 }
             }
+        }
+
+        # Calculate group type based on groupTypes, securityEnabled, mailEnabled, resourceProvisioningOptions
+        $groupTypesValue = $group.groupTypes
+        $isUnified = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'Unified'
+        $hasTeam = $group.resourceProvisioningOptions -is [Array] -and $group.resourceProvisioningOptions -contains 'Team'
+
+        if ($isUnified -and $hasTeam) {
+            $row[$calculatedField] = 'Unified Group with Team'
+        }
+        elseif ($isUnified) {
+            $row[$calculatedField] = 'Unified Group without Team'
+        }
+        elseif (-not $group.securityEnabled) {
+            $row[$calculatedField] = 'Distribution Group'
+        }
+        elseif (-not $group.mailEnabled) {
+            $row[$calculatedField] = 'Security Group'
+        }
+        else {
+            $row[$calculatedField] = 'Mail Enabled Security Group'
         }
 
         $dataTable.Rows.Add($row)

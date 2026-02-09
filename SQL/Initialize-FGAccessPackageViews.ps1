@@ -146,7 +146,7 @@ SELECT
     ap.id AS accessPackageId,
     ap.displayName AS accessPackageName,
     c.displayName AS catalogName,
-    rrs.scopeOriginId AS groupId,
+    UPPER(rrs.scopeOriginId) AS groupId,
     g.displayName AS groupName,
     rrs.scopeOriginSystem AS resourceType,
     rrs.roleDisplayName AS roleName
@@ -155,7 +155,7 @@ FROM dbo.$AssignmentsTable a
     INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
     INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
     INNER JOIN dbo.$ResourceRoleScopesTable rrs ON ap.id = rrs.accessPackageId
-    LEFT JOIN dbo.$GroupsTable g ON rrs.scopeOriginId = g.id
+    LEFT JOIN dbo.$GroupsTable g ON UPPER(rrs.scopeOriginId) = g.id
 WHERE a.assignmentState = 'delivered'  -- Only active assignments
 "@
 
