@@ -402,7 +402,7 @@ function New-FGConfig {
     }
 
     if ($createNewAa) {
-        $defaultAaName = "aa-fortigraph"
+        $defaultAaName = New-FGRandomAutomationAccountName
         $aaInput = Read-Host "  Automation Account Name [$defaultAaName]"
         $automationAccountName = if ([string]::IsNullOrWhiteSpace($aaInput)) { $defaultAaName } else { $aaInput }
 
@@ -807,4 +807,21 @@ function New-FGRandomSqlName {
     $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
 
     return "sql-fortigraph-$suffix"
+}
+
+function New-FGRandomAutomationAccountName {
+    <#
+    .SYNOPSIS
+        Internal helper for New-FGConfig. Generates a unique Automation Account name suggestion.
+    #>
+
+    [cmdletbinding()]
+    Param()
+
+    $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    $bytes = [byte[]]::new(5)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+
+    return "aa-fortigraph-$suffix"
 }
