@@ -235,6 +235,13 @@ function Sync-FGAccessPackageResourceRoleScope {
                         # Note: The ID is a composite string like "guid1_guid2", not a single GUID
                         # This is expected and valid
 
+                        # Normalize scopeOriginId to uppercase - Microsoft Graph returns lowercase GUIDs
+                        # for this field, but all other GUID fields (e.g., group IDs) are uppercase.
+                        # Without this, JOINs between scopeOriginId and group IDs will fail.
+                        $normalizedScopeOriginId = if ($scope.accessPackageResourceScope.originId) {
+                            $scope.accessPackageResourceScope.originId.ToUpper()
+                        } else { $null }
+
                         $flatScope = [PSCustomObject]@{
                             id = $scope.id
                             accessPackageId = $package.id
@@ -245,7 +252,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                             roleOriginId = $scope.accessPackageResourceRole.originId
                             scopeId = $scope.accessPackageResourceScope.id
                             scopeDisplayName = $scope.accessPackageResourceScope.displayName
-                            scopeOriginId = $scope.accessPackageResourceScope.originId
+                            scopeOriginId = $normalizedScopeOriginId
                             scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
                             scopeIsRootScope = $scope.accessPackageResourceScope.isRootScope
                             createdBy = $scope.createdBy
