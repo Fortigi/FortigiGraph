@@ -1,13 +1,19 @@
 function New-FGConfig {
     <#
     .SYNOPSIS
-        Creates a new FortigiGraph configuration file interactively.
+        Creates a new FortigiGraph configuration file and provisions Azure resources.
 
     .DESCRIPTION
-        Walks you through setting up a FortigiGraph configuration file step by step.
-        Uses Connect-AzAccount to authenticate and then lets you pick your subscription,
-        resource group, and SQL server from lists - no manual GUID typing needed.
-        Passwords and secrets are encrypted using Windows DPAPI automatically.
+        Walks you through setting up a FortigiGraph environment step by step:
+        1. Logs into Azure (or reuses existing session)
+        2. Selects or creates a subscription, resource group
+        3. Creates a SQL Server + database (or picks existing)
+        4. Creates an Automation Account (or picks existing)
+        5. Creates an App Registration with correct Graph API permissions
+        6. Configures sync settings
+        7. Saves everything to an encrypted config file
+
+        All passwords and secrets are encrypted using Windows DPAPI.
 
         The generated config file works with:
         - Get-FGAccessToken -ConfigFile
@@ -24,7 +30,7 @@ function New-FGConfig {
 
     .EXAMPLE
         New-FGConfig -Path ".\Config\mycompany.json"
-        Creates a new config file with full interactive setup.
+        Creates a new config file with full interactive setup and provisions resources.
 
     .EXAMPLE
         New-FGConfig -Path ".\Config\mycompany.json" -Quick
@@ -66,7 +72,7 @@ function New-FGConfig {
 
     Write-Host ""
     Write-Host "=== FortigiGraph Configuration Setup ===" -ForegroundColor Cyan
-    Write-Host "This wizard will help you create a config file." -ForegroundColor Gray
+    Write-Host "This wizard will set up your FortigiGraph environment." -ForegroundColor Gray
     Write-Host ""
 
     # ============================================================
@@ -136,17 +142,16 @@ function New-FGConfig {
     Write-Host ""
 
     # ============================================================
-    # Select Resource Group
+    # Select or Create Resource Group
     # ============================================================
-    Write-Host "--- Select Resource Group ---" -ForegroundColor Cyan
+    Write-Host "--- Resource Group ---" -ForegroundColor Cyan
 
     $resourceGroups = @(Get-AzResourceGroup -ErrorAction Stop | Sort-Object ResourceGroupName)
+    $createNewRg = $false
 
     if ($resourceGroups.Count -eq 0) {
-        Write-Host "  No resource groups found. Enter a name for a new one:" -ForegroundColor Yellow
-        $resourceGroupName = Read-Host "  Resource Group Name"
-        $location = Read-Host "  Location [northeurope]"
-        if ([string]::IsNullOrWhiteSpace($location)) { $location = "northeurope" }
+        Write-Host "  No resource groups found." -ForegroundColor Gray
+        $createNewRg = $true
     } else {
         Write-Host ""
         for ($i = 0; $i -lt $resourceGroups.Count; $i++) {
@@ -170,9 +175,7 @@ function New-FGConfig {
         } while (-not $validChoice)
 
         if ($rgIndex -eq -1) {
-            $resourceGroupName = Read-Host "  New Resource Group Name"
-            $location = Read-Host "  Location [northeurope]"
-            if ([string]::IsNullOrWhiteSpace($location)) { $location = "northeurope" }
+            $createNewRg = $true
         } else {
             $selectedRg = $resourceGroups[$rgIndex - 1]
             $resourceGroupName = $selectedRg.ResourceGroupName
@@ -180,25 +183,67 @@ function New-FGConfig {
             Write-Host "  Selected: $resourceGroupName ($location)" -ForegroundColor Green
         }
     }
+
+    if ($createNewRg) {
+        $defaultRgName = "rg-fortigraph"
+        $rgInput = Read-Host "  Resource Group Name [$defaultRgName]"
+        $resourceGroupName = if ([string]::IsNullOrWhiteSpace($rgInput)) { $defaultRgName } else { $rgInput }
+
+        $locationInput = Read-Host "  Location [northeurope]"
+        $location = if ([string]::IsNullOrWhiteSpace($locationInput)) { "northeurope" } else { $locationInput }
+
+        Write-Host "  Creating resource group: $resourceGroupName ($location)..." -ForegroundColor Cyan
+        try {
+            New-AzResourceGroup -Name $resourceGroupName -Location $location -ErrorAction Stop | Out-Null
+            Write-Host "  Resource group created" -ForegroundColor Green
+        } catch {
+            Write-Host "  Failed to create resource group: $_" -ForegroundColor Red
+            return
+        }
+    }
     Write-Host ""
 
     # ============================================================
-    # SQL Server
+    # SQL Server + Database
     # ============================================================
     Write-Host "--- SQL Server ---" -ForegroundColor Cyan
 
-    # Try to find existing SQL servers in the selected resource group
+    # SQL credentials (needed before creating the server)
+    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
+    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
+
+    $generatedPassword = New-FGRandomPassword
+    Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
+    $useGenerated = Read-Host "  Use this password? (Y/n)"
+
+    if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
+        Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
+        $adminPassword = Read-Host -AsSecureString
+    } else {
+        $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
+    }
+
+    $adminPasswordEncrypted = ""
+    if ($adminPassword.Length -gt 0) {
+        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
+    }
+
+    Write-Host ""
+
+    # Try to find existing SQL servers in the resource group
     $sqlServers = @()
     try {
         $sqlServers = @(Get-AzSqlServer -ResourceGroupName $resourceGroupName -ErrorAction SilentlyContinue | Sort-Object ServerName)
     } catch { }
+
+    $createNewSql = $false
 
     if ($sqlServers.Count -gt 0) {
         Write-Host ""
         for ($i = 0; $i -lt $sqlServers.Count; $i++) {
             Write-Host "  [$($i + 1)] $($sqlServers[$i].ServerName) ($($sqlServers[$i].Location))" -ForegroundColor White
         }
-        Write-Host "  [N] Enter a new SQL Server name" -ForegroundColor White
+        Write-Host "  [N] Create a new SQL Server" -ForegroundColor White
         Write-Host ""
 
         do {
@@ -216,26 +261,36 @@ function New-FGConfig {
         } while (-not $validChoice)
 
         if ($sqlIndex -eq -1) {
-            $defaultSqlName = New-FGRandomSqlName
-            $sqlInput = Read-Host "  SQL Server Name [$defaultSqlName]"
-            $sqlServerName = if ([string]::IsNullOrWhiteSpace($sqlInput)) { $defaultSqlName } else { $sqlInput }
+            $createNewSql = $true
         } else {
             $sqlServerName = $sqlServers[$sqlIndex - 1].ServerName
             Write-Host "  Selected: $sqlServerName" -ForegroundColor Green
         }
     } else {
-        $defaultSqlName = New-FGRandomSqlName
-        Write-Host "  No SQL Servers found in $resourceGroupName." -ForegroundColor Gray
-        Write-Host "  A new one will be created automatically on first sync." -ForegroundColor Gray
-        $sqlInput = Read-Host "  SQL Server Name [$defaultSqlName]"
-        $sqlServerName = if ([string]::IsNullOrWhiteSpace($sqlInput)) { $defaultSqlName } else { $sqlInput }
+        $createNewSql = $true
     }
 
-    Write-Host "  Server: $sqlServerName" -ForegroundColor Green
+    if ($createNewSql) {
+        $defaultSqlName = New-FGRandomSqlName
+        $sqlInput = Read-Host "  SQL Server Name [$defaultSqlName]"
+        $sqlServerName = if ([string]::IsNullOrWhiteSpace($sqlInput)) { $defaultSqlName } else { $sqlInput }
 
-    # Database name
+        Write-Host "  Creating SQL Server: $sqlServerName..." -ForegroundColor Cyan
+        try {
+            $sqlCred = New-Object System.Management.Automation.PSCredential($adminUsername, $adminPassword)
+            New-AzSqlServer -ResourceGroupName $resourceGroupName -ServerName $sqlServerName -Location $location -SqlAdministratorCredentials $sqlCred -ErrorAction Stop | Out-Null
+            Write-Host "  SQL Server created: $sqlServerName.database.windows.net" -ForegroundColor Green
+        } catch {
+            Write-Host "  Failed to create SQL Server: $_" -ForegroundColor Red
+            Write-Host "  The name will be saved in config - you can create it later." -ForegroundColor Yellow
+        }
+    }
+
+    # Database
     $databaseName = "GraphData"
+    $createNewDb = $false
     $selectedSqlServer = $sqlServers | Where-Object { $_.ServerName -eq $sqlServerName }
+
     if ($selectedSqlServer) {
         $databases = @()
         try {
@@ -248,7 +303,7 @@ function New-FGConfig {
             for ($i = 0; $i -lt $databases.Count; $i++) {
                 Write-Host "  [$($i + 1)] $($databases[$i].DatabaseName)" -ForegroundColor White
             }
-            Write-Host "  [N] Enter a new database name" -ForegroundColor White
+            Write-Host "  [N] Create a new database" -ForegroundColor White
             Write-Host ""
 
             do {
@@ -266,45 +321,103 @@ function New-FGConfig {
             } while (-not $validChoice)
 
             if ($dbIndex -eq -1) {
-                $dbInput = Read-Host "  Database Name [GraphData]"
-                if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+                $createNewDb = $true
             } else {
                 $databaseName = $databases[$dbIndex - 1].DatabaseName
                 Write-Host "  Selected: $databaseName" -ForegroundColor Green
             }
         } else {
-            $dbInput = Read-Host "  Database Name [GraphData]"
-            if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+            $createNewDb = $true
         }
     } else {
+        $createNewDb = $true
+    }
+
+    if ($createNewDb) {
         $dbInput = Read-Host "  Database Name [GraphData]"
         if (-not [string]::IsNullOrWhiteSpace($dbInput)) { $databaseName = $dbInput }
+
+        # Only create if the SQL server exists (was just created or already existed)
+        try {
+            $existingServer = Get-AzSqlServer -ResourceGroupName $resourceGroupName -ServerName $sqlServerName -ErrorAction SilentlyContinue
+            if ($existingServer) {
+                Write-Host "  Creating database: $databaseName..." -ForegroundColor Cyan
+                New-AzSqlDatabase -ResourceGroupName $resourceGroupName -ServerName $sqlServerName -DatabaseName $databaseName -Edition "Basic" -ErrorAction Stop | Out-Null
+                Write-Host "  Database created" -ForegroundColor Green
+            }
+        } catch {
+            if ($_.Exception.Message -like "*already exists*") {
+                Write-Host "  Database already exists" -ForegroundColor Green
+            } else {
+                Write-Host "  Could not create database: $_" -ForegroundColor Yellow
+                Write-Host "  The name will be saved in config - it will be created on first sync." -ForegroundColor Gray
+            }
+        }
     }
 
     Write-Host ""
 
-    # SQL credentials
-    Write-Host "--- SQL Credentials ---" -ForegroundColor Cyan
+    # ============================================================
+    # Automation Account
+    # ============================================================
+    Write-Host "--- Automation Account ---" -ForegroundColor Cyan
 
-    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
-    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
+    $automationAccounts = @()
+    try {
+        $automationAccounts = @(Get-AzAutomationAccount -ResourceGroupName $resourceGroupName -ErrorAction SilentlyContinue | Sort-Object AutomationAccountName)
+    } catch { }
 
-    # Auto-generate a complex password by default
-    $generatedPassword = New-FGRandomPassword
-    Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
-    $useGenerated = Read-Host "  Use this password? (Y/n)"
+    $createNewAa = $false
 
-    if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
-        Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
-        $adminPassword = Read-Host -AsSecureString
+    if ($automationAccounts.Count -gt 0) {
+        Write-Host ""
+        for ($i = 0; $i -lt $automationAccounts.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($automationAccounts[$i].AutomationAccountName)" -ForegroundColor White
+        }
+        Write-Host "  [N] Create a new Automation Account" -ForegroundColor White
+        Write-Host ""
+
+        do {
+            $aaChoice = Read-Host "  Select Automation Account (1-$($automationAccounts.Count)) or N for new"
+            if ($aaChoice -eq 'n' -or $aaChoice -eq 'N') {
+                $validChoice = $true
+                $aaIndex = -1
+            } else {
+                $aaIndex = 0
+                $validChoice = [int]::TryParse($aaChoice, [ref]$aaIndex) -and $aaIndex -ge 1 -and $aaIndex -le $automationAccounts.Count
+            }
+            if (-not $validChoice) {
+                Write-Host "  Please enter a number between 1 and $($automationAccounts.Count), or N" -ForegroundColor Yellow
+            }
+        } while (-not $validChoice)
+
+        if ($aaIndex -eq -1) {
+            $createNewAa = $true
+        } else {
+            $automationAccountName = $automationAccounts[$aaIndex - 1].AutomationAccountName
+            Write-Host "  Selected: $automationAccountName" -ForegroundColor Green
+        }
     } else {
-        $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
+        $createNewAa = $true
     }
 
-    # Encrypt the password
-    $adminPasswordEncrypted = ""
-    if ($adminPassword.Length -gt 0) {
-        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
+    if ($createNewAa) {
+        $defaultAaName = "aa-fortigraph"
+        $aaInput = Read-Host "  Automation Account Name [$defaultAaName]"
+        $automationAccountName = if ([string]::IsNullOrWhiteSpace($aaInput)) { $defaultAaName } else { $aaInput }
+
+        Write-Host "  Creating Automation Account: $automationAccountName..." -ForegroundColor Cyan
+        try {
+            New-AzAutomationAccount -ResourceGroupName $resourceGroupName -Name $automationAccountName -Location $location -ErrorAction Stop | Out-Null
+            Write-Host "  Automation Account created" -ForegroundColor Green
+        } catch {
+            if ($_.Exception.Message -like "*already exists*") {
+                Write-Host "  Automation Account already exists" -ForegroundColor Green
+            } else {
+                Write-Host "  Could not create Automation Account: $_" -ForegroundColor Yellow
+                Write-Host "  The name will be saved in config - you can create it later." -ForegroundColor Gray
+            }
+        }
     }
 
     Write-Host ""
@@ -452,7 +565,7 @@ function New-FGConfig {
     # ============================================================
     $syncConfig = @{
         Users = @{ Enabled = $true; TableName = "GraphUsers"; Filter = ""; AdditionalAttributes = @() }
-        Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = "" }
+        Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = ""; AdditionalAttributes = @() }
         GroupMembers = @{ Enabled = $true; TableName = "GraphGroupMembers" }
         GroupEligibleMembers = @{ Enabled = $false }
         GroupOwners = @{ Enabled = $true; TableName = "GraphGroupOwners" }
@@ -503,18 +616,6 @@ function New-FGConfig {
         }
 
         Write-Host ""
-
-        # Additional user attributes
-        if ($syncConfig.Users.Enabled) {
-            Write-Host "  Additional user attributes to sync (comma-separated, or Enter to skip)" -ForegroundColor Gray
-            Write-Host "  Examples: officeLocation, city, country, employeeType" -ForegroundColor Gray
-            $attrsInput = Read-Host "  Additional attributes"
-            if (-not [string]::IsNullOrWhiteSpace($attrsInput)) {
-                $syncConfig.Users.AdditionalAttributes = @($attrsInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-            }
-        }
-
-        Write-Host ""
     } else {
         Write-Host "Using default sync settings (all enabled)." -ForegroundColor Gray
         Write-Host ""
@@ -533,6 +634,7 @@ function New-FGConfig {
             DatabaseName                = $databaseName
             AdminUsername               = $adminUsername
             AdminUserPassword_Encrypted = $adminPasswordEncrypted
+            AutomationAccountName       = $automationAccountName
         }
         Graph = [ordered]@{
             TenantId               = $graphTenantId
@@ -547,9 +649,10 @@ function New-FGConfig {
                 AdditionalAttributes = $syncConfig.Users.AdditionalAttributes
             }
             Groups                           = [ordered]@{
-                Enabled   = $syncConfig.Groups.Enabled
-                TableName = $syncConfig.Groups.TableName
-                Filter    = $syncConfig.Groups.Filter
+                Enabled              = $syncConfig.Groups.Enabled
+                TableName            = $syncConfig.Groups.TableName
+                Filter               = $syncConfig.Groups.Filter
+                AdditionalAttributes = $syncConfig.Groups.AdditionalAttributes
             }
             GroupMembers                     = [ordered]@{
                 Enabled   = $syncConfig.GroupMembers.Enabled
@@ -604,10 +707,19 @@ function New-FGConfig {
 
     Write-Host "Config file saved to: $Path" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Next steps:" -ForegroundColor Cyan
-    Write-Host "  1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor White
-    Write-Host "  2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor White
-    Write-Host "  3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor White
+    Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Resources created:" -ForegroundColor White
+    Write-Host "    Resource Group:     $resourceGroupName" -ForegroundColor Gray
+    Write-Host "    SQL Server:         $sqlServerName.database.windows.net" -ForegroundColor Gray
+    Write-Host "    Database:           $databaseName" -ForegroundColor Gray
+    Write-Host "    Automation Account: $automationAccountName" -ForegroundColor Gray
+    Write-Host "    Config file:        $Path" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Next steps:" -ForegroundColor White
+    Write-Host "    1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor Cyan
+    Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+    Write-Host "    3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host ""
 
     return $Path
