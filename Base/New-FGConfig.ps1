@@ -518,6 +518,7 @@ function New-FGConfig {
                 @{ Name = 'Directory.Read.All';             Id = '7ab1d382-f21e-4acd-a863-ba3e13f7da61' }
                 @{ Name = 'EntitlementManagement.Read.All'; Id = 'c74fd47d-ed3c-45c3-9a9e-b8676de685d2' }
                 @{ Name = 'AccessReview.Read.All';          Id = 'd07a8cc0-3d51-4b77-b3b0-32704d1f69fa' }
+                @{ Name = 'AuditLog.Read.All';              Id = 'b0afded3-3588-46d8-8b3d-9842eff778da' }
             )
 
             foreach ($perm in $permissions) {
@@ -567,7 +568,7 @@ function New-FGConfig {
         Users = @{ Enabled = $true; TableName = "GraphUsers"; Filter = ""; AdditionalAttributes = @() }
         Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = ""; AdditionalAttributes = @() }
         GroupMembers = @{ Enabled = $true; TableName = "GraphGroupMembers" }
-        GroupEligibleMembers = @{ Enabled = $false }
+        GroupEligibleMembers = @{ Enabled = $true }
         GroupOwners = @{ Enabled = $true; TableName = "GraphGroupOwners" }
         Catalogs = @{ Enabled = $true; TableName = "GraphCatalogs" }
         AccessPackages = @{ Enabled = $true; TableName = "GraphAccessPackages" }
@@ -589,7 +590,7 @@ function New-FGConfig {
         $syncConfig.Users.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Users" -Default $true)
         $syncConfig.Groups.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Groups" -Default $true)
         $syncConfig.GroupMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Members (direct)" -Default $true)
-        $syncConfig.GroupEligibleMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Eligible Members (PIM)" -Default $false)
+        $syncConfig.GroupEligibleMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Eligible Members (PIM)" -Default $true)
         $syncConfig.GroupOwners.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Owners" -Default $true)
 
         Write-Host ""
@@ -720,6 +721,7 @@ function New-FGConfig {
     Write-Host "    1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor Cyan
+    Write-Host "    4. New-FGAzureAutomationAccount -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host ""
 
     return $Path
