@@ -475,44 +475,22 @@ function Write-SyncError {
     #region Microsoft Graph Connection
     Write-SyncHeader "Connecting to Microsoft Graph"
 
-    # Check for existing valid token
-    $hasValidToken = $false
-    if ($global:AccessToken) {
-        # Check if existing token belongs to the same app as the config file
-        if ($global:ClientId -and $config.Graph.ClientId -and $global:ClientId -ne $config.Graph.ClientId) {
-            Write-SyncStep "Config uses different Client ID ($($config.Graph.ClientId)), getting new token..."
-        } else {
-            try {
-                Write-SyncStep "Checking existing Graph token..."
-                $hasValidToken = Confirm-FGAccessTokenValidity
-                if ($hasValidToken) {
-                    Write-SyncSuccess "Existing token is valid"
-                } else {
-                    Write-SyncStep "Existing token is expired, getting new token..."
-                }
-            } catch {
-                Write-SyncStep "Token validation failed, getting new token..."
-            }
-        }
+    # Always get a fresh token to avoid stale token issues (takes < 1 second)
+    Write-SyncStep "Getting Graph access token..."
+
+    if ($clientSecret -and $clientSecret -ne "") {
+        Get-FGAccessToken `
+            -TenantId $config.Graph.TenantId `
+            -ClientId $config.Graph.ClientId `
+            -ClientSecret $clientSecret
+    } else {
+        Write-SyncStep "Using interactive authentication..."
+        Get-FGAccessToken `
+            -TenantId $config.Graph.TenantId `
+            -ClientId $config.Graph.ClientId
     }
 
-    if (-not $hasValidToken) {
-        Write-SyncStep "Getting Graph access token..."
-
-        if ($clientSecret -and $clientSecret -ne "") {
-            Get-FGAccessToken `
-                -TenantId $config.Graph.TenantId `
-                -ClientId $config.Graph.ClientId `
-                -ClientSecret $clientSecret
-        } else {
-            Write-SyncStep "Using interactive authentication..."
-            Get-FGAccessToken `
-                -TenantId $config.Graph.TenantId `
-                -ClientId $config.Graph.ClientId
-        }
-
-        Write-SyncSuccess "Graph access token obtained"
-    }
+    Write-SyncSuccess "Graph access token obtained"
     #endregion
 
     # Capture Graph API access token and credentials for runspaces (must happen AFTER authentication)
