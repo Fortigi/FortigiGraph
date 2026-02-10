@@ -68,18 +68,32 @@ function New-FGUI {
     $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
 
     $resourceGroupName = $config.Azure.ResourceGroupName
-    if (-not $Location) { $Location = $config.Azure.Location }
     $sqlServerName = $config.Azure.SQLServerName
     $databaseName = $config.Azure.DatabaseName
     $subscriptionId = $config.Azure.SubscriptionId
 
-    # Generate names if not provided
+    # Generate names if not provided - check config first, then generate
     if (-not $WebAppName) {
-        $suffix = (Get-Random -Minimum 10000 -Maximum 99999)
-        $WebAppName = "fg-ui-$suffix"
+        if ($config.UI -and $config.UI.WebAppName) {
+            $WebAppName = $config.UI.WebAppName
+        } else {
+            $suffix = (Get-Random -Minimum 10000 -Maximum 99999)
+            $WebAppName = "fg-ui-$suffix"
+        }
     }
     if (-not $AppServicePlanName) {
-        $AppServicePlanName = "$WebAppName-plan"
+        if ($config.UI -and $config.UI.AppServicePlanName) {
+            $AppServicePlanName = $config.UI.AppServicePlanName
+        } else {
+            $AppServicePlanName = "$WebAppName-plan"
+        }
+    }
+    if (-not $Location) {
+        if ($config.UI -and $config.UI.Location) {
+            $Location = $config.UI.Location
+        } else {
+            $Location = $config.Azure.Location
+        }
     }
 
     Write-Host ""
