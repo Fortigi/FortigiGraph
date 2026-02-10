@@ -78,7 +78,7 @@ function New-FGUI {
             $WebAppName = $config.UI.WebAppName
         } else {
             $suffix = (Get-Random -Minimum 10000 -Maximum 99999)
-            $WebAppName = "fg-ui-$suffix"
+            $WebAppName = "ui-$suffix"
         }
     }
     if (-not $AppServicePlanName) {
