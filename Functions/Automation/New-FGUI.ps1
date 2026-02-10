@@ -15,8 +15,8 @@ function New-FGUI {
         [string]$Location,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('F1', 'B1', 'B2', 'B3', 'S1', 'S2', 'S3')]
-        [string]$Sku = 'F1',
+        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3')]
+        [string]$Sku = 'B1',
 
         [Parameter(Mandatory = $false)]
         [switch]$UseMockData
@@ -49,9 +49,43 @@ function New-FGUI {
         return Invoke-RestMethod @params
     }
 
+    # ─── Helper: Save UI settings to config file ──────────────────────────
+    function Save-UIConfig {
+        param(
+            [string]$ConfigFilePath,
+            [string]$WebAppName,
+            [string]$AppServicePlanName,
+            [string]$Location,
+            [string]$Sku
+        )
+        try {
+            $cfg = Get-Content -Path $ConfigFilePath -Raw | ConvertFrom-Json
+
+            if (-not $cfg.UI) {
+                $cfg | Add-Member -MemberType NoteProperty -Name 'UI' -Value ([PSCustomObject]@{
+                    WebAppName         = $WebAppName
+                    AppServicePlanName = $AppServicePlanName
+                    Location           = $Location
+                    Sku                = $Sku
+                    URL                = "https://$WebAppName.azurewebsites.net"
+                })
+            } else {
+                $cfg.UI.WebAppName = $WebAppName
+                $cfg.UI.AppServicePlanName = $AppServicePlanName
+                $cfg.UI.Location = $Location
+                $cfg.UI.Sku = $Sku
+                $cfg.UI.URL = "https://$WebAppName.azurewebsites.net"
+            }
+
+            $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFilePath -Force
+            return $true
+        } catch {
+            return $false
+        }
+    }
+
     # ─── SKU mapping ───────────────────────────────────────────────────────
     $skuMap = @{
-        'F1' = @{ name = 'F1';  tier = 'Free';     kind = 'linux'; reserved = $true }
         'B1' = @{ name = 'B1';  tier = 'Basic';    kind = 'linux'; reserved = $true }
         'B2' = @{ name = 'B2';  tier = 'Basic';    kind = 'linux'; reserved = $true }
         'B3' = @{ name = 'B3';  tier = 'Basic';    kind = 'linux'; reserved = $true }
@@ -150,9 +184,6 @@ function New-FGUI {
     Write-Host "  Web App:           $WebAppName" -ForegroundColor White
     Write-Host "  URL:               https://$WebAppName.azurewebsites.net" -ForegroundColor White
     Write-Host "  Data mode:         $(if ($UseMockData) { 'Mock data' } else { 'Azure SQL' })" -ForegroundColor White
-    if ($Sku -eq 'F1') {
-        Write-Host "  Cost:              Free" -ForegroundColor White
-    }
     Write-Host ""
     $proceed = Read-Host "Proceed with deployment? (Y/N)"
     if ($proceed -notmatch '^[Yy]') {
@@ -168,7 +199,6 @@ function New-FGUI {
     $skuConfig = $skuMap[$Sku]
 
     try {
-        # Check if plan already exists
         $existingPlan = $null
         try {
             $existingPlan = Invoke-AzureRestApi -Method GET -Uri $planUri
@@ -246,6 +276,14 @@ function New-FGUI {
         return
     }
 
+    # ─── Save config early (resource names are now known) ──────────────────
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Saving UI settings to config file..." -ForegroundColor Cyan
+    if (Save-UIConfig -ConfigFilePath $ConfigFile -WebAppName $WebAppName -AppServicePlanName $AppServicePlanName -Location $Location -Sku $Sku) {
+        Write-Host "  Config file updated" -ForegroundColor Green
+    } else {
+        Write-Host "  Warning: Could not update config file" -ForegroundColor Yellow
+    }
+
     # ─── Configure App Settings (REST API) ─────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Configuring app settings..." -ForegroundColor Cyan
 
@@ -291,6 +329,18 @@ function New-FGUI {
     } catch {
         Write-Host "  Failed to configure app settings: $_" -ForegroundColor Red
         return
+    }
+
+    # ─── Ensure App is Started ─────────────────────────────────────────────
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Ensuring web app is started..." -ForegroundColor Cyan
+    try {
+        $startUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/start"
+        Invoke-AzureRestApi -Method POST -Uri $startUri | Out-Null
+        Write-Host "  Web app started" -ForegroundColor Green
+        # Give the app a moment to fully start before deploying
+        Start-Sleep -Seconds 10
+    } catch {
+        Write-Host "  Warning: Could not start web app: $_" -ForegroundColor Yellow
     }
 
     # ─── SQL Firewall Rule ─────────────────────────────────────────────────
@@ -406,34 +456,6 @@ function New-FGUI {
         if (Test-Path $tempZipPath) {
             Remove-Item $tempZipPath -Force -ErrorAction SilentlyContinue
         }
-    }
-
-    # ─── Save UI settings to config ────────────────────────────────────────
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Saving UI settings to config file..." -ForegroundColor Cyan
-    try {
-        $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
-
-        # Add or update UI section
-        if (-not $config.UI) {
-            $config | Add-Member -MemberType NoteProperty -Name 'UI' -Value ([PSCustomObject]@{
-                WebAppName         = $WebAppName
-                AppServicePlanName = $AppServicePlanName
-                Location           = $Location
-                Sku                = $Sku
-                URL                = "https://$WebAppName.azurewebsites.net"
-            })
-        } else {
-            $config.UI.WebAppName = $WebAppName
-            $config.UI.AppServicePlanName = $AppServicePlanName
-            $config.UI.Location = $Location
-            $config.UI.Sku = $Sku
-            $config.UI.URL = "https://$WebAppName.azurewebsites.net"
-        }
-
-        $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Force
-        Write-Host "  Config file updated" -ForegroundColor Green
-    } catch {
-        Write-Host "  Warning: Could not update config file: $_" -ForegroundColor Yellow
     }
 
     # ─── Done ──────────────────────────────────────────────────────────────
