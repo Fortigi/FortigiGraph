@@ -376,12 +376,11 @@ function New-FGUI {
 
         # Zip deploy via Kudu
         $zipDeployUri = "https://$WebAppName.scm.azurewebsites.net/api/zipdeploy?isAsync=false"
-        $zipBytes = [System.IO.File]::ReadAllBytes($tempZipPath)
 
-        Invoke-RestMethod -Uri $zipDeployUri -Method PUT `
+        Invoke-WebRequest -Uri $zipDeployUri -Method POST `
             -Headers @{ Authorization = "Basic $kuduBase64" } `
-            -ContentType "application/zip" `
-            -Body $zipBytes `
+            -ContentType "application/octet-stream" `
+            -InFile $tempZipPath `
             -TimeoutSec 600 | Out-Null
 
         Write-Host "  Deployment complete" -ForegroundColor Green
