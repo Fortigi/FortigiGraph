@@ -475,39 +475,22 @@ function Write-SyncError {
     #region Microsoft Graph Connection
     Write-SyncHeader "Connecting to Microsoft Graph"
 
-    # Check for existing valid token
-    $hasValidToken = $false
-    if ($global:AccessToken) {
-        try {
-            Write-SyncStep "Checking existing Graph token..."
-            $hasValidToken = Confirm-FGAccessTokenValidity
-            if ($hasValidToken) {
-                Write-SyncSuccess "Existing token is valid"
-            } else {
-                Write-SyncStep "Existing token is expired, getting new token..."
-            }
-        } catch {
-            Write-SyncStep "Token validation failed, getting new token..."
-        }
+    # Always get a fresh token to avoid stale token issues (takes < 1 second)
+    Write-SyncStep "Getting Graph access token..."
+
+    if ($clientSecret -and $clientSecret -ne "") {
+        Get-FGAccessToken `
+            -TenantId $config.Graph.TenantId `
+            -ClientId $config.Graph.ClientId `
+            -ClientSecret $clientSecret
+    } else {
+        Write-SyncStep "Using interactive authentication..."
+        Get-FGAccessToken `
+            -TenantId $config.Graph.TenantId `
+            -ClientId $config.Graph.ClientId
     }
 
-    if (-not $hasValidToken) {
-        Write-SyncStep "Getting Graph access token..."
-
-        if ($clientSecret -and $clientSecret -ne "") {
-            Get-FGAccessToken `
-                -TenantId $config.Graph.TenantId `
-                -ClientId $config.Graph.ClientId `
-                -ClientSecret $clientSecret
-        } else {
-            Write-SyncStep "Using interactive authentication..."
-            Get-FGAccessToken `
-                -TenantId $config.Graph.TenantId `
-                -ClientId $config.Graph.ClientId
-        }
-
-        Write-SyncSuccess "Graph access token obtained"
-    }
+    Write-SyncSuccess "Graph access token obtained"
     #endregion
 
     # Capture Graph API access token and credentials for runspaces (must happen AFTER authentication)

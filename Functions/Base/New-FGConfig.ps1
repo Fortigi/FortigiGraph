@@ -208,29 +208,7 @@ function New-FGConfig {
     # ============================================================
     Write-Host "--- SQL Server ---" -ForegroundColor Cyan
 
-    # SQL credentials (needed before creating the server)
-    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
-    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
-
-    $generatedPassword = New-FGRandomPassword
-    Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
-    $useGenerated = Read-Host "  Use this password? (Y/n)"
-
-    if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
-        Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
-        $adminPassword = Read-Host -AsSecureString
-    } else {
-        $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
-    }
-
-    $adminPasswordEncrypted = ""
-    if ($adminPassword.Length -gt 0) {
-        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
-    }
-
-    Write-Host ""
-
-    # Try to find existing SQL servers in the resource group
+    # First check for existing SQL servers before asking for credentials
     $sqlServers = @()
     try {
         $sqlServers = @(Get-AzSqlServer -ResourceGroupName $resourceGroupName -ErrorAction SilentlyContinue | Sort-Object ServerName)
@@ -269,6 +247,36 @@ function New-FGConfig {
     } else {
         $createNewSql = $true
     }
+
+    # Now ask for credentials - context depends on new vs existing server
+    Write-Host ""
+    $adminUsernameInput = Read-Host "  SQL Admin Username [sqladmin]"
+    $adminUsername = if ([string]::IsNullOrWhiteSpace($adminUsernameInput)) { "sqladmin" } else { $adminUsernameInput }
+
+    if ($createNewSql) {
+        # New server: offer auto-generated password
+        $generatedPassword = New-FGRandomPassword
+        Write-Host "  SQL Admin Password (auto-generated): $generatedPassword" -ForegroundColor Green
+        $useGenerated = Read-Host "  Use this password? (Y/n)"
+
+        if ($useGenerated -eq 'n' -or $useGenerated -eq 'N') {
+            Write-Host "  Enter your own password: " -ForegroundColor Gray -NoNewline
+            $adminPassword = Read-Host -AsSecureString
+        } else {
+            $adminPassword = $generatedPassword | ConvertTo-SecureString -AsPlainText -Force
+        }
+    } else {
+        # Existing server: ask for the current password
+        Write-Host "  SQL Admin Password: " -ForegroundColor Gray -NoNewline
+        $adminPassword = Read-Host -AsSecureString
+    }
+
+    $adminPasswordEncrypted = ""
+    if ($adminPassword.Length -gt 0) {
+        $adminPasswordEncrypted = $adminPassword | ConvertFrom-SecureString
+    }
+
+    Write-Host ""
 
     if ($createNewSql) {
         $defaultSqlName = New-FGRandomSqlName
@@ -402,7 +410,7 @@ function New-FGConfig {
     }
 
     if ($createNewAa) {
-        $defaultAaName = "aa-fortigraph"
+        $defaultAaName = New-FGRandomAutomationAccountName
         $aaInput = Read-Host "  Automation Account Name [$defaultAaName]"
         $automationAccountName = if ([string]::IsNullOrWhiteSpace($aaInput)) { $defaultAaName } else { $aaInput }
 
@@ -518,6 +526,7 @@ function New-FGConfig {
                 @{ Name = 'Directory.Read.All';             Id = '7ab1d382-f21e-4acd-a863-ba3e13f7da61' }
                 @{ Name = 'EntitlementManagement.Read.All'; Id = 'c74fd47d-ed3c-45c3-9a9e-b8676de685d2' }
                 @{ Name = 'AccessReview.Read.All';          Id = 'd07a8cc0-3d51-4b77-b3b0-32704d1f69fa' }
+                @{ Name = 'AuditLog.Read.All';              Id = 'b0afded3-3588-46d8-8b3d-9842eff778da' }
             )
 
             foreach ($perm in $permissions) {
@@ -567,7 +576,7 @@ function New-FGConfig {
         Users = @{ Enabled = $true; TableName = "GraphUsers"; Filter = ""; AdditionalAttributes = @() }
         Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = ""; AdditionalAttributes = @() }
         GroupMembers = @{ Enabled = $true; TableName = "GraphGroupMembers" }
-        GroupEligibleMembers = @{ Enabled = $false }
+        GroupEligibleMembers = @{ Enabled = $true }
         GroupOwners = @{ Enabled = $true; TableName = "GraphGroupOwners" }
         Catalogs = @{ Enabled = $true; TableName = "GraphCatalogs" }
         AccessPackages = @{ Enabled = $true; TableName = "GraphAccessPackages" }
@@ -589,7 +598,7 @@ function New-FGConfig {
         $syncConfig.Users.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Users" -Default $true)
         $syncConfig.Groups.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Groups" -Default $true)
         $syncConfig.GroupMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Members (direct)" -Default $true)
-        $syncConfig.GroupEligibleMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Eligible Members (PIM)" -Default $false)
+        $syncConfig.GroupEligibleMembers.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Eligible Members (PIM)" -Default $true)
         $syncConfig.GroupOwners.Enabled = (Read-FGConfigYesNo -Prompt "  Sync Group Owners" -Default $true)
 
         Write-Host ""
@@ -720,6 +729,7 @@ function New-FGConfig {
     Write-Host "    1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor Cyan
+    Write-Host "    4. New-FGAzureAutomationAccount -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host ""
 
     return $Path
@@ -805,4 +815,21 @@ function New-FGRandomSqlName {
     $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
 
     return "sql-fortigraph-$suffix"
+}
+
+function New-FGRandomAutomationAccountName {
+    <#
+    .SYNOPSIS
+        Internal helper for New-FGConfig. Generates a unique Automation Account name suggestion.
+    #>
+
+    [cmdletbinding()]
+    Param()
+
+    $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    $bytes = [byte[]]::new(5)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+
+    return "aa-fortigraph-$suffix"
 }
