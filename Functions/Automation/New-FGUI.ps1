@@ -12,12 +12,53 @@ function New-FGUI {
         [string]$AppServicePlanName,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'F1')]
-        [string]$Sku = 'B1',
+        [string]$Location,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('F1', 'B1', 'B2', 'B3', 'S1', 'S2', 'S3')]
+        [string]$Sku = 'F1',
 
         [Parameter(Mandatory = $false)]
         [switch]$UseMockData
     )
+
+    # ─── Helper: Azure REST API call ───────────────────────────────────────
+    function Invoke-AzureRestApi {
+        param(
+            [string]$Method,
+            [string]$Uri,
+            [object]$Body,
+            [string]$ApiVersion = "2023-01-01"
+        )
+
+        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token
+        $headers = @{ Authorization = "Bearer $token" }
+        $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
+
+        $params = @{
+            Method      = $Method
+            Uri         = $fullUri
+            Headers     = $headers
+            ContentType = "application/json"
+        }
+
+        if ($Body) {
+            $params.Body = ($Body | ConvertTo-Json -Depth 10)
+        }
+
+        return Invoke-RestMethod @params
+    }
+
+    # ─── SKU mapping ───────────────────────────────────────────────────────
+    $skuMap = @{
+        'F1' = @{ name = 'F1';  tier = 'Free';     kind = 'linux'; reserved = $true }
+        'B1' = @{ name = 'B1';  tier = 'Basic';    kind = 'linux'; reserved = $true }
+        'B2' = @{ name = 'B2';  tier = 'Basic';    kind = 'linux'; reserved = $true }
+        'B3' = @{ name = 'B3';  tier = 'Basic';    kind = 'linux'; reserved = $true }
+        'S1' = @{ name = 'S1';  tier = 'Standard'; kind = 'linux'; reserved = $true }
+        'S2' = @{ name = 'S2';  tier = 'Standard'; kind = 'linux'; reserved = $true }
+        'S3' = @{ name = 'S3';  tier = 'Standard'; kind = 'linux'; reserved = $true }
+    }
 
     # ─── Load Config ───────────────────────────────────────────────────────
     if (-not (Test-Path $ConfigFile)) {
@@ -27,7 +68,7 @@ function New-FGUI {
     $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
 
     $resourceGroupName = $config.Azure.ResourceGroupName
-    $location = $config.Azure.Location
+    if (-not $Location) { $Location = $config.Azure.Location }
     $sqlServerName = $config.Azure.SQLServerName
     $databaseName = $config.Azure.DatabaseName
     $subscriptionId = $config.Azure.SubscriptionId
@@ -76,6 +117,8 @@ function New-FGUI {
         Set-AzContext -SubscriptionId $subscriptionId | Out-Null
     }
 
+    $subId = (Get-AzContext).Subscription.Id
+
     # ─── Verify Resource Group ─────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Verifying resource group: $resourceGroupName..." -ForegroundColor Cyan
     $rg = Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue
@@ -88,11 +131,14 @@ function New-FGUI {
     Write-Host ""
     Write-Host "Deployment plan:" -ForegroundColor Yellow
     Write-Host "  Resource Group:    $resourceGroupName" -ForegroundColor White
-    Write-Host "  Location:          $location" -ForegroundColor White
+    Write-Host "  Location:          $Location" -ForegroundColor White
     Write-Host "  App Service Plan:  $AppServicePlanName ($Sku)" -ForegroundColor White
     Write-Host "  Web App:           $WebAppName" -ForegroundColor White
     Write-Host "  URL:               https://$WebAppName.azurewebsites.net" -ForegroundColor White
     Write-Host "  Data mode:         $(if ($UseMockData) { 'Mock data' } else { 'Azure SQL' })" -ForegroundColor White
+    if ($Sku -eq 'F1') {
+        Write-Host "  Cost:              Free" -ForegroundColor White
+    }
     Write-Host ""
     $proceed = Read-Host "Proceed with deployment? (Y/N)"
     if ($proceed -notmatch '^[Yy]') {
@@ -100,64 +146,104 @@ function New-FGUI {
         return
     }
 
-    # ─── Create App Service Plan ───────────────────────────────────────────
+    # ─── Create App Service Plan (REST API) ────────────────────────────────
     Write-Host ""
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Creating App Service Plan: $AppServicePlanName..." -ForegroundColor Cyan
-    $plan = Get-AzAppServicePlan -ResourceGroupName $resourceGroupName -Name $AppServicePlanName -ErrorAction SilentlyContinue
 
-    if (-not $plan) {
+    $planUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/serverfarms/$AppServicePlanName"
+    $skuConfig = $skuMap[$Sku]
+
+    try {
+        # Check if plan already exists
+        $existingPlan = $null
         try {
-            $plan = New-AzAppServicePlan `
-                -ResourceGroupName $resourceGroupName `
-                -Name $AppServicePlanName `
-                -Location $location `
-                -Tier $(if ($Sku -eq 'F1') { 'Free' } elseif ($Sku -match '^B') { 'Basic' } else { 'Standard' }) `
-                -WorkerSize $(if ($Sku -match '1$') { 'Small' } elseif ($Sku -match '2$') { 'Medium' } else { 'Large' }) `
-                -Linux `
-                -ErrorAction Stop
+            $existingPlan = Invoke-AzureRestApi -Method GET -Uri $planUri
+        } catch {}
+
+        if ($existingPlan) {
+            Write-Host "  App Service Plan already exists" -ForegroundColor Green
+        } else {
+            $planBody = @{
+                location   = $Location
+                kind       = $skuConfig.kind
+                properties = @{ reserved = $skuConfig.reserved }
+                sku        = @{ name = $skuConfig.name; tier = $skuConfig.tier }
+            }
+
+            Invoke-AzureRestApi -Method PUT -Uri $planUri -Body $planBody | Out-Null
             Write-Host "  App Service Plan created" -ForegroundColor Green
-        } catch {
+        }
+    } catch {
+        $errorMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($errorMessage) {
+            Write-Host "  Failed to create App Service Plan: $($errorMessage.Message)" -ForegroundColor Red
+            if ($errorMessage.Message -match 'quota') {
+                Write-Host ""
+                Write-Host "  Your subscription has no App Service quota in $Location." -ForegroundColor Yellow
+                Write-Host "  Fix: Azure Portal > Quotas > App Service > $Location" -ForegroundColor Yellow
+                Write-Host "  Request at least 1 for '$Sku VMs'." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  Or try a different region: New-FGUI -ConfigFile '$ConfigFile' -Location 'westeurope'" -ForegroundColor Yellow
+            }
+        } else {
             Write-Host "  Failed to create App Service Plan: $_" -ForegroundColor Red
-            return
         }
-    } else {
-        Write-Host "  App Service Plan already exists" -ForegroundColor Green
+        return
     }
 
-    # ─── Create Web App ────────────────────────────────────────────────────
+    # ─── Create Web App (REST API) ────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Creating Web App: $WebAppName..." -ForegroundColor Cyan
-    $webApp = Get-AzWebApp -ResourceGroupName $resourceGroupName -Name $WebAppName -ErrorAction SilentlyContinue
 
-    if (-not $webApp) {
+    $webAppUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName"
+
+    try {
+        $existingApp = $null
         try {
-            $webApp = New-AzWebApp `
-                -ResourceGroupName $resourceGroupName `
-                -Name $WebAppName `
-                -AppServicePlan $AppServicePlanName `
-                -Runtime "NODE:20-lts" `
-                -ErrorAction Stop
+            $existingApp = Invoke-AzureRestApi -Method GET -Uri $webAppUri
+        } catch {}
+
+        if ($existingApp) {
+            Write-Host "  Web App already exists" -ForegroundColor Green
+        } else {
+            $webAppBody = @{
+                location   = $Location
+                kind       = "app,linux"
+                properties = @{
+                    serverFarmId = "/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/serverfarms/$AppServicePlanName"
+                    siteConfig   = @{
+                        linuxFxVersion = "NODE|20-lts"
+                        appCommandLine = "cd backend && node src/index.js"
+                        appSettings    = @()
+                    }
+                    reserved = $true
+                }
+            }
+
+            Invoke-AzureRestApi -Method PUT -Uri $webAppUri -Body $webAppBody | Out-Null
             Write-Host "  Web App created" -ForegroundColor Green
-        } catch {
-            Write-Host "  Failed to create Web App: $_" -ForegroundColor Red
-            return
         }
-    } else {
-        Write-Host "  Web App already exists" -ForegroundColor Green
+    } catch {
+        $errorMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($errorMessage) {
+            Write-Host "  Failed to create Web App: $($errorMessage.Message)" -ForegroundColor Red
+        } else {
+            Write-Host "  Failed to create Web App: $_" -ForegroundColor Red
+        }
+        return
     }
 
-    # ─── Configure App Settings ────────────────────────────────────────────
+    # ─── Configure App Settings (REST API) ─────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Configuring app settings..." -ForegroundColor Cyan
 
-    $appSettings = @{
-        "WEBSITES_PORT"                    = "3001"
-        "SCM_DO_BUILD_DURING_DEPLOYMENT"   = "true"
-        "WEBSITE_NODE_DEFAULT_VERSION"     = "~20"
-    }
+    $settingsList = @(
+        @{ name = "WEBSITES_PORT";                  value = "3001" }
+        @{ name = "SCM_DO_BUILD_DURING_DEPLOYMENT"; value = "true" }
+        @{ name = "WEBSITE_NODE_DEFAULT_VERSION";   value = "~20" }
+    )
 
     if ($UseMockData) {
-        $appSettings["USE_SQL"] = "false"
+        $settingsList += @{ name = "USE_SQL"; value = "false" }
     } else {
-        # Get SQL password from config
         $sqlPassword = Get-FGSecureConfigValue -ConfigPath $ConfigFile `
             -PropertyPath "Azure.AdminUserPassword" `
             -PromptMessage "Enter SQL Admin Password"
@@ -169,47 +255,34 @@ function New-FGUI {
             "$sqlServerName.database.windows.net"
         }
 
-        $appSettings["USE_SQL"] = "true"
-        $appSettings["SQL_SERVER"] = $fullServerName
-        $appSettings["SQL_DATABASE"] = $databaseName
-        $appSettings["SQL_USER"] = $sqlUser
-        $appSettings["SQL_PASSWORD"] = $sqlPassword
+        $settingsList += @{ name = "USE_SQL";      value = "true" }
+        $settingsList += @{ name = "SQL_SERVER";    value = $fullServerName }
+        $settingsList += @{ name = "SQL_DATABASE";  value = $databaseName }
+        $settingsList += @{ name = "SQL_USER";      value = $sqlUser }
+        $settingsList += @{ name = "SQL_PASSWORD";  value = $sqlPassword }
     }
 
+    $settingsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings"
+
     try {
-        Set-AzWebApp `
-            -ResourceGroupName $resourceGroupName `
-            -Name $WebAppName `
-            -AppSettings $appSettings `
-            -ErrorAction Stop | Out-Null
+        $settingsBody = @{
+            properties = @{}
+        }
+        foreach ($setting in $settingsList) {
+            $settingsBody.properties[$setting.name] = $setting.value
+        }
+
+        Invoke-AzureRestApi -Method PUT -Uri $settingsUri -Body $settingsBody | Out-Null
         Write-Host "  App settings configured" -ForegroundColor Green
     } catch {
         Write-Host "  Failed to configure app settings: $_" -ForegroundColor Red
         return
     }
 
-    # ─── Configure Startup Command ─────────────────────────────────────────
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Setting startup command..." -ForegroundColor Cyan
-    try {
-        $resource = Get-AzResource -ResourceGroupName $resourceGroupName `
-            -ResourceType "Microsoft.Web/sites/config" `
-            -ResourceName "$WebAppName/web" `
-            -ApiVersion "2022-03-01"
-
-        $resource.Properties.appCommandLine = "cd backend && node src/index.js"
-        $resource | Set-AzResource -Force -ApiVersion "2022-03-01" | Out-Null
-        Write-Host "  Startup command configured" -ForegroundColor Green
-    } catch {
-        Write-Host "  Failed to set startup command: $_" -ForegroundColor Red
-        Write-Host "  You can set it manually in Azure Portal > Web App > Configuration > Startup Command" -ForegroundColor Yellow
-        Write-Host "  Command: cd backend && node src/index.js" -ForegroundColor Yellow
-    }
-
     # ─── SQL Firewall Rule ─────────────────────────────────────────────────
     if (-not $UseMockData) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking SQL firewall for Azure services..." -ForegroundColor Cyan
 
-        # Find the SQL server's resource group (may differ from the web app's)
         $sqlServer = Get-AzSqlServer | Where-Object { $_.ServerName -ieq $sqlServerName.Split('.')[0] } | Select-Object -First 1
         if ($sqlServer) {
             $sqlResourceGroup = $sqlServer.ResourceGroupName
@@ -287,18 +360,31 @@ function New-FGUI {
         $zipSizeMB = [math]::Round((Get-Item $tempZipPath).Length / 1MB, 2)
         Write-Host "  Package created: $zipSizeMB MB" -ForegroundColor Gray
 
-        # Deploy using zip deploy
+        # Deploy using Kudu zip deploy API
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deploying to Azure App Service..." -ForegroundColor Cyan
         Write-Host "  This will take a few minutes (Azure builds the app on the server)..." -ForegroundColor Gray
 
-        Publish-AzWebApp `
-            -ResourceGroupName $resourceGroupName `
-            -Name $WebAppName `
-            -ArchivePath $tempZipPath `
-            -Force `
-            -ErrorAction Stop | Out-Null
+        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token
 
-        Write-Host "  Deployment initiated" -ForegroundColor Green
+        # Get publish credentials
+        $credsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/publishingcredentials/list?api-version=2023-01-01"
+        $creds = Invoke-RestMethod -Uri $credsUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json"
+
+        $kuduUser = $creds.properties.publishingUserName
+        $kuduPass = $creds.properties.publishingPassword
+        $kuduBase64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${kuduUser}:${kuduPass}"))
+
+        # Zip deploy via Kudu
+        $zipDeployUri = "https://$WebAppName.scm.azurewebsites.net/api/zipdeploy?isAsync=false"
+        $zipBytes = [System.IO.File]::ReadAllBytes($tempZipPath)
+
+        Invoke-RestMethod -Uri $zipDeployUri -Method PUT `
+            -Headers @{ Authorization = "Basic $kuduBase64" } `
+            -ContentType "application/zip" `
+            -Body $zipBytes `
+            -TimeoutSec 600 | Out-Null
+
+        Write-Host "  Deployment complete" -ForegroundColor Green
     } catch {
         Write-Host "  Deployment failed: $_" -ForegroundColor Red
         return
@@ -319,12 +405,14 @@ function New-FGUI {
             $config | Add-Member -MemberType NoteProperty -Name 'UI' -Value ([PSCustomObject]@{
                 WebAppName         = $WebAppName
                 AppServicePlanName = $AppServicePlanName
+                Location           = $Location
                 Sku                = $Sku
                 URL                = "https://$WebAppName.azurewebsites.net"
             })
         } else {
             $config.UI.WebAppName = $WebAppName
             $config.UI.AppServicePlanName = $AppServicePlanName
+            $config.UI.Location = $Location
             $config.UI.Sku = $Sku
             $config.UI.URL = "https://$WebAppName.azurewebsites.net"
         }
@@ -359,10 +447,11 @@ function New-FGUI {
     Write-Host ""
 
     return [PSCustomObject]@{
-        WebAppName = $WebAppName
-        URL        = "https://$WebAppName.azurewebsites.net"
+        WebAppName    = $WebAppName
+        URL           = "https://$WebAppName.azurewebsites.net"
         ResourceGroup = $resourceGroupName
-        Sku        = $Sku
-        DataMode   = if ($UseMockData) { 'Mock' } else { 'SQL' }
+        Location      = $Location
+        Sku           = $Sku
+        DataMode      = if ($UseMockData) { 'Mock' } else { 'SQL' }
     }
 }
