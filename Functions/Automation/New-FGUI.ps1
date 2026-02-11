@@ -31,7 +31,7 @@ function New-FGUI {
             [string]$ApiVersion = "2023-01-01"
         )
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token
+        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue).Token
         $headers = @{ Authorization = "Bearer $token" }
         $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
 
@@ -428,7 +428,7 @@ function New-FGUI {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deploying to Azure App Service..." -ForegroundColor Cyan
         Write-Host "  This will take a few minutes (Azure builds the app on the server)..." -ForegroundColor Gray
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token
+        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue).Token
 
         # Get publish credentials
         $credsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/publishingcredentials/list?api-version=2023-01-01"

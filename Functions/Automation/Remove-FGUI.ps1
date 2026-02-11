@@ -73,7 +73,7 @@ function Remove-FGUI {
             [string]$ApiVersion = "2023-01-01"
         )
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token
+        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue).Token
         $headers = @{ Authorization = "Bearer $token" }
         $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
 
