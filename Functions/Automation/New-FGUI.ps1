@@ -22,6 +22,9 @@ function New-FGUI {
         [switch]$UseMockData
     )
 
+    # Suppress Az module deprecation warnings (e.g., Get-AzAccessToken SecureString change)
+    $WarningPreference = 'SilentlyContinue'
+
     # ─── Helper: Azure REST API call ───────────────────────────────────────
     function Invoke-AzureRestApi {
         param(
@@ -504,16 +507,41 @@ function New-FGUI {
         }
     }
 
+    # ─── Warmup Request ─────────────────────────────────────────────────────
+    $appUrl = "https://$WebAppName.azurewebsites.net"
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Warming up the application..." -ForegroundColor Cyan
+    $maxAttempts = 8
+    $attempt = 0
+    $ready = $false
+
+    while ($attempt -lt $maxAttempts -and -not $ready) {
+        $attempt++
+        try {
+            $response = Invoke-WebRequest -Uri $appUrl -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                Write-Host "  Application is ready (HTTP 200)" -ForegroundColor Green
+                $ready = $true
+            } else {
+                Write-Host "  Attempt $attempt/$maxAttempts - HTTP $($response.StatusCode), retrying in 15s..." -ForegroundColor Gray
+                Start-Sleep -Seconds 15
+            }
+        } catch {
+            Write-Host "  Attempt $attempt/$maxAttempts - Not ready yet, retrying in 15s..." -ForegroundColor Gray
+            Start-Sleep -Seconds 15
+        }
+    }
+
+    if (-not $ready) {
+        Write-Host "  App may still be starting. Try opening the URL in a minute." -ForegroundColor Yellow
+    }
+
     # ─── Done ──────────────────────────────────────────────────────────────
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Green
     Write-Host "║           Deployment Complete!                   ║" -ForegroundColor Green
     Write-Host "╚══════════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  URL: https://$WebAppName.azurewebsites.net" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Note: The first load may take 1-2 minutes while Azure" -ForegroundColor Gray
-    Write-Host "  builds the application (npm install + build)." -ForegroundColor Gray
+    Write-Host "  URL: $appUrl" -ForegroundColor White
     Write-Host ""
     if ($UseMockData) {
         Write-Host "  Running with MOCK DATA. To switch to real SQL data:" -ForegroundColor Yellow
@@ -529,7 +557,7 @@ function New-FGUI {
 
     return [PSCustomObject]@{
         WebAppName    = $WebAppName
-        URL           = "https://$WebAppName.azurewebsites.net"
+        URL           = $appUrl
         ResourceGroup = $resourceGroupName
         Location      = $Location
         Sku           = $Sku

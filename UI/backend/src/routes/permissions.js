@@ -9,11 +9,26 @@ if (useSql) {
   db = await import('../db/connection.js');
 }
 
-// GET /api/permissions - vw_UserPermissionAssignments
+// GET /api/permissions - vw_UserPermissionAssignments enriched with display names
 router.get('/permissions', async (req, res) => {
   try {
     if (useSql) {
-      const result = await db.query('SELECT * FROM vw_UserPermissionAssignments');
+      const result = await db.query(`
+        SELECT
+          p.groupId,
+          g.displayName AS groupDisplayName,
+          p.memberId,
+          u.displayName AS memberDisplayName,
+          u.userPrincipalName AS memberUPN,
+          p.memberType,
+          p.membershipType,
+          u.department,
+          u.jobTitle
+        FROM vw_UserPermissionAssignments p
+        LEFT JOIN GraphUsers u ON p.memberId = u.id
+        LEFT JOIN GraphGroups g ON p.groupId = g.id
+        WHERE p.memberType != '#microsoft.graph.group'
+      `);
       return res.json(result.recordset);
     }
     res.json(permissionAssignments);

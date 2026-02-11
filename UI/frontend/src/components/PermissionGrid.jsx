@@ -6,6 +6,7 @@ import {
   getGroupedRowModel,
   getExpandedRowModel,
   getSortedRowModel,
+  getFacetedRowModel,
   flexRender,
 } from '@tanstack/react-table';
 
@@ -237,6 +238,3 @@ export default function PermissionGrid({ data }) {
     </div>
   );
 }
-
-// Need to import this - TanStack Table requires explicit faceted model import
-import { getFacetedRowModel } from '@tanstack/react-table';

@@ -49,6 +49,9 @@ function Remove-FGUI {
         return
     }
 
+    # Suppress Az module deprecation warnings
+    $WarningPreference = 'SilentlyContinue'
+
     # ─── Azure Context ─────────────────────────────────────────────────────
     Write-Host ""
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking Azure context..." -ForegroundColor Cyan
