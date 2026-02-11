@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import MatrixView from './components/MatrixView';
-import PermissionGrid from './components/PermissionGrid';
-import PivotView from './components/PivotView';
+import ActionsView from './components/ActionsView';
 import ViewToggle from './components/ViewToggle';
 
 export default function App() {
@@ -47,8 +46,7 @@ export default function App() {
         ) : (
           <>
             {activeView === 'matrix' && <MatrixView data={data} />}
-            {activeView === 'grid' && <PermissionGrid data={data} />}
-            {activeView === 'pivot' && <PivotView data={data} />}
+            {activeView === 'actions' && <ActionsView data={data} />}
           </>
         )}
       </main>

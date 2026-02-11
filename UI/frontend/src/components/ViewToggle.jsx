@@ -1,7 +1,6 @@
 const views = [
   { id: 'matrix', label: 'Matrix View', description: 'Users vs Groups matrix with colored membership indicators' },
-  { id: 'grid', label: 'Grid View', description: 'Filter, sort, and group permission assignments' },
-  { id: 'pivot', label: 'Pivot View', description: 'Drag-and-drop pivot analysis with heatmap' },
+  { id: 'actions', label: 'Actions', description: 'Pending permission changes based on role mining annotations' },
 ];
 
 export default function ViewToggle({ activeView, onViewChange }) {
