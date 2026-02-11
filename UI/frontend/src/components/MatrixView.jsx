@@ -1,26 +1,55 @@
-import { useMemo, useState } from 'react';
-
-const membershipColors = {
-  Direct:   { bg: '#dcfce7', text: '#166534', label: 'D' },
-  Indirect: { bg: '#dbeafe', text: '#1e40af', label: 'I' },
-  Eligible: { bg: '#fef9c3', text: '#854d0e', label: 'E' },
-  Owner:    { bg: '#fce7f3', text: '#9d174d', label: 'O' },
-};
+import { useMemo, useState, useCallback, useEffect } from 'react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { useMatrixAnnotations } from '../hooks/useMatrixAnnotations';
+import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
+import MatrixToolbar from './matrix/MatrixToolbar';
+import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
+import MatrixGroupRow from './matrix/MatrixGroupRow';
 
 export default function MatrixView({ data }) {
-  const [rowAxis, setRowAxis] = useState('groupDisplayName');
-  const [colAxis, setColAxis] = useState('memberDisplayName');
-  const [filterText, setFilterText] = useState('');
   const [filterDept, setFilterDept] = useState('');
+  const [filterText, setFilterText] = useState('');
 
-  // Derive available departments for filtering
+  const annotations = useMatrixAnnotations(filterDept);
+  const rowOrderHook = useMatrixRowOrder(filterDept);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        annotations.undo();
+      }
+      if (e.key === 'Escape') {
+        annotations.setActiveBrush(null);
+      }
+      // Number keys 1-6 for palette
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= annotations.palette.length && !e.ctrlKey && !e.altKey) {
+        const target = e.target;
+        if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
+        annotations.setActiveBrush(annotations.palette[num - 1].key);
+      }
+      if (e.key === '0') {
+        const target = e.target;
+        if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
+        annotations.setActiveBrush('clear');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [annotations]);
+
+  // Extract unique departments
   const departments = useMemo(() => {
     const depts = new Set();
     data.forEach(d => { if (d.department) depts.add(d.department); });
     return [...depts].sort();
   }, [data]);
 
-  // Filter data
+  // Filter data by department and text search
   const filteredData = useMemo(() => {
     let result = data;
     if (filterDept) {
@@ -37,182 +66,175 @@ export default function MatrixView({ data }) {
     return result;
   }, [data, filterDept, filterText]);
 
-  // Build the matrix
-  const { rowLabels, colLabels, matrix } = useMemo(() => {
-    const rowSet = new Map();
-    const colSet = new Map();
-    const cells = new Map(); // key: "rowVal|colVal" -> { types: Set, user?, group? }
+  // Build matrix data structures
+  const { users, groups, memberships } = useMemo(() => {
+    const userMap = new Map();
+    const groupMap = new Map();
+    const membershipMap = new Map();
 
     filteredData.forEach(d => {
-      const rowVal = d[rowAxis] || '(unknown)';
-      const colVal = d[colAxis] || '(unknown)';
-
-      if (!rowSet.has(rowVal)) rowSet.set(rowVal, rowSet.size);
-      if (!colSet.has(colVal)) colSet.set(colVal, colSet.size);
-
-      const key = `${rowVal}|${colVal}`;
-      if (!cells.has(key)) {
-        cells.set(key, { types: new Set() });
+      // Users
+      if (d.memberId && !userMap.has(d.memberId)) {
+        userMap.set(d.memberId, {
+          id: d.memberId,
+          displayName: d.memberDisplayName || d.memberId,
+          jobTitle: d.jobTitle || '',
+          department: d.department || '',
+          upn: d.memberUPN || '',
+        });
       }
-      cells.get(key).types.add(d.membershipType);
+
+      // Groups
+      if (d.groupId && !groupMap.has(d.groupId)) {
+        const name = d.groupDisplayName || d.groupId;
+        // Parse category from group name prefix
+        const parts = name.split(/[-_]/);
+        let category = '';
+        const prefixMap = {
+          AG: 'App Group', CG: 'Cloud Group', GG: 'Global Group',
+          SG: 'Security', APP: 'Application', ROL: 'Role',
+          ORG: 'Organization', UAW: 'Access', MGT: 'Management',
+        };
+        if (parts.length > 1) {
+          category = prefixMap[parts[0].toUpperCase()] || parts[0];
+        }
+
+        groupMap.set(d.groupId, {
+          id: d.groupId,
+          displayName: name,
+          category,
+          description: d.groupDescription || '',
+        });
+      }
+
+      // Memberships
+      const key = `${d.groupId}|${d.memberId}`;
+      if (!membershipMap.has(key)) {
+        membershipMap.set(key, new Set());
+      }
+      membershipMap.get(key).add(d.membershipType);
     });
 
-    const rowLabels = [...rowSet.keys()].sort();
-    const colLabels = [...colSet.keys()].sort();
+    // Sort users by job title then name for visual grouping
+    const users = [...userMap.values()].sort((a, b) => {
+      const titleCmp = (a.jobTitle || '').localeCompare(b.jobTitle || '');
+      if (titleCmp !== 0) return titleCmp;
+      return (a.displayName || '').localeCompare(b.displayName || '');
+    });
 
-    return { rowLabels, colLabels, matrix: cells };
-  }, [filteredData, rowAxis, colAxis]);
+    // Sort groups by category then name
+    const groups = [...groupMap.values()].sort((a, b) => {
+      const catCmp = (a.category || '').localeCompare(b.category || '');
+      if (catCmp !== 0) return catCmp;
+      return (a.displayName || '').localeCompare(b.displayName || '');
+    });
 
-  // Limit rendering for performance
-  const maxCols = 50;
-  const maxRows = 200;
-  const displayCols = colLabels.slice(0, maxCols);
-  const displayRows = rowLabels.slice(0, maxRows);
-  const truncatedCols = colLabels.length > maxCols;
-  const truncatedRows = rowLabels.length > maxRows;
+    return { users, groups, memberships: membershipMap };
+  }, [filteredData]);
 
-  const axisOptions = [
-    { value: 'memberDisplayName', label: 'User' },
-    { value: 'department', label: 'Department' },
-    { value: 'jobTitle', label: 'Job Title' },
-    { value: 'groupDisplayName', label: 'Group' },
-    { value: 'membershipType', label: 'Membership Type' },
-  ];
+  // Apply custom row order
+  const orderedGroups = useMemo(
+    () => rowOrderHook.getOrderedGroups(groups),
+    [groups, rowOrderHook.getOrderedGroups]
+  );
+
+  const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
+  const userIds = useMemo(() => users.map(u => u.id), [users]);
+
+  // DnD setup
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = groupIds.indexOf(active.id);
+    const newIndex = groupIds.indexOf(over.id);
+    const newOrder = arrayMove(groupIds, oldIndex, newIndex);
+    rowOrderHook.updateOrder(newOrder);
+  }, [groupIds, rowOrderHook]);
+
+  // Cell click handlers
+  const handleCellClick = useCallback((cellKey) => {
+    annotations.annotateCell(cellKey);
+  }, [annotations]);
+
+  const handleCellShiftClick = useCallback((cellKey) => {
+    const lastKey = annotations.lastClickedCell.current;
+    if (lastKey) {
+      annotations.annotateRange(lastKey, cellKey, groupIds, userIds);
+    } else {
+      annotations.annotateCell(cellKey);
+    }
+  }, [annotations, groupIds, userIds]);
+
+  const stats = {
+    users: users.length,
+    groups: orderedGroups.length,
+    memberships: memberships.size,
+  };
+
+  // Number of info columns (drag handle + category + group name)
+  const infoColumnCount = 3;
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-4 text-sm">
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Rows:</label>
-          <select
-            value={rowAxis}
-            onChange={e => setRowAxis(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm"
-          >
-            {axisOptions.filter(o => o.value !== colAxis).map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Columns:</label>
-          <select
-            value={colAxis}
-            onChange={e => setColAxis(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm"
-          >
-            {axisOptions.filter(o => o.value !== rowAxis).map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Department:</label>
-          <select
-            value={filterDept}
-            onChange={e => setFilterDept(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm"
-          >
-            <option value="">All</option>
-            {departments.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Search:</label>
-          <input
-            type="text"
-            value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            placeholder="Filter users or groups..."
-            className="px-2 py-1 border border-gray-300 rounded text-sm w-48"
-          />
-        </div>
-      </div>
+      <MatrixToolbar
+        departments={departments}
+        filterDept={filterDept}
+        setFilterDept={setFilterDept}
+        filterText={filterText}
+        setFilterText={setFilterText}
+        palette={annotations.palette}
+        activeBrush={annotations.activeBrush}
+        setActiveBrush={annotations.setActiveBrush}
+        onUndo={annotations.undo}
+        onClearAll={annotations.clearAll}
+        onExport={annotations.exportAnnotations}
+        onImport={annotations.importAnnotations}
+        onResetOrder={rowOrderHook.resetOrder}
+        hasCustomOrder={rowOrderHook.hasCustomOrder}
+        stats={stats}
+      />
 
-      {/* Stats & Legend */}
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>
-          {displayRows.length} rows x {displayCols.length} columns
-          {(truncatedRows || truncatedCols) && ' (use filters to narrow down)'}
-        </span>
-        <div className="flex items-center gap-3">
-          {Object.entries(membershipColors).map(([type, color]) => (
-            <span key={type} className="flex items-center gap-1">
-              <span
-                className="inline-block w-4 h-4 rounded text-center text-[10px] font-bold leading-4"
-                style={{ backgroundColor: color.bg, color: color.text }}
-              >
-                {color.label}
-              </span>
-              {type}
-            </span>
-          ))}
+      {users.length === 0 || orderedGroups.length === 0 ? (
+        <div className="text-center text-gray-500 py-12">
+          {filterDept
+            ? `No data found for department "${filterDept}". Select a different department.`
+            : 'No permission data available.'}
         </div>
-      </div>
-
-      {/* Matrix table */}
-      <div className="border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-300px)]">
-        <table className="text-xs border-collapse">
-          <thead className="sticky top-0 z-10 bg-gray-50">
-            <tr>
-              <th className="sticky left-0 z-20 bg-gray-100 px-3 py-2 text-left font-medium text-gray-700 border-b border-r border-gray-200 min-w-[180px]">
-                {axisOptions.find(o => o.value === rowAxis)?.label} / {axisOptions.find(o => o.value === colAxis)?.label}
-              </th>
-              {displayCols.map(col => (
-                <th
-                  key={col}
-                  className="px-1 py-2 font-medium text-gray-600 border-b border-gray-200 whitespace-nowrap"
-                  style={{ writingMode: 'vertical-lr', textOrientation: 'mixed', maxHeight: '160px' }}
-                  title={col}
-                >
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {displayRows.map(row => (
-              <tr key={row} className="hover:bg-gray-50/50">
-                <td className="sticky left-0 bg-white px-3 py-1 font-medium text-gray-700 border-r border-b border-gray-200 whitespace-nowrap">
-                  {row}
-                </td>
-                {displayCols.map(col => {
-                  const cell = matrix.get(`${row}|${col}`);
-                  if (!cell) {
-                    return <td key={col} className="border-b border-gray-100 px-1 py-1" />;
-                  }
-                  const types = [...cell.types];
-                  return (
-                    <td
-                      key={col}
-                      className="border-b border-gray-100 px-0.5 py-0.5 text-center"
-                      title={`${row} - ${col}: ${types.join(', ')}`}
-                    >
-                      <div className="flex gap-px justify-center">
-                        {types.map(t => {
-                          const color = membershipColors[t] || { bg: '#e5e7eb', text: '#374151', label: '?' };
-                          return (
-                            <span
-                              key={t}
-                              className="inline-block w-4 h-4 rounded text-[10px] font-bold leading-4 text-center"
-                              style={{ backgroundColor: color.bg, color: color.text }}
-                            >
-                              {color.label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      ) : (
+        <div className="border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-280px)]">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+            modifiers={[restrictToVerticalAxis]}
+          >
+            <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
+              <MatrixColumnHeaders users={users} infoColumnCount={infoColumnCount} />
+              <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
+                <tbody>
+                  {orderedGroups.map(group => (
+                    <MatrixGroupRow
+                      key={group.id}
+                      group={group}
+                      users={users}
+                      memberships={memberships}
+                      annotations={annotations.cells}
+                      activeBrush={annotations.activeBrush}
+                      palette={annotations.palette}
+                      onCellClick={handleCellClick}
+                      onCellShiftClick={handleCellShiftClick}
+                    />
+                  ))}
+                </tbody>
+              </SortableContext>
+            </table>
+          </DndContext>
+        </div>
+      )}
     </div>
   );
 }
