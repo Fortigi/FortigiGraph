@@ -24,12 +24,19 @@ const FIELD_LABELS = {
 };
 
 export default function MatrixView({ data }) {
-  const [filterField, setFilterField] = useState('department');
-  const [filterValue, setFilterValue] = useState('');
+  // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
+  const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
 
-  // Storage key combines field + value for unique persistence
-  const storageKey = filterValue ? `${filterField}:${filterValue}` : '';
+  // Build a stable storage key from all active filters (sorted for consistency)
+  const storageKey = useMemo(() => {
+    if (activeFilters.length === 0) return '';
+    return activeFilters
+      .map(f => `${f.field}:${f.value}`)
+      .sort()
+      .join('|');
+  }, [activeFilters]);
+
   const annotations = useMatrixAnnotations(storageKey);
   const rowOrderHook = useMatrixRowOrder(storageKey);
   const colOrderHook = useMatrixColumnOrder(storageKey);
@@ -41,13 +48,14 @@ export default function MatrixView({ data }) {
     return Object.keys(sample)
       .filter(key => !EXCLUDE_FIELDS.has(key))
       .filter(key => {
-        // Only include fields that have at least 2 distinct values and aren't all unique
+        // Include fields that have at least 1 distinct value and aren't all unique
         const values = new Set();
         for (const d of data) {
-          if (d[key] != null && d[key] !== '') values.add(String(d[key]));
+          const val = d[key];
+          if (val != null && val !== '') values.add(String(val));
           if (values.size > 500) break; // Too many unique values, skip
         }
-        return values.size >= 2 && values.size <= 500;
+        return values.size >= 1 && values.size <= 500;
       })
       .map(key => ({
         key,
@@ -57,10 +65,37 @@ export default function MatrixView({ data }) {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [data]);
 
-  // Reset filter value when field changes
-  const handleFilterFieldChange = useCallback((newField) => {
-    setFilterField(newField);
-    setFilterValue('');
+  // Get available values for a specific field (considering already-applied filters)
+  const getOptionsForField = useCallback((fieldKey) => {
+    const field = filterFields.find(f => f.key === fieldKey);
+    if (!field) return [];
+    // Apply all OTHER active filters first to show contextual values
+    let filtered = data;
+    for (const af of activeFilters) {
+      if (af.field === fieldKey) continue; // skip the field we're getting options for
+      const f = filterFields.find(ff => ff.key === af.field);
+      if (f) {
+        filtered = filtered.filter(d => String(d[f.dataKey] ?? '') === af.value);
+      }
+    }
+    const values = new Set();
+    filtered.forEach(d => {
+      const val = d[field.dataKey];
+      if (val != null && val !== '') values.add(String(val));
+    });
+    return [...values].sort();
+  }, [data, activeFilters, filterFields]);
+
+  const addFilter = useCallback((field, value) => {
+    setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
+  }, []);
+
+  const removeFilter = useCallback((field) => {
+    setActiveFilters(prev => prev.filter(f => f.field !== field));
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setActiveFilters([]);
   }, []);
 
   // Keyboard shortcuts
@@ -90,25 +125,13 @@ export default function MatrixView({ data }) {
     return () => window.removeEventListener('keydown', handler);
   }, [annotations]);
 
-  // Extract unique values for the selected filter field
-  const filterOptions = useMemo(() => {
-    const field = filterFields.find(f => f.key === filterField);
-    if (!field) return [];
-    const values = new Set();
-    data.forEach(d => {
-      const val = d[field.dataKey];
-      if (val) values.add(val);
-    });
-    return [...values].sort();
-  }, [data, filterField]);
-
-  // Filter data by selected field/value and text search
+  // Filter data by all active filters and text search
   const filteredData = useMemo(() => {
     let result = data;
-    if (filterValue) {
-      const field = filterFields.find(f => f.key === filterField);
+    for (const af of activeFilters) {
+      const field = filterFields.find(f => f.key === af.field);
       if (field) {
-        result = result.filter(d => d[field.dataKey] === filterValue);
+        result = result.filter(d => String(d[field.dataKey] ?? '') === af.value);
       }
     }
     if (filterText) {
@@ -120,7 +143,7 @@ export default function MatrixView({ data }) {
       );
     }
     return result;
-  }, [data, filterField, filterValue, filterText]);
+  }, [data, activeFilters, filterFields, filterText]);
 
   // Build matrix data structures
   const { rawUsers, groups, memberships } = useMemo(() => {
@@ -257,11 +280,11 @@ export default function MatrixView({ data }) {
     <div className="flex flex-col gap-3">
       <MatrixToolbar
         filterFields={filterFields}
-        filterField={filterField}
-        setFilterField={handleFilterFieldChange}
-        filterOptions={filterOptions}
-        filterValue={filterValue}
-        setFilterValue={setFilterValue}
+        activeFilters={activeFilters}
+        getOptionsForField={getOptionsForField}
+        onAddFilter={addFilter}
+        onRemoveFilter={removeFilter}
+        onClearAllFilters={clearAllFilters}
         filterText={filterText}
         setFilterText={setFilterText}
         palette={annotations.palette}
@@ -281,9 +304,9 @@ export default function MatrixView({ data }) {
 
       {users.length === 0 || orderedGroups.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {filterValue
-            ? `No data found for "${filterValue}". Select a different filter value.`
-            : 'No permission data available. Select a filter to narrow down the view.'}
+          {activeFilters.length > 0
+            ? 'No data found for the current filters. Try removing some filters.'
+            : 'No permission data available. Add a filter to narrow down the view.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-280px)]">

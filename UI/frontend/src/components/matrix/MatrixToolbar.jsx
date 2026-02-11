@@ -1,12 +1,12 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo } from 'react';
 
 export default function MatrixToolbar({
   filterFields,
-  filterField,
-  setFilterField,
-  filterOptions,
-  filterValue,
-  setFilterValue,
+  activeFilters,
+  getOptionsForField,
+  onAddFilter,
+  onRemoveFilter,
+  onClearAllFilters,
   filterText,
   setFilterText,
   palette,
@@ -26,6 +26,8 @@ export default function MatrixToolbar({
   const fileInputRef = useRef(null);
   const [editingKey, setEditingKey] = useState(null);
   const [editValue, setEditValue] = useState('');
+  const [addingFilter, setAddingFilter] = useState(false);
+  const [newFilterField, setNewFilterField] = useState('');
 
   const startEditing = (color) => {
     setEditingKey(color.key);
@@ -39,46 +41,132 @@ export default function MatrixToolbar({
     setEditingKey(null);
   };
 
-  const activeFieldLabel = filterFields.find(f => f.key === filterField)?.label || 'Filter';
+  // Fields not yet used in active filters
+  const availableFields = useMemo(() => {
+    const usedFields = new Set(activeFilters.map(f => f.field));
+    return filterFields.filter(f => !usedFields.has(f.key));
+  }, [filterFields, activeFilters]);
+
+  // Options for the field being added
+  const newFilterOptions = useMemo(() => {
+    if (!newFilterField) return [];
+    return getOptionsForField(newFilterField);
+  }, [newFilterField, getOptionsForField]);
+
+  const handleAddFilterValue = (value) => {
+    if (newFilterField && value) {
+      onAddFilter(newFilterField, value);
+    }
+    setAddingFilter(false);
+    setNewFilterField('');
+  };
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Row 1: Filters */}
-      <div className="flex flex-wrap items-center gap-4 text-sm">
-        <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Filter by:</label>
-          <select
-            value={filterField}
-            onChange={e => setFilterField(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm"
+      {/* Row 1: Active filters + add filter */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium text-gray-700">Filters:</span>
+
+        {/* Active filter pills */}
+        {activeFilters.map(af => {
+          const field = filterFields.find(f => f.key === af.field);
+          return (
+            <span
+              key={af.field}
+              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs"
+            >
+              <span className="font-medium text-blue-700">{field?.label || af.field}:</span>
+              <select
+                value={af.value}
+                onChange={e => onAddFilter(af.field, e.target.value)}
+                className="bg-transparent border-none text-blue-900 text-xs font-medium cursor-pointer p-0 pr-4"
+              >
+                {getOptionsForField(af.field).map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => onRemoveFilter(af.field)}
+                className="text-blue-400 hover:text-blue-700 font-bold ml-0.5"
+                title="Remove filter"
+              >
+                &times;
+              </button>
+            </span>
+          );
+        })}
+
+        {/* Add filter button / inline selector */}
+        {addingFilter ? (
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-xs">
+            <select
+              autoFocus
+              value={newFilterField}
+              onChange={e => setNewFilterField(e.target.value)}
+              className="bg-transparent border-none text-xs p-0 pr-4"
+            >
+              <option value="">Select field...</option>
+              {availableFields.map(f => (
+                <option key={f.key} value={f.key}>{f.label}</option>
+              ))}
+            </select>
+            {newFilterField && (
+              <>
+                <span className="text-gray-400">=</span>
+                <select
+                  value=""
+                  onChange={e => handleAddFilterValue(e.target.value)}
+                  className="bg-transparent border-none text-xs p-0 pr-4"
+                >
+                  <option value="">Select value...</option>
+                  {newFilterOptions.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </>
+            )}
+            <button
+              onClick={() => { setAddingFilter(false); setNewFilterField(''); }}
+              className="text-gray-400 hover:text-gray-700 font-bold"
+            >
+              &times;
+            </button>
+          </span>
+        ) : (
+          availableFields.length > 0 && (
+            <button
+              onClick={() => setAddingFilter(true)}
+              className="px-2 py-1 rounded text-xs text-blue-600 hover:bg-blue-50 border border-blue-200 border-dashed"
+            >
+              + Add filter
+            </button>
+          )
+        )}
+
+        {activeFilters.length > 1 && (
+          <button
+            onClick={onClearAllFilters}
+            className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100"
+            title="Clear all filters"
           >
-            {filterFields.map(f => (
-              <option key={f.key} value={f.key}>{f.label}</option>
-            ))}
-          </select>
-          <select
-            value={filterValue}
-            onChange={e => setFilterValue(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm max-w-xs"
-          >
-            <option value="">All {activeFieldLabel.toLowerCase()}s</option>
-            {filterOptions.map(v => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-        </div>
+            Clear all
+          </button>
+        )}
+
+        <div className="border-l border-gray-300 h-5 mx-1" />
+
         <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Search:</label>
           <input
             type="text"
             value={filterText}
             onChange={e => setFilterText(e.target.value)}
-            placeholder="Filter users or groups..."
-            className="px-2 py-1 border border-gray-300 rounded text-sm w-48"
+            placeholder="Search users or groups..."
+            className="px-2 py-1 border border-gray-300 rounded text-xs w-44"
           />
         </div>
-        <div className="text-xs text-gray-500">
-          {stats.users} users x {stats.groups} groups &middot; {stats.memberships} assignments
+
+        <div className="text-xs text-gray-500 ml-auto">
+          {stats.users} users &times; {stats.groups} groups &middot; {stats.memberships} assignments
         </div>
       </div>
 
