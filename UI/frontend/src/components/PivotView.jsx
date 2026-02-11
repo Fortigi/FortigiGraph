@@ -1,29 +1,26 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import PivotTableUI from 'react-pivottable/PivotTableUI';
 import TableRenderers from 'react-pivottable/TableRenderers';
 import 'react-pivottable/pivottable.css';
-import { useState } from 'react';
 
 export default function PivotView({ data }) {
+  // Use friendly field names throughout - no mapping needed
   const [pivotState, setPivotState] = useState({
-    rows: ['department'],
-    cols: ['groupDisplayName'],
-    vals: ['memberId'],
-    aggregatorName: 'Count Unique Values',
+    rows: ['Department'],
+    cols: ['Group'],
+    aggregatorName: 'Count',
     rendererName: 'Heatmap',
   });
 
-  // PivotTable.js expects plain arrays of objects
+  // Transform data to use friendly field names
   const pivotData = useMemo(() => {
     return data.map(row => ({
-      User: row.memberDisplayName,
-      UPN: row.memberUPN,
-      Department: row.department,
-      'Job Title': row.jobTitle,
-      Group: row.groupDisplayName,
-      'Membership Type': row.membershipType,
-      // Hidden field used for counting
-      memberId: row.memberId,
+      User: row.memberDisplayName || '',
+      UPN: row.memberUPN || '',
+      Department: row.department || '',
+      'Job Title': row.jobTitle || '',
+      Group: row.groupDisplayName || '',
+      'Membership Type': row.membershipType || '',
     }));
   }, [data]);
 
@@ -31,19 +28,14 @@ export default function PivotView({ data }) {
     <div className="overflow-auto max-h-[calc(100vh-220px)]">
       <PivotTableUI
         data={pivotData}
-        onChange={s => setPivotState(s)}
+        onChange={s => {
+          // PivotTableUI passes back the full state including `data` -
+          // we must strip `data` to avoid passing stale data back in
+          const { data: _ignored, ...rest } = s;
+          setPivotState(rest);
+        }}
         renderers={TableRenderers}
         {...pivotState}
-        // Map to friendly field names for the pivot UI
-        rows={pivotState.rows?.map(r => {
-          const map = { department: 'Department', groupDisplayName: 'Group', membershipType: 'Membership Type', jobTitle: 'Job Title', memberDisplayName: 'User' };
-          return map[r] || r;
-        })}
-        cols={pivotState.cols?.map(c => {
-          const map = { department: 'Department', groupDisplayName: 'Group', membershipType: 'Membership Type', jobTitle: 'Job Title', memberDisplayName: 'User' };
-          return map[c] || c;
-        })}
-        hiddenFromDragDrop={['memberId']}
       />
     </div>
   );

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { usePermissions } from './hooks/usePermissions';
+import MatrixView from './components/MatrixView';
 import PermissionGrid from './components/PermissionGrid';
 import PivotView from './components/PivotView';
 import ViewToggle from './components/ViewToggle';
 
 export default function App() {
   const { data, loading, error } = usePermissions();
-  const [activeView, setActiveView] = useState('grid');
+  const [activeView, setActiveView] = useState('matrix');
 
   if (error) {
     return (
@@ -45,6 +46,7 @@ export default function App() {
           </div>
         ) : (
           <>
+            {activeView === 'matrix' && <MatrixView data={data} />}
             {activeView === 'grid' && <PermissionGrid data={data} />}
             {activeView === 'pivot' && <PivotView data={data} />}
           </>

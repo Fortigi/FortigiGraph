@@ -1,4 +1,5 @@
 const views = [
+  { id: 'matrix', label: 'Matrix View', description: 'Users vs Groups matrix with colored membership indicators' },
   { id: 'grid', label: 'Grid View', description: 'Filter, sort, and group permission assignments' },
   { id: 'pivot', label: 'Pivot View', description: 'Drag-and-drop pivot analysis with heatmap' },
 ];
