@@ -7,6 +7,7 @@ import {
   getExpandedRowModel,
   getSortedRowModel,
   getFacetedRowModel,
+  getFacetedUniqueValues,
   flexRender,
 } from '@tanstack/react-table';
 
@@ -19,13 +20,13 @@ const membershipColors = {
 
 function ColumnFilter({ column }) {
   const columnFilterValue = column.getFilterValue();
+  const facetedUniqueValues = column.getFacetedUniqueValues();
+
   const uniqueValues = useMemo(() => {
-    const values = new Set();
-    column.getFacetedRowModel().rows.forEach(row => {
-      values.add(row.getValue(column.id));
-    });
-    return [...values].sort();
-  }, [column]);
+    return [...facetedUniqueValues.keys()]
+      .filter(v => v != null && v !== '')
+      .sort();
+  }, [facetedUniqueValues]);
 
   // Use dropdown for low-cardinality columns
   if (uniqueValues.length <= 20) {
@@ -120,8 +121,9 @@ export default function PermissionGrid({ data }) {
     getSortedRowModel: getSortedRowModel(),
     getGroupedRowModel: getGroupedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    enableGrouping: true,
     getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
+    enableGrouping: true,
   });
 
   const groupableColumns = columns.filter(c => c.enableGrouping);
