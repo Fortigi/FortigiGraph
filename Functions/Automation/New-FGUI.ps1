@@ -438,16 +438,62 @@ function New-FGUI {
         $kuduPass = $creds.properties.publishingPassword
         $kuduBase64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${kuduUser}:${kuduPass}"))
 
-        # Zip deploy via Kudu
-        $zipDeployUri = "https://$WebAppName.scm.azurewebsites.net/api/zipdeploy?isAsync=false"
+        # Zip deploy via Kudu (async to avoid 504 timeout during Oryx build)
+        $zipDeployUri = "https://$WebAppName.scm.azurewebsites.net/api/zipdeploy?isAsync=true"
 
-        Invoke-WebRequest -Uri $zipDeployUri -Method POST `
+        $deployResponse = Invoke-WebRequest -Uri $zipDeployUri -Method POST `
             -Headers @{ Authorization = "Basic $kuduBase64" } `
             -ContentType "application/octet-stream" `
             -InFile $tempZipPath `
-            -TimeoutSec 600 | Out-Null
+            -TimeoutSec 120
 
-        Write-Host "  Deployment complete" -ForegroundColor Green
+        # Poll deployment status
+        $pollUrl = $deployResponse.Headers['Location']
+        if (-not $pollUrl) {
+            # Fallback: check latest deployment
+            $pollUrl = "https://$WebAppName.scm.azurewebsites.net/api/deployments/latest"
+        }
+        # Ensure pollUrl is a string (not an array)
+        if ($pollUrl -is [array]) { $pollUrl = $pollUrl[0] }
+
+        $authHeaders = @{ Authorization = "Basic $kuduBase64" }
+        $maxWaitMinutes = 10
+        $elapsed = 0
+        $pollInterval = 15
+
+        Write-Host "  Waiting for build to complete (up to $maxWaitMinutes min)..." -ForegroundColor Gray
+
+        while ($elapsed -lt ($maxWaitMinutes * 60)) {
+            Start-Sleep -Seconds $pollInterval
+            $elapsed += $pollInterval
+
+            try {
+                $status = Invoke-RestMethod -Uri $pollUrl -Headers $authHeaders -Method GET
+                $buildStatus = $status.status
+                $progress = $status.progress
+
+                if ($progress) {
+                    Write-Host "  [$([math]::Floor($elapsed/60))m $($elapsed%60)s] $progress" -ForegroundColor Gray
+                }
+
+                # Status codes: 0=Pending, 1=Building, 2=Deploying, 3=Failed, 4=Success
+                if ($buildStatus -eq 4) {
+                    Write-Host "  Deployment complete" -ForegroundColor Green
+                    break
+                } elseif ($buildStatus -eq 3) {
+                    Write-Host "  Deployment failed on Azure. Check logs:" -ForegroundColor Red
+                    Write-Host "  https://$WebAppName.scm.azurewebsites.net/api/deployments/latest/log" -ForegroundColor Yellow
+                    return
+                }
+            } catch {
+                Write-Host "  [$([math]::Floor($elapsed/60))m $($elapsed%60)s] Waiting..." -ForegroundColor Gray
+            }
+        }
+
+        if ($elapsed -ge ($maxWaitMinutes * 60)) {
+            Write-Host "  Build is still running. Check status at:" -ForegroundColor Yellow
+            Write-Host "  https://$WebAppName.scm.azurewebsites.net/api/deployments/latest" -ForegroundColor Yellow
+        }
     } catch {
         Write-Host "  Deployment failed: $_" -ForegroundColor Red
         return
