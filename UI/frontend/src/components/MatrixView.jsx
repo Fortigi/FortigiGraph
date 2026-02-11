@@ -9,12 +9,19 @@ import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
 
-const FILTER_FIELDS = [
-  { key: 'department', label: 'Department', dataKey: 'department' },
-  { key: 'jobTitle', label: 'Job Title', dataKey: 'jobTitle' },
-  { key: 'membershipType', label: 'Membership Type', dataKey: 'membershipType' },
-  { key: 'groupDisplayName', label: 'Group', dataKey: 'groupDisplayName' },
-];
+// Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
+const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType']);
+// Friendly labels for known fields
+const FIELD_LABELS = {
+  department: 'Department',
+  jobTitle: 'Job Title',
+  membershipType: 'Membership Type',
+  groupDisplayName: 'Group',
+  companyName: 'Company',
+  accountEnabled: 'Account Enabled',
+  userType: 'User Type',
+  employeeType: 'Employee Type',
+};
 
 export default function MatrixView({ data }) {
   const [filterField, setFilterField] = useState('department');
@@ -26,6 +33,29 @@ export default function MatrixView({ data }) {
   const annotations = useMatrixAnnotations(storageKey);
   const rowOrderHook = useMatrixRowOrder(storageKey);
   const colOrderHook = useMatrixColumnOrder(storageKey);
+
+  // Auto-discover filterable fields from data
+  const filterFields = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    const sample = data[0];
+    return Object.keys(sample)
+      .filter(key => !EXCLUDE_FIELDS.has(key))
+      .filter(key => {
+        // Only include fields that have at least 2 distinct values and aren't all unique
+        const values = new Set();
+        for (const d of data) {
+          if (d[key] != null && d[key] !== '') values.add(String(d[key]));
+          if (values.size > 500) break; // Too many unique values, skip
+        }
+        return values.size >= 2 && values.size <= 500;
+      })
+      .map(key => ({
+        key,
+        label: FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
+        dataKey: key,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [data]);
 
   // Reset filter value when field changes
   const handleFilterFieldChange = useCallback((newField) => {
@@ -62,7 +92,7 @@ export default function MatrixView({ data }) {
 
   // Extract unique values for the selected filter field
   const filterOptions = useMemo(() => {
-    const field = FILTER_FIELDS.find(f => f.key === filterField);
+    const field = filterFields.find(f => f.key === filterField);
     if (!field) return [];
     const values = new Set();
     data.forEach(d => {
@@ -76,7 +106,7 @@ export default function MatrixView({ data }) {
   const filteredData = useMemo(() => {
     let result = data;
     if (filterValue) {
-      const field = FILTER_FIELDS.find(f => f.key === filterField);
+      const field = filterFields.find(f => f.key === filterField);
       if (field) {
         result = result.filter(d => d[field.dataKey] === filterValue);
       }
@@ -226,7 +256,7 @@ export default function MatrixView({ data }) {
   return (
     <div className="flex flex-col gap-3">
       <MatrixToolbar
-        filterFields={FILTER_FIELDS}
+        filterFields={filterFields}
         filterField={filterField}
         setFilterField={handleFilterFieldChange}
         filterOptions={filterOptions}
