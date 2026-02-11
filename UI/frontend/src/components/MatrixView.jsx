@@ -4,6 +4,7 @@ import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-ki
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useMatrixAnnotations } from '../hooks/useMatrixAnnotations';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
+import { useMatrixColumnOrder } from '../hooks/useMatrixColumnOrder';
 import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
@@ -14,6 +15,7 @@ export default function MatrixView({ data }) {
 
   const annotations = useMatrixAnnotations(filterDept);
   const rowOrderHook = useMatrixRowOrder(filterDept);
+  const colOrderHook = useMatrixColumnOrder(filterDept);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -67,7 +69,7 @@ export default function MatrixView({ data }) {
   }, [data, filterDept, filterText]);
 
   // Build matrix data structures
-  const { users, groups, memberships } = useMemo(() => {
+  const { rawUsers, groups, memberships } = useMemo(() => {
     const userMap = new Map();
     const groupMap = new Map();
     const membershipMap = new Map();
@@ -115,8 +117,8 @@ export default function MatrixView({ data }) {
       membershipMap.get(key).add(d.membershipType);
     });
 
-    // Sort users by job title then name for visual grouping
-    const users = [...userMap.values()].sort((a, b) => {
+    // Sort users by job title then name for initial default order
+    const rawUsers = [...userMap.values()].sort((a, b) => {
       const titleCmp = (a.jobTitle || '').localeCompare(b.jobTitle || '');
       if (titleCmp !== 0) return titleCmp;
       return (a.displayName || '').localeCompare(b.displayName || '');
@@ -129,8 +131,14 @@ export default function MatrixView({ data }) {
       return (a.displayName || '').localeCompare(b.displayName || '');
     });
 
-    return { users, groups, memberships: membershipMap };
+    return { rawUsers, groups, memberships: membershipMap };
   }, [filteredData]);
+
+  // Apply custom column order
+  const users = useMemo(
+    () => colOrderHook.getOrderedUsers(rawUsers),
+    [rawUsers, colOrderHook.getOrderedUsers]
+  );
 
   // Apply custom row order
   const orderedGroups = useMemo(
@@ -141,12 +149,12 @@ export default function MatrixView({ data }) {
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
   const userIds = useMemo(() => users.map(u => u.id), [users]);
 
-  // DnD setup
+  // Row DnD setup
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const handleDragEnd = useCallback((event) => {
+  const handleRowDragEnd = useCallback((event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIndex = groupIds.indexOf(active.id);
@@ -154,6 +162,11 @@ export default function MatrixView({ data }) {
     const newOrder = arrayMove(groupIds, oldIndex, newIndex);
     rowOrderHook.updateOrder(newOrder);
   }, [groupIds, rowOrderHook]);
+
+  // Column DnD callback
+  const handleColumnDragEnd = useCallback((newUserIds) => {
+    colOrderHook.updateOrder(newUserIds);
+  }, [colOrderHook]);
 
   // Cell click handlers
   const handleCellClick = useCallback((cellKey) => {
@@ -189,12 +202,15 @@ export default function MatrixView({ data }) {
         palette={annotations.palette}
         activeBrush={annotations.activeBrush}
         setActiveBrush={annotations.setActiveBrush}
+        onUpdatePaletteLabel={annotations.updatePaletteLabel}
         onUndo={annotations.undo}
         onClearAll={annotations.clearAll}
         onExport={annotations.exportAnnotations}
         onImport={annotations.importAnnotations}
-        onResetOrder={rowOrderHook.resetOrder}
-        hasCustomOrder={rowOrderHook.hasCustomOrder}
+        onResetRowOrder={rowOrderHook.resetOrder}
+        onResetColumnOrder={colOrderHook.resetOrder}
+        hasCustomRowOrder={rowOrderHook.hasCustomOrder}
+        hasCustomColumnOrder={colOrderHook.hasCustomOrder}
         stats={stats}
       />
 
@@ -209,11 +225,16 @@ export default function MatrixView({ data }) {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
+            onDragEnd={handleRowDragEnd}
             modifiers={[restrictToVerticalAxis]}
           >
             <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
-              <MatrixColumnHeaders users={users} infoColumnCount={infoColumnCount} />
+              <MatrixColumnHeaders
+                users={users}
+                userIds={userIds}
+                infoColumnCount={infoColumnCount}
+                onColumnDragEnd={handleColumnDragEnd}
+              />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>
                   {orderedGroups.map(group => (

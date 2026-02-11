@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 export default function MatrixToolbar({
   departments,
@@ -9,15 +9,32 @@ export default function MatrixToolbar({
   palette,
   activeBrush,
   setActiveBrush,
+  onUpdatePaletteLabel,
   onUndo,
   onClearAll,
   onExport,
   onImport,
-  onResetOrder,
-  hasCustomOrder,
+  onResetRowOrder,
+  onResetColumnOrder,
+  hasCustomRowOrder,
+  hasCustomColumnOrder,
   stats,
 }) {
   const fileInputRef = useRef(null);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState('');
+
+  const startEditing = (color) => {
+    setEditingKey(color.key);
+    setEditValue(color.label);
+  };
+
+  const finishEditing = () => {
+    if (editingKey && editValue.trim()) {
+      onUpdatePaletteLabel(editingKey, editValue.trim());
+    }
+    setEditingKey(null);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -55,19 +72,37 @@ export default function MatrixToolbar({
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium text-gray-700">Brush:</span>
         {palette.map(color => (
-          <button
-            key={color.key}
-            onClick={() => setActiveBrush(activeBrush === color.key ? null : color.key)}
-            className={`px-2 py-1 rounded text-xs font-medium border-2 transition-all ${
-              activeBrush === color.key
-                ? 'border-gray-800 shadow-md scale-110'
-                : 'border-transparent hover:border-gray-300'
-            }`}
-            style={{ backgroundColor: color.hex }}
-            title={color.label}
-          >
-            {color.label}
-          </button>
+          <div key={color.key} className="relative">
+            {editingKey === color.key ? (
+              <input
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onBlur={finishEditing}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') finishEditing();
+                  if (e.key === 'Escape') setEditingKey(null);
+                }}
+                className="px-2 py-1 rounded text-xs font-medium border-2 border-gray-800 w-24"
+                style={{ backgroundColor: color.hex }}
+              />
+            ) : (
+              <button
+                onClick={() => setActiveBrush(activeBrush === color.key ? null : color.key)}
+                onDoubleClick={() => startEditing(color)}
+                className={`px-2 py-1 rounded text-xs font-medium border-2 transition-all ${
+                  activeBrush === color.key
+                    ? 'border-gray-800 shadow-md scale-110'
+                    : 'border-transparent hover:border-gray-300'
+                }`}
+                style={{ backgroundColor: color.hex }}
+                title={`${color.label}${color.marker ? ` (${color.marker})` : ''} — double-click to rename`}
+              >
+                {color.marker && <span className="mr-0.5 font-bold">{color.marker}</span>}
+                {color.label}
+              </button>
+            )}
+          </div>
         ))}
         <button
           onClick={() => setActiveBrush(activeBrush === 'clear' ? null : 'clear')}
@@ -130,18 +165,34 @@ export default function MatrixToolbar({
           }}
         />
 
-        {hasCustomOrder && (
+        {(hasCustomRowOrder || hasCustomColumnOrder) && (
           <>
             <div className="border-l border-gray-300 h-5 mx-1" />
-            <button
-              onClick={onResetOrder}
-              className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
-              title="Reset row order to default"
-            >
-              Reset Order
-            </button>
+            {hasCustomRowOrder && (
+              <button
+                onClick={onResetRowOrder}
+                className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
+                title="Reset row order to default"
+              >
+                Reset Rows
+              </button>
+            )}
+            {hasCustomColumnOrder && (
+              <button
+                onClick={onResetColumnOrder}
+                className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
+                title="Reset column order to default"
+              >
+                Reset Columns
+              </button>
+            )}
           </>
         )}
+      </div>
+
+      {/* Row 3: Hints */}
+      <div className="text-[10px] text-gray-400">
+        Keys 1-6: select brush &middot; 0: eraser &middot; Esc: deselect &middot; Ctrl+Z: undo &middot; Shift+click: fill range &middot; Double-click brush to rename &middot; Drag column headers or rows to reorder
       </div>
     </div>
   );

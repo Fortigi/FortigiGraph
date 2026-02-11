@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DEFAULT_PALETTE = [
-  { key: 'green',  hex: '#bbf7d0', label: 'Confirmed' },
-  { key: 'pink',   hex: '#fbcfe8', label: 'Role A' },
-  { key: 'purple', hex: '#e9d5ff', label: 'Role B' },
-  { key: 'orange', hex: '#fed7aa', label: 'Role C' },
-  { key: 'red',    hex: '#fecaca', label: 'Remove' },
-  { key: 'blue',   hex: '#bfdbfe', label: 'Add' },
+  { key: 'green',  hex: '#bbf7d0', label: 'Confirmed', marker: null },
+  { key: 'pink',   hex: '#fbcfe8', label: 'Role A', marker: null },
+  { key: 'purple', hex: '#e9d5ff', label: 'Role B', marker: null },
+  { key: 'orange', hex: '#fed7aa', label: 'Role C', marker: null },
+  { key: 'red',    hex: '#fecaca', label: 'Remove', marker: '-' },
+  { key: 'blue',   hex: '#bfdbfe', label: 'Add', marker: '+' },
 ];
 
 function getStorageKey(department) {

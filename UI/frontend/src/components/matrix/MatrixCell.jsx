@@ -9,7 +9,9 @@ const TYPE_INDICATORS = {
 
 function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette, onClick, onShiftClick }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
-  const annotationColor = annotation ? palette.find(p => p.key === annotation)?.hex : null;
+  const paletteEntry = annotation ? palette.find(p => p.key === annotation) : null;
+  const annotationColor = paletteEntry?.hex || null;
+  const marker = paletteEntry?.marker || null;
 
   const handleClick = (e) => {
     if (e.shiftKey) {
@@ -29,6 +31,7 @@ function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette
         minWidth: '24px',
         width: '24px',
         height: '24px',
+        position: 'relative',
       }}
       onClick={handleClick}
       title={
@@ -37,7 +40,23 @@ function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette
           : undefined
       }
     >
-      {hasMembership && (
+      {/* +/- marker from annotation */}
+      {marker && (
+        <span
+          className="absolute font-black text-center"
+          style={{
+            fontSize: '16px',
+            lineHeight: '24px',
+            color: marker === '+' ? '#1e40af' : '#991b1b',
+            inset: 0,
+            zIndex: 1,
+          }}
+        >
+          {marker}
+        </span>
+      )}
+      {/* Membership type indicators */}
+      {hasMembership && !marker && (
         <div className="flex items-center justify-center gap-px">
           {membershipTypes.size === 1 ? (
             (() => {
