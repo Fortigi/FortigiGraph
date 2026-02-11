@@ -9,13 +9,29 @@ import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
 
+const FILTER_FIELDS = [
+  { key: 'department', label: 'Department', dataKey: 'department' },
+  { key: 'jobTitle', label: 'Job Title', dataKey: 'jobTitle' },
+  { key: 'membershipType', label: 'Membership Type', dataKey: 'membershipType' },
+  { key: 'groupDisplayName', label: 'Group', dataKey: 'groupDisplayName' },
+];
+
 export default function MatrixView({ data }) {
-  const [filterDept, setFilterDept] = useState('');
+  const [filterField, setFilterField] = useState('department');
+  const [filterValue, setFilterValue] = useState('');
   const [filterText, setFilterText] = useState('');
 
-  const annotations = useMatrixAnnotations(filterDept);
-  const rowOrderHook = useMatrixRowOrder(filterDept);
-  const colOrderHook = useMatrixColumnOrder(filterDept);
+  // Storage key combines field + value for unique persistence
+  const storageKey = filterValue ? `${filterField}:${filterValue}` : '';
+  const annotations = useMatrixAnnotations(storageKey);
+  const rowOrderHook = useMatrixRowOrder(storageKey);
+  const colOrderHook = useMatrixColumnOrder(storageKey);
+
+  // Reset filter value when field changes
+  const handleFilterFieldChange = useCallback((newField) => {
+    setFilterField(newField);
+    setFilterValue('');
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -44,18 +60,26 @@ export default function MatrixView({ data }) {
     return () => window.removeEventListener('keydown', handler);
   }, [annotations]);
 
-  // Extract unique departments
-  const departments = useMemo(() => {
-    const depts = new Set();
-    data.forEach(d => { if (d.department) depts.add(d.department); });
-    return [...depts].sort();
-  }, [data]);
+  // Extract unique values for the selected filter field
+  const filterOptions = useMemo(() => {
+    const field = FILTER_FIELDS.find(f => f.key === filterField);
+    if (!field) return [];
+    const values = new Set();
+    data.forEach(d => {
+      const val = d[field.dataKey];
+      if (val) values.add(val);
+    });
+    return [...values].sort();
+  }, [data, filterField]);
 
-  // Filter data by department and text search
+  // Filter data by selected field/value and text search
   const filteredData = useMemo(() => {
     let result = data;
-    if (filterDept) {
-      result = result.filter(d => d.department === filterDept);
+    if (filterValue) {
+      const field = FILTER_FIELDS.find(f => f.key === filterField);
+      if (field) {
+        result = result.filter(d => d[field.dataKey] === filterValue);
+      }
     }
     if (filterText) {
       const lower = filterText.toLowerCase();
@@ -66,7 +90,7 @@ export default function MatrixView({ data }) {
       );
     }
     return result;
-  }, [data, filterDept, filterText]);
+  }, [data, filterField, filterValue, filterText]);
 
   // Build matrix data structures
   const { rawUsers, groups, memberships } = useMemo(() => {
@@ -202,9 +226,12 @@ export default function MatrixView({ data }) {
   return (
     <div className="flex flex-col gap-3">
       <MatrixToolbar
-        departments={departments}
-        filterDept={filterDept}
-        setFilterDept={setFilterDept}
+        filterFields={FILTER_FIELDS}
+        filterField={filterField}
+        setFilterField={handleFilterFieldChange}
+        filterOptions={filterOptions}
+        filterValue={filterValue}
+        setFilterValue={setFilterValue}
         filterText={filterText}
         setFilterText={setFilterText}
         palette={annotations.palette}
@@ -224,9 +251,9 @@ export default function MatrixView({ data }) {
 
       {users.length === 0 || orderedGroups.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {filterDept
-            ? `No data found for department "${filterDept}". Select a different department.`
-            : 'No permission data available.'}
+          {filterValue
+            ? `No data found for "${filterValue}". Select a different filter value.`
+            : 'No permission data available. Select a filter to narrow down the view.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-280px)]">

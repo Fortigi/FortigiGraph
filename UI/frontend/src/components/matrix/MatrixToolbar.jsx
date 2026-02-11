@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
 
 export default function MatrixToolbar({
-  departments,
-  filterDept,
-  setFilterDept,
+  filterFields,
+  filterField,
+  setFilterField,
+  filterOptions,
+  filterValue,
+  setFilterValue,
   filterText,
   setFilterText,
   palette,
@@ -36,20 +39,31 @@ export default function MatrixToolbar({
     setEditingKey(null);
   };
 
+  const activeFieldLabel = filterFields.find(f => f.key === filterField)?.label || 'Filter';
+
   return (
     <div className="flex flex-col gap-2">
       {/* Row 1: Filters */}
       <div className="flex flex-wrap items-center gap-4 text-sm">
         <div className="flex items-center gap-2">
-          <label className="font-medium text-gray-700">Department:</label>
+          <label className="font-medium text-gray-700">Filter by:</label>
           <select
-            value={filterDept}
-            onChange={e => setFilterDept(e.target.value)}
+            value={filterField}
+            onChange={e => setFilterField(e.target.value)}
             className="px-2 py-1 border border-gray-300 rounded text-sm"
           >
-            <option value="">All departments</option>
-            {departments.map(d => (
-              <option key={d} value={d}>{d}</option>
+            {filterFields.map(f => (
+              <option key={f.key} value={f.key}>{f.label}</option>
+            ))}
+          </select>
+          <select
+            value={filterValue}
+            onChange={e => setFilterValue(e.target.value)}
+            className="px-2 py-1 border border-gray-300 rounded text-sm max-w-xs"
+          >
+            <option value="">All {activeFieldLabel.toLowerCase()}s</option>
+            {filterOptions.map(v => (
+              <option key={v} value={v}>{v}</option>
             ))}
           </select>
         </div>
