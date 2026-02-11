@@ -69,7 +69,7 @@ function SortableUserHeader({ user }) {
   );
 }
 
-export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, onColumnDragEnd }) {
+export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, onColumnDragEnd, onSortByCount }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
@@ -141,14 +141,18 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
           </th>
         ))}
 
-        {/* Right metadata column headers */}
-        <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
-            style={{ minWidth: '40px' }}>
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>#</div>
+        {/* Right metadata column headers - clickable to sort */}
+        <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
+            style={{ minWidth: '40px' }}
+            onClick={onSortByCount}
+            title="Sort by member count (descending)">
+          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}># &#x25BC;</div>
         </th>
-        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
-            style={{ minWidth: '45px' }}>
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>%</div>
+        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
+            style={{ minWidth: '45px' }}
+            onClick={onSortByCount}
+            title="Sort by percentage (descending)">
+          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>% &#x25BC;</div>
         </th>
         <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
             style={{ minWidth: '60px' }}>

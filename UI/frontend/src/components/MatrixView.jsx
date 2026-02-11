@@ -170,6 +170,12 @@ export default function MatrixView({ data }) {
     colOrderHook.updateOrder(newUserIds);
   }, [colOrderHook]);
 
+  // Sort rows by member count descending (clears any custom drag order)
+  const handleSortByCount = useCallback(() => {
+    const sorted = [...orderedGroups].sort((a, b) => b.memberCount - a.memberCount);
+    rowOrderHook.updateOrder(sorted.map(g => g.id));
+  }, [orderedGroups, rowOrderHook]);
+
   // Cell click handlers
   const handleCellClick = useCallback((cellKey) => {
     annotations.annotateCell(cellKey);
@@ -236,6 +242,7 @@ export default function MatrixView({ data }) {
                 userIds={userIds}
                 infoColumnCount={infoColumnCount}
                 onColumnDragEnd={handleColumnDragEnd}
+                onSortByCount={handleSortByCount}
               />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>
