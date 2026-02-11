@@ -147,6 +147,10 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>#</div>
         </th>
         <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
+            style={{ minWidth: '45px' }}>
+          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>%</div>
+        </th>
+        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
             style={{ minWidth: '60px' }}>
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>Type</div>
         </th>
@@ -184,6 +188,7 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
 
             {/* Right metadata column headers row 2 */}
             <th className="border-b border-l-2 border-gray-300 bg-gray-100" />
+            <th className="border-b border-gray-300 bg-gray-100" />
             <th className="border-b border-gray-300 bg-gray-100" />
             <th className="border-b border-gray-300 bg-gray-100" />
           </tr>

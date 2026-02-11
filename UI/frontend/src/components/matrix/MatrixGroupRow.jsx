@@ -5,6 +5,7 @@ import MatrixCell from './MatrixCell';
 export default function MatrixGroupRow({
   group,
   users,
+  totalUsers,
   memberships,
   annotations,
   activeBrush,
@@ -27,8 +28,8 @@ export default function MatrixGroupRow({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Count memberships in this row
-  const memberCount = users.filter(u => memberships.has(`${group.id}|${u.id}`)).length;
+  const memberCount = group.memberCount;
+  const pct = totalUsers > 0 ? Math.round((memberCount / totalUsers) * 100) : 0;
 
   // Collect unique membership types
   const rowTypes = new Set();
@@ -86,6 +87,12 @@ export default function MatrixGroupRow({
       <td className="border-l-2 border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 text-center"
           style={{ minWidth: '40px' }}>
         {memberCount}
+      </td>
+      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 text-center"
+          style={{ minWidth: '45px' }}>
+        <span style={{ color: pct === 100 ? '#166534' : pct >= 75 ? '#854d0e' : undefined }}>
+          {pct}%
+        </span>
       </td>
       <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
           style={{ minWidth: '60px' }}>

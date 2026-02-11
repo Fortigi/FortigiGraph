@@ -124,12 +124,14 @@ export default function MatrixView({ data }) {
       return (a.displayName || '').localeCompare(b.displayName || '');
     });
 
-    // Sort groups by category then name
-    const groups = [...groupMap.values()].sort((a, b) => {
-      const catCmp = (a.category || '').localeCompare(b.category || '');
-      if (catCmp !== 0) return catCmp;
-      return (a.displayName || '').localeCompare(b.displayName || '');
-    });
+    // Compute member count per group (for default sort and % column)
+    const userList = [...userMap.values()];
+    for (const group of groupMap.values()) {
+      group.memberCount = userList.filter(u => membershipMap.has(`${group.id}|${u.id}`)).length;
+    }
+
+    // Sort groups by member count descending (most common permissions first)
+    const groups = [...groupMap.values()].sort((a, b) => b.memberCount - a.memberCount);
 
     return { rawUsers, groups, memberships: membershipMap };
   }, [filteredData]);
@@ -242,6 +244,7 @@ export default function MatrixView({ data }) {
                       key={group.id}
                       group={group}
                       users={users}
+                      totalUsers={users.length}
                       memberships={memberships}
                       annotations={annotations.cells}
                       activeBrush={annotations.activeBrush}
