@@ -257,7 +257,7 @@ function Sync-FGGroup {
 
     # Ensure attributes needed for groupTypeCalculated are always fetched from Graph
     $graphAttributes = $Attributes
-    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions')) {
+    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions', 'membershipRule')) {
         if ($graphAttributes -notcontains $required) {
             $graphAttributes += $required
         }
@@ -352,26 +352,29 @@ function Sync-FGGroup {
             }
         }
 
-        # Calculate group type based on groupTypes, securityEnabled, mailEnabled, resourceProvisioningOptions
+        # Calculate group type based on groupTypes, securityEnabled, mailEnabled, resourceProvisioningOptions, membershipRule
         $groupTypesValue = $group.groupTypes
         $isUnified = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'Unified'
         $hasTeam = $group.resourceProvisioningOptions -is [Array] -and $group.resourceProvisioningOptions -contains 'Team'
+        $isDynamic = -not [string]::IsNullOrWhiteSpace($group.membershipRule)
 
         if ($isUnified -and $hasTeam) {
-            $row[$calculatedField] = 'Unified Group with Team'
+            $baseType = 'Unified Group with Team'
         }
         elseif ($isUnified) {
-            $row[$calculatedField] = 'Unified Group without Team'
+            $baseType = 'Unified Group without Team'
         }
         elseif (-not $group.securityEnabled) {
-            $row[$calculatedField] = 'Distribution Group'
+            $baseType = 'Distribution Group'
         }
         elseif (-not $group.mailEnabled) {
-            $row[$calculatedField] = 'Security Group'
+            $baseType = 'Security Group'
         }
         else {
-            $row[$calculatedField] = 'Mail Enabled Security Group'
+            $baseType = 'Mail Enabled Security Group'
         }
+
+        $row[$calculatedField] = if ($isDynamic) { "Dynamic $baseType" } else { $baseType }
 
         $dataTable.Rows.Add($row)
     }
