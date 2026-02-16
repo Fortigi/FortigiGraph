@@ -259,15 +259,8 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     pctCell.alignment = { horizontal: 'center' };
     pctCell.border = thinBorder();
 
-    // Collect row membership types
-    const rowTypes = new Set();
-    users.forEach(u => {
-      const types = memberships.get(`${group.id}|${u.id}`);
-      if (types) types.forEach(t => rowTypes.add(t));
-    });
-
     const typeCell = ws.getCell(rowNum, metaColStart + 2);
-    typeCell.value = [...rowTypes].join('/');
+    typeCell.value = group.groupType || '';
     typeCell.font = { size: 8 };
     typeCell.border = thinBorder();
 

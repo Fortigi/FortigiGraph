@@ -184,6 +184,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
           displayName: name,
           category,
           description: d.groupDescription || '',
+          groupType: d.groupTypeCalculated || '',
         });
       }
 

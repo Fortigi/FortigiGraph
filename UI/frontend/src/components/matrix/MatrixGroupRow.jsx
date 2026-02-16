@@ -33,12 +33,6 @@ export default function MatrixGroupRow({
   const memberCount = group.memberCount;
   const pct = totalUsers > 0 ? Math.round((memberCount / totalUsers) * 100) : 0;
 
-  // Collect unique membership types
-  const rowTypes = new Set();
-  users.forEach(u => {
-    const types = memberships.get(`${group.id}|${u.id}`);
-    if (types) types.forEach(t => rowTypes.add(t));
-  });
 
   return (
     <tr ref={setNodeRef} style={style} className="hover:bg-gray-50/30">
@@ -97,8 +91,9 @@ export default function MatrixGroupRow({
         </span>
       </td>
       <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
-          style={{ minWidth: '60px' }}>
-        {[...rowTypes].join('/')}
+          style={{ minWidth: '60px' }}
+          title={group.groupType}>
+        {group.groupType}
       </td>
       <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[200px]"
           title={group.description}>

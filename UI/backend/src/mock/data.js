@@ -89,6 +89,7 @@ function addAssignment(uId, gId, membershipType) {
   permissionAssignments.push({
     groupId: gId,
     groupDisplayName: group.displayName,
+    groupTypeCalculated: group.groupTypeCalculated || 'Security Group',
     memberId: uId,
     memberDisplayName: user.displayName,
     memberUPN: user.userPrincipalName,

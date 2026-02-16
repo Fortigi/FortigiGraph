@@ -17,6 +17,7 @@ router.get('/permissions', async (req, res) => {
         SELECT
           p.groupId,
           g.displayName AS groupDisplayName,
+          g.groupTypeCalculated,
           p.memberId,
           u.displayName AS memberDisplayName,
           u.userPrincipalName AS memberUPN,
