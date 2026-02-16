@@ -210,9 +210,10 @@ export default function PermissionGrid({ data }) {
                 className="hover:bg-gray-50 border-b border-gray-100"
               >
                 {row.getVisibleCells().map(cell => {
-                  const managed = row.original?.managedByAccessPackage === true || row.original?.managedByAccessPackage === 1;
+                  const rawVal = row.original?.managedByAccessPackage;
+                  const managed = !!rawVal && rawVal !== '0' && rawVal !== 'false';
                   return (
-                  <td key={cell.id} className={`px-3 py-1.5 ${managed ? 'text-red-600' : ''}`}>
+                  <td key={cell.id} className="px-3 py-1.5" style={managed ? { color: '#dc2626' } : undefined}>
                     {cell.getIsGrouped() ? (
                       <button
                         onClick={row.getToggleExpandedHandler()}
