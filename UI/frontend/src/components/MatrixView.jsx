@@ -5,6 +5,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useMatrixAnnotations } from '../hooks/useMatrixAnnotations';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
 import { useMatrixColumnOrder } from '../hooks/useMatrixColumnOrder';
+import { exportToExcel } from '../utils/exportToExcel';
 import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
@@ -267,6 +268,19 @@ export default function MatrixView({ data }) {
     }
   }, [annotations, groupIds, userIds]);
 
+  // Excel export handler
+  const handleExportExcel = useCallback(() => {
+    exportToExcel({
+      users,
+      orderedGroups,
+      memberships,
+      annotations: annotations.cells,
+      palette: annotations.palette,
+      activeFilters,
+      filterFields,
+    });
+  }, [users, orderedGroups, memberships, annotations.cells, annotations.palette, activeFilters, filterFields]);
+
   const stats = {
     users: users.length,
     groups: orderedGroups.length,
@@ -294,6 +308,7 @@ export default function MatrixView({ data }) {
         onUndo={annotations.undo}
         onClearAll={annotations.clearAll}
         onExport={annotations.exportAnnotations}
+        onExportExcel={handleExportExcel}
         onImport={annotations.importAnnotations}
         onResetRowOrder={rowOrderHook.resetOrder}
         onResetColumnOrder={colOrderHook.resetOrder}

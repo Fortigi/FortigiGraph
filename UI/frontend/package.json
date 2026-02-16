@@ -16,6 +16,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-table": "^8.21.3",
+    "exceljs": "^4.4.0",
     "pivottable": "^2.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

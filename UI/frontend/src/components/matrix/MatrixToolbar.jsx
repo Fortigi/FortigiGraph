@@ -16,6 +16,7 @@ export default function MatrixToolbar({
   onUndo,
   onClearAll,
   onExport,
+  onExportExcel,
   onImport,
   onResetRowOrder,
   onResetColumnOrder,
@@ -238,11 +239,18 @@ export default function MatrixToolbar({
         <div className="border-l border-gray-300 h-5 mx-1" />
 
         <button
+          onClick={onExportExcel}
+          className="px-2 py-1 rounded text-xs text-white bg-green-600 hover:bg-green-700 border border-green-700 font-medium"
+          title="Export matrix to Excel (.xlsx) with colors and annotations"
+        >
+          Export Excel
+        </button>
+        <button
           onClick={onExport}
           className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
           title="Export annotations as JSON"
         >
-          Export
+          Export JSON
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
