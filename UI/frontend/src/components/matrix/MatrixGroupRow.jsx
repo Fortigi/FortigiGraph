@@ -12,6 +12,8 @@ export default function MatrixGroupRow({
   palette,
   onCellClick,
   onCellShiftClick,
+  accessPackages = [],
+  apGroupMap,
 }) {
   const {
     attributes,
@@ -102,6 +104,32 @@ export default function MatrixGroupRow({
           title={group.description}>
         <div className="truncate">{group.description}</div>
       </td>
+
+      {/* Access Package cells (SOLL) */}
+      {accessPackages.map((ap, idx) => {
+        const apKey = `${group.id}|${ap.id}`;
+        const roleName = apGroupMap?.get(apKey);
+        const hasMapping = !!roleName;
+        return (
+          <td
+            key={ap.id}
+            className={`px-0 py-0 text-center border-r border-b border-gray-100 ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
+            style={{
+              backgroundColor: hasMapping ? '#c7d2fe' : undefined,
+              minWidth: '24px',
+              width: '24px',
+              height: '24px',
+            }}
+            title={hasMapping ? `${ap.displayName} (${roleName})` : undefined}
+          >
+            {hasMapping && (
+              <span className="text-[9px] font-bold text-indigo-800">
+                {roleName === 'Owner' ? 'O' : 'M'}
+              </span>
+            )}
+          </td>
+        );
+      })}
     </tr>
   );
 }

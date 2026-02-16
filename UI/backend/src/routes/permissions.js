@@ -41,6 +41,32 @@ router.get('/permissions', async (req, res) => {
   }
 });
 
+// GET /api/access-package-groups - Access package to group mapping
+router.get('/access-package-groups', async (req, res) => {
+  try {
+    if (useSql) {
+      const result = await db.query(`
+        SELECT
+          rrs.accessPackageId,
+          ap.displayName AS accessPackageName,
+          c.displayName  AS catalogName,
+          UPPER(rrs.scopeOriginId) AS groupId,
+          g.displayName  AS groupName,
+          rrs.roleDisplayName AS roleName
+        FROM dbo.GraphAccessPackageResourceRoleScopes rrs
+        INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
+        INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
+        LEFT  JOIN dbo.GraphGroups g ON UPPER(rrs.scopeOriginId) = g.id
+        WHERE rrs.scopeOriginSystem = 'AadGroup'
+      `);
+      return res.json(result.recordset);
+    }
+    res.json([]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/unmanaged - vw_UnmanagedPermissions
 router.get('/unmanaged', async (req, res) => {
   try {

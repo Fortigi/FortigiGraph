@@ -24,7 +24,7 @@ const FIELD_LABELS = {
   employeeType: 'Employee Type',
 };
 
-export default function MatrixView({ data }) {
+export default function MatrixView({ data, accessPackageGroups = [] }) {
   // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
@@ -214,6 +214,36 @@ export default function MatrixView({ data }) {
     return { rawUsers, groups, memberships: membershipMap };
   }, [filteredData]);
 
+  // Build access package data (SOLL matrix): which groups are in which access packages
+  const { accessPackages, apGroupMap } = useMemo(() => {
+    if (!accessPackageGroups || accessPackageGroups.length === 0) {
+      return { accessPackages: [], apGroupMap: new Map() };
+    }
+    // Only include access packages that reference groups in our current view
+    const visibleGroupIds = new Set(groups.map(g => g.id));
+    const apMap = new Map();
+    const mapping = new Map(); // "groupId|apId" -> roleName
+
+    for (const row of accessPackageGroups) {
+      const gid = row.groupId?.toUpperCase();
+      if (!gid || !visibleGroupIds.has(gid)) continue;
+      if (!apMap.has(row.accessPackageId)) {
+        apMap.set(row.accessPackageId, {
+          id: row.accessPackageId,
+          displayName: row.accessPackageName,
+          catalogName: row.catalogName,
+        });
+      }
+      mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
+    }
+
+    // Sort access packages alphabetically
+    const accessPackages = [...apMap.values()].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName)
+    );
+    return { accessPackages, apGroupMap: mapping };
+  }, [accessPackageGroups, groups]);
+
   // Apply custom column order
   const users = useMemo(
     () => colOrderHook.getOrderedUsers(rawUsers),
@@ -278,8 +308,10 @@ export default function MatrixView({ data }) {
       palette: annotations.palette,
       activeFilters,
       filterFields,
+      accessPackages,
+      apGroupMap,
     });
-  }, [users, orderedGroups, memberships, annotations.cells, annotations.palette, activeFilters, filterFields]);
+  }, [users, orderedGroups, memberships, annotations.cells, annotations.palette, activeFilters, filterFields, accessPackages, apGroupMap]);
 
   const stats = {
     users: users.length,
@@ -338,6 +370,7 @@ export default function MatrixView({ data }) {
                 infoColumnCount={infoColumnCount}
                 onColumnDragEnd={handleColumnDragEnd}
                 onSortByCount={handleSortByCount}
+                accessPackages={accessPackages}
               />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>
@@ -353,6 +386,8 @@ export default function MatrixView({ data }) {
                       palette={annotations.palette}
                       onCellClick={handleCellClick}
                       onCellShiftClick={handleCellShiftClick}
+                      accessPackages={accessPackages}
+                      apGroupMap={apGroupMap}
                     />
                   ))}
                 </tbody>

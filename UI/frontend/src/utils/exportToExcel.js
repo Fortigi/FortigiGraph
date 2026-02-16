@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, annotations, palette, activeFilters, filterFields }) {
+export async function exportToExcel({ users, orderedGroups, memberships, annotations, palette, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -51,6 +51,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
   ws.getColumn(metaColStart + 1).width = 6;  // %
   ws.getColumn(metaColStart + 2).width = 10; // Type
   ws.getColumn(metaColStart + 3).width = 30; // Description
+
+  // Access package columns start after metadata
+  const apColStart = metaColStart + 4; // 1-based
+  const apCount = accessPackages.length;
+  for (let a = 0; a < apCount; a++) {
+    ws.getColumn(apColStart + a).width = 4;
+  }
 
   // ===== ROW 1: Job titles (merged) =====
   const row1 = ws.getRow(1);
@@ -94,6 +101,23 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
   setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
   setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
 
+  // Row 1 access package banner
+  if (apCount > 0) {
+    if (apCount > 1) {
+      ws.mergeCells(1, apColStart, 1, apColStart + apCount - 1);
+    }
+    const apBanner = ws.getCell(1, apColStart);
+    apBanner.value = 'Access Packages (SOLL)';
+    apBanner.font = { size: 8, bold: true, color: { argb: 'FF3730A3' } };
+    apBanner.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
+    apBanner.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E7FF' },
+    };
+    apBanner.border = thinBorder();
+  }
+
   // ===== ROW 2: User display names =====
   const row2 = ws.getRow(2);
   row2.height = 80;
@@ -118,6 +142,23 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     const comment = [users[u].upn, users[u].jobTitle, users[u].department].filter(Boolean).join('\n');
     if (comment) {
       cell.note = comment;
+    }
+  }
+
+  // Row 2 access package name headers
+  for (let a = 0; a < apCount; a++) {
+    const cell = ws.getCell(2, apColStart + a);
+    cell.value = accessPackages[a].displayName;
+    cell.font = { size: 7, bold: false, color: { argb: 'FF3730A3' } };
+    cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E7FF' },
+    };
+    cell.border = thinBorder();
+    if (accessPackages[a].catalogName) {
+      cell.note = `Catalog: ${accessPackages[a].catalogName}`;
     }
   }
 
@@ -234,6 +275,25 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     descCell.value = group.description;
     descCell.font = { size: 8, color: { argb: 'FF666666' } };
     descCell.border = thinBorder();
+
+    // Access package cells
+    for (let a = 0; a < apCount; a++) {
+      const apKey = `${group.id}|${accessPackages[a].id}`;
+      const roleName = apGroupMap?.get(apKey);
+      const apCell = ws.getCell(rowNum, apColStart + a);
+
+      if (roleName) {
+        apCell.value = roleName === 'Owner' ? 'O' : 'M';
+        apCell.font = { size: 7, bold: true, color: { argb: 'FF3730A3' } };
+        apCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        apCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFC7D2FE' },
+        };
+      }
+      apCell.border = thinBorder();
+    }
   });
 
   // ===== Legend Sheet =====

@@ -5,7 +5,7 @@ import ActionsView from './components/ActionsView';
 import ViewToggle from './components/ViewToggle';
 
 export default function App() {
-  const { data, loading, error } = usePermissions();
+  const { data, accessPackageGroups, loading, error } = usePermissions();
   const [activeView, setActiveView] = useState('matrix');
 
   if (error) {
@@ -45,7 +45,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            {activeView === 'matrix' && <MatrixView data={data} />}
+            {activeView === 'matrix' && <MatrixView data={data} accessPackageGroups={accessPackageGroups} />}
             {activeView === 'actions' && <ActionsView data={data} />}
           </>
         )}
