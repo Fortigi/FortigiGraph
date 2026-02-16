@@ -28,6 +28,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
   // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
+  const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -251,11 +252,21 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
     [rawUsers, colOrderHook.getOrderedUsers]
   );
 
-  // Apply custom row order
-  const orderedGroups = useMemo(
-    () => rowOrderHook.getOrderedGroups(groups),
-    [groups, rowOrderHook.getOrderedGroups]
-  );
+  // Unique group types for filter dropdown
+  const uniqueGroupTypes = useMemo(() => {
+    const types = new Set();
+    groups.forEach(g => { if (g.groupType) types.add(g.groupType); });
+    return [...types].sort();
+  }, [groups]);
+
+  // Apply custom row order, then filter by group type
+  const orderedGroups = useMemo(() => {
+    let result = rowOrderHook.getOrderedGroups(groups);
+    if (groupTypeFilter && groupTypeFilter.size > 0) {
+      result = result.filter(g => groupTypeFilter.has(g.groupType));
+    }
+    return result;
+  }, [groups, rowOrderHook.getOrderedGroups, groupTypeFilter]);
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
   const userIds = useMemo(() => users.map(u => u.id), [users]);
@@ -372,6 +383,9 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
                 onColumnDragEnd={handleColumnDragEnd}
                 onSortByCount={handleSortByCount}
                 accessPackages={accessPackages}
+                uniqueGroupTypes={uniqueGroupTypes}
+                groupTypeFilter={groupTypeFilter}
+                onGroupTypeFilterChange={setGroupTypeFilter}
               />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>

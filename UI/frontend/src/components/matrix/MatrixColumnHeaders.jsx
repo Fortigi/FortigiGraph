@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
@@ -69,7 +70,39 @@ function SortableUserHeader({ user }) {
   );
 }
 
-export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, onColumnDragEnd, onSortByCount, accessPackages = [] }) {
+export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, onColumnDragEnd, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange }) {
+  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const typeFilterRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!typeFilterOpen) return;
+    const handler = (e) => {
+      if (typeFilterRef.current && !typeFilterRef.current.contains(e.target)) {
+        setTypeFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [typeFilterOpen]);
+
+  const isTypeFiltered = groupTypeFilter && groupTypeFilter.size > 0;
+
+  const toggleTypeValue = (val) => {
+    if (!groupTypeFilter) {
+      // First selection: select only this one
+      onGroupTypeFilterChange(new Set([val]));
+    } else if (groupTypeFilter.has(val)) {
+      const next = new Set(groupTypeFilter);
+      next.delete(val);
+      onGroupTypeFilterChange(next.size === 0 ? null : next);
+    } else {
+      onGroupTypeFilterChange(new Set([...groupTypeFilter, val]));
+    }
+  };
+
+  const selectAllTypes = () => onGroupTypeFilterChange(null);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
@@ -154,9 +187,57 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
             title="Sort by percentage (descending)">
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>% &#x25BC;</div>
         </th>
-        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
-            style={{ minWidth: '60px' }}>
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>Type</div>
+        <th className={`border-b border-gray-300 px-1 py-1 text-[10px] font-medium cursor-pointer select-none relative ${isTypeFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            style={{ minWidth: '60px' }}
+            ref={typeFilterRef}>
+          <div
+            style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}
+            onClick={() => setTypeFilterOpen(prev => !prev)}
+          >
+            Type {isTypeFiltered ? '\u25BC' : '\u25BD'}
+          </div>
+          {typeFilterOpen && (
+            <div
+              className="absolute bg-white border border-gray-300 rounded shadow-lg z-50 text-left"
+              style={{ top: '100%', right: 0, minWidth: '200px', writingMode: 'horizontal-tb' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 border-b border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!isTypeFiltered}
+                    onChange={selectAllTypes}
+                    className="rounded"
+                  />
+                  (Select All)
+                </label>
+              </div>
+              <div className="max-h-48 overflow-auto py-1">
+                {uniqueGroupTypes.map(t => (
+                  <label key={t} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={!groupTypeFilter || groupTypeFilter.has(t)}
+                      onChange={() => toggleTypeValue(t)}
+                      className="rounded"
+                    />
+                    {t}
+                  </label>
+                ))}
+              </div>
+              {isTypeFiltered && (
+                <div className="px-3 py-1.5 border-t border-gray-200">
+                  <button
+                    onClick={selectAllTypes}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </th>
         <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
             style={{ minWidth: '200px' }}>
