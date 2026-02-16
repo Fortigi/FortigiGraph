@@ -79,27 +79,6 @@ export default function MatrixGroupRow({
         );
       })}
 
-      {/* Right-side metadata */}
-      <td className="border-l-2 border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 text-center"
-          style={{ minWidth: '40px' }}>
-        {memberCount}
-      </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 text-center"
-          style={{ minWidth: '45px' }}>
-        <span style={{ color: pct === 100 ? '#166534' : pct >= 75 ? '#854d0e' : undefined }}>
-          {pct}%
-        </span>
-      </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
-          style={{ minWidth: '60px' }}
-          title={group.groupType}>
-        {group.groupType}
-      </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[200px]"
-          title={group.description}>
-        <div className="truncate">{group.description}</div>
-      </td>
-
       {/* Access Package cells (SOLL) */}
       {accessPackages.map((ap, idx) => {
         const apKey = `${group.id}|${ap.id}`;
@@ -125,6 +104,27 @@ export default function MatrixGroupRow({
           </td>
         );
       })}
+
+      {/* Right-side metadata */}
+      <td className="border-l-2 border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 text-center"
+          style={{ minWidth: '40px' }}>
+        {memberCount}
+      </td>
+      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 text-center"
+          style={{ minWidth: '45px' }}>
+        <span style={{ color: pct === 100 ? '#166534' : pct >= 75 ? '#854d0e' : undefined }}>
+          {pct}%
+        </span>
+      </td>
+      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
+          style={{ minWidth: '60px' }}
+          title={group.groupType}>
+        {group.groupType}
+      </td>
+      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[200px]"
+          title={group.description}>
+        <div className="truncate">{group.description}</div>
+      </td>
     </tr>
   );
 }

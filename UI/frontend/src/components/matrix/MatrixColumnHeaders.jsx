@@ -174,6 +174,27 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
           </th>
         ))}
 
+        {/* Access Package columns (SOLL) */}
+        {accessPackages.length > 0 && (
+          <th className="border-b border-l-2 border-gray-300 bg-indigo-50 px-1 py-1 text-[10px] text-indigo-700 font-bold"
+              colSpan={accessPackages.length}
+              style={{ height: '120px' }}>
+            <div
+              style={{
+                writingMode: 'vertical-lr',
+                textOrientation: 'mixed',
+                transform: 'rotate(180deg)',
+                maxHeight: '110px',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                margin: '0 auto',
+              }}
+            >
+              Access Packages (SOLL)
+            </div>
+          </th>
+        )}
+
         {/* Right metadata column headers - clickable to sort */}
         <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
             style={{ minWidth: '40px' }}
@@ -243,27 +264,6 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
             style={{ minWidth: '200px' }}>
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>Description</div>
         </th>
-
-        {/* Access Package columns (SOLL) */}
-        {accessPackages.length > 0 && (
-          <th className="border-b border-l-2 border-gray-300 bg-indigo-50 px-1 py-1 text-[10px] text-indigo-700 font-bold"
-              colSpan={accessPackages.length}
-              style={{ height: '120px' }}>
-            <div
-              style={{
-                writingMode: 'vertical-lr',
-                textOrientation: 'mixed',
-                transform: 'rotate(180deg)',
-                maxHeight: '110px',
-                overflow: 'hidden',
-                whiteSpace: 'nowrap',
-                margin: '0 auto',
-              }}
-            >
-              Access Packages (SOLL)
-            </div>
-          </th>
-        )}
       </tr>
 
       {/* Row 2: User names (draggable) */}
@@ -291,12 +291,6 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
             {users.map(user => (
               <SortableUserHeader key={user.id} user={user} />
             ))}
-
-            {/* Right metadata column headers row 2 */}
-            <th className="border-b border-l-2 border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
 
             {/* Access Package name headers */}
             {accessPackages.map((ap, idx) => (
@@ -327,6 +321,12 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
                 </div>
               </th>
             ))}
+
+            {/* Right metadata column headers row 2 */}
+            <th className="border-b border-l-2 border-gray-300 bg-gray-100" />
+            <th className="border-b border-gray-300 bg-gray-100" />
+            <th className="border-b border-gray-300 bg-gray-100" />
+            <th className="border-b border-gray-300 bg-gray-100" />
           </tr>
         </SortableContext>
       </DndContext>
