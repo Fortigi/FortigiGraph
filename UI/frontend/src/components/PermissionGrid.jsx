@@ -204,16 +204,16 @@ export default function PermissionGrid({ data }) {
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map(row => (
+            {table.getRowModel().rows.map(row => {
+              const rawVal = row.original?.managedByAccessPackage;
+              const managed = !!rawVal && rawVal !== '0' && rawVal !== 'false';
+              return (
               <tr
                 key={row.id}
-                className="hover:bg-gray-50 border-b border-gray-100"
+                className={`hover:bg-gray-50 border-b border-gray-100 ${managed ? 'row-managed' : ''}`}
               >
-                {row.getVisibleCells().map(cell => {
-                  const rawVal = row.original?.managedByAccessPackage;
-                  const managed = !!rawVal && rawVal !== '0' && rawVal !== 'false';
-                  return (
-                  <td key={cell.id} className="px-3 py-1.5" style={managed ? { color: '#dc2626' } : undefined}>
+                {row.getVisibleCells().map(cell => (
+                  <td key={cell.id} className="px-3 py-1.5">
                     {cell.getIsGrouped() ? (
                       <button
                         onClick={row.getToggleExpandedHandler()}
@@ -234,10 +234,10 @@ export default function PermissionGrid({ data }) {
                       flexRender(cell.column.columnDef.cell, cell.getContext())
                     )}
                   </td>
-                  );
-                })}
+                ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

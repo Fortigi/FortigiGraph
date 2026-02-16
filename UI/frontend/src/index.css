@@ -20,3 +20,12 @@
   background-color: #fce7f3;
   color: #9d174d;
 }
+
+/* Row text color override for managed-by-access-package rows */
+.row-managed {
+  color: #dc2626 !important;
+}
+.row-managed td,
+.row-managed td * {
+  color: inherit !important;
+}
