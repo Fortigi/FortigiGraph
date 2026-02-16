@@ -106,27 +106,6 @@ export default function PermissionGrid({ data }) {
         );
       },
     },
-    {
-      accessorKey: 'managedByAccessPackage',
-      header: 'Managed',
-      enableGrouping: true,
-      size: 80,
-      cell: ({ getValue }) => {
-        const value = getValue();
-        const managed = value === true || value === 1;
-        return (
-          <span className={`text-xs font-medium ${managed ? 'text-red-600' : 'text-white'}`}>
-            {managed ? 'Yes' : 'No'}
-          </span>
-        );
-      },
-      filterFn: (row, columnId, filterValue) => {
-        if (!filterValue) return true;
-        const val = row.getValue(columnId);
-        const managed = val === true || val === 1;
-        return filterValue === 'Yes' ? managed : !managed;
-      },
-    },
   ], []);
 
   const table = useReactTable({
@@ -230,8 +209,10 @@ export default function PermissionGrid({ data }) {
                 key={row.id}
                 className="hover:bg-gray-50 border-b border-gray-100"
               >
-                {row.getVisibleCells().map(cell => (
-                  <td key={cell.id} className="px-3 py-1.5">
+                {row.getVisibleCells().map(cell => {
+                  const managed = row.original?.managedByAccessPackage === true || row.original?.managedByAccessPackage === 1;
+                  return (
+                  <td key={cell.id} className={`px-3 py-1.5 ${managed ? 'text-red-600' : ''}`}>
                     {cell.getIsGrouped() ? (
                       <button
                         onClick={row.getToggleExpandedHandler()}
@@ -252,7 +233,8 @@ export default function PermissionGrid({ data }) {
                       flexRender(cell.column.columnDef.cell, cell.getContext())
                     )}
                   </td>
-                ))}
+                  );
+                })}
               </tr>
             ))}
           </tbody>
