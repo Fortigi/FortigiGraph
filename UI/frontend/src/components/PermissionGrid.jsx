@@ -106,6 +106,27 @@ export default function PermissionGrid({ data }) {
         );
       },
     },
+    {
+      accessorKey: 'managedByAccessPackage',
+      header: 'Managed',
+      enableGrouping: true,
+      size: 80,
+      cell: ({ getValue }) => {
+        const value = getValue();
+        const managed = value === true || value === 1;
+        return (
+          <span className={`text-xs font-medium ${managed ? 'text-red-600' : 'text-white'}`}>
+            {managed ? 'Yes' : 'No'}
+          </span>
+        );
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue) return true;
+        const val = row.getValue(columnId);
+        const managed = val === true || val === 1;
+        return filterValue === 'Yes' ? managed : !managed;
+      },
+    },
   ], []);
 
   const table = useReactTable({

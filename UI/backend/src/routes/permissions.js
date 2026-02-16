@@ -29,7 +29,8 @@ router.get('/permissions', async (req, res) => {
           u.companyName,
           u.accountEnabled,
           u.userType,
-          u.employeeType
+          u.employeeType,
+          p.managedByAccessPackage
         FROM vw_UserPermissionAssignments p
         LEFT JOIN GraphUsers u ON p.memberId = u.id
         LEFT JOIN GraphGroups g ON p.groupId = g.id

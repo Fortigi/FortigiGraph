@@ -96,7 +96,8 @@ function addAssignment(uId, gId, membershipType) {
     memberType: '#microsoft.graph.user',
     membershipType,
     department: user.department,
-    jobTitle: user.jobTitle
+    jobTitle: user.jobTitle,
+    managedByAccessPackage: membershipType === 'Eligible'
   });
 }
 
