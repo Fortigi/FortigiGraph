@@ -89,14 +89,20 @@ function Initialize-FGGroupMembershipViews {
 SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$DirectMembersTable') THEN 1 ELSE 0 END AS DirectExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$EligibleMembersTable') THEN 1 ELSE 0 END AS EligibleExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists,
+    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaAccessPackage') THEN 1 ELSE 0 END AS SollViewExists
 "@
         $reader = $checkTablesCmd.ExecuteReader()
         $reader.Read()
         $directExists = $reader.GetInt32(0) -eq 1
         $eligibleExists = $reader.GetInt32(1) -eq 1
         $ownersExists = $reader.GetInt32(2) -eq 1
+        $sollViewExists = $reader.GetInt32(3) -eq 1
         $reader.Close()
+
+        if (-not $sollViewExists) {
+            Write-Warning "View 'vw_UserPermissionAssignmentViaAccessPackage' does not exist. Run Initialize-FGAccessPackageViews for managedByAccessPackage column (optional)."
+        }
 
         if (-not $directExists) {
             throw "Required table '$DirectMembersTable' does not exist. Please run Sync-FGGroupMember first."
@@ -222,7 +228,8 @@ WITH CurrentMembers AS (
         ValidTo
     FROM dbo.vw_GraphGroupMembersRecursive
     WHERE ValidTo = '9999-12-31 23:59:59.9999999'
-)
+),
+AllAssignments AS (
 SELECT
     groupId,
     memberId,
@@ -279,7 +286,36 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
 "@
         }
 
-        $createView2SQL += ";"
+        # Close AllAssignments CTE and add final SELECT with managedByAccessPackage column
+        $createView2SQL += @"
+
+)
+SELECT
+    a.groupId,
+    a.memberId,
+    a.memberType,
+    a.membershipType,
+    a.ValidFrom,
+    a.ValidTo,
+"@
+
+        if ($sollViewExists) {
+            $createView2SQL += @"
+
+    CAST(CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.vw_UserPermissionAssignmentViaAccessPackage ap
+        WHERE ap.userId = a.memberId AND ap.groupId = a.groupId
+    ) THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage
+FROM AllAssignments a;
+"@
+        }
+        else {
+            $createView2SQL += @"
+
+    CAST(0 AS BIT) AS managedByAccessPackage
+FROM AllAssignments a;
+"@
+        }
 
         $createView2Cmd = $connection.CreateCommand()
         $createView2Cmd.CommandText = $createView2SQL
@@ -302,7 +338,13 @@ WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
         Write-Host "  - Comprehensive view combining ALL membership types" -ForegroundColor Gray
         Write-Host "  - Includes: $($types -join ', ')" -ForegroundColor Gray
         Write-Host "  - Single query to get complete membership picture" -ForegroundColor Gray
-        Write-Host "  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo" -ForegroundColor Gray
+        Write-Host "  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo, managedByAccessPackage" -ForegroundColor Gray
+        if ($sollViewExists) {
+            Write-Host "  - managedByAccessPackage: Checks against vw_UserPermissionAssignmentViaAccessPackage (SOLL)" -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  - managedByAccessPackage: Always 0 (run Initialize-FGAccessPackageViews first, then re-run this)" -ForegroundColor Yellow
+        }
         Write-Host "========================================`n" -ForegroundColor Green
 
         return $true
