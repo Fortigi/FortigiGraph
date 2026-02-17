@@ -25,6 +25,8 @@ function Remove-FGUI {
     $appServicePlanName = $config.UI.AppServicePlanName
     $location           = $config.UI.Location
     $url                = $config.UI.URL
+    $authClientId       = if ($config.UI.Auth) { $config.UI.Auth.ClientId } else { $null }
+    $authAppName        = if ($config.UI.Auth) { $config.UI.Auth.AppRegistrationName } else { $null }
 
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Yellow
@@ -38,6 +40,9 @@ function Remove-FGUI {
     Write-Host "  App Service Plan:  $appServicePlanName" -ForegroundColor White
     Write-Host "  Location:          $location" -ForegroundColor White
     Write-Host "  URL:               $url" -ForegroundColor White
+    if ($authAppName) {
+        Write-Host "  App Registration:  $authAppName" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "  After removal, the App Service Plan stops billing." -ForegroundColor Gray
     Write-Host "  You can redeploy anytime with: New-FGUI -ConfigFile '$ConfigFile'" -ForegroundColor Gray
@@ -81,6 +86,30 @@ function Remove-FGUI {
         $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
 
         return Invoke-RestMethod -Method $Method -Uri $fullUri -Headers $headers -ContentType "application/json"
+    }
+
+    # ─── Delete App Registration ─────────────────────────────────────────
+    if ($authClientId) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deleting App Registration: $authAppName..." -ForegroundColor Cyan
+        try {
+            $graphToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue).Token
+            $graphHeaders = @{
+                Authorization  = "Bearer $graphToken"
+                "Content-Type" = "application/json"
+            }
+
+            $apps = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$authClientId'" -Headers $graphHeaders
+            if ($apps.value.Count -gt 0) {
+                $appObjectId = $apps.value[0].id
+                Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Method DELETE -Headers $graphHeaders | Out-Null
+                Write-Host "  App Registration deleted" -ForegroundColor Green
+            } else {
+                Write-Host "  App Registration not found (already deleted)" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "  Failed to delete App Registration: $_" -ForegroundColor Yellow
+            Write-Host "  You can delete it manually in Azure Portal > App Registrations" -ForegroundColor Yellow
+        }
     }
 
     # ─── Delete Web App ───────────────────────────────────────────────────

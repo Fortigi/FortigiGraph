@@ -1,13 +1,25 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePermissions } from './hooks/usePermissions';
+import { useAuth } from './auth/AuthGate';
 import MatrixView from './components/MatrixView';
-import ActionsView from './components/ActionsView';
-import ViewToggle from './components/ViewToggle';
+import SyncLogPage from './components/SyncLogPage';
+
+function useHashRoute() {
+  const [page, setPage] = useState(window.location.hash.replace('#', '') || 'matrix');
+  useEffect(() => {
+    const onHash = () => setPage(window.location.hash.replace('#', '') || 'matrix');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const navigate = useCallback((p) => { window.location.hash = p; }, []);
+  return [page, navigate];
+}
 
 export default function App() {
   const [userLimit, setUserLimit] = useState(25);
-  const { data, totalUsers, accessPackageGroups, loading, error } = usePermissions(userLimit);
-  const [activeView, setActiveView] = useState('matrix');
+  const { data, totalUsers, accessPackageGroups, managedByPackages, loading, error } = usePermissions(userLimit);
+  const { account, logout } = useAuth();
+  const [page, navigate] = useHashRoute();
 
   if (error) {
     return (
@@ -34,29 +46,46 @@ export default function App() {
               Analyze permission assignments to discover role patterns
             </p>
           </div>
-          <ViewToggle activeView={activeView} onViewChange={setActiveView} />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('sync-log')}
+              className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 hover:bg-gray-100 border border-gray-200"
+            >
+              Sync Log
+            </button>
+            {account && (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span>{account.name || account.username}</span>
+                <button
+                  onClick={logout}
+                  className="text-gray-400 hover:text-gray-600"
+                  title="Sign out"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Content */}
       <main className="p-6">
-        {loading ? (
+        {page === 'sync-log' ? (
+          <SyncLogPage onBack={() => navigate('matrix')} />
+        ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-500">Loading permission data...</div>
           </div>
         ) : (
-          <>
-            {activeView === 'matrix' && (
-              <MatrixView
-                data={data}
-                accessPackageGroups={accessPackageGroups}
-                totalUsers={totalUsers}
-                userLimit={userLimit}
-                setUserLimit={setUserLimit}
-              />
-            )}
-            {activeView === 'actions' && <ActionsView data={data} />}
-          </>
+          <MatrixView
+            data={data}
+            accessPackageGroups={accessPackageGroups}
+            managedByPackages={managedByPackages}
+            totalUsers={totalUsers}
+            userLimit={userLimit}
+            setUserLimit={setUserLimit}
+          />
         )}
       </main>
     </div>

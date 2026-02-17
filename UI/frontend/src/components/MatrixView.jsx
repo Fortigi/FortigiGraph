@@ -1,10 +1,8 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import { useMatrixAnnotations } from '../hooks/useMatrixAnnotations';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
-import { useMatrixColumnOrder } from '../hooks/useMatrixColumnOrder';
 import { exportToExcel } from '../utils/exportToExcel';
 import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
@@ -24,12 +22,12 @@ const FIELD_LABELS = {
   employeeType: 'Employee Type',
 };
 
-export default function MatrixView({ data, accessPackageGroups = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
+export default function MatrixView({ data, accessPackageGroups = [], managedByPackages = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
   // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
-  const [managedFilter, setManagedFilter] = useState('both'); // 'both' | 'ist' | 'soll'
+  const [managedFilter, setManagedFilter] = useState('all'); // 'all' | 'unmanaged' | 'managed'
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -40,9 +38,7 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
       .join('|');
   }, [activeFilters]);
 
-  const annotations = useMatrixAnnotations(storageKey);
   const rowOrderHook = useMatrixRowOrder(storageKey);
-  const colOrderHook = useMatrixColumnOrder(storageKey);
 
   // Auto-discover filterable fields from data
   const filterFields = useMemo(() => {
@@ -101,33 +97,6 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
     setActiveFilters([]);
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.ctrlKey && e.key === 'z') {
-        e.preventDefault();
-        annotations.undo();
-      }
-      if (e.key === 'Escape') {
-        annotations.setActiveBrush(null);
-      }
-      // Number keys 1-6 for palette
-      const num = parseInt(e.key);
-      if (num >= 1 && num <= annotations.palette.length && !e.ctrlKey && !e.altKey) {
-        const target = e.target;
-        if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
-        annotations.setActiveBrush(annotations.palette[num - 1].key);
-      }
-      if (e.key === '0') {
-        const target = e.target;
-        if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
-        annotations.setActiveBrush('clear');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [annotations]);
-
   // Filter data by all active filters, text search, and managed filter
   const filteredData = useMemo(() => {
     let result = data;
@@ -145,16 +114,16 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
         (d.memberUPN || '').toLowerCase().includes(lower)
       );
     }
-    if (managedFilter === 'soll') {
+    if (managedFilter === 'managed') {
       result = result.filter(d => !!d.managedByAccessPackage);
-    } else if (managedFilter === 'ist') {
+    } else if (managedFilter === 'unmanaged') {
       result = result.filter(d => !d.managedByAccessPackage);
     }
     return result;
   }, [data, activeFilters, filterFields, filterText, managedFilter]);
 
   // Build matrix data structures
-  const { rawUsers, groups, memberships, managedMap } = useMemo(() => {
+  const { users, groups, memberships, managedMap } = useMemo(() => {
     const userMap = new Map();
     const groupMap = new Map();
     const membershipMap = new Map();
@@ -203,14 +172,14 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
       }
       membershipMap.get(key).add(d.membershipType);
 
-      // Track managedByAccessPackage per cell
+      // Track managedByAccessPackage per cell (boolean from view, used for filtering)
       if (d.managedByAccessPackage) {
         managed.set(key, true);
       }
     });
 
-    // Sort users by job title then name for initial default order
-    const rawUsers = [...userMap.values()].sort((a, b) => {
+    // Sort users by job title then name
+    const users = [...userMap.values()].sort((a, b) => {
       const titleCmp = (a.jobTitle || '').localeCompare(b.jobTitle || '');
       if (titleCmp !== 0) return titleCmp;
       return (a.displayName || '').localeCompare(b.displayName || '');
@@ -225,8 +194,20 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
     // Sort groups by member count descending (most common permissions first)
     const groups = [...groupMap.values()].sort((a, b) => b.memberCount - a.memberCount);
 
-    return { rawUsers, groups, memberships: membershipMap, managedMap: managed };
+    return { users, groups, memberships: membershipMap, managedMap: managed };
   }, [filteredData]);
+
+  // Build managed-by-AP map: cellKey (lowercase) -> accessPackageId[] (lowercase)
+  // All keys and values normalized to lowercase for case-insensitive matching
+  const managedApMap = useMemo(() => {
+    const map = new Map();
+    if (!managedByPackages || managedByPackages.length === 0) return map;
+    for (const r of managedByPackages) {
+      const key = `${(r.groupId || '').toLowerCase()}|${(r.memberId || '').toLowerCase()}`;
+      map.set(key, (r.accessPackageIds || []).map(id => id.toLowerCase()));
+    }
+    return map;
+  }, [managedByPackages]);
 
   // Build access package data (SOLL matrix): which groups are in which access packages
   const { accessPackages, apGroupMap } = useMemo(() => {
@@ -246,23 +227,25 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
           id: row.accessPackageId,
           displayName: row.accessPackageName,
           catalogName: row.catalogName,
+          totalAssignments: row.totalAssignments || 0,
         });
       }
       mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
     }
 
-    // Sort access packages alphabetically
+    // Sort access packages by total assignments descending (broadest first)
     const accessPackages = [...apMap.values()].sort((a, b) =>
-      a.displayName.localeCompare(b.displayName)
+      b.totalAssignments - a.totalAssignments || a.displayName.localeCompare(b.displayName)
     );
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);
 
-  // Apply custom column order (data already limited server-side)
-  const users = useMemo(
-    () => colOrderHook.getOrderedUsers(rawUsers),
-    [rawUsers, colOrderHook.getOrderedUsers]
-  );
+  // AP ID (lowercase) -> sorted index (for consistent color lookup)
+  const apIdToIndex = useMemo(() => {
+    const map = new Map();
+    accessPackages.forEach((ap, idx) => map.set(ap.id.toLowerCase(), idx));
+    return map;
+  }, [accessPackages]);
 
   // Unique group types for filter dropdown
   const uniqueGroupTypes = useMemo(() => {
@@ -281,7 +264,6 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
   }, [groups, rowOrderHook.getOrderedGroups, groupTypeFilter]);
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
-  const userIds = useMemo(() => users.map(u => u.id), [users]);
 
   // Row DnD setup
   const sensors = useSensors(
@@ -297,30 +279,11 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
     rowOrderHook.updateOrder(newOrder);
   }, [groupIds, rowOrderHook]);
 
-  // Column DnD callback
-  const handleColumnDragEnd = useCallback((newUserIds) => {
-    colOrderHook.updateOrder(newUserIds);
-  }, [colOrderHook]);
-
   // Sort rows by member count descending (clears any custom drag order)
   const handleSortByCount = useCallback(() => {
     const sorted = [...orderedGroups].sort((a, b) => b.memberCount - a.memberCount);
     rowOrderHook.updateOrder(sorted.map(g => g.id));
   }, [orderedGroups, rowOrderHook]);
-
-  // Cell click handlers
-  const handleCellClick = useCallback((cellKey) => {
-    annotations.annotateCell(cellKey);
-  }, [annotations]);
-
-  const handleCellShiftClick = useCallback((cellKey) => {
-    const lastKey = annotations.lastClickedCell.current;
-    if (lastKey) {
-      annotations.annotateRange(lastKey, cellKey, groupIds, userIds);
-    } else {
-      annotations.annotateCell(cellKey);
-    }
-  }, [annotations, groupIds, userIds]);
 
   // Excel export handler
   const handleExportExcel = useCallback(() => {
@@ -328,14 +291,14 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
       users,
       orderedGroups,
       memberships,
-      annotations: annotations.cells,
-      palette: annotations.palette,
+      managedApMap,
+      apIdToIndex,
       activeFilters,
       filterFields,
       accessPackages,
       apGroupMap,
     });
-  }, [users, orderedGroups, memberships, annotations.cells, annotations.palette, activeFilters, filterFields, accessPackages, apGroupMap]);
+  }, [users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages, apGroupMap]);
 
   const stats = {
     users: users.length,
@@ -362,19 +325,9 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
         setManagedFilter={setManagedFilter}
         userLimit={userLimit}
         setUserLimit={setUserLimit}
-        palette={annotations.palette}
-        activeBrush={annotations.activeBrush}
-        setActiveBrush={annotations.setActiveBrush}
-        onUpdatePaletteLabel={annotations.updatePaletteLabel}
-        onUndo={annotations.undo}
-        onClearAll={annotations.clearAll}
-        onExport={annotations.exportAnnotations}
         onExportExcel={handleExportExcel}
-        onImport={annotations.importAnnotations}
         onResetRowOrder={rowOrderHook.resetOrder}
-        onResetColumnOrder={colOrderHook.resetOrder}
         hasCustomRowOrder={rowOrderHook.hasCustomOrder}
-        hasCustomColumnOrder={colOrderHook.hasCustomOrder}
         stats={stats}
       />
 
@@ -395,9 +348,7 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
             <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
               <MatrixColumnHeaders
                 users={users}
-                userIds={userIds}
                 infoColumnCount={infoColumnCount}
-                onColumnDragEnd={handleColumnDragEnd}
                 onSortByCount={handleSortByCount}
                 accessPackages={accessPackages}
                 uniqueGroupTypes={uniqueGroupTypes}
@@ -414,11 +365,8 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
                       totalUsers={users.length}
                       memberships={memberships}
                       managedMap={managedMap}
-                      annotations={annotations.cells}
-                      activeBrush={annotations.activeBrush}
-                      palette={annotations.palette}
-                      onCellClick={handleCellClick}
-                      onCellShiftClick={handleCellShiftClick}
+                      managedApMap={managedApMap}
+                      apIdToIndex={apIdToIndex}
                       accessPackages={accessPackages}
                       apGroupMap={apGroupMap}
                     />

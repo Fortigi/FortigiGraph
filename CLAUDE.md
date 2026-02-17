@@ -53,13 +53,16 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - Memory-safe batching mode for large datasets (400 MB Azure sandbox limit)
 
 ### 6. Role Mining UI (Beta)
-- **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service
-- **Matrix View**: User-group permission heatmap with drag-and-drop row/column reordering
+- **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
+- **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
+- **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
+- **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E, O); multi-type cells show all badges side by side
+- **Access Package Coloring**: Each AP gets a distinct color from a 15-color palette; managed cells are colored by their governing AP
+- **Multi-AP Indicator**: Cells managed by multiple access packages show a count badge
+- **Access Package Columns**: SOLL columns sorted by total assignment count (broadest first, most targeted last)
 - **IST/SOLL Toggle**: Filter matrix to show managed (SOLL), unmanaged (IST), or all assignments
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
-- **Annotation Brushes**: Color-code cells, export to Excel, import/export annotations as JSON
-- **Access Package Overlay**: SOLL columns showing which groups are governed by access packages
-- **Managed Indicator**: Cells with `managedByAccessPackage=true` show a distinct blue background
+- **Excel Export**: Full matrix export with AP-colored cells, rich-text multi-type badges, and multi-AP notes
 - **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
 
 ## Repository Structure
@@ -124,21 +127,24 @@ FortigiGraph/
 ├── UI/                     # Role Mining Web Application (Beta)
 │   ├── backend/            # Node.js + Express API server
 │   │   └── src/
-│   │       ├── routes/permissions.js  # API endpoints (server-side userLimit)
+│   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
+│   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
 │   │       ├── db/connection.js       # Azure SQL (mssql) connection pool
 │   │       └── mock/data.js           # Mock data for local dev
 │   └── frontend/           # React + Vite + Tailwind
 │       └── src/
 │           ├── App.jsx                # Root component, userLimit state
+│           ├── auth/AuthGate.jsx      # MSAL authentication gate
 │           ├── hooks/usePermissions.js # API hook with debounced refetch
+│           ├── utils/exportToExcel.js # Excel export with AP colors & rich text
 │           └── components/
-│               ├── MatrixView.jsx     # Main matrix orchestrator
+│               ├── MatrixView.jsx     # Main matrix orchestrator (managedApMap, apIdToIndex)
 │               ├── PermissionGrid.jsx # TanStack Table grid view
 │               └── matrix/            # Matrix sub-components
-│                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider, brushes
-│                   ├── MatrixCell.jsx       # Individual cell (managed bg color)
-│                   ├── MatrixGroupRow.jsx   # Row with DnD support
-│                   └── MatrixColumnHeaders.jsx
+│                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
+│                   ├── MatrixCell.jsx       # Individual cell (AP-colored bg, multi-type badges)
+│                   ├── MatrixGroupRow.jsx   # Row with DnD support, AP color lookup
+│                   └── MatrixColumnHeaders.jsx  # AP color palette (15 colors)
 │
 ├── _Build/                 # Build and publishing scripts
 │   └── CreatePSD.ps1       # Module manifest generation
@@ -372,7 +378,7 @@ function Get-FGSQLResource {
 ### Group Membership Views (via `Initialize-FGGroupMembershipViews`)
 
 - `vw_GraphGroupMembersRecursive` - Calculates ALL memberships (direct + indirect) with paths using recursive CTE
-- `vw_UserPermissionAssignments` - Comprehensive view: Owner, Direct, Indirect, Eligible + `managedByAccessPackage` (BIT)
+- `vw_UserPermissionAssignments` - All membership types as separate rows: Owner, Direct, Indirect, Eligible + `managedByAccessPackage` (BIT). A user can have multiple rows per group (e.g. Direct + Owner) — no deduplication, so the UI can show all types.
 
 ### Access Package Views (via `Initialize-FGAccessPackageViews`)
 

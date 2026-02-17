@@ -7,78 +7,71 @@ const TYPE_INDICATORS = {
   Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
 };
 
-function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush, palette, onClick, onShiftClick }) {
+function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
-  const paletteEntry = annotation ? palette.find(p => p.key === annotation) : null;
-  const annotationColor = paletteEntry?.hex || null;
-  const marker = paletteEntry?.marker || null;
 
-  const handleClick = (e) => {
-    if (e.shiftKey) {
-      onShiftClick(cellKey);
+  // Background: AP color for managed cells (if known), fallback blue for managed, green for unmanaged
+  let bgColor;
+  if (hasMembership) {
+    if (managed && apColor) {
+      bgColor = apColor;
+    } else if (managed) {
+      bgColor = '#dbeafe';
     } else {
-      onClick(cellKey);
+      bgColor = '#dcfce7';
     }
-  };
+  }
+
+  // Tooltip
+  let title;
+  if (hasMembership) {
+    const types = [...membershipTypes].join(', ');
+    if (apNames && apNames.length > 0) {
+      title = `${types}\nManaged by: ${apNames.join(', ')}`;
+    } else if (managed) {
+      title = `${types} (managed by access package)`;
+    } else {
+      title = types;
+    }
+  }
 
   return (
     <td
-      className={`px-0 py-0 text-center border-r border-b border-gray-100 ${
-        activeBrush ? 'cursor-crosshair' : ''
-      }`}
+      className="px-0 py-0 text-center border-r border-b border-gray-100"
       style={{
-        backgroundColor: annotationColor || (hasMembership ? (managed ? '#dbeafe' : '#dcfce7') : undefined),
+        backgroundColor: bgColor,
         minWidth: '24px',
         width: '24px',
         height: '24px',
-        position: 'relative',
+        position: apCount > 1 ? 'relative' : undefined,
       }}
-      onClick={handleClick}
-      title={
-        hasMembership
-          ? [...membershipTypes].join(', ') + (managed ? ' (managed by access package)' : '')
-          : undefined
-      }
+      title={title}
     >
-      {/* +/- marker from annotation */}
-      {marker && (
-        <span
-          className="absolute font-black text-center"
-          style={{
-            fontSize: '16px',
-            lineHeight: '24px',
-            color: marker === '+' ? '#1e40af' : '#991b1b',
-            inset: 0,
-            zIndex: 1,
-          }}
-        >
-          {marker}
-        </span>
-      )}
-      {/* Membership type indicators */}
-      {hasMembership && !marker && (
+      {hasMembership && (
         <div className="flex items-center justify-center gap-px">
-          {membershipTypes.size === 1 ? (
-            (() => {
-              const type = [...membershipTypes][0];
-              const ind = TYPE_INDICATORS[type];
-              return ind ? (
-                <span
-                  className="inline-block w-4 h-4 rounded-sm text-[9px] font-bold leading-4 text-center"
-                  style={{ backgroundColor: ind.bg, color: ind.text }}
-                >
-                  {ind.letter}
-                </span>
-              ) : (
-                <span className="text-[9px] font-bold text-green-800">1</span>
-              );
-            })()
-          ) : (
-            <span className="text-[9px] font-bold text-green-800">
-              {[...membershipTypes].map(t => TYPE_INDICATORS[t]?.letter || '?').join('')}
-            </span>
-          )}
+          {[...membershipTypes].map(type => {
+            const ind = TYPE_INDICATORS[type];
+            return ind ? (
+              <span
+                key={type}
+                className={`inline-block rounded-sm text-center font-bold leading-none ${membershipTypes.size === 1 ? 'w-4 h-4 text-[9px] leading-4' : 'w-[9px] h-[14px] text-[7px] leading-[14px]'}`}
+                style={{ backgroundColor: ind.bg, color: ind.text }}
+              >
+                {ind.letter}
+              </span>
+            ) : (
+              <span key={type} className="text-[7px] font-bold text-green-800">?</span>
+            );
+          })}
         </div>
+      )}
+      {apCount > 1 && (
+        <span
+          className="absolute -top-1 -right-1 flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-bold leading-none bg-white text-gray-700 border border-gray-300 shadow-sm"
+          style={{ zIndex: 1 }}
+        >
+          {apCount}
+        </span>
       )}
     </td>
   );
@@ -86,9 +79,9 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
 
 export default memo(MatrixCell, (prev, next) => {
   return (
-    prev.annotation === next.annotation &&
-    prev.activeBrush === next.activeBrush &&
     prev.membershipTypes === next.membershipTypes &&
-    prev.managed === next.managed
+    prev.managed === next.managed &&
+    prev.apColor === next.apColor &&
+    prev.apCount === next.apCount
   );
 });

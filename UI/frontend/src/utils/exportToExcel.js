@@ -5,10 +5,10 @@ import ExcelJS from 'exceljs';
  *
  * Layout:
  *   Row 1: (3 blank info cols) | Job Title merged headers | # | % | Type | Description
- *   Row 2: (Drag) | Category | Group Name | user names... | # | % | Type | Description
+ *   Row 2: (empty) | Category | Group Name | user names... | # | % | Type | Description
  *   Row 3+: group rows with colored cells
  *
- * Plus a "Legend" sheet showing the annotation palette.
+ * Plus a "Legend" sheet showing membership types and active filters.
  */
 
 function hexToArgb(hex) {
@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, annotations, palette, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
+export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -76,7 +76,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     i += span;
   }
 
-  // Merge & color job title header cells
+  // Merge & style job title header cells (neutral gray)
   for (const jts of jobTitleSpans) {
     const startCol = infoColCount + jts.startIndex + 1;
     const endCol = startCol + jts.span - 1;
@@ -90,7 +90,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: hexToArgb(getTeamColorHex(jts.title)) },
+      fgColor: { argb: 'FFF3F4F6' },
     };
     cell.border = thinBorder();
   }
@@ -134,7 +134,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: hexToArgb(getTeamColorHex(users[u].jobTitle)) },
+      fgColor: { argb: 'FFF3F4F6' },
     };
     cell.border = thinBorder();
 
@@ -145,16 +145,16 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     }
   }
 
-  // Row 2 access package name headers
+  // Row 2 access package name headers (each AP gets a distinct color)
   for (let a = 0; a < apCount; a++) {
     const cell = ws.getCell(2, apColStart + a);
     cell.value = accessPackages[a].displayName;
-    cell.font = { size: 7, bold: false, color: { argb: 'FF3730A3' } };
+    cell.font = { size: 7, bold: false };
     cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFE0E7FF' },
+      fgColor: { argb: hexToArgb(getApColorHex(a)) },
     };
     cell.border = thinBorder();
     if (accessPackages[a].catalogName) {
@@ -185,55 +185,49 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
       const cellKey = `${group.id}|${users[u].id}`;
       const memberTypes = memberships.get(cellKey);
       const hasMembership = memberTypes && memberTypes.size > 0;
-      const annotationKey = annotations[cellKey];
-      const paletteEntry = annotationKey ? palette.find(p => p.key === annotationKey) : null;
 
       const excelCell = ws.getCell(rowNum, infoColCount + u + 1);
 
       // Cell content
-      if (paletteEntry?.marker) {
-        excelCell.value = paletteEntry.marker;
-        excelCell.font = {
-          size: 12,
-          bold: true,
-          color: { argb: paletteEntry.marker === '+' ? 'FF1E40AF' : 'FF991B1B' },
-        };
-        excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      } else if (hasMembership) {
+      if (hasMembership) {
         const types = [...memberTypes];
-        const letters = types.map(t => TYPE_COLORS[t] ? t.charAt(0) : '?').join('');
-        excelCell.value = letters;
-        excelCell.font = { size: 7, bold: true, color: { argb: 'FFFFFFFF' } };
         excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-        // Use the first type's background color for the letter
         if (types.length === 1 && TYPE_COLORS[types[0]]) {
+          excelCell.value = types[0].charAt(0);
           excelCell.font = { size: 7, bold: true, color: { argb: 'FF' + TYPE_COLORS[types[0]].text } };
+        } else {
+          // Rich text: each letter gets its own type color
+          excelCell.value = {
+            richText: types.map(t => ({
+              text: TYPE_COLORS[t] ? t.charAt(0) : '?',
+              font: { size: 7, bold: true, color: { argb: 'FF' + (TYPE_COLORS[t]?.bg || '374151') } },
+            })),
+          };
         }
       }
 
-      // Cell background
-      if (paletteEntry) {
+      // Cell background: AP color for managed cells, green for unmanaged
+      if (hasMembership) {
+        const cellKeyLower = `${group.id.toLowerCase()}|${users[u].id.toLowerCase()}`;
+        const apIds = managedApMap?.get(cellKeyLower);
+        let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
+        if (apIds && apIds.length > 0 && apIdToIndex) {
+          const firstIdx = apIdToIndex.get(apIds[0]);
+          if (firstIdx != null) {
+            bgArgb = hexToArgb(getApColorHex(firstIdx));
+          } else {
+            bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
+          }
+          if (apIds.length > 1) {
+            excelCell.note = `Managed by: ${apIds.length} access packages`;
+          }
+        }
         excelCell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: hexToArgb(paletteEntry.hex) },
+          fgColor: { argb: bgArgb },
         };
-      } else if (hasMembership) {
-        const types = [...memberTypes];
-        if (types.length === 1 && TYPE_COLORS[types[0]]) {
-          excelCell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FF' + TYPE_COLORS[types[0]].bg },
-          };
-        } else {
-          excelCell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFDCFCE7' }, // light green (default membership bg)
-          };
-        }
       }
 
       excelCell.border = thinBorder();
@@ -269,7 +263,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
     descCell.font = { size: 8, color: { argb: 'FF666666' } };
     descCell.border = thinBorder();
 
-    // Access package cells
+    // Access package cells (each AP column uses its own color)
     for (let a = 0; a < apCount; a++) {
       const apKey = `${group.id}|${accessPackages[a].id}`;
       const roleName = apGroupMap?.get(apKey);
@@ -277,12 +271,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
 
       if (roleName) {
         apCell.value = roleName === 'Owner' ? 'O' : 'M';
-        apCell.font = { size: 7, bold: true, color: { argb: 'FF3730A3' } };
+        apCell.font = { size: 7, bold: true };
         apCell.alignment = { horizontal: 'center', vertical: 'middle' };
         apCell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FFC7D2FE' },
+          fgColor: { argb: hexToArgb(getApColorHex(a)) },
         };
       }
       apCell.border = thinBorder();
@@ -295,39 +289,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
   legendWs.getColumn(2).width = 10;
   legendWs.getColumn(3).width = 14;
 
-  setHeaderCell(legendWs.getCell(1, 1), 'Color');
-  setHeaderCell(legendWs.getCell(1, 2), 'Marker');
-  setHeaderCell(legendWs.getCell(1, 3), 'Label');
-
-  palette.forEach((p, idx) => {
-    const r = idx + 2;
-    const colorCell = legendWs.getCell(r, 1);
-    colorCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: hexToArgb(p.hex) },
-    };
-    colorCell.value = p.key;
-    colorCell.font = { size: 9 };
-    colorCell.border = thinBorder();
-
-    legendWs.getCell(r, 2).value = p.marker || '';
-    legendWs.getCell(r, 2).font = { size: 9 };
-    legendWs.getCell(r, 2).border = thinBorder();
-
-    legendWs.getCell(r, 3).value = p.label;
-    legendWs.getCell(r, 3).font = { size: 9 };
-    legendWs.getCell(r, 3).border = thinBorder();
-  });
-
   // Membership type legend
-  const typeStart = palette.length + 3;
-  setHeaderCell(legendWs.getCell(typeStart, 1), 'Membership Type');
-  setHeaderCell(legendWs.getCell(typeStart, 2), 'Letter');
-  setHeaderCell(legendWs.getCell(typeStart, 3), 'Color');
+  setHeaderCell(legendWs.getCell(1, 1), 'Membership Type');
+  setHeaderCell(legendWs.getCell(1, 2), 'Letter');
+  setHeaderCell(legendWs.getCell(1, 3), 'Color');
 
   Object.entries(TYPE_COLORS).forEach(([type, colors], idx) => {
-    const r = typeStart + idx + 1;
+    const r = idx + 2;
     legendWs.getCell(r, 1).value = type;
     legendWs.getCell(r, 1).font = { size: 9 };
     legendWs.getCell(r, 1).border = thinBorder();
@@ -349,7 +317,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
 
   // Filters info
   if (activeFilters && activeFilters.length > 0) {
-    const filterStart = typeStart + Object.keys(TYPE_COLORS).length + 2;
+    const filterStart = Object.keys(TYPE_COLORS).length + 3;
     setHeaderCell(legendWs.getCell(filterStart, 1), 'Active Filters');
     setHeaderCell(legendWs.getCell(filterStart, 2), 'Value');
 
@@ -405,21 +373,13 @@ function setHeaderCell(cell, value, rotated = false) {
   }
 }
 
-// Replicate the team color hash from MatrixColumnHeaders
-const TEAM_COLORS_HEX = [
+// Access package color palette (matches MatrixColumnHeaders AP_COLORS)
+const AP_COLORS_HEX = [
   '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
   '#fed7aa', '#99f6e4', '#c7d2fe', '#fecdd3', '#d9f99d',
   '#fef08a', '#a5f3fc', '#c4b5fd', '#fda4af', '#bef264',
 ];
 
-function hashString(str) {
-  let hash = 0;
-  for (let i = 0; i < (str || '').length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-function getTeamColorHex(jobTitle) {
-  return TEAM_COLORS_HEX[hashString(jobTitle) % TEAM_COLORS_HEX.length];
+function getApColorHex(index) {
+  return AP_COLORS_HEX[index % AP_COLORS_HEX.length];
 }

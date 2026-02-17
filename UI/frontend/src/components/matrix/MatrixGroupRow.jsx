@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import MatrixCell from './MatrixCell';
+import { getAccessPackageColor } from './MatrixColumnHeaders';
 
 export default function MatrixGroupRow({
   group,
@@ -8,11 +9,8 @@ export default function MatrixGroupRow({
   totalUsers,
   memberships,
   managedMap,
-  annotations,
-  activeBrush,
-  palette,
-  onCellClick,
-  onCellShiftClick,
+  managedApMap,
+  apIdToIndex,
   accessPackages = [],
   apGroupMap,
 }) {
@@ -33,7 +31,6 @@ export default function MatrixGroupRow({
 
   const memberCount = group.memberCount;
   const pct = totalUsers > 0 ? Math.round((memberCount / totalUsers) * 100) : 0;
-
 
   return (
     <tr ref={setNodeRef} style={style} className="hover:bg-gray-50/30">
@@ -66,17 +63,31 @@ export default function MatrixGroupRow({
       {/* Intersection cells */}
       {users.map(user => {
         const cellKey = `${group.id}|${user.id}`;
+        const managed = managedMap?.has(cellKey);
+        // Look up which access packages manage this cell (all keys/IDs normalized to lowercase)
+        const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
+        const apIds = managed ? managedApMap?.get(cellKeyLower) : null;
+        let apColor = null;
+        let apCount = 0;
+        let apNames = null;
+        if (apIds && apIds.length > 0) {
+          apCount = apIds.length;
+          const firstIdx = apIdToIndex?.get(apIds[0]);
+          if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
+          apNames = apIds.map(id => {
+            const ap = accessPackages.find(a => a.id.toLowerCase() === id);
+            return ap ? ap.displayName : id;
+          });
+        }
         return (
           <MatrixCell
             key={cellKey}
             cellKey={cellKey}
             membershipTypes={memberships.get(cellKey)}
-            managed={managedMap?.has(cellKey)}
-            annotation={annotations[cellKey]}
-            activeBrush={activeBrush}
-            palette={palette}
-            onClick={onCellClick}
-            onShiftClick={onCellShiftClick}
+            managed={managed}
+            apColor={apColor}
+            apCount={apCount}
+            apNames={apNames}
           />
         );
       })}
@@ -91,7 +102,7 @@ export default function MatrixGroupRow({
             key={ap.id}
             className={`px-0 py-0 text-center border-r border-b border-gray-100 ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
             style={{
-              backgroundColor: hasMapping ? '#c7d2fe' : undefined,
+              backgroundColor: hasMapping ? getAccessPackageColor(idx) : undefined,
               minWidth: '24px',
               width: '24px',
               height: '24px',
@@ -99,7 +110,7 @@ export default function MatrixGroupRow({
             title={hasMapping ? `${ap.displayName} (${roleName})` : undefined}
           >
             {hasMapping && (
-              <span className="text-[9px] font-bold text-indigo-800">
+              <span className="text-[9px] font-bold text-gray-700">
                 {roleName === 'Owner' ? 'O' : 'M'}
               </span>
             )}

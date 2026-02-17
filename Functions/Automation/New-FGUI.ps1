@@ -15,11 +15,17 @@ function New-FGUI {
         [string]$Location,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3')]
-        [string]$Sku = 'B1',
+        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P0v3', 'P1v3', 'P2v3', 'P3v3')]
+        [string]$Sku = 'P0v3',
 
         [Parameter(Mandatory = $false)]
-        [switch]$UseMockData
+        [switch]$UseMockData,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$NoAuth,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Force
     )
 
     # Suppress Az module deprecation warnings (e.g., Get-AzAccessToken SecureString change)
@@ -52,6 +58,34 @@ function New-FGUI {
         return Invoke-RestMethod @params
     }
 
+    # ─── Helper: Microsoft Graph API call ────────────────────────────────
+    function Invoke-GraphApi {
+        param(
+            [string]$Method,
+            [string]$Uri,
+            [object]$Body
+        )
+
+        $graphToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue).Token
+        $headers = @{
+            Authorization  = "Bearer $graphToken"
+            "Content-Type" = "application/json"
+        }
+
+        $params = @{
+            Method      = $Method
+            Uri         = $Uri
+            Headers     = $headers
+            ContentType = "application/json"
+        }
+
+        if ($Body) {
+            $params.Body = ($Body | ConvertTo-Json -Depth 10)
+        }
+
+        return Invoke-RestMethod @params
+    }
+
     # ─── Helper: Save UI settings to config file ──────────────────────────
     function Save-UIConfig {
         param(
@@ -59,7 +93,8 @@ function New-FGUI {
             [string]$WebAppName,
             [string]$AppServicePlanName,
             [string]$Location,
-            [string]$Sku
+            [string]$Sku,
+            [hashtable]$Auth
         )
         try {
             $cfg = Get-Content -Path $ConfigFilePath -Raw | ConvertFrom-Json
@@ -80,6 +115,20 @@ function New-FGUI {
                 $cfg.UI.URL = "https://$WebAppName.azurewebsites.net"
             }
 
+            if ($Auth) {
+                $authObj = [PSCustomObject]@{
+                    AppRegistrationName = $Auth.AppRegistrationName
+                    ClientId            = $Auth.ClientId
+                    TenantId            = $Auth.TenantId
+                }
+
+                if ($cfg.UI.PSObject.Properties['Auth']) {
+                    $cfg.UI.Auth = $authObj
+                } else {
+                    $cfg.UI | Add-Member -MemberType NoteProperty -Name 'Auth' -Value $authObj
+                }
+            }
+
             $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFilePath -Force
             return $true
         } catch {
@@ -94,7 +143,11 @@ function New-FGUI {
         'B3' = @{ name = 'B3';  tier = 'Basic';    kind = 'linux'; reserved = $true }
         'S1' = @{ name = 'S1';  tier = 'Standard'; kind = 'linux'; reserved = $true }
         'S2' = @{ name = 'S2';  tier = 'Standard'; kind = 'linux'; reserved = $true }
-        'S3' = @{ name = 'S3';  tier = 'Standard'; kind = 'linux'; reserved = $true }
+        'S3'   = @{ name = 'S3';   tier = 'Standard';  kind = 'linux'; reserved = $true }
+        'P0v3' = @{ name = 'P0v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P1v3' = @{ name = 'P1v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P2v3' = @{ name = 'P2v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P3v3' = @{ name = 'P3v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
     }
 
     # ─── Load Config ───────────────────────────────────────────────────────
@@ -169,6 +222,7 @@ function New-FGUI {
     }
 
     $subId = (Get-AzContext).Subscription.Id
+    $tenantId = (Get-AzContext).Tenant.Id
 
     # ─── Verify Resource Group ─────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Verifying resource group: $resourceGroupName..." -ForegroundColor Cyan
@@ -177,6 +231,231 @@ function New-FGUI {
         throw "Resource group '$resourceGroupName' not found. Run New-FGConfig first."
     }
     Write-Host "  Resource group exists" -ForegroundColor Green
+
+    # ─── Entra ID App Registration for Authentication ─────────────────────
+    $uiClientId = $null
+    $uiAuthAppName = $null
+
+    if (-not $NoAuth) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Setting up Entra ID authentication..." -ForegroundColor Cyan
+
+        $uiAuthAppName = "FortigiGraph-UI-$WebAppName"
+        $redirectUri = "https://$WebAppName.azurewebsites.net"
+
+        # -Force: delete existing app registration so it gets recreated cleanly
+        if ($Force) {
+            $appsToDelete = @()
+
+            # Check config for existing client ID
+            if ($config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
+                try {
+                    $existing = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$($config.UI.Auth.ClientId)'"
+                    if ($existing.value.Count -gt 0) { $appsToDelete += $existing.value[0] }
+                } catch {}
+            }
+
+            # Also check by display name (catches orphaned registrations)
+            try {
+                $byName = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$uiAuthAppName'"
+                foreach ($app in $byName.value) {
+                    if ($appsToDelete.id -notcontains $app.id) { $appsToDelete += $app }
+                }
+            } catch {}
+
+            foreach ($app in $appsToDelete) {
+                Write-Host "  Deleting app registration: $($app.displayName) ($($app.appId))..." -ForegroundColor Yellow
+                try {
+                    Invoke-GraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/applications/$($app.id)" | Out-Null
+                    Write-Host "  Deleted" -ForegroundColor Yellow
+                } catch {
+                    Write-Host "  Warning: Could not delete app registration: $_" -ForegroundColor Yellow
+                }
+            }
+        }
+
+        # Check if app registration already exists (from config or by name)
+        if (-not $Force -and $config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
+            $uiClientId = $config.UI.Auth.ClientId
+            Write-Host "  Found existing app in config: $uiClientId" -ForegroundColor Green
+
+            # Ensure redirect URI and token version are current
+            try {
+                $existingApps = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$uiClientId'"
+                if ($existingApps.value.Count -gt 0) {
+                    $appObjectId = $existingApps.value[0].id
+                    $patchBody = @{}
+
+                    $currentRedirects = @($existingApps.value[0].spa.redirectUris)
+                    if ($redirectUri -notin $currentRedirects) {
+                        $currentRedirects += $redirectUri
+                        $patchBody.spa = @{ redirectUris = $currentRedirects }
+                        Write-Host "  Updating redirect URI: $redirectUri" -ForegroundColor Cyan
+                    }
+
+                    # Ensure v2 access tokens (required for issuer validation)
+                    if ($existingApps.value[0].api.requestedAccessTokenVersion -ne 2) {
+                        $patchBody.api = @{ requestedAccessTokenVersion = 2 }
+                        Write-Host "  Updating access token version to v2..." -ForegroundColor Cyan
+                    }
+
+                    if ($patchBody.Count -gt 0) {
+                        Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body $patchBody | Out-Null
+                        Write-Host "  App registration updated" -ForegroundColor Green
+                    }
+                }
+            } catch {
+                Write-Host "  Warning: Could not verify app registration settings: $_" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $uiClientId) {
+            # Search by display name
+            try {
+                $searchResult = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$uiAuthAppName'"
+                if ($searchResult.value.Count -gt 0) {
+                    $uiClientId = $searchResult.value[0].appId
+                    Write-Host "  Found existing app registration: $uiAuthAppName ($uiClientId)" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "  Warning: Could not search for existing app: $_" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $uiClientId) {
+            # Create new app registration
+            Write-Host "  Creating app registration: $uiAuthAppName..." -ForegroundColor Cyan
+
+            try {
+                $newApp = Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/applications" -Body @{
+                    displayName    = $uiAuthAppName
+                    signInAudience = "AzureADMyOrg"
+                    spa            = @{
+                        redirectUris = @($redirectUri)
+                    }
+                }
+
+                $uiClientId = $newApp.appId
+                $appObjectId = $newApp.id
+                Write-Host "  App registration created: $uiClientId" -ForegroundColor Green
+
+                # Step 1: Add identifier URI and API scope
+                $scopeId = [guid]::NewGuid().ToString()
+                Write-Host "  Configuring API scope..." -ForegroundColor Cyan
+
+                Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
+                    identifierUris = @("api://$uiClientId")
+                    api = @{
+                        requestedAccessTokenVersion = 2
+                        oauth2PermissionScopes = @(
+                            @{
+                                id                      = $scopeId
+                                adminConsentDisplayName  = "Access FortigiGraph UI"
+                                adminConsentDescription  = "Allow access to FortigiGraph Role Mining UI"
+                                userConsentDisplayName   = "Access FortigiGraph UI"
+                                userConsentDescription   = "Allow access to FortigiGraph Role Mining UI"
+                                value                    = "access"
+                                type                     = "User"
+                                isEnabled                = $true
+                            }
+                        )
+                    }
+                } | Out-Null
+                Write-Host "  API scope configured" -ForegroundColor Green
+
+                # Step 2: Pre-authorize the SPA for its own API scope (must be separate
+                # PATCH because the scope needs to exist before it can be referenced)
+                Write-Host "  Pre-authorizing SPA for API scope..." -ForegroundColor Cyan
+
+                Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
+                    api = @{
+                        requestedAccessTokenVersion = 2
+                        oauth2PermissionScopes = @(
+                            @{
+                                id                      = $scopeId
+                                adminConsentDisplayName  = "Access FortigiGraph UI"
+                                adminConsentDescription  = "Allow access to FortigiGraph Role Mining UI"
+                                userConsentDisplayName   = "Access FortigiGraph UI"
+                                userConsentDescription   = "Allow access to FortigiGraph Role Mining UI"
+                                value                    = "access"
+                                type                     = "User"
+                                isEnabled                = $true
+                            }
+                        )
+                        preAuthorizedApplications = @(
+                            @{
+                                appId                  = $uiClientId
+                                delegatedPermissionIds = @($scopeId)
+                            }
+                        )
+                    }
+                } | Out-Null
+                Write-Host "  Pre-authorization configured (no consent prompt)" -ForegroundColor Green
+
+                # Create service principal
+                Write-Host "  Creating service principal..." -ForegroundColor Cyan
+                $spObjectId = $null
+                try {
+                    $sp = Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals" -Body @{
+                        appId = $uiClientId
+                    }
+                    $spObjectId = $sp.id
+                    Write-Host "  Service principal created" -ForegroundColor Green
+                } catch {
+                    if ($_.Exception.Response.StatusCode -eq 409 -or $_.ErrorDetails.Message -like "*already exists*") {
+                        Write-Host "  Service principal already exists" -ForegroundColor Green
+                        # Look up existing service principal
+                        $existingSp = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$uiClientId'"
+                        $spObjectId = $existingSp.value[0].id
+                    } else {
+                        Write-Host "  Warning: Could not create service principal: $_" -ForegroundColor Yellow
+                    }
+                }
+
+                # Enable assignment required and assign the deploying user
+                if ($spObjectId) {
+                    Write-Host "  Enabling 'Assignment required'..." -ForegroundColor Cyan
+                    Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId" -Body @{
+                        appRoleAssignmentRequired = $true
+                    } | Out-Null
+                    Write-Host "  Assignment required enabled (only assigned users can access)" -ForegroundColor Green
+
+                    # Get the current user and assign them
+                    Write-Host "  Assigning current user..." -ForegroundColor Cyan
+                    $me = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/me"
+                    Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" -Body @{
+                        principalId = $me.id
+                        resourceId  = $spObjectId
+                        appRoleId   = "00000000-0000-0000-0000-000000000000"
+                    } | Out-Null
+                    Write-Host "  Assigned: $($me.displayName) ($($me.userPrincipalName))" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "  Failed to create app registration: $_" -ForegroundColor Red
+
+                # Clean up partially created app registration
+                if ($appObjectId) {
+                    Write-Host "  Cleaning up partial app registration..." -ForegroundColor Yellow
+                    try {
+                        Invoke-GraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" | Out-Null
+                        Write-Host "  Partial app registration removed" -ForegroundColor Yellow
+                    } catch {
+                        Write-Host "  Warning: Could not clean up app '$uiAuthAppName'. Delete it manually in Azure Portal > App Registrations." -ForegroundColor Yellow
+                    }
+                }
+
+                Write-Host "  The UI will be deployed without authentication." -ForegroundColor Yellow
+                Write-Host "  You can set up auth manually later by creating an App Registration" -ForegroundColor Yellow
+                Write-Host "  and configuring AUTH_ENABLED, AUTH_TENANT_ID, AUTH_CLIENT_ID env vars." -ForegroundColor Yellow
+                $uiClientId = $null
+            }
+        }
+
+        if ($uiClientId) {
+            Write-Host ""
+            Write-Host "  TIP: To grant others access, assign users or groups to the" -ForegroundColor Gray
+            Write-Host "  Enterprise Application '$uiAuthAppName' in the Azure Portal." -ForegroundColor Gray
+        }
+    }
 
     # ─── Deployment Summary ────────────────────────────────────────────────
     Write-Host ""
@@ -187,6 +466,7 @@ function New-FGUI {
     Write-Host "  Web App:           $WebAppName" -ForegroundColor White
     Write-Host "  URL:               https://$WebAppName.azurewebsites.net" -ForegroundColor White
     Write-Host "  Data mode:         $(if ($UseMockData) { 'Mock data' } else { 'Azure SQL' })" -ForegroundColor White
+    Write-Host "  Authentication:    $(if ($uiClientId) { "Entra ID ($uiClientId)" } elseif ($NoAuth) { 'Disabled' } else { 'Disabled' })" -ForegroundColor White
     Write-Host ""
     $proceed = Read-Host "Proceed with deployment? (Y/N)"
     if ($proceed -notmatch '^[Yy]') {
@@ -281,7 +561,15 @@ function New-FGUI {
 
     # ─── Save config early (resource names are now known) ──────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Saving UI settings to config file..." -ForegroundColor Cyan
-    if (Save-UIConfig -ConfigFilePath $ConfigFile -WebAppName $WebAppName -AppServicePlanName $AppServicePlanName -Location $Location -Sku $Sku) {
+    $authConfig = $null
+    if ($uiClientId) {
+        $authConfig = @{
+            AppRegistrationName = $uiAuthAppName
+            ClientId            = $uiClientId
+            TenantId            = $tenantId
+        }
+    }
+    if (Save-UIConfig -ConfigFilePath $ConfigFile -WebAppName $WebAppName -AppServicePlanName $AppServicePlanName -Location $Location -Sku $Sku -Auth $authConfig) {
         Write-Host "  Config file updated" -ForegroundColor Green
     } else {
         Write-Host "  Warning: Could not update config file" -ForegroundColor Yellow
@@ -295,6 +583,15 @@ function New-FGUI {
         @{ name = "SCM_DO_BUILD_DURING_DEPLOYMENT"; value = "true" }
         @{ name = "WEBSITE_NODE_DEFAULT_VERSION";   value = "~20" }
     )
+
+    # Auth settings
+    if ($uiClientId) {
+        $settingsList += @{ name = "AUTH_ENABLED";   value = "true" }
+        $settingsList += @{ name = "AUTH_TENANT_ID"; value = $tenantId }
+        $settingsList += @{ name = "AUTH_CLIENT_ID"; value = $uiClientId }
+    } else {
+        $settingsList += @{ name = "AUTH_ENABLED"; value = "false" }
+    }
 
     if ($UseMockData) {
         $settingsList += @{ name = "USE_SQL"; value = "false" }
@@ -555,6 +852,18 @@ function New-FGUI {
     }
     Write-Host ""
 
+    if ($uiClientId) {
+        Write-Host "  Authentication: Entra ID enabled (assignment required)" -ForegroundColor Green
+        Write-Host "  App Registration: $uiAuthAppName" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  To grant others access:" -ForegroundColor White
+        Write-Host "  Open Azure Portal > Enterprise Applications > $uiAuthAppName > Users and groups" -ForegroundColor Gray
+    } else {
+        Write-Host "  Authentication: Disabled" -ForegroundColor Yellow
+        Write-Host "  Run New-FGUI again without -NoAuth to enable Entra ID auth." -ForegroundColor Yellow
+    }
+    Write-Host ""
+
     return [PSCustomObject]@{
         WebAppName    = $WebAppName
         URL           = $appUrl
@@ -562,5 +871,6 @@ function New-FGUI {
         Location      = $Location
         Sku           = $Sku
         DataMode      = if ($UseMockData) { 'Mock' } else { 'SQL' }
+        Auth          = if ($uiClientId) { $uiClientId } else { 'Disabled' }
     }
 }

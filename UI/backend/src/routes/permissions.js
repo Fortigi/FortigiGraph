@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { users, groups, permissionAssignments, unmanagedPermissions } from '../mock/data.js';
+import { permissionAssignments } from '../mock/data.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -17,12 +17,11 @@ router.get('/permissions', async (req, res) => {
 
     if (useSql) {
       const p = await db.getPool();
-      const request = p.request();
 
-      let dataSql;
+      // Main permissions query
+      let result;
       if (userLimit > 0) {
-        request.input('userLimit', userLimit);
-        dataSql = `
+        result = await p.request().input('userLimit', userLimit).query(`
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
             FROM vw_UserPermissionAssignments p
@@ -56,9 +55,9 @@ router.get('/permissions', async (req, res) => {
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM vw_UserPermissionAssignments p
           WHERE p.memberType != '#microsoft.graph.group';
-        `;
+        `);
       } else {
-        dataSql = `
+        result = await p.request().query(`
           SELECT
             p.groupId,
             g.displayName AS groupDisplayName,
@@ -80,20 +79,62 @@ router.get('/permissions', async (req, res) => {
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group';
-        `;
+        `);
       }
 
-      const result = await request.query(dataSql);
+      // Separate query for AP mapping (gracefully falls back if view doesn't exist)
+      let managedByPackages = [];
+      try {
+        let apSql;
+        if (userLimit > 0) {
+          apSql = `
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            WHERE ap.userId IN (
+              SELECT TOP (${parseInt(userLimit)}) p.memberId
+              FROM vw_UserPermissionAssignments p
+              WHERE p.memberType != '#microsoft.graph.group'
+              GROUP BY p.memberId
+              ORDER BY COUNT(*) DESC
+            )
+            GROUP BY ap.userId, ap.groupId;
+          `;
+        } else {
+          apSql = `
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            GROUP BY ap.userId, ap.groupId;
+          `;
+        }
+        const apResult = await p.request().query(apSql);
+        managedByPackages = (apResult.recordset || [])
+          .filter(r => r.memberId)
+          .map(r => ({
+            memberId: r.memberId,
+            groupId: r.groupId,
+            accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+          }));
+      } catch (apErr) {
+        console.error('AP mapping query failed (non-fatal):', apErr.message);
+      }
 
       if (userLimit > 0) {
         return res.json({
           data: result.recordsets[0],
           totalUsers: result.recordsets[1][0].totalUsers,
+          managedByPackages,
         });
       }
       return res.json({
-        data: result.recordset,
-        totalUsers: new Set(result.recordset.map(r => r.memberId)).size,
+        data: result.recordsets[0],
+        totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
+        managedByPackages,
       });
     }
 
@@ -111,7 +152,7 @@ router.get('/permissions', async (req, res) => {
       );
       mockData = mockData.filter(r => topUserIds.has(r.memberId));
     }
-    res.json({ data: mockData, totalUsers: allUserIds.length });
+    res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -128,11 +169,18 @@ router.get('/access-package-groups', async (req, res) => {
           c.displayName  AS catalogName,
           UPPER(rrs.scopeOriginId) AS groupId,
           g.displayName  AS groupName,
-          rrs.roleDisplayName AS roleName
+          rrs.roleDisplayName AS roleName,
+          ISNULL(ac.cnt, 0) AS totalAssignments
         FROM dbo.GraphAccessPackageResourceRoleScopes rrs
         INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
         INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
         LEFT  JOIN dbo.GraphGroups g ON UPPER(rrs.scopeOriginId) = g.id
+        LEFT  JOIN (
+          SELECT accessPackageId, COUNT(*) AS cnt
+          FROM dbo.GraphAccessPackageAssignments
+          WHERE assignmentState = 'delivered'
+          GROUP BY accessPackageId
+        ) ac ON rrs.accessPackageId = ac.accessPackageId
         WHERE rrs.scopeOriginSystem = 'AadGroup'
       `);
       return res.json(result.recordset);
@@ -143,40 +191,78 @@ router.get('/access-package-groups', async (req, res) => {
   }
 });
 
-// GET /api/unmanaged - vw_UnmanagedPermissions
-router.get('/unmanaged', async (req, res) => {
+// GET /api/sync-log - Recent sync log entries from GraphSyncLog
+router.get('/sync-log', async (req, res) => {
   try {
-    if (useSql) {
-      const result = await db.query('SELECT * FROM vw_UnmanagedPermissions');
-      return res.json(result.recordset);
-    }
-    res.json(unmanagedPermissions);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
 
-// GET /api/users - GraphUsers
-router.get('/users', async (req, res) => {
-  try {
     if (useSql) {
-      const result = await db.query('SELECT id, displayName, userPrincipalName, department, jobTitle FROM GraphUsers');
-      return res.json(result.recordset);
-    }
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      const p = await db.getPool();
+      const request = p.request();
+      request.input('limit', limit);
 
-// GET /api/groups - GraphGroups
-router.get('/groups', async (req, res) => {
-  try {
-    if (useSql) {
-      const result = await db.query('SELECT id, displayName, description FROM GraphGroups');
+      // Check if GraphSyncLog table exists before querying
+      const tableCheck = await request.query(`
+        SELECT OBJECT_ID('dbo.GraphSyncLog', 'U') AS tableExists
+      `);
+      if (!tableCheck.recordset[0].tableExists) {
+        return res.json([]);
+      }
+
+      const result = await p.request().input('limit', limit).query(`
+        SELECT TOP (@limit)
+          Id, SyncType, StartTime, EndTime, DurationSeconds,
+          RecordCount, Status, ErrorMessage, TableName, CreatedAt
+        FROM dbo.GraphSyncLog
+        ORDER BY StartTime DESC
+      `);
       return res.json(result.recordset);
     }
-    res.json(groups);
+
+    // Mock data: generate realistic sync log entries
+    const syncTypes = [
+      { type: 'Users', table: 'GraphUsers', records: 1247 },
+      { type: 'Groups', table: 'GraphGroups', records: 389 },
+      { type: 'GroupMembers', table: 'GraphGroupMembers', records: 4521 },
+      { type: 'GroupTransitiveMembers', table: 'GraphGroupTransitiveMembers', records: 8932 },
+      { type: 'GroupEligibleMembers', table: 'GraphGroupEligibleMembers', records: 156 },
+      { type: 'GroupOwners', table: 'GraphGroupOwners', records: 412 },
+      { type: 'Catalogs', table: 'GraphCatalogs', records: 12 },
+      { type: 'AccessPackages', table: 'GraphAccessPackages', records: 67 },
+      { type: 'AccessPackageAssignments', table: 'GraphAccessPackageAssignments', records: 834 },
+      { type: 'AccessPackageResourceRoleScopes', table: 'GraphAccessPackageResourceRoleScopes', records: 203 },
+      { type: 'AccessPackageAssignmentPolicies', table: 'GraphAccessPackageAssignmentPolicies', records: 71 },
+      { type: 'AccessPackageAssignmentRequests', table: 'GraphAccessPackageAssignmentRequests', records: 2103 },
+      { type: 'AccessPackageAccessReviews', table: 'GraphAccessPackageAccessReviews', records: 45 },
+    ];
+    const mockLogs = [];
+    let id = 1;
+    // Generate 2 full sync runs
+    for (let run = 0; run < 2; run++) {
+      const baseTime = new Date(Date.now() - (run * 24 * 60 * 60 * 1000) - (2 * 60 * 60 * 1000));
+      let offset = 0;
+      for (const st of syncTypes) {
+        const duration = Math.floor(Math.random() * 120) + 5;
+        const start = new Date(baseTime.getTime() + offset * 1000);
+        const end = new Date(start.getTime() + duration * 1000);
+        const isFailed = run === 1 && st.type === 'AccessPackageAccessReviews';
+        mockLogs.push({
+          Id: id++,
+          SyncType: st.type,
+          StartTime: start.toISOString(),
+          EndTime: end.toISOString(),
+          DurationSeconds: duration,
+          RecordCount: isFailed ? 0 : st.records + Math.floor(Math.random() * 20),
+          Status: isFailed ? 'Failed' : 'Success',
+          ErrorMessage: isFailed ? 'The remote server returned an error: (403) Forbidden.' : null,
+          TableName: st.table,
+          CreatedAt: end.toISOString(),
+        });
+        offset += duration + 2;
+      }
+    }
+    mockLogs.sort((a, b) => new Date(b.StartTime) - new Date(a.StartTime));
+    res.json(mockLogs.slice(0, limit));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
