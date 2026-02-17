@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -323,6 +323,18 @@ export default function MatrixView({
     groups.forEach(g => { if (g.groupType) types.add(g.groupType); });
     return [...types].sort();
   }, [groups]);
+
+  // Default: exclude Distribution and Dynamic group types (user can change)
+  const groupTypeDefaultsApplied = useRef(false);
+  useEffect(() => {
+    if (groupTypeDefaultsApplied.current || uniqueGroupTypes.length === 0) return;
+    groupTypeDefaultsApplied.current = true;
+    const excluded = /distribution|dynamic/i;
+    const defaults = new Set(uniqueGroupTypes.filter(t => !excluded.test(t)));
+    if (defaults.size > 0 && defaults.size < uniqueGroupTypes.length) {
+      setGroupTypeFilter(defaults);
+    }
+  }, [uniqueGroupTypes]);
 
   // Apply custom row order, then filter by group type
   const orderedGroups = useMemo(() => {
