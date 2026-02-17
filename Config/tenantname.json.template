@@ -109,6 +109,14 @@
     "Views": {
       "Enabled": true
     },
+    "MaterializedViews": {
+      "Enabled": true,
+      "Schedule": {
+        "Enabled": true,
+        "Time": "10:00",
+        "Frequency": "Daily"
+      }
+    },
     "ParallelExecution": true
   },
   "_UI_NOTE": "UI section is created automatically by New-FGUI",
