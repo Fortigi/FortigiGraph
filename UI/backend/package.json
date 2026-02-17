@@ -1,0 +1,15 @@
+{
+  "name": "fortigraph-ui-backend",
+  "version": "0.1.0",
+  "description": "FortigiGraph Role Mining UI - Backend API",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "mssql": "^11.0.1"
+  }
+}
