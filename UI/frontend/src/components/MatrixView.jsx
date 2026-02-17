@@ -27,7 +27,7 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
-  const [managedFilter, setManagedFilter] = useState('both'); // 'both' | 'ist' | 'soll'
+  const [managedFilter, setManagedFilter] = useState('all'); // 'all' | 'unmanaged' | 'managed'
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -114,9 +114,9 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
         (d.memberUPN || '').toLowerCase().includes(lower)
       );
     }
-    if (managedFilter === 'soll') {
+    if (managedFilter === 'managed') {
       result = result.filter(d => !!d.managedByAccessPackage);
-    } else if (managedFilter === 'ist') {
+    } else if (managedFilter === 'unmanaged') {
       result = result.filter(d => !d.managedByAccessPackage);
     }
     return result;

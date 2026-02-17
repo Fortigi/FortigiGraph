@@ -149,9 +149,9 @@ export default function MatrixToolbar({
 
         <div className="inline-flex rounded border border-gray-300 overflow-hidden">
           {[
-            { key: 'both', label: 'Both' },
-            { key: 'ist',  label: 'IST' },
-            { key: 'soll', label: 'SOLL' },
+            { key: 'all',       label: 'All' },
+            { key: 'unmanaged', label: 'Unmanaged' },
+            { key: 'managed',   label: 'Managed' },
           ].map(opt => (
             <button
               key={opt.key}
