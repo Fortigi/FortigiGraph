@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import MatrixCell from './MatrixCell';
+import { getAccessPackageColor } from './MatrixColumnHeaders';
 
 export default function MatrixGroupRow({
   group,
@@ -80,7 +81,7 @@ export default function MatrixGroupRow({
             key={ap.id}
             className={`px-0 py-0 text-center border-r border-b border-gray-100 ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
             style={{
-              backgroundColor: hasMapping ? '#c7d2fe' : undefined,
+              backgroundColor: hasMapping ? getAccessPackageColor(idx) : undefined,
               minWidth: '24px',
               width: '24px',
               height: '24px',
@@ -88,7 +89,7 @@ export default function MatrixGroupRow({
             title={hasMapping ? `${ap.displayName} (${roleName})` : undefined}
           >
             {hasMapping && (
-              <span className="text-[9px] font-bold text-indigo-800">
+              <span className="text-[9px] font-bold text-gray-700">
                 {roleName === 'Owner' ? 'O' : 'M'}
               </span>
             )}

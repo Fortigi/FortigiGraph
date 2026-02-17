@@ -1,21 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 
-const TEAM_COLORS = [
+const AP_COLORS = [
   '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
   '#fed7aa', '#99f6e4', '#c7d2fe', '#fecdd3', '#d9f99d',
   '#fef08a', '#a5f3fc', '#c4b5fd', '#fda4af', '#bef264',
 ];
 
-function hashString(str) {
-  let hash = 0;
-  for (let i = 0; i < (str || '').length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-export function getTeamColor(jobTitle) {
-  return TEAM_COLORS[hashString(jobTitle) % TEAM_COLORS.length];
+export function getAccessPackageColor(index) {
+  return AP_COLORS[index % AP_COLORS.length];
 }
 
 export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange }) {
@@ -83,9 +75,8 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           <th
             key={idx}
             colSpan={span.span}
-            className="border-b border-r border-gray-300 px-0 py-0 text-center"
+            className="border-b border-r border-gray-300 px-0 py-0 text-center bg-gray-100"
             style={{
-              backgroundColor: getTeamColor(span.title),
               height: '120px',
               minWidth: `${span.span * 24}px`,
             }}
@@ -217,9 +208,8 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
         {users.map(user => (
           <th
             key={user.id}
-            className="border-b border-r border-gray-200 px-0 py-0 text-center"
+            className="border-b border-r border-gray-200 px-0 py-0 text-center bg-gray-100"
             style={{
-              backgroundColor: getTeamColor(user.jobTitle),
               height: '100px',
               width: '24px',
               minWidth: '24px',
@@ -249,7 +239,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             key={ap.id}
             className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
             style={{
-              backgroundColor: '#e0e7ff',
+              backgroundColor: getAccessPackageColor(idx),
               height: '100px',
               width: '24px',
               minWidth: '24px',
@@ -257,7 +247,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
           >
             <div
-              className="text-[10px] text-indigo-800 font-medium select-none"
+              className="text-[10px] text-gray-700 font-medium select-none"
               style={{
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',

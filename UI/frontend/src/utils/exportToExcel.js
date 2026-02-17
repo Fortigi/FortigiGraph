@@ -76,7 +76,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
     i += span;
   }
 
-  // Merge & color job title header cells
+  // Merge & style job title header cells (neutral gray)
   for (const jts of jobTitleSpans) {
     const startCol = infoColCount + jts.startIndex + 1;
     const endCol = startCol + jts.span - 1;
@@ -90,7 +90,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: hexToArgb(getTeamColorHex(jts.title)) },
+      fgColor: { argb: 'FFF3F4F6' },
     };
     cell.border = thinBorder();
   }
@@ -134,7 +134,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: hexToArgb(getTeamColorHex(users[u].jobTitle)) },
+      fgColor: { argb: 'FFF3F4F6' },
     };
     cell.border = thinBorder();
 
@@ -145,16 +145,16 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
     }
   }
 
-  // Row 2 access package name headers
+  // Row 2 access package name headers (each AP gets a distinct color)
   for (let a = 0; a < apCount; a++) {
     const cell = ws.getCell(2, apColStart + a);
     cell.value = accessPackages[a].displayName;
-    cell.font = { size: 7, bold: false, color: { argb: 'FF3730A3' } };
+    cell.font = { size: 7, bold: false };
     cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFE0E7FF' },
+      fgColor: { argb: hexToArgb(getApColorHex(a)) },
     };
     cell.border = thinBorder();
     if (accessPackages[a].catalogName) {
@@ -253,7 +253,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
     descCell.font = { size: 8, color: { argb: 'FF666666' } };
     descCell.border = thinBorder();
 
-    // Access package cells
+    // Access package cells (each AP column uses its own color)
     for (let a = 0; a < apCount; a++) {
       const apKey = `${group.id}|${accessPackages[a].id}`;
       const roleName = apGroupMap?.get(apKey);
@@ -261,12 +261,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
 
       if (roleName) {
         apCell.value = roleName === 'Owner' ? 'O' : 'M';
-        apCell.font = { size: 7, bold: true, color: { argb: 'FF3730A3' } };
+        apCell.font = { size: 7, bold: true };
         apCell.alignment = { horizontal: 'center', vertical: 'middle' };
         apCell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FFC7D2FE' },
+          fgColor: { argb: hexToArgb(getApColorHex(a)) },
         };
       }
       apCell.border = thinBorder();
@@ -363,21 +363,13 @@ function setHeaderCell(cell, value, rotated = false) {
   }
 }
 
-// Replicate the team color hash from MatrixColumnHeaders
-const TEAM_COLORS_HEX = [
+// Access package color palette (matches MatrixColumnHeaders AP_COLORS)
+const AP_COLORS_HEX = [
   '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
   '#fed7aa', '#99f6e4', '#c7d2fe', '#fecdd3', '#d9f99d',
   '#fef08a', '#a5f3fc', '#c4b5fd', '#fda4af', '#bef264',
 ];
 
-function hashString(str) {
-  let hash = 0;
-  for (let i = 0; i < (str || '').length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-function getTeamColorHex(jobTitle) {
-  return TEAM_COLORS_HEX[hashString(jobTitle) % TEAM_COLORS_HEX.length];
+function getApColorHex(index) {
+  return AP_COLORS_HEX[index % AP_COLORS_HEX.length];
 }
