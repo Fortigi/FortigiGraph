@@ -15,8 +15,8 @@ function New-FGUI {
         [string]$Location,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3')]
-        [string]$Sku = 'B1',
+        [ValidateSet('B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P0v3', 'P1v3', 'P2v3', 'P3v3')]
+        [string]$Sku = 'P0v3',
 
         [Parameter(Mandatory = $false)]
         [switch]$UseMockData,
@@ -143,7 +143,11 @@ function New-FGUI {
         'B3' = @{ name = 'B3';  tier = 'Basic';    kind = 'linux'; reserved = $true }
         'S1' = @{ name = 'S1';  tier = 'Standard'; kind = 'linux'; reserved = $true }
         'S2' = @{ name = 'S2';  tier = 'Standard'; kind = 'linux'; reserved = $true }
-        'S3' = @{ name = 'S3';  tier = 'Standard'; kind = 'linux'; reserved = $true }
+        'S3'   = @{ name = 'S3';   tier = 'Standard';  kind = 'linux'; reserved = $true }
+        'P0v3' = @{ name = 'P0v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P1v3' = @{ name = 'P1v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P2v3' = @{ name = 'P2v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
+        'P3v3' = @{ name = 'P3v3'; tier = 'PremiumV3'; kind = 'linux'; reserved = $true }
     }
 
     # ─── Load Config ───────────────────────────────────────────────────────
