@@ -68,7 +68,8 @@ function Start-FGAutomationRunbook {
             "Sync-FGAccessPackageResourceRoleScopes",
             "Sync-FGAccessPackageAssignmentPolicies",
             "Sync-FGAccessPackageAssignmentRequests",
-            "Sync-FGAccessPackageAccessReviews"
+            "Sync-FGAccessPackageAccessReviews",
+            "Sync-FGMaterializedViews"
         )]
         [string]$RunbookName,
 
