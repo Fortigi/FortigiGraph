@@ -262,12 +262,13 @@ export default function MatrixView({
   }, [managedByPackages]);
 
   // Build access package data (SOLL matrix): which groups are in which access packages
+  // Only include APs where at least one visible user actually has an assignment through that AP.
   const { accessPackages, apGroupMap } = useMemo(() => {
     if (!accessPackageGroups || accessPackageGroups.length === 0) {
       return { accessPackages: [], apGroupMap: new Map() };
     }
-    // Only include access packages that reference groups in our current view
     const visibleGroupIds = new Set(groups.map(g => g.id));
+    const visibleUserIds = new Set(users.map(u => u.id.toLowerCase()));
     const apMap = new Map();
     const mapping = new Map(); // "groupId|apId" -> roleName
 
@@ -285,12 +286,28 @@ export default function MatrixView({
       mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
     }
 
+    // Filter to APs that have at least one visible user assignment
+    const apIdsWithAssignments = new Set();
+    for (const [cellKey, apIds] of managedApMap) {
+      const [gid, uid] = cellKey.split('|');
+      if (visibleGroupIds.has(gid.toUpperCase()) && visibleUserIds.has(uid)) {
+        for (const apId of apIds) {
+          apIdsWithAssignments.add(apId);
+        }
+      }
+    }
+    for (const apId of [...apMap.keys()]) {
+      if (!apIdsWithAssignments.has(apId.toLowerCase())) {
+        apMap.delete(apId);
+      }
+    }
+
     // Sort access packages by total assignments descending (broadest first)
     const accessPackages = [...apMap.values()].sort((a, b) =>
       b.totalAssignments - a.totalAssignments || a.displayName.localeCompare(b.displayName)
     );
     return { accessPackages, apGroupMap: mapping };
-  }, [accessPackageGroups, groups]);
+  }, [accessPackageGroups, groups, users, managedApMap]);
 
   // AP ID (lowercase) -> sorted index (for consistent color lookup)
   const apIdToIndex = useMemo(() => {
