@@ -330,17 +330,41 @@ function New-FGUI {
 
                 # Create service principal
                 Write-Host "  Creating service principal..." -ForegroundColor Cyan
+                $spObjectId = $null
                 try {
-                    Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals" -Body @{
+                    $sp = Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals" -Body @{
                         appId = $uiClientId
-                    } | Out-Null
+                    }
+                    $spObjectId = $sp.id
                     Write-Host "  Service principal created" -ForegroundColor Green
                 } catch {
                     if ($_.Exception.Response.StatusCode -eq 409 -or $_.ErrorDetails.Message -like "*already exists*") {
                         Write-Host "  Service principal already exists" -ForegroundColor Green
+                        # Look up existing service principal
+                        $existingSp = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$uiClientId'"
+                        $spObjectId = $existingSp.value[0].id
                     } else {
                         Write-Host "  Warning: Could not create service principal: $_" -ForegroundColor Yellow
                     }
+                }
+
+                # Enable assignment required and assign the deploying user
+                if ($spObjectId) {
+                    Write-Host "  Enabling 'Assignment required'..." -ForegroundColor Cyan
+                    Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId" -Body @{
+                        appRoleAssignmentRequired = $true
+                    } | Out-Null
+                    Write-Host "  Assignment required enabled (only assigned users can access)" -ForegroundColor Green
+
+                    # Get the current user and assign them
+                    Write-Host "  Assigning current user..." -ForegroundColor Cyan
+                    $me = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/me"
+                    Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" -Body @{
+                        principalId = $me.id
+                        resourceId  = $spObjectId
+                        appRoleId   = "00000000-0000-0000-0000-000000000000"
+                    } | Out-Null
+                    Write-Host "  Assigned: $($me.displayName) ($($me.userPrincipalName))" -ForegroundColor Green
                 }
             } catch {
                 Write-Host "  Failed to create app registration: $_" -ForegroundColor Red
@@ -365,9 +389,8 @@ function New-FGUI {
 
         if ($uiClientId) {
             Write-Host ""
-            Write-Host "  TIP: To restrict access, enable 'Assignment required' on the" -ForegroundColor Gray
-            Write-Host "  Enterprise Application '$uiAuthAppName' in the Azure Portal," -ForegroundColor Gray
-            Write-Host "  then assign users or groups." -ForegroundColor Gray
+            Write-Host "  TIP: To grant others access, assign users or groups to the" -ForegroundColor Gray
+            Write-Host "  Enterprise Application '$uiAuthAppName' in the Azure Portal." -ForegroundColor Gray
         }
     }
 
@@ -767,13 +790,11 @@ function New-FGUI {
     Write-Host ""
 
     if ($uiClientId) {
-        Write-Host "  Authentication: Entra ID enabled" -ForegroundColor Green
+        Write-Host "  Authentication: Entra ID enabled (assignment required)" -ForegroundColor Green
         Write-Host "  App Registration: $uiAuthAppName" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "  To restrict access to specific users/groups:" -ForegroundColor White
-        Write-Host "  1. Open Azure Portal > Enterprise Applications > $uiAuthAppName" -ForegroundColor Gray
-        Write-Host "  2. Set 'Assignment required?' to Yes" -ForegroundColor Gray
-        Write-Host "  3. Assign users or groups" -ForegroundColor Gray
+        Write-Host "  To grant others access:" -ForegroundColor White
+        Write-Host "  Open Azure Portal > Enterprise Applications > $uiAuthAppName > Users and groups" -ForegroundColor Gray
     } else {
         Write-Host "  Authentication: Disabled" -ForegroundColor Yellow
         Write-Host "  Run New-FGUI again without -NoAuth to enable Entra ID auth." -ForegroundColor Yellow
