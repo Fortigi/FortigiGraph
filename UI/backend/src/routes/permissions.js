@@ -143,4 +143,81 @@ router.get('/access-package-groups', async (req, res) => {
   }
 });
 
+// GET /api/sync-log - Recent sync log entries from GraphSyncLog
+router.get('/sync-log', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+
+    if (useSql) {
+      const p = await db.getPool();
+      const request = p.request();
+      request.input('limit', limit);
+
+      // Check if GraphSyncLog table exists before querying
+      const tableCheck = await request.query(`
+        SELECT OBJECT_ID('dbo.GraphSyncLog', 'U') AS tableExists
+      `);
+      if (!tableCheck.recordset[0].tableExists) {
+        return res.json([]);
+      }
+
+      const result = await p.request().input('limit', limit).query(`
+        SELECT TOP (@limit)
+          Id, SyncType, StartTime, EndTime, DurationSeconds,
+          RecordCount, Status, ErrorMessage, TableName, CreatedAt
+        FROM dbo.GraphSyncLog
+        ORDER BY StartTime DESC
+      `);
+      return res.json(result.recordset);
+    }
+
+    // Mock data: generate realistic sync log entries
+    const syncTypes = [
+      { type: 'Users', table: 'GraphUsers', records: 1247 },
+      { type: 'Groups', table: 'GraphGroups', records: 389 },
+      { type: 'GroupMembers', table: 'GraphGroupMembers', records: 4521 },
+      { type: 'GroupTransitiveMembers', table: 'GraphGroupTransitiveMembers', records: 8932 },
+      { type: 'GroupEligibleMembers', table: 'GraphGroupEligibleMembers', records: 156 },
+      { type: 'GroupOwners', table: 'GraphGroupOwners', records: 412 },
+      { type: 'Catalogs', table: 'GraphCatalogs', records: 12 },
+      { type: 'AccessPackages', table: 'GraphAccessPackages', records: 67 },
+      { type: 'AccessPackageAssignments', table: 'GraphAccessPackageAssignments', records: 834 },
+      { type: 'AccessPackageResourceRoleScopes', table: 'GraphAccessPackageResourceRoleScopes', records: 203 },
+      { type: 'AccessPackageAssignmentPolicies', table: 'GraphAccessPackageAssignmentPolicies', records: 71 },
+      { type: 'AccessPackageAssignmentRequests', table: 'GraphAccessPackageAssignmentRequests', records: 2103 },
+      { type: 'AccessPackageAccessReviews', table: 'GraphAccessPackageAccessReviews', records: 45 },
+    ];
+    const mockLogs = [];
+    let id = 1;
+    // Generate 2 full sync runs
+    for (let run = 0; run < 2; run++) {
+      const baseTime = new Date(Date.now() - (run * 24 * 60 * 60 * 1000) - (2 * 60 * 60 * 1000));
+      let offset = 0;
+      for (const st of syncTypes) {
+        const duration = Math.floor(Math.random() * 120) + 5;
+        const start = new Date(baseTime.getTime() + offset * 1000);
+        const end = new Date(start.getTime() + duration * 1000);
+        const isFailed = run === 1 && st.type === 'AccessPackageAccessReviews';
+        mockLogs.push({
+          Id: id++,
+          SyncType: st.type,
+          StartTime: start.toISOString(),
+          EndTime: end.toISOString(),
+          DurationSeconds: duration,
+          RecordCount: isFailed ? 0 : st.records + Math.floor(Math.random() * 20),
+          Status: isFailed ? 'Failed' : 'Success',
+          ErrorMessage: isFailed ? 'The remote server returned an error: (403) Forbidden.' : null,
+          TableName: st.table,
+          CreatedAt: end.toISOString(),
+        });
+        offset += duration + 2;
+      }
+    }
+    mockLogs.sort((a, b) => new Date(b.StartTime) - new Date(a.StartTime));
+    res.json(mockLogs.slice(0, limit));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
