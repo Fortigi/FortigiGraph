@@ -154,6 +154,7 @@ router.get('/permissions', async (req, res) => {
     }
     res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
+    console.error('permissions query failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -187,7 +188,9 @@ router.get('/access-package-groups', async (req, res) => {
     }
     res.json([]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Table may not exist in this environment — return empty instead of 500
+    console.error('access-package-groups query failed:', err.message);
+    res.json([]);
   }
 });
 

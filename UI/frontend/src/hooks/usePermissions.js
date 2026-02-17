@@ -27,7 +27,10 @@ export function usePermissions(userLimit = 25) {
   const fetchPermissions = useCallback(async (limit, signal) => {
     const params = limit > 0 ? `?userLimit=${limit}` : '';
     const res = await authFetch(`${API_BASE}/permissions${params}`, { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
     return res.json();
   }, [authFetch]);
 
