@@ -191,14 +191,19 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       // Cell content
       if (hasMembership) {
         const types = [...memberTypes];
-        const letters = types.map(t => TYPE_COLORS[t] ? t.charAt(0) : '?').join('');
-        excelCell.value = letters;
-        excelCell.font = { size: 7, bold: true, color: { argb: 'FFFFFFFF' } };
         excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-        // Use the first type's background color for the letter
         if (types.length === 1 && TYPE_COLORS[types[0]]) {
+          excelCell.value = types[0].charAt(0);
           excelCell.font = { size: 7, bold: true, color: { argb: 'FF' + TYPE_COLORS[types[0]].text } };
+        } else {
+          // Rich text: each letter gets its own type color
+          excelCell.value = {
+            richText: types.map(t => ({
+              text: TYPE_COLORS[t] ? t.charAt(0) : '?',
+              font: { size: 7, bold: true, color: { argb: 'FF' + (TYPE_COLORS[t]?.bg || '374151') } },
+            })),
+          };
         }
       }
 

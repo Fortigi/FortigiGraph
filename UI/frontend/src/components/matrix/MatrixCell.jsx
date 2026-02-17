@@ -49,26 +49,20 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
     >
       {hasMembership && (
         <div className="flex items-center justify-center gap-px">
-          {membershipTypes.size === 1 ? (
-            (() => {
-              const type = [...membershipTypes][0];
-              const ind = TYPE_INDICATORS[type];
-              return ind ? (
-                <span
-                  className="inline-block w-4 h-4 rounded-sm text-[9px] font-bold leading-4 text-center"
-                  style={{ backgroundColor: ind.bg, color: ind.text }}
-                >
-                  {ind.letter}
-                </span>
-              ) : (
-                <span className="text-[9px] font-bold text-green-800">1</span>
-              );
-            })()
-          ) : (
-            <span className="text-[9px] font-bold text-green-800">
-              {[...membershipTypes].map(t => TYPE_INDICATORS[t]?.letter || '?').join('')}
-            </span>
-          )}
+          {[...membershipTypes].map(type => {
+            const ind = TYPE_INDICATORS[type];
+            return ind ? (
+              <span
+                key={type}
+                className={`inline-block rounded-sm text-center font-bold leading-none ${membershipTypes.size === 1 ? 'w-4 h-4 text-[9px] leading-4' : 'w-[9px] h-[14px] text-[7px] leading-[14px]'}`}
+                style={{ backgroundColor: ind.bg, color: ind.text }}
+              >
+                {ind.letter}
+              </span>
+            ) : (
+              <span key={type} className="text-[7px] font-bold text-green-800">?</span>
+            );
+          })}
         </div>
       )}
       {apCount > 1 && (
