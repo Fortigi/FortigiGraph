@@ -5,10 +5,10 @@ import ExcelJS from 'exceljs';
  *
  * Layout:
  *   Row 1: (3 blank info cols) | Job Title merged headers | # | % | Type | Description
- *   Row 2: (Drag) | Category | Group Name | user names... | # | % | Type | Description
+ *   Row 2: (empty) | Category | Group Name | user names... | # | % | Type | Description
  *   Row 3+: group rows with colored cells
  *
- * Plus a "Legend" sheet showing the annotation palette.
+ * Plus a "Legend" sheet showing membership types and active filters.
  */
 
 function hexToArgb(hex) {
@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, annotations, palette, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
+export async function exportToExcel({ users, orderedGroups, memberships, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -185,21 +185,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
       const cellKey = `${group.id}|${users[u].id}`;
       const memberTypes = memberships.get(cellKey);
       const hasMembership = memberTypes && memberTypes.size > 0;
-      const annotationKey = annotations[cellKey];
-      const paletteEntry = annotationKey ? palette.find(p => p.key === annotationKey) : null;
 
       const excelCell = ws.getCell(rowNum, infoColCount + u + 1);
 
       // Cell content
-      if (paletteEntry?.marker) {
-        excelCell.value = paletteEntry.marker;
-        excelCell.font = {
-          size: 12,
-          bold: true,
-          color: { argb: paletteEntry.marker === '+' ? 'FF1E40AF' : 'FF991B1B' },
-        };
-        excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      } else if (hasMembership) {
+      if (hasMembership) {
         const types = [...memberTypes];
         const letters = types.map(t => TYPE_COLORS[t] ? t.charAt(0) : '?').join('');
         excelCell.value = letters;
@@ -213,13 +203,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
       }
 
       // Cell background
-      if (paletteEntry) {
-        excelCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: hexToArgb(paletteEntry.hex) },
-        };
-      } else if (hasMembership) {
+      if (hasMembership) {
         const types = [...memberTypes];
         if (types.length === 1 && TYPE_COLORS[types[0]]) {
           excelCell.fill = {
@@ -295,39 +279,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
   legendWs.getColumn(2).width = 10;
   legendWs.getColumn(3).width = 14;
 
-  setHeaderCell(legendWs.getCell(1, 1), 'Color');
-  setHeaderCell(legendWs.getCell(1, 2), 'Marker');
-  setHeaderCell(legendWs.getCell(1, 3), 'Label');
-
-  palette.forEach((p, idx) => {
-    const r = idx + 2;
-    const colorCell = legendWs.getCell(r, 1);
-    colorCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: hexToArgb(p.hex) },
-    };
-    colorCell.value = p.key;
-    colorCell.font = { size: 9 };
-    colorCell.border = thinBorder();
-
-    legendWs.getCell(r, 2).value = p.marker || '';
-    legendWs.getCell(r, 2).font = { size: 9 };
-    legendWs.getCell(r, 2).border = thinBorder();
-
-    legendWs.getCell(r, 3).value = p.label;
-    legendWs.getCell(r, 3).font = { size: 9 };
-    legendWs.getCell(r, 3).border = thinBorder();
-  });
-
   // Membership type legend
-  const typeStart = palette.length + 3;
-  setHeaderCell(legendWs.getCell(typeStart, 1), 'Membership Type');
-  setHeaderCell(legendWs.getCell(typeStart, 2), 'Letter');
-  setHeaderCell(legendWs.getCell(typeStart, 3), 'Color');
+  setHeaderCell(legendWs.getCell(1, 1), 'Membership Type');
+  setHeaderCell(legendWs.getCell(1, 2), 'Letter');
+  setHeaderCell(legendWs.getCell(1, 3), 'Color');
 
   Object.entries(TYPE_COLORS).forEach(([type, colors], idx) => {
-    const r = typeStart + idx + 1;
+    const r = idx + 2;
     legendWs.getCell(r, 1).value = type;
     legendWs.getCell(r, 1).font = { size: 9 };
     legendWs.getCell(r, 1).border = thinBorder();
@@ -349,7 +307,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, annotat
 
   // Filters info
   if (activeFilters && activeFilters.length > 0) {
-    const filterStart = typeStart + Object.keys(TYPE_COLORS).length + 2;
+    const filterStart = Object.keys(TYPE_COLORS).length + 3;
     setHeaderCell(legendWs.getCell(filterStart, 1), 'Active Filters');
     setHeaderCell(legendWs.getCell(filterStart, 2), 'Value');
 

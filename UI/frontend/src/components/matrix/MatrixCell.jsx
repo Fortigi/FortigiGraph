@@ -7,56 +7,25 @@ const TYPE_INDICATORS = {
   Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
 };
 
-function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush, palette, onClick, onShiftClick }) {
+function MatrixCell({ cellKey, membershipTypes, managed }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
-  const paletteEntry = annotation ? palette.find(p => p.key === annotation) : null;
-  const annotationColor = paletteEntry?.hex || null;
-  const marker = paletteEntry?.marker || null;
-
-  const handleClick = (e) => {
-    if (e.shiftKey) {
-      onShiftClick(cellKey);
-    } else {
-      onClick(cellKey);
-    }
-  };
 
   return (
     <td
-      className={`px-0 py-0 text-center border-r border-b border-gray-100 ${
-        activeBrush ? 'cursor-crosshair' : ''
-      }`}
+      className="px-0 py-0 text-center border-r border-b border-gray-100"
       style={{
-        backgroundColor: annotationColor || (hasMembership ? (managed ? '#dbeafe' : '#dcfce7') : undefined),
+        backgroundColor: hasMembership ? (managed ? '#dbeafe' : '#dcfce7') : undefined,
         minWidth: '24px',
         width: '24px',
         height: '24px',
-        position: 'relative',
       }}
-      onClick={handleClick}
       title={
         hasMembership
           ? [...membershipTypes].join(', ') + (managed ? ' (managed by access package)' : '')
           : undefined
       }
     >
-      {/* +/- marker from annotation */}
-      {marker && (
-        <span
-          className="absolute font-black text-center"
-          style={{
-            fontSize: '16px',
-            lineHeight: '24px',
-            color: marker === '+' ? '#1e40af' : '#991b1b',
-            inset: 0,
-            zIndex: 1,
-          }}
-        >
-          {marker}
-        </span>
-      )}
-      {/* Membership type indicators */}
-      {hasMembership && !marker && (
+      {hasMembership && (
         <div className="flex items-center justify-center gap-px">
           {membershipTypes.size === 1 ? (
             (() => {
@@ -86,8 +55,6 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
 
 export default memo(MatrixCell, (prev, next) => {
   return (
-    prev.annotation === next.annotation &&
-    prev.activeBrush === next.activeBrush &&
     prev.membershipTypes === next.membershipTypes &&
     prev.managed === next.managed
   );

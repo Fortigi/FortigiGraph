@@ -1,8 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
-import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
-import { CSS } from '@dnd-kit/utilities';
 
 const TEAM_COLORS = [
   '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
@@ -22,55 +18,7 @@ export function getTeamColor(jobTitle) {
   return TEAM_COLORS[hashString(jobTitle) % TEAM_COLORS.length];
 }
 
-function SortableUserHeader({ user }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: user.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    backgroundColor: getTeamColor(user.jobTitle),
-    height: '100px',
-    width: '24px',
-    minWidth: '24px',
-    cursor: 'grab',
-  };
-
-  return (
-    <th
-      ref={setNodeRef}
-      className="border-b border-r border-gray-200 px-0 py-0 text-center"
-      style={style}
-      title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}\n(drag to reorder)`}
-      {...attributes}
-      {...listeners}
-    >
-      <div
-        className="text-[10px] text-gray-700 font-medium select-none"
-        style={{
-          writingMode: 'vertical-lr',
-          textOrientation: 'mixed',
-          transform: 'rotate(180deg)',
-          maxHeight: '95px',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          margin: '0 auto',
-        }}
-      >
-        {user.displayName}
-      </div>
-    </th>
-  );
-}
-
-export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, onColumnDragEnd, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange }) {
+export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange }) {
   const [typeFilterOpen, setTypeFilterOpen] = useState(false);
   const typeFilterRef = useRef(null);
 
@@ -103,19 +51,6 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
 
   const selectAllTypes = () => onGroupTypeFilterChange(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
-
-  const handleDragEnd = (event) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = userIds.indexOf(active.id);
-    const newIndex = userIds.indexOf(over.id);
-    const newOrder = arrayMove(userIds, oldIndex, newIndex);
-    onColumnDragEnd(newOrder);
-  };
-
   // Group consecutive users by job title for merged headers
   const jobTitleSpans = [];
   let i = 0;
@@ -140,9 +75,7 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
           style={{ minHeight: '120px' }}
         >
           <div className="text-xs text-gray-500 font-normal">
-            <div>Drag rows or columns to reorder</div>
-            <div>Click cells with brush to annotate</div>
-            <div className="text-gray-400">Shift+click for range</div>
+            <div>Drag rows to reorder</div>
           </div>
         </th>
 
@@ -266,70 +199,86 @@ export default function MatrixColumnHeaders({ users, userIds, infoColumnCount, o
         </th>
       </tr>
 
-      {/* Row 2: User names (draggable) */}
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-        modifiers={[restrictToHorizontalAxis]}
-      >
-        <SortableContext items={userIds} strategy={horizontalListSortingStrategy}>
-          <tr>
-            {/* Corner cells for row info headers */}
-            <th className="sticky left-0 z-30 bg-gray-100 border-b border-r border-gray-300 px-1 py-1 text-[10px] text-gray-500"
-                style={{ minWidth: '24px' }}>
-            </th>
-            <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
-                style={{ left: '24px', minWidth: '100px' }}>
-              Category
-            </th>
-            <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
-                style={{ left: '124px', minWidth: '250px' }}>
-              Group Name
-            </th>
+      {/* Row 2: User names */}
+      <tr>
+        {/* Corner cells for row info headers */}
+        <th className="sticky left-0 z-30 bg-gray-100 border-b border-r border-gray-300 px-1 py-1 text-[10px] text-gray-500"
+            style={{ minWidth: '24px' }}>
+        </th>
+        <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
+            style={{ left: '24px', minWidth: '100px' }}>
+          Category
+        </th>
+        <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
+            style={{ left: '124px', minWidth: '250px' }}>
+          Group Name
+        </th>
 
-            {users.map(user => (
-              <SortableUserHeader key={user.id} user={user} />
-            ))}
+        {users.map(user => (
+          <th
+            key={user.id}
+            className="border-b border-r border-gray-200 px-0 py-0 text-center"
+            style={{
+              backgroundColor: getTeamColor(user.jobTitle),
+              height: '100px',
+              width: '24px',
+              minWidth: '24px',
+            }}
+            title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}`}
+          >
+            <div
+              className="text-[10px] text-gray-700 font-medium select-none"
+              style={{
+                writingMode: 'vertical-lr',
+                textOrientation: 'mixed',
+                transform: 'rotate(180deg)',
+                maxHeight: '95px',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                margin: '0 auto',
+              }}
+            >
+              {user.displayName}
+            </div>
+          </th>
+        ))}
 
-            {/* Access Package name headers */}
-            {accessPackages.map((ap, idx) => (
-              <th
-                key={ap.id}
-                className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
-                style={{
-                  backgroundColor: '#e0e7ff',
-                  height: '100px',
-                  width: '24px',
-                  minWidth: '24px',
-                }}
-                title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
-              >
-                <div
-                  className="text-[10px] text-indigo-800 font-medium select-none"
-                  style={{
-                    writingMode: 'vertical-lr',
-                    textOrientation: 'mixed',
-                    transform: 'rotate(180deg)',
-                    maxHeight: '95px',
-                    overflow: 'hidden',
-                    whiteSpace: 'nowrap',
-                    margin: '0 auto',
-                  }}
-                >
-                  {ap.displayName}
-                </div>
-              </th>
-            ))}
+        {/* Access Package name headers */}
+        {accessPackages.map((ap, idx) => (
+          <th
+            key={ap.id}
+            className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
+            style={{
+              backgroundColor: '#e0e7ff',
+              height: '100px',
+              width: '24px',
+              minWidth: '24px',
+            }}
+            title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
+          >
+            <div
+              className="text-[10px] text-indigo-800 font-medium select-none"
+              style={{
+                writingMode: 'vertical-lr',
+                textOrientation: 'mixed',
+                transform: 'rotate(180deg)',
+                maxHeight: '95px',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                margin: '0 auto',
+              }}
+            >
+              {ap.displayName}
+            </div>
+          </th>
+        ))}
 
-            {/* Right metadata column headers row 2 */}
-            <th className="border-b border-l-2 border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
-            <th className="border-b border-gray-300 bg-gray-100" />
-          </tr>
-        </SortableContext>
-      </DndContext>
+        {/* Right metadata column headers row 2 */}
+        <th className="border-b border-l-2 border-gray-300 bg-gray-100" />
+        <th className="border-b border-gray-300 bg-gray-100" />
+        <th className="border-b border-gray-300 bg-gray-100" />
+        <th className="border-b border-gray-300 bg-gray-100" />
+      </tr>
     </thead>
   );
 }

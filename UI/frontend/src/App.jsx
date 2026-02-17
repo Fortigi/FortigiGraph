@@ -1,13 +1,10 @@
 import { useState } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import MatrixView from './components/MatrixView';
-import ActionsView from './components/ActionsView';
-import ViewToggle from './components/ViewToggle';
 
 export default function App() {
   const [userLimit, setUserLimit] = useState(25);
   const { data, totalUsers, accessPackageGroups, loading, error } = usePermissions(userLimit);
-  const [activeView, setActiveView] = useState('matrix');
 
   if (error) {
     return (
@@ -27,14 +24,11 @@ export default function App() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">FortigiGraph Role Mining</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Analyze permission assignments to discover role patterns
-            </p>
-          </div>
-          <ViewToggle activeView={activeView} onViewChange={setActiveView} />
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">FortigiGraph Role Mining</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Analyze permission assignments to discover role patterns
+          </p>
         </div>
       </header>
 
@@ -45,18 +39,13 @@ export default function App() {
             <div className="text-gray-500">Loading permission data...</div>
           </div>
         ) : (
-          <>
-            {activeView === 'matrix' && (
-              <MatrixView
-                data={data}
-                accessPackageGroups={accessPackageGroups}
-                totalUsers={totalUsers}
-                userLimit={userLimit}
-                setUserLimit={setUserLimit}
-              />
-            )}
-            {activeView === 'actions' && <ActionsView data={data} />}
-          </>
+          <MatrixView
+            data={data}
+            accessPackageGroups={accessPackageGroups}
+            totalUsers={totalUsers}
+            userLimit={userLimit}
+            setUserLimit={setUserLimit}
+          />
         )}
       </main>
     </div>

@@ -8,11 +8,6 @@ export default function MatrixGroupRow({
   totalUsers,
   memberships,
   managedMap,
-  annotations,
-  activeBrush,
-  palette,
-  onCellClick,
-  onCellShiftClick,
   accessPackages = [],
   apGroupMap,
 }) {
@@ -33,7 +28,6 @@ export default function MatrixGroupRow({
 
   const memberCount = group.memberCount;
   const pct = totalUsers > 0 ? Math.round((memberCount / totalUsers) * 100) : 0;
-
 
   return (
     <tr ref={setNodeRef} style={style} className="hover:bg-gray-50/30">
@@ -72,11 +66,6 @@ export default function MatrixGroupRow({
             cellKey={cellKey}
             membershipTypes={memberships.get(cellKey)}
             managed={managedMap?.has(cellKey)}
-            annotation={annotations[cellKey]}
-            activeBrush={activeBrush}
-            palette={palette}
-            onClick={onCellClick}
-            onShiftClick={onCellShiftClick}
           />
         );
       })}
