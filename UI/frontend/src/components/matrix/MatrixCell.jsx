@@ -7,7 +7,7 @@ const TYPE_INDICATORS = {
   Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
 };
 
-function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette, onClick, onShiftClick }) {
+function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush, palette, onClick, onShiftClick }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
   const paletteEntry = annotation ? palette.find(p => p.key === annotation) : null;
   const annotationColor = paletteEntry?.hex || null;
@@ -65,7 +65,7 @@ function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette
               return ind ? (
                 <span
                   className="inline-block w-4 h-4 rounded-sm text-[9px] font-bold leading-4 text-center"
-                  style={{ backgroundColor: ind.bg, color: ind.text }}
+                  style={{ backgroundColor: ind.bg, color: managed ? '#dc2626' : ind.text }}
                 >
                   {ind.letter}
                 </span>
@@ -74,7 +74,7 @@ function MatrixCell({ cellKey, membershipTypes, annotation, activeBrush, palette
               );
             })()
           ) : (
-            <span className="text-[9px] font-bold text-green-800">
+            <span className="text-[9px] font-bold" style={{ color: managed ? '#dc2626' : '#166534' }}>
               {[...membershipTypes].map(t => TYPE_INDICATORS[t]?.letter || '?').join('')}
             </span>
           )}
@@ -88,6 +88,7 @@ export default memo(MatrixCell, (prev, next) => {
   return (
     prev.annotation === next.annotation &&
     prev.activeBrush === next.activeBrush &&
-    prev.membershipTypes === next.membershipTypes
+    prev.membershipTypes === next.membershipTypes &&
+    prev.managed === next.managed
   );
 });

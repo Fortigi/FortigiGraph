@@ -7,6 +7,7 @@ export default function MatrixGroupRow({
   users,
   totalUsers,
   memberships,
+  managedMap,
   annotations,
   activeBrush,
   palette,
@@ -70,6 +71,7 @@ export default function MatrixGroupRow({
             key={cellKey}
             cellKey={cellKey}
             membershipTypes={memberships.get(cellKey)}
+            managed={managedMap?.has(cellKey)}
             annotation={annotations[cellKey]}
             activeBrush={activeBrush}
             palette={palette}

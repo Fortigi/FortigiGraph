@@ -148,10 +148,11 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
   }, [data, activeFilters, filterFields, filterText]);
 
   // Build matrix data structures
-  const { rawUsers, groups, memberships } = useMemo(() => {
+  const { rawUsers, groups, memberships, managedMap } = useMemo(() => {
     const userMap = new Map();
     const groupMap = new Map();
     const membershipMap = new Map();
+    const managed = new Map();
 
     filteredData.forEach(d => {
       // Users
@@ -195,6 +196,11 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
         membershipMap.set(key, new Set());
       }
       membershipMap.get(key).add(d.membershipType);
+
+      // Track managedByAccessPackage per cell
+      if (d.managedByAccessPackage) {
+        managed.set(key, true);
+      }
     });
 
     // Sort users by job title then name for initial default order
@@ -213,7 +219,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
     // Sort groups by member count descending (most common permissions first)
     const groups = [...groupMap.values()].sort((a, b) => b.memberCount - a.memberCount);
 
-    return { rawUsers, groups, memberships: membershipMap };
+    return { rawUsers, groups, memberships: membershipMap, managedMap: managed };
   }, [filteredData]);
 
   // Build access package data (SOLL matrix): which groups are in which access packages
@@ -396,6 +402,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
                       users={users}
                       totalUsers={users.length}
                       memberships={memberships}
+                      managedMap={managedMap}
                       annotations={annotations.cells}
                       activeBrush={annotations.activeBrush}
                       palette={annotations.palette}
