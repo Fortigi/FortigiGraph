@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../auth/AuthGate';
 
 function formatTimeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -35,6 +36,7 @@ const statusColors = {
 };
 
 export default function SyncLogPage({ onBack }) {
+  const { authFetch } = useAuth();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -43,7 +45,7 @@ export default function SyncLogPage({ onBack }) {
     let cancelled = false;
     async function fetchLogs() {
       try {
-        const res = await fetch('/api/sync-log?limit=50');
+        const res = await authFetch('/api/sync-log?limit=50');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!cancelled) setLogs(data);

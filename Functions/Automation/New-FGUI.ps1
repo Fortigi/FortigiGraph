@@ -19,7 +19,10 @@ function New-FGUI {
         [string]$Sku = 'B1',
 
         [Parameter(Mandatory = $false)]
-        [switch]$UseMockData
+        [switch]$UseMockData,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$NoAuth
     )
 
     # Suppress Az module deprecation warnings (e.g., Get-AzAccessToken SecureString change)
@@ -52,6 +55,34 @@ function New-FGUI {
         return Invoke-RestMethod @params
     }
 
+    # ─── Helper: Microsoft Graph API call ────────────────────────────────
+    function Invoke-GraphApi {
+        param(
+            [string]$Method,
+            [string]$Uri,
+            [object]$Body
+        )
+
+        $graphToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue).Token
+        $headers = @{
+            Authorization  = "Bearer $graphToken"
+            "Content-Type" = "application/json"
+        }
+
+        $params = @{
+            Method      = $Method
+            Uri         = $Uri
+            Headers     = $headers
+            ContentType = "application/json"
+        }
+
+        if ($Body) {
+            $params.Body = ($Body | ConvertTo-Json -Depth 10)
+        }
+
+        return Invoke-RestMethod @params
+    }
+
     # ─── Helper: Save UI settings to config file ──────────────────────────
     function Save-UIConfig {
         param(
@@ -59,7 +90,8 @@ function New-FGUI {
             [string]$WebAppName,
             [string]$AppServicePlanName,
             [string]$Location,
-            [string]$Sku
+            [string]$Sku,
+            [hashtable]$Auth
         )
         try {
             $cfg = Get-Content -Path $ConfigFilePath -Raw | ConvertFrom-Json
@@ -78,6 +110,20 @@ function New-FGUI {
                 $cfg.UI.Location = $Location
                 $cfg.UI.Sku = $Sku
                 $cfg.UI.URL = "https://$WebAppName.azurewebsites.net"
+            }
+
+            if ($Auth) {
+                $authObj = [PSCustomObject]@{
+                    AppRegistrationName = $Auth.AppRegistrationName
+                    ClientId            = $Auth.ClientId
+                    TenantId            = $Auth.TenantId
+                }
+
+                if ($cfg.UI.PSObject.Properties['Auth']) {
+                    $cfg.UI.Auth = $authObj
+                } else {
+                    $cfg.UI | Add-Member -MemberType NoteProperty -Name 'Auth' -Value $authObj
+                }
             }
 
             $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFilePath -Force
@@ -169,6 +215,7 @@ function New-FGUI {
     }
 
     $subId = (Get-AzContext).Subscription.Id
+    $tenantId = (Get-AzContext).Tenant.Id
 
     # ─── Verify Resource Group ─────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Verifying resource group: $resourceGroupName..." -ForegroundColor Cyan
@@ -177,6 +224,130 @@ function New-FGUI {
         throw "Resource group '$resourceGroupName' not found. Run New-FGConfig first."
     }
     Write-Host "  Resource group exists" -ForegroundColor Green
+
+    # ─── Entra ID App Registration for Authentication ─────────────────────
+    $uiClientId = $null
+    $uiAuthAppName = $null
+
+    if (-not $NoAuth) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Setting up Entra ID authentication..." -ForegroundColor Cyan
+
+        $uiAuthAppName = "FortigiGraph-UI-$WebAppName"
+        $redirectUri = "https://$WebAppName.azurewebsites.net"
+
+        # Check if app registration already exists (from config or by name)
+        if ($config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
+            $uiClientId = $config.UI.Auth.ClientId
+            Write-Host "  Found existing app in config: $uiClientId" -ForegroundColor Green
+
+            # Ensure redirect URI is current
+            try {
+                $existingApps = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$uiClientId'"
+                if ($existingApps.value.Count -gt 0) {
+                    $appObjectId = $existingApps.value[0].id
+                    $currentRedirects = @($existingApps.value[0].spa.redirectUris)
+                    if ($redirectUri -notin $currentRedirects) {
+                        $currentRedirects += $redirectUri
+                        Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
+                            spa = @{ redirectUris = $currentRedirects }
+                        } | Out-Null
+                        Write-Host "  Updated redirect URI: $redirectUri" -ForegroundColor Green
+                    }
+                }
+            } catch {
+                Write-Host "  Warning: Could not verify redirect URI: $_" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $uiClientId) {
+            # Search by display name
+            try {
+                $searchResult = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$uiAuthAppName'"
+                if ($searchResult.value.Count -gt 0) {
+                    $uiClientId = $searchResult.value[0].appId
+                    Write-Host "  Found existing app registration: $uiAuthAppName ($uiClientId)" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "  Warning: Could not search for existing app: $_" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $uiClientId) {
+            # Create new app registration
+            Write-Host "  Creating app registration: $uiAuthAppName..." -ForegroundColor Cyan
+
+            try {
+                $newApp = Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/applications" -Body @{
+                    displayName    = $uiAuthAppName
+                    signInAudience = "AzureADMyOrg"
+                    spa            = @{
+                        redirectUris = @($redirectUri)
+                    }
+                }
+
+                $uiClientId = $newApp.appId
+                $appObjectId = $newApp.id
+                Write-Host "  App registration created: $uiClientId" -ForegroundColor Green
+
+                # Add identifier URI and API scope with pre-authorization
+                $scopeId = [guid]::NewGuid().ToString()
+                Write-Host "  Configuring API scope and pre-authorization..." -ForegroundColor Cyan
+
+                Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
+                    identifierUris = @("api://$uiClientId")
+                    api = @{
+                        oauth2PermissionScopes = @(
+                            @{
+                                id                      = $scopeId
+                                adminConsentDisplayName  = "Access FortigiGraph UI"
+                                adminConsentDescription  = "Allow access to FortigiGraph Role Mining UI"
+                                userConsentDisplayName   = "Access FortigiGraph UI"
+                                userConsentDescription   = "Allow access to FortigiGraph Role Mining UI"
+                                value                    = "access"
+                                type                     = "User"
+                                isEnabled                = $true
+                            }
+                        )
+                        preAuthorizedApplications = @(
+                            @{
+                                appId                    = $uiClientId
+                                delegatedPermissionIds   = @($scopeId)
+                            }
+                        )
+                    }
+                } | Out-Null
+                Write-Host "  API scope configured (no admin consent required)" -ForegroundColor Green
+
+                # Create service principal
+                Write-Host "  Creating service principal..." -ForegroundColor Cyan
+                try {
+                    Invoke-GraphApi -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals" -Body @{
+                        appId = $uiClientId
+                    } | Out-Null
+                    Write-Host "  Service principal created" -ForegroundColor Green
+                } catch {
+                    if ($_.Exception.Response.StatusCode -eq 409 -or $_.ErrorDetails.Message -like "*already exists*") {
+                        Write-Host "  Service principal already exists" -ForegroundColor Green
+                    } else {
+                        Write-Host "  Warning: Could not create service principal: $_" -ForegroundColor Yellow
+                    }
+                }
+            } catch {
+                Write-Host "  Failed to create app registration: $_" -ForegroundColor Red
+                Write-Host "  The UI will be deployed without authentication." -ForegroundColor Yellow
+                Write-Host "  You can set up auth manually later by creating an App Registration" -ForegroundColor Yellow
+                Write-Host "  and configuring AUTH_ENABLED, AUTH_TENANT_ID, AUTH_CLIENT_ID env vars." -ForegroundColor Yellow
+                $uiClientId = $null
+            }
+        }
+
+        if ($uiClientId) {
+            Write-Host ""
+            Write-Host "  TIP: To restrict access, enable 'Assignment required' on the" -ForegroundColor Gray
+            Write-Host "  Enterprise Application '$uiAuthAppName' in the Azure Portal," -ForegroundColor Gray
+            Write-Host "  then assign users or groups." -ForegroundColor Gray
+        }
+    }
 
     # ─── Deployment Summary ────────────────────────────────────────────────
     Write-Host ""
@@ -187,6 +358,7 @@ function New-FGUI {
     Write-Host "  Web App:           $WebAppName" -ForegroundColor White
     Write-Host "  URL:               https://$WebAppName.azurewebsites.net" -ForegroundColor White
     Write-Host "  Data mode:         $(if ($UseMockData) { 'Mock data' } else { 'Azure SQL' })" -ForegroundColor White
+    Write-Host "  Authentication:    $(if ($uiClientId) { "Entra ID ($uiClientId)" } elseif ($NoAuth) { 'Disabled' } else { 'Disabled' })" -ForegroundColor White
     Write-Host ""
     $proceed = Read-Host "Proceed with deployment? (Y/N)"
     if ($proceed -notmatch '^[Yy]') {
@@ -281,7 +453,15 @@ function New-FGUI {
 
     # ─── Save config early (resource names are now known) ──────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Saving UI settings to config file..." -ForegroundColor Cyan
-    if (Save-UIConfig -ConfigFilePath $ConfigFile -WebAppName $WebAppName -AppServicePlanName $AppServicePlanName -Location $Location -Sku $Sku) {
+    $authConfig = $null
+    if ($uiClientId) {
+        $authConfig = @{
+            AppRegistrationName = $uiAuthAppName
+            ClientId            = $uiClientId
+            TenantId            = $tenantId
+        }
+    }
+    if (Save-UIConfig -ConfigFilePath $ConfigFile -WebAppName $WebAppName -AppServicePlanName $AppServicePlanName -Location $Location -Sku $Sku -Auth $authConfig) {
         Write-Host "  Config file updated" -ForegroundColor Green
     } else {
         Write-Host "  Warning: Could not update config file" -ForegroundColor Yellow
@@ -295,6 +475,15 @@ function New-FGUI {
         @{ name = "SCM_DO_BUILD_DURING_DEPLOYMENT"; value = "true" }
         @{ name = "WEBSITE_NODE_DEFAULT_VERSION";   value = "~20" }
     )
+
+    # Auth settings
+    if ($uiClientId) {
+        $settingsList += @{ name = "AUTH_ENABLED";   value = "true" }
+        $settingsList += @{ name = "AUTH_TENANT_ID"; value = $tenantId }
+        $settingsList += @{ name = "AUTH_CLIENT_ID"; value = $uiClientId }
+    } else {
+        $settingsList += @{ name = "AUTH_ENABLED"; value = "false" }
+    }
 
     if ($UseMockData) {
         $settingsList += @{ name = "USE_SQL"; value = "false" }
@@ -555,6 +744,20 @@ function New-FGUI {
     }
     Write-Host ""
 
+    if ($uiClientId) {
+        Write-Host "  Authentication: Entra ID enabled" -ForegroundColor Green
+        Write-Host "  App Registration: $uiAuthAppName" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  To restrict access to specific users/groups:" -ForegroundColor White
+        Write-Host "  1. Open Azure Portal > Enterprise Applications > $uiAuthAppName" -ForegroundColor Gray
+        Write-Host "  2. Set 'Assignment required?' to Yes" -ForegroundColor Gray
+        Write-Host "  3. Assign users or groups" -ForegroundColor Gray
+    } else {
+        Write-Host "  Authentication: Disabled" -ForegroundColor Yellow
+        Write-Host "  Run New-FGUI again without -NoAuth to enable Entra ID auth." -ForegroundColor Yellow
+    }
+    Write-Host ""
+
     return [PSCustomObject]@{
         WebAppName    = $WebAppName
         URL           = $appUrl
@@ -562,5 +765,6 @@ function New-FGUI {
         Location      = $Location
         Sku           = $Sku
         DataMode      = if ($UseMockData) { 'Mock' } else { 'SQL' }
+        Auth          = if ($uiClientId) { $uiClientId } else { 'Disabled' }
     }
 }
