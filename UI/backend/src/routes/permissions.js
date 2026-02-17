@@ -18,13 +18,26 @@ router.get('/permissions', async (req, res) => {
     if (useSql) {
       const p = await db.getPool();
 
+      // Prefer materialized tables (fast) with view fallback (slow but always current)
+      const matCheck = await p.request().query(`
+        SELECT
+          OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
+          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists
+      `);
+      const permSource = matCheck.recordset[0].matPermExists
+        ? 'mat_UserPermissionAssignments'
+        : 'vw_UserPermissionAssignments';
+      const apSource = matCheck.recordset[0].matApExists
+        ? 'mat_UserPermissionAssignmentViaAccessPackage'
+        : 'vw_UserPermissionAssignmentViaAccessPackage';
+
       // Main permissions query
       let result;
       if (userLimit > 0) {
         result = await p.request().input('userLimit', userLimit).query(`
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
-            FROM vw_UserPermissionAssignments p
+            FROM ${permSource} p
             WHERE p.memberType != '#microsoft.graph.group'
             GROUP BY p.memberId
             ORDER BY COUNT(*) DESC
@@ -46,7 +59,7 @@ router.get('/permissions', async (req, res) => {
             u.userType,
             u.employeeType,
             p.managedByAccessPackage
-          FROM vw_UserPermissionAssignments p
+          FROM ${permSource} p
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group'
@@ -76,14 +89,14 @@ router.get('/permissions', async (req, res) => {
             u.userType,
             u.employeeType,
             p.managedByAccessPackage
-          FROM vw_UserPermissionAssignments p
+          FROM ${permSource} p
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group';
         `);
       }
 
-      // Separate query for AP mapping (gracefully falls back if view doesn't exist)
+      // Separate query for AP mapping (gracefully falls back if view/table doesn't exist)
       let managedByPackages = [];
       try {
         let apSql;
@@ -93,10 +106,10 @@ router.get('/permissions', async (req, res) => {
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            FROM ${apSource} ap
             WHERE ap.userId IN (
               SELECT TOP (${parseInt(userLimit)}) p.memberId
-              FROM vw_UserPermissionAssignments p
+              FROM ${permSource} p
               WHERE p.memberType != '#microsoft.graph.group'
               GROUP BY p.memberId
               ORDER BY COUNT(*) DESC
@@ -109,7 +122,7 @@ router.get('/permissions', async (req, res) => {
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            FROM ${apSource} ap
             GROUP BY ap.userId, ap.groupId;
           `;
         }

@@ -1453,6 +1453,15 @@ function Write-SyncError {
         } catch {
             Write-SyncError "Access package view creation failed" $_.Exception.Message
         }
+
+        # Materialize views into tables for fast UI queries
+        try {
+            Write-SyncStep "Materializing views into indexed tables..."
+            Sync-FGMaterializedViews
+            Write-SyncSuccess "Views materialized for UI performance"
+        } catch {
+            Write-SyncError "View materialization failed" $_.Exception.Message
+        }
     }
     #endregion
 
