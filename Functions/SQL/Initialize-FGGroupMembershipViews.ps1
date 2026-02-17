@@ -240,13 +240,13 @@ SELECT
 FROM CurrentMembers
 "@
 
-        # Add owners if table exists (using LEFT JOIN anti-pattern for performance)
+        # Add owners if table exists
         if ($ownersExists) {
             $createView2SQL += @"
 
 UNION ALL
 
--- Owners (excluding those who are already members)
+-- Owners
 SELECT
     o.groupId,
     o.ownerId AS memberId,
@@ -255,21 +255,17 @@ SELECT
     o.ValidFrom,
     o.ValidTo
 FROM dbo.$OwnersTable o
-LEFT JOIN CurrentMembers cm
-    ON cm.groupId = o.groupId
-    AND cm.memberId = o.ownerId
 WHERE o.ValidTo = '9999-12-31 23:59:59.9999999'
-    AND cm.memberId IS NULL  -- Anti-join: owner is NOT a member
 "@
         }
 
-        # Add eligible members if table exists (using LEFT JOIN anti-pattern for performance)
+        # Add eligible members if table exists
         if ($eligibleExists) {
             $createView2SQL += @"
 
 UNION ALL
 
--- Eligible Members (excluding those who are already active members)
+-- Eligible Members
 SELECT
     e.groupId,
     e.memberId,
@@ -278,11 +274,7 @@ SELECT
     e.ValidFrom,
     e.ValidTo
 FROM dbo.$EligibleMembersTable e
-LEFT JOIN CurrentMembers cm
-    ON cm.groupId = e.groupId
-    AND cm.memberId = e.memberId
 WHERE e.ValidTo = '9999-12-31 23:59:59.9999999'
-    AND cm.memberId IS NULL  -- Anti-join: eligible is NOT already a member
 "@
         }
 
