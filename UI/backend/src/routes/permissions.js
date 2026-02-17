@@ -165,7 +165,7 @@ router.get('/permissions', async (req, res) => {
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
             FROM ${permSource} p
-            LEFT JOIN GraphUsers u ON p.memberId = u.id
+            INNER JOIN GraphUsers u ON p.memberId = u.id
             WHERE p.memberType != '#microsoft.graph.group'
               ${filterWhere}
             GROUP BY p.memberId
@@ -184,14 +184,14 @@ router.get('/permissions', async (req, res) => {
             ${dynamicUserCols},
             p.managedByAccessPackage
           FROM ${permSource} p
-          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group'
             AND p.memberId IN (SELECT memberId FROM TopUsers);
 
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM ${permSource} p
-          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          INNER JOIN GraphUsers u ON p.memberId = u.id
           WHERE p.memberType != '#microsoft.graph.group'
             ${filterWhere};
         `);
@@ -214,7 +214,7 @@ router.get('/permissions', async (req, res) => {
             ${dynamicUserCols},
             p.managedByAccessPackage
           FROM ${permSource} p
-          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group'
             ${filterWhere};
@@ -241,7 +241,7 @@ router.get('/permissions', async (req, res) => {
             WITH TopUsers AS (
               SELECT TOP (@userLimit) p.memberId
               FROM ${permSource} p
-              LEFT JOIN GraphUsers u ON p.memberId = u.id
+              INNER JOIN GraphUsers u ON p.memberId = u.id
               WHERE p.memberType != '#microsoft.graph.group'
                 ${filterWhere}
               GROUP BY p.memberId
