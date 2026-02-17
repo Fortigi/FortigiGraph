@@ -227,14 +227,15 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
           id: row.accessPackageId,
           displayName: row.accessPackageName,
           catalogName: row.catalogName,
+          totalAssignments: row.totalAssignments || 0,
         });
       }
       mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
     }
 
-    // Sort access packages alphabetically
+    // Sort access packages by total assignments descending (broadest first)
     const accessPackages = [...apMap.values()].sort((a, b) =>
-      a.displayName.localeCompare(b.displayName)
+      b.totalAssignments - a.totalAssignments || a.displayName.localeCompare(b.displayName)
     );
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);

@@ -84,7 +84,6 @@ router.get('/permissions', async (req, res) => {
 
       // Separate query for AP mapping (gracefully falls back if view doesn't exist)
       let managedByPackages = [];
-      let apDebug = null;
       try {
         let apSql;
         if (userLimit > 0) {
@@ -121,10 +120,8 @@ router.get('/permissions', async (req, res) => {
             groupId: r.groupId,
             accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
           }));
-        apDebug = { status: 'ok', rowCount: managedByPackages.length };
       } catch (apErr) {
         console.error('AP mapping query failed (non-fatal):', apErr.message);
-        apDebug = { status: 'error', message: apErr.message };
       }
 
       if (userLimit > 0) {
@@ -132,7 +129,6 @@ router.get('/permissions', async (req, res) => {
           data: result.recordsets[0],
           totalUsers: result.recordsets[1][0].totalUsers,
           managedByPackages,
-          _apDebug: apDebug,
         });
       }
       return res.json({
@@ -174,11 +170,18 @@ router.get('/access-package-groups', async (req, res) => {
           c.displayName  AS catalogName,
           UPPER(rrs.scopeOriginId) AS groupId,
           g.displayName  AS groupName,
-          rrs.roleDisplayName AS roleName
+          rrs.roleDisplayName AS roleName,
+          ISNULL(ac.cnt, 0) AS totalAssignments
         FROM dbo.GraphAccessPackageResourceRoleScopes rrs
         INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
         INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
         LEFT  JOIN dbo.GraphGroups g ON UPPER(rrs.scopeOriginId) = g.id
+        LEFT  JOIN (
+          SELECT accessPackageId, COUNT(*) AS cnt
+          FROM dbo.GraphAccessPackageAssignments
+          WHERE assignmentState = 'delivered'
+          GROUP BY accessPackageId
+        ) ac ON rrs.accessPackageId = ac.accessPackageId
         WHERE rrs.scopeOriginSystem = 'AadGroup'
       `);
       return res.json(result.recordset);
