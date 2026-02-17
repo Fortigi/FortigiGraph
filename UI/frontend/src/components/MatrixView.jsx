@@ -24,13 +24,12 @@ const FIELD_LABELS = {
   employeeType: 'Employee Type',
 };
 
-export default function MatrixView({ data, accessPackageGroups = [] }) {
+export default function MatrixView({ data, accessPackageGroups = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
   // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
   const [managedFilter, setManagedFilter] = useState('both'); // 'both' | 'ist' | 'soll'
-  const [userLimit, setUserLimit] = useState(25);
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -259,15 +258,10 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);
 
-  // Apply custom column order, then limit
-  const allUsers = useMemo(
+  // Apply custom column order (data already limited server-side)
+  const users = useMemo(
     () => colOrderHook.getOrderedUsers(rawUsers),
     [rawUsers, colOrderHook.getOrderedUsers]
-  );
-  const totalUserCount = allUsers.length;
-  const users = useMemo(
-    () => userLimit > 0 ? allUsers.slice(0, userLimit) : allUsers,
-    [allUsers, userLimit]
   );
 
   // Unique group types for filter dropdown
@@ -345,7 +339,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
 
   const stats = {
     users: users.length,
-    totalUsers: totalUserCount,
+    totalUsers: serverTotalUsers,
     groups: orderedGroups.length,
     memberships: memberships.size,
   };

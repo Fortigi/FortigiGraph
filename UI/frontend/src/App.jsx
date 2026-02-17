@@ -5,7 +5,8 @@ import ActionsView from './components/ActionsView';
 import ViewToggle from './components/ViewToggle';
 
 export default function App() {
-  const { data, accessPackageGroups, loading, error } = usePermissions();
+  const [userLimit, setUserLimit] = useState(25);
+  const { data, totalUsers, accessPackageGroups, loading, error } = usePermissions(userLimit);
   const [activeView, setActiveView] = useState('matrix');
 
   if (error) {
@@ -45,7 +46,15 @@ export default function App() {
           </div>
         ) : (
           <>
-            {activeView === 'matrix' && <MatrixView data={data} accessPackageGroups={accessPackageGroups} />}
+            {activeView === 'matrix' && (
+              <MatrixView
+                data={data}
+                accessPackageGroups={accessPackageGroups}
+                totalUsers={totalUsers}
+                userLimit={userLimit}
+                setUserLimit={setUserLimit}
+              />
+            )}
             {activeView === 'actions' && <ActionsView data={data} />}
           </>
         )}

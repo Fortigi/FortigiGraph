@@ -10,35 +10,108 @@ if (useSql) {
 }
 
 // GET /api/permissions - vw_UserPermissionAssignments enriched with display names
+// Optional query params: userLimit (int) - limit to top N users by assignment count
 router.get('/permissions', async (req, res) => {
   try {
+    const userLimit = parseInt(req.query.userLimit) || 0;
+
     if (useSql) {
-      const result = await db.query(`
-        SELECT
-          p.groupId,
-          g.displayName AS groupDisplayName,
-          g.groupTypeCalculated,
-          g.description AS groupDescription,
-          p.memberId,
-          u.displayName AS memberDisplayName,
-          u.userPrincipalName AS memberUPN,
-          p.memberType,
-          p.membershipType,
-          u.department,
-          u.jobTitle,
-          u.companyName,
-          u.accountEnabled,
-          u.userType,
-          u.employeeType,
-          p.managedByAccessPackage
-        FROM vw_UserPermissionAssignments p
-        LEFT JOIN GraphUsers u ON p.memberId = u.id
-        LEFT JOIN GraphGroups g ON p.groupId = g.id
-        WHERE p.memberType != '#microsoft.graph.group'
-      `);
-      return res.json(result.recordset);
+      const p = await db.getPool();
+      const request = p.request();
+
+      let dataSql;
+      if (userLimit > 0) {
+        request.input('userLimit', userLimit);
+        dataSql = `
+          WITH TopUsers AS (
+            SELECT TOP (@userLimit) p.memberId
+            FROM vw_UserPermissionAssignments p
+            WHERE p.memberType != '#microsoft.graph.group'
+            GROUP BY p.memberId
+            ORDER BY COUNT(*) DESC
+          )
+          SELECT
+            p.groupId,
+            g.displayName AS groupDisplayName,
+            g.groupTypeCalculated,
+            g.description AS groupDescription,
+            p.memberId,
+            u.displayName AS memberDisplayName,
+            u.userPrincipalName AS memberUPN,
+            p.memberType,
+            p.membershipType,
+            u.department,
+            u.jobTitle,
+            u.companyName,
+            u.accountEnabled,
+            u.userType,
+            u.employeeType,
+            p.managedByAccessPackage
+          FROM vw_UserPermissionAssignments p
+          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          LEFT JOIN GraphGroups g ON p.groupId = g.id
+          WHERE p.memberType != '#microsoft.graph.group'
+            AND p.memberId IN (SELECT memberId FROM TopUsers);
+
+          SELECT COUNT(DISTINCT p.memberId) AS totalUsers
+          FROM vw_UserPermissionAssignments p
+          WHERE p.memberType != '#microsoft.graph.group';
+        `;
+      } else {
+        dataSql = `
+          SELECT
+            p.groupId,
+            g.displayName AS groupDisplayName,
+            g.groupTypeCalculated,
+            g.description AS groupDescription,
+            p.memberId,
+            u.displayName AS memberDisplayName,
+            u.userPrincipalName AS memberUPN,
+            p.memberType,
+            p.membershipType,
+            u.department,
+            u.jobTitle,
+            u.companyName,
+            u.accountEnabled,
+            u.userType,
+            u.employeeType,
+            p.managedByAccessPackage
+          FROM vw_UserPermissionAssignments p
+          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          LEFT JOIN GraphGroups g ON p.groupId = g.id
+          WHERE p.memberType != '#microsoft.graph.group';
+        `;
+      }
+
+      const result = await request.query(dataSql);
+
+      if (userLimit > 0) {
+        return res.json({
+          data: result.recordsets[0],
+          totalUsers: result.recordsets[1][0].totalUsers,
+        });
+      }
+      return res.json({
+        data: result.recordset,
+        totalUsers: new Set(result.recordset.map(r => r.memberId)).size,
+      });
     }
-    res.json(permissionAssignments);
+
+    // Mock data path
+    let mockData = permissionAssignments;
+    const allUserIds = [...new Set(mockData.map(r => r.memberId))];
+    if (userLimit > 0) {
+      const userCounts = {};
+      mockData.forEach(r => { userCounts[r.memberId] = (userCounts[r.memberId] || 0) + 1; });
+      const topUserIds = new Set(
+        Object.entries(userCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, userLimit)
+          .map(e => e[0])
+      );
+      mockData = mockData.filter(r => topUserIds.has(r.memberId));
+    }
+    res.json({ data: mockData, totalUsers: allUserIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
