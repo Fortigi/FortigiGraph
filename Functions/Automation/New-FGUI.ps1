@@ -22,7 +22,10 @@ function New-FGUI {
         [switch]$UseMockData,
 
         [Parameter(Mandatory = $false)]
-        [switch]$NoAuth
+        [switch]$NoAuth,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Force
     )
 
     # Suppress Az module deprecation warnings (e.g., Get-AzAccessToken SecureString change)
@@ -235,8 +238,39 @@ function New-FGUI {
         $uiAuthAppName = "FortigiGraph-UI-$WebAppName"
         $redirectUri = "https://$WebAppName.azurewebsites.net"
 
+        # -Force: delete existing app registration so it gets recreated cleanly
+        if ($Force) {
+            $appsToDelete = @()
+
+            # Check config for existing client ID
+            if ($config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
+                try {
+                    $existing = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$($config.UI.Auth.ClientId)'"
+                    if ($existing.value.Count -gt 0) { $appsToDelete += $existing.value[0] }
+                } catch {}
+            }
+
+            # Also check by display name (catches orphaned registrations)
+            try {
+                $byName = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$uiAuthAppName'"
+                foreach ($app in $byName.value) {
+                    if ($appsToDelete.id -notcontains $app.id) { $appsToDelete += $app }
+                }
+            } catch {}
+
+            foreach ($app in $appsToDelete) {
+                Write-Host "  Deleting app registration: $($app.displayName) ($($app.appId))..." -ForegroundColor Yellow
+                try {
+                    Invoke-GraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/applications/$($app.id)" | Out-Null
+                    Write-Host "  Deleted" -ForegroundColor Yellow
+                } catch {
+                    Write-Host "  Warning: Could not delete app registration: $_" -ForegroundColor Yellow
+                }
+            }
+        }
+
         # Check if app registration already exists (from config or by name)
-        if ($config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
+        if (-not $Force -and $config.UI -and $config.UI.Auth -and $config.UI.Auth.ClientId) {
             $uiClientId = $config.UI.Auth.ClientId
             Write-Host "  Found existing app in config: $uiClientId" -ForegroundColor Green
 
