@@ -32,8 +32,11 @@ export function authMiddleware(req, res, next) {
   const token = authHeader.split(' ')[1];
 
   jwt.verify(token, getKey, {
-    audience: `api://${clientId}`,
-    issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+    audience: [`api://${clientId}`, clientId],
+    issuer: [
+      `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      `https://sts.windows.net/${tenantId}/`,
+    ],
     algorithms: ['RS256'],
   }, (err, decoded) => {
     if (err) {

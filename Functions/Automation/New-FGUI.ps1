@@ -368,6 +368,19 @@ function New-FGUI {
 
                 Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
                     api = @{
+                        requestedAccessTokenVersion = 2
+                        oauth2PermissionScopes = @(
+                            @{
+                                id                      = $scopeId
+                                adminConsentDisplayName  = "Access FortigiGraph UI"
+                                adminConsentDescription  = "Allow access to FortigiGraph Role Mining UI"
+                                userConsentDisplayName   = "Access FortigiGraph UI"
+                                userConsentDescription   = "Allow access to FortigiGraph Role Mining UI"
+                                value                    = "access"
+                                type                     = "User"
+                                isEnabled                = $true
+                            }
+                        )
                         preAuthorizedApplications = @(
                             @{
                                 appId                  = $uiClientId
