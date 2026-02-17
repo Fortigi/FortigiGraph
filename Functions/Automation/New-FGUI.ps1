@@ -289,9 +289,9 @@ function New-FGUI {
                 $appObjectId = $newApp.id
                 Write-Host "  App registration created: $uiClientId" -ForegroundColor Green
 
-                # Add identifier URI and API scope with pre-authorization
+                # Step 1: Add identifier URI and API scope
                 $scopeId = [guid]::NewGuid().ToString()
-                Write-Host "  Configuring API scope and pre-authorization..." -ForegroundColor Cyan
+                Write-Host "  Configuring API scope..." -ForegroundColor Cyan
 
                 Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
                     identifierUris = @("api://$uiClientId")
@@ -308,15 +308,25 @@ function New-FGUI {
                                 isEnabled                = $true
                             }
                         )
+                    }
+                } | Out-Null
+                Write-Host "  API scope configured" -ForegroundColor Green
+
+                # Step 2: Pre-authorize the SPA for its own API scope (must be separate
+                # PATCH because the scope needs to exist before it can be referenced)
+                Write-Host "  Pre-authorizing SPA for API scope..." -ForegroundColor Cyan
+
+                Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
+                    api = @{
                         preAuthorizedApplications = @(
                             @{
-                                appId                    = $uiClientId
-                                delegatedPermissionIds   = @($scopeId)
+                                appId                  = $uiClientId
+                                delegatedPermissionIds = @($scopeId)
                             }
                         )
                     }
                 } | Out-Null
-                Write-Host "  API scope configured (no admin consent required)" -ForegroundColor Green
+                Write-Host "  Pre-authorization configured (no consent prompt)" -ForegroundColor Green
 
                 # Create service principal
                 Write-Host "  Creating service principal..." -ForegroundColor Cyan
@@ -334,6 +344,18 @@ function New-FGUI {
                 }
             } catch {
                 Write-Host "  Failed to create app registration: $_" -ForegroundColor Red
+
+                # Clean up partially created app registration
+                if ($appObjectId) {
+                    Write-Host "  Cleaning up partial app registration..." -ForegroundColor Yellow
+                    try {
+                        Invoke-GraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" | Out-Null
+                        Write-Host "  Partial app registration removed" -ForegroundColor Yellow
+                    } catch {
+                        Write-Host "  Warning: Could not clean up app '$uiAuthAppName'. Delete it manually in Azure Portal > App Registrations." -ForegroundColor Yellow
+                    }
+                }
+
                 Write-Host "  The UI will be deployed without authentication." -ForegroundColor Yellow
                 Write-Host "  You can set up auth manually later by creating an App Registration" -ForegroundColor Yellow
                 Write-Host "  and configuring AUTH_ENABLED, AUTH_TENANT_ID, AUTH_CLIENT_ID env vars." -ForegroundColor Yellow
