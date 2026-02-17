@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
+export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -202,22 +202,26 @@ export async function exportToExcel({ users, orderedGroups, memberships, activeF
         }
       }
 
-      // Cell background
+      // Cell background: AP color for managed cells, green for unmanaged
       if (hasMembership) {
-        const types = [...memberTypes];
-        if (types.length === 1 && TYPE_COLORS[types[0]]) {
-          excelCell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FF' + TYPE_COLORS[types[0]].bg },
-          };
-        } else {
-          excelCell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFDCFCE7' }, // light green (default membership bg)
-          };
+        const apIds = managedApMap?.get(cellKey) || managedApMap?.get(`${group.id.toUpperCase()}|${users[u].id}`);
+        let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
+        if (apIds && apIds.length > 0 && apIdToIndex) {
+          const firstIdx = apIdToIndex.get(apIds[0]);
+          if (firstIdx != null) {
+            bgArgb = hexToArgb(getApColorHex(firstIdx));
+          } else {
+            bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
+          }
+          if (apIds.length > 1) {
+            excelCell.note = `Managed by: ${apIds.length} access packages`;
+          }
         }
+        excelCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: bgArgb },
+        };
       }
 
       excelCell.border = thinBorder();

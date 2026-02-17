@@ -17,7 +17,7 @@ function useHashRoute() {
 
 export default function App() {
   const [userLimit, setUserLimit] = useState(25);
-  const { data, totalUsers, accessPackageGroups, loading, error } = usePermissions(userLimit);
+  const { data, totalUsers, accessPackageGroups, managedByPackages, loading, error } = usePermissions(userLimit);
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
 
@@ -81,6 +81,7 @@ export default function App() {
           <MatrixView
             data={data}
             accessPackageGroups={accessPackageGroups}
+            managedByPackages={managedByPackages}
             totalUsers={totalUsers}
             userLimit={userLimit}
             setUserLimit={setUserLimit}

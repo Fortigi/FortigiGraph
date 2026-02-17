@@ -22,7 +22,7 @@ const FIELD_LABELS = {
   employeeType: 'Employee Type',
 };
 
-export default function MatrixView({ data, accessPackageGroups = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
+export default function MatrixView({ data, accessPackageGroups = [], managedByPackages = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
   // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
@@ -172,7 +172,7 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
       }
       membershipMap.get(key).add(d.membershipType);
 
-      // Track managedByAccessPackage per cell
+      // Track managedByAccessPackage per cell (boolean from view, used for filtering)
       if (d.managedByAccessPackage) {
         managed.set(key, true);
       }
@@ -196,6 +196,21 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
 
     return { users, groups, memberships: membershipMap, managedMap: managed };
   }, [filteredData]);
+
+  // Build managed-by-AP map: cellKey -> accessPackageId[]
+  // Uses case-insensitive groupId matching (AP view uppercases, main view may not)
+  const managedApMap = useMemo(() => {
+    const map = new Map();
+    if (!managedByPackages || managedByPackages.length === 0) return map;
+    for (const r of managedByPackages) {
+      // Try both original and uppercased groupId to handle SQL collation differences
+      const key = `${r.groupId}|${r.memberId}`;
+      const keyUpper = `${(r.groupId || '').toUpperCase()}|${r.memberId}`;
+      map.set(key, r.accessPackageIds);
+      if (key !== keyUpper) map.set(keyUpper, r.accessPackageIds);
+    }
+    return map;
+  }, [managedByPackages]);
 
   // Build access package data (SOLL matrix): which groups are in which access packages
   const { accessPackages, apGroupMap } = useMemo(() => {
@@ -226,6 +241,13 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
     );
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);
+
+  // AP ID -> sorted index (for consistent color lookup)
+  const apIdToIndex = useMemo(() => {
+    const map = new Map();
+    accessPackages.forEach((ap, idx) => map.set(ap.id, idx));
+    return map;
+  }, [accessPackages]);
 
   // Unique group types for filter dropdown
   const uniqueGroupTypes = useMemo(() => {
@@ -271,12 +293,14 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
       users,
       orderedGroups,
       memberships,
+      managedApMap,
+      apIdToIndex,
       activeFilters,
       filterFields,
       accessPackages,
       apGroupMap,
     });
-  }, [users, orderedGroups, memberships, activeFilters, filterFields, accessPackages, apGroupMap]);
+  }, [users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages, apGroupMap]);
 
   const stats = {
     users: users.length,
@@ -343,6 +367,8 @@ export default function MatrixView({ data, accessPackageGroups = [], totalUsers:
                       totalUsers={users.length}
                       memberships={memberships}
                       managedMap={managedMap}
+                      managedApMap={managedApMap}
+                      apIdToIndex={apIdToIndex}
                       accessPackages={accessPackages}
                       apGroupMap={apGroupMap}
                     />

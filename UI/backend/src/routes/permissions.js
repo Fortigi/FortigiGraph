@@ -56,6 +56,27 @@ router.get('/permissions', async (req, res) => {
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM vw_UserPermissionAssignments p
           WHERE p.memberType != '#microsoft.graph.group';
+
+          IF OBJECT_ID('dbo.vw_UserPermissionAssignmentViaAccessPackage', 'V') IS NOT NULL
+          BEGIN
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
+            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            WHERE ap.userId IN (
+              SELECT TOP (@userLimit) p.memberId
+              FROM vw_UserPermissionAssignments p
+              WHERE p.memberType != '#microsoft.graph.group'
+              GROUP BY p.memberId
+              ORDER BY COUNT(*) DESC
+            )
+            GROUP BY ap.userId, ap.groupId;
+          END
+          ELSE
+          BEGIN
+            SELECT NULL AS memberId, NULL AS groupId, NULL AS accessPackageIds WHERE 1=0;
+          END
         `;
       } else {
         dataSql = `
@@ -80,20 +101,46 @@ router.get('/permissions', async (req, res) => {
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group';
+
+          IF OBJECT_ID('dbo.vw_UserPermissionAssignmentViaAccessPackage', 'V') IS NOT NULL
+          BEGIN
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
+            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            GROUP BY ap.userId, ap.groupId;
+          END
+          ELSE
+          BEGIN
+            SELECT NULL AS memberId, NULL AS groupId, NULL AS accessPackageIds WHERE 1=0;
+          END
         `;
       }
 
       const result = await request.query(dataSql);
 
+      // Parse AP mapping: last recordset contains (memberId, groupId, accessPackageIds CSV)
+      const apRecordset = result.recordsets[result.recordsets.length - 1] || [];
+      const managedByPackages = apRecordset
+        .filter(r => r.memberId)
+        .map(r => ({
+          memberId: r.memberId,
+          groupId: r.groupId,
+          accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+        }));
+
       if (userLimit > 0) {
         return res.json({
           data: result.recordsets[0],
           totalUsers: result.recordsets[1][0].totalUsers,
+          managedByPackages,
         });
       }
       return res.json({
-        data: result.recordset,
-        totalUsers: new Set(result.recordset.map(r => r.memberId)).size,
+        data: result.recordsets[0],
+        totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
+        managedByPackages,
       });
     }
 
@@ -111,7 +158,7 @@ router.get('/permissions', async (req, res) => {
       );
       mockData = mockData.filter(r => topUserIds.has(r.memberId));
     }
-    res.json({ data: mockData, totalUsers: allUserIds.length });
+    res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

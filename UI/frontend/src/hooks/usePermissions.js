@@ -8,6 +8,7 @@ export function usePermissions(userLimit = 25) {
   const [data, setData] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [accessPackageGroups, setAccessPackageGroups] = useState([]);
+  const [managedByPackages, setManagedByPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -48,6 +49,7 @@ export function usePermissions(userLimit = 25) {
         if (cancelled) return;
         setData(permResult.data);
         setTotalUsers(permResult.totalUsers);
+        setManagedByPackages(permResult.managedByPackages || []);
 
         if (apRes.ok) {
           setAccessPackageGroups(await apRes.json());
@@ -67,5 +69,5 @@ export function usePermissions(userLimit = 25) {
     };
   }, [debouncedLimit, fetchPermissions, authFetch]);
 
-  return { data, totalUsers, accessPackageGroups, loading, error };
+  return { data, totalUsers, accessPackageGroups, managedByPackages, loading, error };
 }

@@ -7,23 +7,45 @@ const TYPE_INDICATORS = {
   Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
 };
 
-function MatrixCell({ cellKey, membershipTypes, managed }) {
+function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
+
+  // Background: AP color for managed cells (if known), fallback blue for managed, green for unmanaged
+  let bgColor;
+  if (hasMembership) {
+    if (managed && apColor) {
+      bgColor = apColor;
+    } else if (managed) {
+      bgColor = '#dbeafe';
+    } else {
+      bgColor = '#dcfce7';
+    }
+  }
+
+  // Tooltip
+  let title;
+  if (hasMembership) {
+    const types = [...membershipTypes].join(', ');
+    if (apNames && apNames.length > 0) {
+      title = `${types}\nManaged by: ${apNames.join(', ')}`;
+    } else if (managed) {
+      title = `${types} (managed by access package)`;
+    } else {
+      title = types;
+    }
+  }
 
   return (
     <td
       className="px-0 py-0 text-center border-r border-b border-gray-100"
       style={{
-        backgroundColor: hasMembership ? (managed ? '#dbeafe' : '#dcfce7') : undefined,
+        backgroundColor: bgColor,
         minWidth: '24px',
         width: '24px',
         height: '24px',
+        position: apCount > 1 ? 'relative' : undefined,
       }}
-      title={
-        hasMembership
-          ? [...membershipTypes].join(', ') + (managed ? ' (managed by access package)' : '')
-          : undefined
-      }
+      title={title}
     >
       {hasMembership && (
         <div className="flex items-center justify-center gap-px">
@@ -49,6 +71,14 @@ function MatrixCell({ cellKey, membershipTypes, managed }) {
           )}
         </div>
       )}
+      {apCount > 1 && (
+        <span
+          className="absolute -top-1 -right-1 flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-bold leading-none bg-white text-gray-700 border border-gray-300 shadow-sm"
+          style={{ zIndex: 1 }}
+        >
+          {apCount}
+        </span>
+      )}
     </td>
   );
 }
@@ -56,6 +86,8 @@ function MatrixCell({ cellKey, membershipTypes, managed }) {
 export default memo(MatrixCell, (prev, next) => {
   return (
     prev.membershipTypes === next.membershipTypes &&
-    prev.managed === next.managed
+    prev.managed === next.managed &&
+    prev.apColor === next.apColor &&
+    prev.apCount === next.apCount
   );
 });

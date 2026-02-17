@@ -9,6 +9,8 @@ export default function MatrixGroupRow({
   totalUsers,
   memberships,
   managedMap,
+  managedApMap,
+  apIdToIndex,
   accessPackages = [],
   apGroupMap,
 }) {
@@ -61,12 +63,30 @@ export default function MatrixGroupRow({
       {/* Intersection cells */}
       {users.map(user => {
         const cellKey = `${group.id}|${user.id}`;
+        const managed = managedMap?.has(cellKey);
+        // Look up which access packages manage this cell
+        const apIds = managed ? (managedApMap?.get(cellKey) || managedApMap?.get(`${group.id.toUpperCase()}|${user.id}`)) : null;
+        let apColor = null;
+        let apCount = 0;
+        let apNames = null;
+        if (apIds && apIds.length > 0) {
+          apCount = apIds.length;
+          const firstIdx = apIdToIndex?.get(apIds[0]);
+          if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
+          apNames = apIds.map(id => {
+            const ap = accessPackages.find(a => a.id === id);
+            return ap ? ap.displayName : id;
+          });
+        }
         return (
           <MatrixCell
             key={cellKey}
             cellKey={cellKey}
             membershipTypes={memberships.get(cellKey)}
-            managed={managedMap?.has(cellKey)}
+            managed={managed}
+            apColor={apColor}
+            apCount={apCount}
+            apNames={apNames}
           />
         );
       })}
