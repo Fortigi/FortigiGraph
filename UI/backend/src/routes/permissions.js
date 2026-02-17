@@ -17,12 +17,11 @@ router.get('/permissions', async (req, res) => {
 
     if (useSql) {
       const p = await db.getPool();
-      const request = p.request();
 
-      let dataSql;
+      // Main permissions query
+      let result;
       if (userLimit > 0) {
-        request.input('userLimit', userLimit);
-        dataSql = `
+        result = await p.request().input('userLimit', userLimit).query(`
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
             FROM vw_UserPermissionAssignments p
@@ -56,30 +55,9 @@ router.get('/permissions', async (req, res) => {
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM vw_UserPermissionAssignments p
           WHERE p.memberType != '#microsoft.graph.group';
-
-          IF OBJECT_ID('dbo.vw_UserPermissionAssignmentViaAccessPackage', 'V') IS NOT NULL
-          BEGIN
-            SELECT
-              ap.userId AS memberId,
-              ap.groupId,
-              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
-            FROM vw_UserPermissionAssignmentViaAccessPackage ap
-            WHERE ap.userId IN (
-              SELECT TOP (@userLimit) p.memberId
-              FROM vw_UserPermissionAssignments p
-              WHERE p.memberType != '#microsoft.graph.group'
-              GROUP BY p.memberId
-              ORDER BY COUNT(*) DESC
-            )
-            GROUP BY ap.userId, ap.groupId;
-          END
-          ELSE
-          BEGIN
-            SELECT NULL AS memberId, NULL AS groupId, NULL AS accessPackageIds WHERE 1=0;
-          END
-        `;
+        `);
       } else {
-        dataSql = `
+        result = await p.request().query(`
           SELECT
             p.groupId,
             g.displayName AS groupDisplayName,
@@ -101,34 +79,50 @@ router.get('/permissions', async (req, res) => {
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group';
+        `);
+      }
 
-          IF OBJECT_ID('dbo.vw_UserPermissionAssignmentViaAccessPackage', 'V') IS NOT NULL
-          BEGIN
+      // Separate query for AP mapping (gracefully falls back if view doesn't exist)
+      let managedByPackages = [];
+      try {
+        let apSql;
+        if (userLimit > 0) {
+          apSql = `
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
+            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            WHERE ap.userId IN (
+              SELECT TOP (${parseInt(userLimit)}) p.memberId
+              FROM vw_UserPermissionAssignments p
+              WHERE p.memberType != '#microsoft.graph.group'
+              GROUP BY p.memberId
+              ORDER BY COUNT(*) DESC
+            )
+            GROUP BY ap.userId, ap.groupId;
+          `;
+        } else {
+          apSql = `
             SELECT
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
             FROM vw_UserPermissionAssignmentViaAccessPackage ap
             GROUP BY ap.userId, ap.groupId;
-          END
-          ELSE
-          BEGIN
-            SELECT NULL AS memberId, NULL AS groupId, NULL AS accessPackageIds WHERE 1=0;
-          END
-        `;
+          `;
+        }
+        const apResult = await p.request().query(apSql);
+        managedByPackages = (apResult.recordset || [])
+          .filter(r => r.memberId)
+          .map(r => ({
+            memberId: r.memberId,
+            groupId: r.groupId,
+            accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+          }));
+      } catch (_apErr) {
+        // View may not exist yet — silently return empty array
       }
-
-      const result = await request.query(dataSql);
-
-      // Parse AP mapping: last recordset contains (memberId, groupId, accessPackageIds CSV)
-      const apRecordset = result.recordsets[result.recordsets.length - 1] || [];
-      const managedByPackages = apRecordset
-        .filter(r => r.memberId)
-        .map(r => ({
-          memberId: r.memberId,
-          groupId: r.groupId,
-          accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
-        }));
 
       if (userLimit > 0) {
         return res.json({
