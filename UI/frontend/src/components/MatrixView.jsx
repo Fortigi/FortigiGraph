@@ -29,6 +29,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
   const [activeFilters, setActiveFilters] = useState([]);
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
+  const [managedFilter, setManagedFilter] = useState('both'); // 'both' | 'ist' | 'soll'
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -127,7 +128,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
     return () => window.removeEventListener('keydown', handler);
   }, [annotations]);
 
-  // Filter data by all active filters and text search
+  // Filter data by all active filters, text search, and managed filter
   const filteredData = useMemo(() => {
     let result = data;
     for (const af of activeFilters) {
@@ -144,8 +145,13 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
         (d.memberUPN || '').toLowerCase().includes(lower)
       );
     }
+    if (managedFilter === 'soll') {
+      result = result.filter(d => !!d.managedByAccessPackage);
+    } else if (managedFilter === 'ist') {
+      result = result.filter(d => !d.managedByAccessPackage);
+    }
     return result;
-  }, [data, activeFilters, filterFields, filterText]);
+  }, [data, activeFilters, filterFields, filterText, managedFilter]);
 
   // Build matrix data structures
   const { rawUsers, groups, memberships, managedMap } = useMemo(() => {
@@ -351,6 +357,8 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
         onClearAllFilters={clearAllFilters}
         filterText={filterText}
         setFilterText={setFilterText}
+        managedFilter={managedFilter}
+        setManagedFilter={setManagedFilter}
         palette={annotations.palette}
         activeBrush={annotations.activeBrush}
         setActiveBrush={annotations.setActiveBrush}

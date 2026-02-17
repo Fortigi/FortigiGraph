@@ -9,6 +9,8 @@ export default function MatrixToolbar({
   onClearAllFilters,
   filterText,
   setFilterText,
+  managedFilter,
+  setManagedFilter,
   palette,
   activeBrush,
   setActiveBrush,
@@ -164,6 +166,28 @@ export default function MatrixToolbar({
             placeholder="Search users or groups..."
             className="px-2 py-1 border border-gray-300 rounded text-xs w-44"
           />
+        </div>
+
+        <div className="border-l border-gray-300 h-5 mx-1" />
+
+        <div className="inline-flex rounded border border-gray-300 overflow-hidden">
+          {[
+            { key: 'both', label: 'Both' },
+            { key: 'ist',  label: 'IST' },
+            { key: 'soll', label: 'SOLL' },
+          ].map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setManagedFilter(opt.key)}
+              className={`px-2 py-1 text-xs font-medium transition-colors ${
+                managedFilter === opt.key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         <div className="text-xs text-gray-500 ml-auto">
