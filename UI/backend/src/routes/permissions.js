@@ -52,9 +52,10 @@ router.get('/permissions', async (req, res) => {
           WHERE p.memberType != '#microsoft.graph.group'
             AND p.memberId IN (SELECT memberId FROM TopUsers);
 
-          SELECT COUNT(DISTINCT p.memberId) AS totalUsers
-          FROM vw_UserPermissionAssignments p
-          WHERE p.memberType != '#microsoft.graph.group';
+          SELECT COUNT(DISTINCT memberId) AS totalUsers
+          FROM dbo.GraphGroupMembers
+          WHERE memberType != '#microsoft.graph.group'
+            AND ValidTo = '9999-12-31 23:59:59.9999999';
         `);
       } else {
         result = await p.request().query(`
