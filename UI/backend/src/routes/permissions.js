@@ -120,8 +120,9 @@ router.get('/permissions', async (req, res) => {
             groupId: r.groupId,
             accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
           }));
-      } catch (_apErr) {
-        // View may not exist yet — silently return empty array
+      } catch (apErr) {
+        console.error('AP mapping query failed (non-fatal):', apErr.message);
+        // View may not exist yet — gracefully return empty array
       }
 
       if (userLimit > 0) {

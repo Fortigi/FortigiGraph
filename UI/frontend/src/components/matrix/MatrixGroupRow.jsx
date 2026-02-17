@@ -64,8 +64,9 @@ export default function MatrixGroupRow({
       {users.map(user => {
         const cellKey = `${group.id}|${user.id}`;
         const managed = managedMap?.has(cellKey);
-        // Look up which access packages manage this cell
-        const apIds = managed ? (managedApMap?.get(cellKey) || managedApMap?.get(`${group.id.toUpperCase()}|${user.id}`)) : null;
+        // Look up which access packages manage this cell (all keys/IDs normalized to lowercase)
+        const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
+        const apIds = managed ? managedApMap?.get(cellKeyLower) : null;
         let apColor = null;
         let apCount = 0;
         let apNames = null;
@@ -74,7 +75,7 @@ export default function MatrixGroupRow({
           const firstIdx = apIdToIndex?.get(apIds[0]);
           if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
           apNames = apIds.map(id => {
-            const ap = accessPackages.find(a => a.id === id);
+            const ap = accessPackages.find(a => a.id.toLowerCase() === id);
             return ap ? ap.displayName : id;
           });
         }

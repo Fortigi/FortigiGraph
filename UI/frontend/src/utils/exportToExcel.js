@@ -204,7 +204,8 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
       // Cell background: AP color for managed cells, green for unmanaged
       if (hasMembership) {
-        const apIds = managedApMap?.get(cellKey) || managedApMap?.get(`${group.id.toUpperCase()}|${users[u].id}`);
+        const cellKeyLower = `${group.id.toLowerCase()}|${users[u].id.toLowerCase()}`;
+        const apIds = managedApMap?.get(cellKeyLower);
         let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
         if (apIds && apIds.length > 0 && apIdToIndex) {
           const firstIdx = apIdToIndex.get(apIds[0]);

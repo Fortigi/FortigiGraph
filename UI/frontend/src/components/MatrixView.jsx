@@ -197,17 +197,14 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
     return { users, groups, memberships: membershipMap, managedMap: managed };
   }, [filteredData]);
 
-  // Build managed-by-AP map: cellKey -> accessPackageId[]
-  // Uses case-insensitive groupId matching (AP view uppercases, main view may not)
+  // Build managed-by-AP map: cellKey (lowercase) -> accessPackageId[] (lowercase)
+  // All keys and values normalized to lowercase for case-insensitive matching
   const managedApMap = useMemo(() => {
     const map = new Map();
     if (!managedByPackages || managedByPackages.length === 0) return map;
     for (const r of managedByPackages) {
-      // Try both original and uppercased groupId to handle SQL collation differences
-      const key = `${r.groupId}|${r.memberId}`;
-      const keyUpper = `${(r.groupId || '').toUpperCase()}|${r.memberId}`;
-      map.set(key, r.accessPackageIds);
-      if (key !== keyUpper) map.set(keyUpper, r.accessPackageIds);
+      const key = `${(r.groupId || '').toLowerCase()}|${(r.memberId || '').toLowerCase()}`;
+      map.set(key, (r.accessPackageIds || []).map(id => id.toLowerCase()));
     }
     return map;
   }, [managedByPackages]);
@@ -242,10 +239,10 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);
 
-  // AP ID -> sorted index (for consistent color lookup)
+  // AP ID (lowercase) -> sorted index (for consistent color lookup)
   const apIdToIndex = useMemo(() => {
     const map = new Map();
-    accessPackages.forEach((ap, idx) => map.set(ap.id, idx));
+    accessPackages.forEach((ap, idx) => map.set(ap.id.toLowerCase(), idx));
     return map;
   }, [accessPackages]);
 
