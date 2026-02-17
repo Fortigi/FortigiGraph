@@ -84,6 +84,7 @@ router.get('/permissions', async (req, res) => {
 
       // Separate query for AP mapping (gracefully falls back if view doesn't exist)
       let managedByPackages = [];
+      let apDebug = null;
       try {
         let apSql;
         if (userLimit > 0) {
@@ -120,9 +121,10 @@ router.get('/permissions', async (req, res) => {
             groupId: r.groupId,
             accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
           }));
+        apDebug = { status: 'ok', rowCount: managedByPackages.length };
       } catch (apErr) {
         console.error('AP mapping query failed (non-fatal):', apErr.message);
-        // View may not exist yet — gracefully return empty array
+        apDebug = { status: 'error', message: apErr.message };
       }
 
       if (userLimit > 0) {
@@ -130,12 +132,14 @@ router.get('/permissions', async (req, res) => {
           data: result.recordsets[0],
           totalUsers: result.recordsets[1][0].totalUsers,
           managedByPackages,
+          _apDebug: apDebug,
         });
       }
       return res.json({
         data: result.recordsets[0],
         totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
         managedByPackages,
+        _apDebug: apDebug,
       });
     }
 
