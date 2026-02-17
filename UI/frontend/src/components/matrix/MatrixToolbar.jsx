@@ -11,6 +11,8 @@ export default function MatrixToolbar({
   setFilterText,
   managedFilter,
   setManagedFilter,
+  userLimit,
+  setUserLimit,
   palette,
   activeBrush,
   setActiveBrush,
@@ -190,8 +192,33 @@ export default function MatrixToolbar({
           ))}
         </div>
 
+        <div className="border-l border-gray-300 h-5 mx-1" />
+
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-600 whitespace-nowrap">Users:</label>
+          <input
+            type="range"
+            min={5}
+            max={Math.max(stats.totalUsers, 5)}
+            step={5}
+            value={Math.min(userLimit, stats.totalUsers)}
+            onChange={e => setUserLimit(Number(e.target.value))}
+            className="w-24 h-1 accent-blue-600"
+          />
+          <span className="text-xs text-gray-700 font-medium tabular-nums w-6 text-right">
+            {Math.min(userLimit, stats.totalUsers)}
+          </span>
+        </div>
+
         <div className="text-xs text-gray-500 ml-auto">
-          {stats.users} users &times; {stats.groups} groups &middot; {stats.memberships} assignments
+          {stats.users === stats.totalUsers ? (
+            <>{stats.users} users</>
+          ) : (
+            <span className="text-amber-600 font-medium">
+              Showing {stats.users} of {stats.totalUsers} users
+            </span>
+          )}
+          {' '}&times; {stats.groups} groups &middot; {stats.memberships} assignments
         </div>
       </div>
 

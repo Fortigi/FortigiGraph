@@ -30,6 +30,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
   const [managedFilter, setManagedFilter] = useState('both'); // 'both' | 'ist' | 'soll'
+  const [userLimit, setUserLimit] = useState(25);
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -258,10 +259,15 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups]);
 
-  // Apply custom column order
-  const users = useMemo(
+  // Apply custom column order, then limit
+  const allUsers = useMemo(
     () => colOrderHook.getOrderedUsers(rawUsers),
     [rawUsers, colOrderHook.getOrderedUsers]
+  );
+  const totalUserCount = allUsers.length;
+  const users = useMemo(
+    () => userLimit > 0 ? allUsers.slice(0, userLimit) : allUsers,
+    [allUsers, userLimit]
   );
 
   // Unique group types for filter dropdown
@@ -339,6 +345,7 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
 
   const stats = {
     users: users.length,
+    totalUsers: totalUserCount,
     groups: orderedGroups.length,
     memberships: memberships.size,
   };
@@ -359,6 +366,8 @@ export default function MatrixView({ data, accessPackageGroups = [] }) {
         setFilterText={setFilterText}
         managedFilter={managedFilter}
         setManagedFilter={setManagedFilter}
+        userLimit={userLimit}
+        setUserLimit={setUserLimit}
         palette={annotations.palette}
         activeBrush={annotations.activeBrush}
         setActiveBrush={annotations.setActiveBrush}
