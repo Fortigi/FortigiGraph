@@ -20,11 +20,22 @@ const FIELD_LABELS = {
   accountEnabled: 'Account Enabled',
   userType: 'User Type',
   employeeType: 'Employee Type',
+  officeLocation: 'Office Location',
+  city: 'City',
+  country: 'Country',
+  state: 'State',
+  usageLocation: 'Usage Location',
+  mail: 'Mail',
+  manager: 'Manager',
+  onPremisesSamAccountName: 'SAM Account',
 };
 
-export default function MatrixView({ data, accessPackageGroups = [], managedByPackages = [], totalUsers: serverTotalUsers, userLimit, setUserLimit }) {
-  // Multiple active filters: [{field: 'department', value: 'Sales'}, ...]
-  const [activeFilters, setActiveFilters] = useState([]);
+export default function MatrixView({
+  data, accessPackageGroups = [], managedByPackages = [], totalUsers: serverTotalUsers,
+  userLimit, setUserLimit,
+  activeFilters, setActiveFilters,
+  userColumns,
+}) {
   const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
   const [managedFilter, setManagedFilter] = useState('all'); // 'all' | 'unmanaged' | 'managed'
@@ -40,38 +51,76 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
 
   const rowOrderHook = useMatrixRowOrder(storageKey);
 
-  // Auto-discover filterable fields from data
+  // Set of user column names (for knowing which filters are server-side)
+  const userColumnNames = useMemo(() => {
+    if (!userColumns) return new Set();
+    return new Set(userColumns.map(c => c.column));
+  }, [userColumns]);
+
+  // Auto-discover filterable fields from data + merge server-provided user columns.
+  // Data-derived fields appear even if not in userColumns (e.g., membershipType, groupDisplayName).
+  // Server-provided user columns appear even if all values are null in the current page.
   const filterFields = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    const sample = data[0];
-    return Object.keys(sample)
-      .filter(key => !EXCLUDE_FIELDS.has(key))
-      .filter(key => {
-        // Include fields that have at least 1 distinct value and aren't all unique
+    const fieldMap = new Map(); // key -> { key, label, dataKey }
+
+    // 1. Discover from data (current page)
+    if (data && data.length > 0) {
+      const sample = data[0];
+      for (const key of Object.keys(sample)) {
+        if (EXCLUDE_FIELDS.has(key)) continue;
         const values = new Set();
         for (const d of data) {
           const val = d[key];
           if (val != null && val !== '') values.add(String(val));
-          if (values.size > 500) break; // Too many unique values, skip
+          if (values.size > 500) break;
         }
-        return values.size >= 1 && values.size <= 500;
-      })
-      .map(key => ({
-        key,
-        label: FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
-        dataKey: key,
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [data]);
+        if (values.size >= 1 && values.size <= 500) {
+          fieldMap.set(key, {
+            key,
+            label: FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
+            dataKey: key,
+          });
+        }
+      }
+    }
 
-  // Get available values for a specific field (considering already-applied filters)
+    // 2. Add server-provided user columns that aren't already discovered
+    //    (e.g., columns where all values are null in the current page but have values in full dataset)
+    if (userColumns) {
+      for (const col of userColumns) {
+        if (EXCLUDE_FIELDS.has(col.column)) continue;
+        if (!fieldMap.has(col.column) && col.values && col.values.length > 0) {
+          fieldMap.set(col.column, {
+            key: col.column,
+            label: FIELD_LABELS[col.column] || col.column.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
+            dataKey: col.column,
+          });
+        }
+      }
+    }
+
+    return [...fieldMap.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [data, userColumns]);
+
+  // Get available values for a specific field.
+  // User columns: use server-provided values (full dataset, not just current page).
+  // Other fields: derive from loaded data with cross-filter logic.
   const getOptionsForField = useCallback((fieldKey) => {
+    // For user columns, return server-provided values (from full dataset)
+    if (userColumns) {
+      const serverCol = userColumns.find(c => c.column === fieldKey);
+      if (serverCol && serverCol.values && serverCol.values.length > 0) {
+        return serverCol.values;
+      }
+    }
+
+    // For non-user columns (membershipType, groupDisplayName, etc.), derive from loaded data
     const field = filterFields.find(f => f.key === fieldKey);
     if (!field) return [];
     // Apply all OTHER active filters first to show contextual values
     let filtered = data;
     for (const af of activeFilters) {
-      if (af.field === fieldKey) continue; // skip the field we're getting options for
+      if (af.field === fieldKey) continue;
       const f = filterFields.find(ff => ff.key === af.field);
       if (f) {
         filtered = filtered.filter(d => String(d[f.dataKey] ?? '') === af.value);
@@ -83,24 +132,27 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
       if (val != null && val !== '') values.add(String(val));
     });
     return [...values].sort();
-  }, [data, activeFilters, filterFields]);
+  }, [data, activeFilters, filterFields, userColumns]);
 
   const addFilter = useCallback((field, value) => {
     setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
-  }, []);
+  }, [setActiveFilters]);
 
   const removeFilter = useCallback((field) => {
     setActiveFilters(prev => prev.filter(f => f.field !== field));
-  }, []);
+  }, [setActiveFilters]);
 
   const clearAllFilters = useCallback(() => {
     setActiveFilters([]);
-  }, []);
+  }, [setActiveFilters]);
 
-  // Filter data by all active filters, text search, and managed filter
+  // Apply CLIENT-SIDE filters only (server-side user attribute filters already applied by backend).
+  // Client-side: text search, managed toggle, non-user-column structured filters.
   const filteredData = useMemo(() => {
     let result = data;
+    // Only apply non-server filters client-side
     for (const af of activeFilters) {
+      if (userColumnNames.has(af.field)) continue; // already applied server-side
       const field = filterFields.find(f => f.key === af.field);
       if (field) {
         result = result.filter(d => String(d[field.dataKey] ?? '') === af.value);
@@ -120,7 +172,7 @@ export default function MatrixView({ data, accessPackageGroups = [], managedByPa
       result = result.filter(d => !d.managedByAccessPackage);
     }
     return result;
-  }, [data, activeFilters, filterFields, filterText, managedFilter]);
+  }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames]);
 
   // Build matrix data structures
   const { users, groups, memberships, managedMap } = useMemo(() => {

@@ -17,7 +17,8 @@ function useHashRoute() {
 
 export default function App() {
   const [userLimit, setUserLimit] = useState(25);
-  const { data, totalUsers, accessPackageGroups, managedByPackages, loading, error } = usePermissions(userLimit);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, error } = usePermissions(userLimit, activeFilters);
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
 
@@ -85,6 +86,9 @@ export default function App() {
             totalUsers={totalUsers}
             userLimit={userLimit}
             setUserLimit={setUserLimit}
+            activeFilters={activeFilters}
+            setActiveFilters={setActiveFilters}
+            userColumns={userColumns}
           />
         )}
       </main>

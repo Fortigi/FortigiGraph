@@ -9,11 +9,105 @@ if (useSql) {
   db = await import('../db/connection.js');
 }
 
-// GET /api/permissions - vw_UserPermissionAssignments enriched with display names
-// Optional query params: userLimit (int) - limit to top N users by assignment count
+// ─── User column discovery (cached) ───────────────────────────────
+// Columns from GraphUsers that are excluded from dynamic SELECT/filter
+const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
+// Data types useful for filtering (skip datetime, uniqueidentifier, etc.)
+const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
+// Columns always handled with explicit aliases (not included in dynamic list)
+const ALIASED_COLS = new Set(['displayName', 'userPrincipalName']);
+
+let userColumnsCache = null;
+
+async function getUserColumns(pool) {
+  if (userColumnsCache) return userColumnsCache;
+  const result = await pool.request().query(`
+    SELECT COLUMN_NAME, DATA_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'GraphUsers'
+      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
+    ORDER BY ORDINAL_POSITION
+  `);
+  userColumnsCache = result.recordset.map(r => ({
+    name: r.COLUMN_NAME,
+    type: r.DATA_TYPE,
+  }));
+  return userColumnsCache;
+}
+
+// ─── GET /api/user-columns ────────────────────────────────────────
+// Returns column names + distinct values from GraphUsers for filter dropdowns.
+// Values come from the FULL dataset (not limited by userLimit), so dropdowns
+// show all possible options regardless of which page of users is loaded.
+router.get('/user-columns', async (req, res) => {
+  try {
+    if (!useSql) {
+      // Mock: derive from mock data
+      const mockCols = {};
+      for (const row of permissionAssignments) {
+        for (const [key, val] of Object.entries(row)) {
+          if (['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType',
+               'groupDisplayName', 'groupTypeCalculated', 'groupDescription',
+               'membershipType', 'managedByAccessPackage'].includes(key)) continue;
+          if (val == null || val === '') continue;
+          if (!mockCols[key]) mockCols[key] = new Set();
+          mockCols[key].add(String(val));
+        }
+      }
+      return res.json(
+        Object.entries(mockCols)
+          .filter(([, vals]) => vals.size >= 1 && vals.size <= 500)
+          .map(([column, vals]) => ({ column, values: [...vals].sort() }))
+      );
+    }
+
+    const p = await db.getPool();
+    const cols = await getUserColumns(p);
+    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
+
+    if (filterableCols.length === 0) return res.json([]);
+
+    // Single UNION ALL query to get all distinct values in one roundtrip
+    const parts = filterableCols.map(c =>
+      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
+      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphUsers ` +
+      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
+      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
+    );
+
+    const unionSql = parts.join('\nUNION ALL\n') + '\nORDER BY col, val';
+    const result = await p.request().query(unionSql);
+
+    // Group by column
+    const grouped = {};
+    for (const r of result.recordset) {
+      if (!grouped[r.col]) grouped[r.col] = [];
+      grouped[r.col].push(r.val);
+    }
+
+    return res.json(
+      Object.entries(grouped).map(([column, values]) => ({ column, values }))
+    );
+  } catch (err) {
+    console.error('user-columns query failed:', err.message);
+    return res.json([]);
+  }
+});
+
+// ─── GET /api/permissions ─────────────────────────────────────────
+// Query params:
+//   userLimit (int)  - limit to top N users by assignment count
+//   filters  (JSON)  - server-side filters: {"department":"HR","costCenter":"CC100"}
+//                       Only columns that exist in GraphUsers are applied; unknown fields ignored.
 router.get('/permissions', async (req, res) => {
   try {
     const userLimit = parseInt(req.query.userLimit) || 0;
+
+    // Parse filters (JSON object of field:value pairs)
+    let requestedFilters = {};
+    if (req.query.filters) {
+      try { requestedFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
+    }
 
     if (useSql) {
       const p = await db.getPool();
@@ -31,14 +125,49 @@ router.get('/permissions', async (req, res) => {
         ? 'mat_UserPermissionAssignmentViaAccessPackage'
         : 'vw_UserPermissionAssignmentViaAccessPackage';
 
+      // Discover user columns dynamically
+      const allCols = await getUserColumns(p);
+      const colNames = new Set(allCols.map(c => c.name));
+
+      // Build dynamic user column SELECT (exclude aliased cols handled explicitly)
+      const dynamicUserCols = allCols
+        .filter(c => !ALIASED_COLS.has(c.name))
+        .map(c => `u.[${c.name}]`)
+        .join(',\n            ');
+
+      // Validate and build filter WHERE clause (parameterized)
+      const validFilters = [];
+      for (const [field, value] of Object.entries(requestedFilters)) {
+        if (colNames.has(field) && value != null && String(value) !== '') {
+          validFilters.push({ field, value: String(value) });
+        }
+      }
+
+      let filterWhere = '';
+      const addParams = (request) => {
+        for (let i = 0; i < validFilters.length; i++) {
+          const f = validFilters[i];
+          // Use CAST for consistent string comparison (handles bit/int columns)
+          filterWhere += ` AND CAST(u.[${f.field}] AS NVARCHAR(400)) = @f${i}`;
+          request.input(`f${i}`, f.value);
+        }
+      };
+
       // Main permissions query
       let result;
       if (userLimit > 0) {
-        result = await p.request().input('userLimit', userLimit).query(`
+        const request = p.request();
+        request.input('userLimit', userLimit);
+        filterWhere = ''; // reset before building
+        addParams(request);
+
+        result = await request.query(`
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
             FROM ${permSource} p
+            LEFT JOIN GraphUsers u ON p.memberId = u.id
             WHERE p.memberType != '#microsoft.graph.group'
+              ${filterWhere}
             GROUP BY p.memberId
             ORDER BY COUNT(*) DESC
           )
@@ -52,12 +181,7 @@ router.get('/permissions', async (req, res) => {
             u.userPrincipalName AS memberUPN,
             p.memberType,
             p.membershipType,
-            u.department,
-            u.jobTitle,
-            u.companyName,
-            u.accountEnabled,
-            u.userType,
-            u.employeeType,
+            ${dynamicUserCols},
             p.managedByAccessPackage
           FROM ${permSource} p
           LEFT JOIN GraphUsers u ON p.memberId = u.id
@@ -65,13 +189,18 @@ router.get('/permissions', async (req, res) => {
           WHERE p.memberType != '#microsoft.graph.group'
             AND p.memberId IN (SELECT memberId FROM TopUsers);
 
-          SELECT COUNT(DISTINCT memberId) AS totalUsers
-          FROM dbo.GraphGroupMembers
-          WHERE memberType != '#microsoft.graph.group'
-            AND ValidTo = '9999-12-31 23:59:59.9999999';
+          SELECT COUNT(DISTINCT p.memberId) AS totalUsers
+          FROM ${permSource} p
+          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          WHERE p.memberType != '#microsoft.graph.group'
+            ${filterWhere};
         `);
       } else {
-        result = await p.request().query(`
+        const request = p.request();
+        filterWhere = '';
+        addParams(request);
+
+        result = await request.query(`
           SELECT
             p.groupId,
             g.displayName AS groupDisplayName,
@@ -82,40 +211,58 @@ router.get('/permissions', async (req, res) => {
             u.userPrincipalName AS memberUPN,
             p.memberType,
             p.membershipType,
-            u.department,
-            u.jobTitle,
-            u.companyName,
-            u.accountEnabled,
-            u.userType,
-            u.employeeType,
+            ${dynamicUserCols},
             p.managedByAccessPackage
           FROM ${permSource} p
           LEFT JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
-          WHERE p.memberType != '#microsoft.graph.group';
+          WHERE p.memberType != '#microsoft.graph.group'
+            ${filterWhere};
         `);
       }
 
-      // Separate query for AP mapping (gracefully falls back if view/table doesn't exist)
+      // AP mapping query — scope to same user set (with filters applied)
       let managedByPackages = [];
       try {
         let apSql;
         if (userLimit > 0) {
+          const apRequest = p.request();
+          apRequest.input('userLimit', userLimit);
+          filterWhere = '';
+          const apAddParams = (req2) => {
+            for (let i = 0; i < validFilters.length; i++) {
+              filterWhere += ` AND CAST(u.[${validFilters[i].field}] AS NVARCHAR(400)) = @f${i}`;
+              req2.input(`f${i}`, validFilters[i].value);
+            }
+          };
+          apAddParams(apRequest);
+
           apSql = `
+            WITH TopUsers AS (
+              SELECT TOP (@userLimit) p.memberId
+              FROM ${permSource} p
+              LEFT JOIN GraphUsers u ON p.memberId = u.id
+              WHERE p.memberType != '#microsoft.graph.group'
+                ${filterWhere}
+              GROUP BY p.memberId
+              ORDER BY COUNT(*) DESC
+            )
             SELECT
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM ${apSource} ap
-            WHERE ap.userId IN (
-              SELECT TOP (${parseInt(userLimit)}) p.memberId
-              FROM ${permSource} p
-              WHERE p.memberType != '#microsoft.graph.group'
-              GROUP BY p.memberId
-              ORDER BY COUNT(*) DESC
-            )
+            WHERE ap.userId IN (SELECT memberId FROM TopUsers)
             GROUP BY ap.userId, ap.groupId;
           `;
+          const apResult = await apRequest.query(apSql);
+          managedByPackages = (apResult.recordset || [])
+            .filter(r => r.memberId)
+            .map(r => ({
+              memberId: r.memberId,
+              groupId: r.groupId,
+              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+            }));
         } else {
           apSql = `
             SELECT
@@ -125,15 +272,15 @@ router.get('/permissions', async (req, res) => {
             FROM ${apSource} ap
             GROUP BY ap.userId, ap.groupId;
           `;
+          const apResult = await p.request().query(apSql);
+          managedByPackages = (apResult.recordset || [])
+            .filter(r => r.memberId)
+            .map(r => ({
+              memberId: r.memberId,
+              groupId: r.groupId,
+              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+            }));
         }
-        const apResult = await p.request().query(apSql);
-        managedByPackages = (apResult.recordset || [])
-          .filter(r => r.memberId)
-          .map(r => ({
-            memberId: r.memberId,
-            groupId: r.groupId,
-            accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
-          }));
       } catch (apErr) {
         console.error('AP mapping query failed (non-fatal):', apErr.message);
       }
@@ -152,8 +299,14 @@ router.get('/permissions', async (req, res) => {
       });
     }
 
-    // Mock data path
+    // Mock data path (supports filters for local dev)
     let mockData = permissionAssignments;
+    // Apply mock filters
+    for (const [field, value] of Object.entries(requestedFilters)) {
+      if (value != null && value !== '') {
+        mockData = mockData.filter(r => String(r[field] ?? '') === String(value));
+      }
+    }
     const allUserIds = [...new Set(mockData.map(r => r.memberId))];
     if (userLimit > 0) {
       const userCounts = {};
