@@ -216,7 +216,7 @@ FortigiGraph creates SQL views automatically for instant insights:
 
 **Group Membership Views** (via `Initialize-FGGroupMembershipViews`):
 - `vw_GraphGroupMembersRecursive` - All memberships (direct + indirect) with paths
-- `vw_UserPermissionAssignments` - Comprehensive view: Owner, Direct, Indirect, Eligible
+- `vw_UserPermissionAssignments` - Comprehensive view with all types as separate rows: Owner, Direct, Indirect, Eligible (a user can have multiple types per group, e.g. Direct + Owner)
 
 **Access Package Views** (via `Initialize-FGAccessPackageViews`):
 - `vw_UserPermissionAssignmentViaAccessPackage` - User permissions via access packages
@@ -240,27 +240,30 @@ FortigiGraph creates SQL views automatically for instant insights:
 
 ## Role Mining UI (Beta)
 
-> **Warning**: The Role Mining UI is currently in **beta**. It does **not include authentication or authorization**. Anyone with network access to the web application can view the permission data. Deploy it only in trusted environments or behind a VPN/reverse proxy with authentication. Do not expose it to the public internet.
-
 FortigiGraph includes an optional web-based Role Mining UI that visualizes your permission data as an interactive matrix, making it easy to discover role patterns and governance gaps.
 
 ### Features
 
 - **Permission Matrix**: Interactive heatmap showing user-group assignments with membership type indicators (Direct, Indirect, Eligible, Owner)
+- **Multi-Type Badges**: When a user has multiple relationship types to the same group (e.g. Direct + Owner), each type is shown as its own colored badge in the cell
+- **Access Package Coloring**: Each access package gets a distinct color. Managed cells are colored to match the access package that governs them, making it instantly visible which package controls which assignments
+- **Multi-AP Indicator**: When a cell is managed by multiple access packages, a badge shows the count
+- **Access Package Columns**: SOLL columns sorted by total assignment count (broadest packages like "All Employees" first, targeted packages last)
 - **IST/SOLL/Both Toggle**: Switch between showing all assignments, only unmanaged (IST), or only managed-by-access-package (SOLL)
 - **Server-Side User Limit**: Adjustable slider (default 25 users) that limits data at the SQL level, keeping the UI fast even with hundreds of thousands of assignments
-- **Managed Indicator**: Cells where the membership is managed by an access package are visually distinguished (blue background vs green)
-- **Annotation Brushes**: Color-code cells for role discovery, export annotations to Excel or JSON
-- **Access Package Overlay**: SOLL columns showing which groups are governed by access packages
-- **Drag-and-Drop**: Reorder rows and columns to group related permissions together
-- **Multi-Filter**: Filter by department, job title, membership type, and more
-- **Excel Export**: Export the matrix with colors and annotations to `.xlsx`
+- **Entra ID Authentication**: Built-in MSAL-based authentication with app registration. Use `-NoAuth` for demo/development environments
+- **Drag-and-Drop**: Reorder rows to group related permissions together
+- **Multi-Filter**: Filter by department, job title, membership type, group type, and more
+- **Excel Export**: Export the matrix with colors, AP coloring, and rich-text membership badges to `.xlsx`
 
 ### Quick Start
 
 ```powershell
-# Deploy the UI (creates Azure App Service + deploys code)
+# Deploy the UI (creates Azure App Service + App Registration + deploys code)
 New-FGUI -ConfigFile '.\Config\mycompany.json'
+
+# Deploy without authentication (for demos/development)
+New-FGUI -ConfigFile '.\Config\mycompany.json' -NoAuth
 
 # Redeploy after code changes (code-only, no resource creation)
 Update-FGUI -ConfigFile '.\Config\mycompany.json'
@@ -273,8 +276,9 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 - **Backend**: Node.js + Express serving a REST API that queries the FortigiGraph SQL views
 - **Frontend**: React + Vite + Tailwind CSS + TanStack Table v8
-- **Deployment**: Azure App Service (Linux, Node 20) with Oryx build-on-deploy
-- **Data**: Reads directly from `vw_UserPermissionAssignments` and related views
+- **Authentication**: Entra ID (Azure AD) with MSAL, supporting both v1 and v2 token formats
+- **Deployment**: Azure App Service (Linux, Node 20, default P0v3 SKU) with Oryx build-on-deploy
+- **Data**: Reads from `vw_UserPermissionAssignments`, `vw_UserPermissionAssignmentViaAccessPackage`, and related views
 
 ---
 

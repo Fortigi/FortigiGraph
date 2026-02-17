@@ -210,8 +210,8 @@ FROM RecursiveMemberships;
         $dropView2Cmd.ExecuteNonQuery() | Out-Null
 
         # Build the view SQL dynamically based on which tables exist
-        # OPTIMIZATION: Use LEFT JOIN anti-pattern instead of NOT EXISTS to avoid
-        # recalculating the recursive CTE multiple times
+        # All membership types (Direct, Indirect, Owner, Eligible) are included as separate rows
+        # so the UI can display multiple badges per cell (e.g. D+O for Direct+Owner)
         $createView2SQL = @"
 CREATE VIEW dbo.vw_UserPermissionAssignments AS
 WITH CurrentMembers AS (

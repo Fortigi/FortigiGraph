@@ -135,7 +135,6 @@ router.get('/permissions', async (req, res) => {
         data: result.recordsets[0],
         totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
         managedByPackages,
-        _apDebug: apDebug,
       });
     }
 
