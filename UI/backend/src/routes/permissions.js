@@ -92,7 +92,7 @@ router.get('/permissions', async (req, res) => {
             SELECT
               ap.userId AS memberId,
               ap.groupId,
-              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
+              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM vw_UserPermissionAssignmentViaAccessPackage ap
             WHERE ap.userId IN (
               SELECT TOP (${parseInt(userLimit)}) p.memberId
@@ -108,7 +108,7 @@ router.get('/permissions', async (req, res) => {
             SELECT
               ap.userId AS memberId,
               ap.groupId,
-              STRING_AGG(ap.accessPackageId, ',') AS accessPackageIds
+              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM vw_UserPermissionAssignmentViaAccessPackage ap
             GROUP BY ap.userId, ap.groupId;
           `;
