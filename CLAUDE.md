@@ -52,6 +52,16 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - Encrypted variables, runbooks, daily schedules, SQL firewall rules
 - Memory-safe batching mode for large datasets (400 MB Azure sandbox limit)
 
+### 6. Role Mining UI (Beta)
+- **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service
+- **Matrix View**: User-group permission heatmap with drag-and-drop row/column reordering
+- **IST/SOLL Toggle**: Filter matrix to show managed (SOLL), unmanaged (IST), or all assignments
+- **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
+- **Annotation Brushes**: Color-code cells, export to Excel, import/export annotations as JSON
+- **Access Package Overlay**: SOLL columns showing which groups are governed by access packages
+- **Managed Indicator**: Cells with `managedByAccessPackage=true` show a distinct blue background
+- **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
+
 ## Repository Structure
 
 ```
@@ -110,6 +120,25 @@ FortigiGraph/
 │
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
+│
+├── UI/                     # Role Mining Web Application (Beta)
+│   ├── backend/            # Node.js + Express API server
+│   │   └── src/
+│   │       ├── routes/permissions.js  # API endpoints (server-side userLimit)
+│   │       ├── db/connection.js       # Azure SQL (mssql) connection pool
+│   │       └── mock/data.js           # Mock data for local dev
+│   └── frontend/           # React + Vite + Tailwind
+│       └── src/
+│           ├── App.jsx                # Root component, userLimit state
+│           ├── hooks/usePermissions.js # API hook with debounced refetch
+│           └── components/
+│               ├── MatrixView.jsx     # Main matrix orchestrator
+│               ├── PermissionGrid.jsx # TanStack Table grid view
+│               └── matrix/            # Matrix sub-components
+│                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider, brushes
+│                   ├── MatrixCell.jsx       # Individual cell (managed bg color)
+│                   ├── MatrixGroupRow.jsx   # Row with DnD support
+│                   └── MatrixColumnHeaders.jsx
 │
 ├── _Build/                 # Build and publishing scripts
 │   └── CreatePSD.ps1       # Module manifest generation
@@ -343,7 +372,7 @@ function Get-FGSQLResource {
 ### Group Membership Views (via `Initialize-FGGroupMembershipViews`)
 
 - `vw_GraphGroupMembersRecursive` - Calculates ALL memberships (direct + indirect) with paths using recursive CTE
-- `vw_UserPermissionAssignments` - Comprehensive view: Owner, Direct, Indirect, Eligible
+- `vw_UserPermissionAssignments` - Comprehensive view: Owner, Direct, Indirect, Eligible + `managedByAccessPackage` (BIT)
 
 ### Access Package Views (via `Initialize-FGAccessPackageViews`)
 

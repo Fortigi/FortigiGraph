@@ -238,6 +238,46 @@ FortigiGraph creates SQL views automatically for instant insights:
 
 ---
 
+## Role Mining UI (Beta)
+
+> **Warning**: The Role Mining UI is currently in **beta**. It does **not include authentication or authorization**. Anyone with network access to the web application can view the permission data. Deploy it only in trusted environments or behind a VPN/reverse proxy with authentication. Do not expose it to the public internet.
+
+FortigiGraph includes an optional web-based Role Mining UI that visualizes your permission data as an interactive matrix, making it easy to discover role patterns and governance gaps.
+
+### Features
+
+- **Permission Matrix**: Interactive heatmap showing user-group assignments with membership type indicators (Direct, Indirect, Eligible, Owner)
+- **IST/SOLL/Both Toggle**: Switch between showing all assignments, only unmanaged (IST), or only managed-by-access-package (SOLL)
+- **Server-Side User Limit**: Adjustable slider (default 25 users) that limits data at the SQL level, keeping the UI fast even with hundreds of thousands of assignments
+- **Managed Indicator**: Cells where the membership is managed by an access package are visually distinguished (blue background vs green)
+- **Annotation Brushes**: Color-code cells for role discovery, export annotations to Excel or JSON
+- **Access Package Overlay**: SOLL columns showing which groups are governed by access packages
+- **Drag-and-Drop**: Reorder rows and columns to group related permissions together
+- **Multi-Filter**: Filter by department, job title, membership type, and more
+- **Excel Export**: Export the matrix with colors and annotations to `.xlsx`
+
+### Quick Start
+
+```powershell
+# Deploy the UI (creates Azure App Service + deploys code)
+New-FGUI -ConfigFile '.\Config\mycompany.json'
+
+# Redeploy after code changes (code-only, no resource creation)
+Update-FGUI -ConfigFile '.\Config\mycompany.json'
+
+# Remove the UI (stops billing)
+Remove-FGUI -ConfigFile '.\Config\mycompany.json'
+```
+
+### Architecture
+
+- **Backend**: Node.js + Express serving a REST API that queries the FortigiGraph SQL views
+- **Frontend**: React + Vite + Tailwind CSS + TanStack Table v8
+- **Deployment**: Azure App Service (Linux, Node 20) with Oryx build-on-deploy
+- **Data**: Reads directly from `vw_UserPermissionAssignments` and related views
+
+---
+
 ## Config File
 
 The config file drives all FortigiGraph operations. Create one with `New-FGConfig` or manually from the template in `Config/tenantname.json.template`.
@@ -473,6 +513,9 @@ FortigiGraph/
 │   ├── SQL/                # Azure SQL operations (24 functions)
 │   ├── Sync/               # Data synchronization (14 functions)
 │   └── Automation/         # Azure Automation management (4 functions)
+├── UI/                     # Role Mining Web Application (Beta)
+│   ├── backend/            # Node.js + Express API server
+│   └── frontend/           # React + Vite + Tailwind
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
 ├── _Build/                 # Build and publishing scripts
