@@ -199,14 +199,28 @@ export default function MatrixToolbar({
           <input
             type="range"
             min={5}
-            max={Math.max(stats.totalUsers, 5)}
-            step={5}
-            value={Math.min(userLimit, stats.totalUsers)}
-            onChange={e => setUserLimit(Number(e.target.value))}
+            max={stats.totalUsers}
+            step={1}
+            value={userLimit <= 0 ? stats.totalUsers : Math.min(userLimit, stats.totalUsers)}
+            onChange={e => {
+              const val = Number(e.target.value);
+              setUserLimit(val >= stats.totalUsers ? 0 : val);
+            }}
             className="w-24 h-1 accent-blue-600"
           />
-          <span className="text-xs text-gray-700 font-medium tabular-nums w-6 text-right">
-            {Math.min(userLimit, stats.totalUsers)}
+          <button
+            onClick={() => setUserLimit(userLimit <= 0 ? 25 : 0)}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+              userLimit <= 0
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'
+            }`}
+            title={userLimit <= 0 ? 'Click to limit to 25 users' : 'Click to show all users'}
+          >
+            All
+          </button>
+          <span className="text-xs text-gray-700 font-medium tabular-nums w-8 text-right">
+            {userLimit <= 0 ? stats.totalUsers : Math.min(userLimit, stats.totalUsers)}
           </span>
         </div>
 
