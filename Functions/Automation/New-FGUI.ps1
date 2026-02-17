@@ -240,22 +240,33 @@ function New-FGUI {
             $uiClientId = $config.UI.Auth.ClientId
             Write-Host "  Found existing app in config: $uiClientId" -ForegroundColor Green
 
-            # Ensure redirect URI is current
+            # Ensure redirect URI and token version are current
             try {
                 $existingApps = Invoke-GraphApi -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$uiClientId'"
                 if ($existingApps.value.Count -gt 0) {
                     $appObjectId = $existingApps.value[0].id
+                    $patchBody = @{}
+
                     $currentRedirects = @($existingApps.value[0].spa.redirectUris)
                     if ($redirectUri -notin $currentRedirects) {
                         $currentRedirects += $redirectUri
-                        Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
-                            spa = @{ redirectUris = $currentRedirects }
-                        } | Out-Null
-                        Write-Host "  Updated redirect URI: $redirectUri" -ForegroundColor Green
+                        $patchBody.spa = @{ redirectUris = $currentRedirects }
+                        Write-Host "  Updating redirect URI: $redirectUri" -ForegroundColor Cyan
+                    }
+
+                    # Ensure v2 access tokens (required for issuer validation)
+                    if ($existingApps.value[0].api.requestedAccessTokenVersion -ne 2) {
+                        $patchBody.api = @{ requestedAccessTokenVersion = 2 }
+                        Write-Host "  Updating access token version to v2..." -ForegroundColor Cyan
+                    }
+
+                    if ($patchBody.Count -gt 0) {
+                        Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body $patchBody | Out-Null
+                        Write-Host "  App registration updated" -ForegroundColor Green
                     }
                 }
             } catch {
-                Write-Host "  Warning: Could not verify redirect URI: $_" -ForegroundColor Yellow
+                Write-Host "  Warning: Could not verify app registration settings: $_" -ForegroundColor Yellow
             }
         }
 
@@ -296,6 +307,7 @@ function New-FGUI {
                 Invoke-GraphApi -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$appObjectId" -Body @{
                     identifierUris = @("api://$uiClientId")
                     api = @{
+                        requestedAccessTokenVersion = 2
                         oauth2PermissionScopes = @(
                             @{
                                 id                      = $scopeId
