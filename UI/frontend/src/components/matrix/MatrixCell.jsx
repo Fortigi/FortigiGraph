@@ -27,7 +27,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
         activeBrush ? 'cursor-crosshair' : ''
       }`}
       style={{
-        backgroundColor: annotationColor || (hasMembership ? '#dcfce7' : undefined),
+        backgroundColor: annotationColor || (hasMembership ? (managed ? '#dbeafe' : '#dcfce7') : undefined),
         minWidth: '24px',
         width: '24px',
         height: '24px',
@@ -36,7 +36,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
       onClick={handleClick}
       title={
         hasMembership
-          ? [...membershipTypes].join(', ')
+          ? [...membershipTypes].join(', ') + (managed ? ' (managed by access package)' : '')
           : undefined
       }
     >
@@ -65,7 +65,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
               return ind ? (
                 <span
                   className="inline-block w-4 h-4 rounded-sm text-[9px] font-bold leading-4 text-center"
-                  style={{ backgroundColor: ind.bg, color: managed ? '#dc2626' : ind.text }}
+                  style={{ backgroundColor: ind.bg, color: ind.text }}
                 >
                   {ind.letter}
                 </span>
@@ -74,7 +74,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, annotation, activeBrush
               );
             })()
           ) : (
-            <span className="text-[9px] font-bold" style={{ color: managed ? '#dc2626' : '#166534' }}>
+            <span className="text-[9px] font-bold text-green-800">
               {[...membershipTypes].map(t => TYPE_INDICATORS[t]?.letter || '?').join('')}
             </span>
           )}
