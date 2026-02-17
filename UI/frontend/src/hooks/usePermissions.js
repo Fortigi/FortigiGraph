@@ -11,6 +11,7 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
   const [managedByPackages, setManagedByPackages] = useState([]);
   const [userColumns, setUserColumns] = useState(null); // null = loading
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // true during refetch (filter/limit change)
   const [error, setError] = useState(null);
 
   // Fetch user columns once on mount (for filter dropdowns + knowing which filters are server-side)
@@ -79,8 +80,9 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
 
     async function fetchData() {
       try {
-        // Only show full loading spinner on initial load (no data yet)
+        // Full loading spinner on initial load; subtle refreshing indicator on subsequent fetches
         if (data.length === 0) setLoading(true);
+        setRefreshing(true);
 
         const [permResult, apRes] = await Promise.all([
           fetchPermissions(debouncedLimit, debouncedFilterKey, controller.signal),
@@ -99,7 +101,10 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
         if (cancelled || err.name === 'AbortError') return;
         setError(err.message);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }
     fetchData();
@@ -110,5 +115,5 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
     };
   }, [debouncedLimit, debouncedFilterKey, fetchPermissions, authFetch]);
 
-  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, error };
+  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, refreshing, error };
 }
