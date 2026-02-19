@@ -38,6 +38,51 @@ async function ensureTagTables(pool) {
 // Re-export for other routes to use
 export { ensureTagTables };
 
+// ─── Column discovery helpers ────────────────────────────────────
+const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
+const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
+
+let userColsCache = null;
+let groupColsCache = null;
+
+async function discoverColumns(pool, table) {
+  const result = await pool.request().query(`
+    SELECT COLUMN_NAME, DATA_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = '${table}'
+      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
+    ORDER BY ORDINAL_POSITION
+  `);
+  return result.recordset.map(r => ({ name: r.COLUMN_NAME, type: r.DATA_TYPE }));
+}
+
+async function getUserCols(pool) {
+  if (userColsCache) return userColsCache;
+  userColsCache = await discoverColumns(pool, 'GraphUsers');
+  return userColsCache;
+}
+
+async function getGroupCols(pool) {
+  if (groupColsCache) return groupColsCache;
+  groupColsCache = await discoverColumns(pool, 'GraphGroups');
+  return groupColsCache;
+}
+
+// Build parameterized WHERE clause from filters object, validating against actual columns
+function buildFilterWhere(requestObj, filters, validColNames, alias, paramPrefix = 'fl') {
+  let where = '';
+  let idx = 0;
+  for (const [field, value] of Object.entries(filters)) {
+    if (validColNames.has(field) && value != null && String(value) !== '') {
+      const paramName = `${paramPrefix}${idx}`;
+      where += ` AND CAST(${alias}.[${field}] AS NVARCHAR(400)) = @${paramName}`;
+      requestObj.input(paramName, String(value));
+      idx++;
+    }
+  }
+  return where;
+}
+
 // ─── GET /api/tags ────────────────────────────────────────────────
 router.get('/tags', async (req, res) => {
   try {
@@ -194,31 +239,39 @@ router.post('/tags/:id/unassign', async (req, res) => {
 router.post('/tags/:id/assign-by-filter', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
-    const { entityType, search } = req.body;
+    const { entityType, search, filters } = req.body;
     if (!entityType) return res.status(400).json({ error: 'entityType required' });
 
     const p = await db.getPool();
     await ensureTagTables(p);
     const tagId = parseInt(req.params.id);
     const table = entityType === 'user' ? 'GraphUsers' : 'GraphGroups';
+    const alias = 'e';
 
     const request = p.request().input('tagId', tagId);
     let where = '1=1';
     if (search) {
       request.input('search', `%${search}%`);
       if (entityType === 'user') {
-        where = `(displayName LIKE @search OR userPrincipalName LIKE @search)`;
+        where += ` AND (${alias}.displayName LIKE @search OR ${alias}.userPrincipalName LIKE @search)`;
       } else {
-        where = `(displayName LIKE @search OR description LIKE @search)`;
+        where += ` AND (${alias}.displayName LIKE @search OR ${alias}.description LIKE @search)`;
       }
+    }
+
+    // Apply attribute filters
+    if (filters && typeof filters === 'object') {
+      const cols = entityType === 'user' ? await getUserCols(p) : await getGroupCols(p);
+      const colNames = new Set(cols.map(c => c.name));
+      where += buildFilterWhere(request, filters, colNames, alias, 'bf');
     }
 
     const result = await request.query(`
       INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
-      SELECT @tagId, UPPER(CAST(id AS NVARCHAR(36)))
-      FROM dbo.${table}
+      SELECT @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
+      FROM dbo.${table} ${alias}
       WHERE (${where})
-        AND UPPER(CAST(id AS NVARCHAR(36))) NOT IN (
+        AND UPPER(CAST(${alias}.id AS NVARCHAR(36))) NOT IN (
           SELECT entityId FROM dbo.GraphTagAssignments WHERE tagId = @tagId
         );
       SELECT @@ROWCOUNT AS inserted;
@@ -239,6 +292,66 @@ function parseTags(tagString) {
   });
 }
 
+// ─── GET /api/user-columns-page ──────────────────────────────────
+// Column discovery for the Users page (distinct values from GraphUsers)
+router.get('/user-columns-page', async (req, res) => {
+  try {
+    if (!useSql) return res.json([]);
+    const p = await db.getPool();
+    const cols = await getUserCols(p);
+    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
+    if (filterableCols.length === 0) return res.json([]);
+
+    const parts = filterableCols.map(c =>
+      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
+      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphUsers ` +
+      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
+      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
+    );
+    const result = await p.request().query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
+
+    const grouped = {};
+    for (const r of result.recordset) {
+      if (!grouped[r.col]) grouped[r.col] = [];
+      grouped[r.col].push(r.val);
+    }
+    return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));
+  } catch (err) {
+    console.error('user-columns-page query failed:', err.message);
+    return res.json([]);
+  }
+});
+
+// ─── GET /api/group-columns ──────────────────────────────────────
+// Column discovery for the Groups page (distinct values from GraphGroups)
+router.get('/group-columns', async (req, res) => {
+  try {
+    if (!useSql) return res.json([]);
+    const p = await db.getPool();
+    const cols = await getGroupCols(p);
+    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
+    if (filterableCols.length === 0) return res.json([]);
+
+    const parts = filterableCols.map(c =>
+      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
+      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphGroups ` +
+      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
+      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
+    );
+    const result = await p.request().query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
+
+    const grouped = {};
+    for (const r of result.recordset) {
+      if (!grouped[r.col]) grouped[r.col] = [];
+      grouped[r.col].push(r.val);
+    }
+    return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));
+  } catch (err) {
+    console.error('group-columns query failed:', err.message);
+    return res.json([]);
+  }
+});
+
 // ─── GET /api/users ───────────────────────────────────────────────
 router.get('/users', async (req, res) => {
   try {
@@ -249,12 +362,23 @@ router.get('/users', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
+    // Parse attribute filters
+    let attrFilters = {};
+    if (req.query.filters) {
+      try { attrFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
+    }
+
     const p = await db.getPool();
     await ensureTagTables(p);
 
     const request = p.request();
     request.input('limit', limit);
     request.input('offset', offset);
+
+    // Validate attribute filters against actual columns
+    const cols = await getUserCols(p);
+    const colNames = new Set(cols.map(c => c.name));
+    const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'u');
 
     let where = '1=1';
     if (search) {
@@ -265,6 +389,7 @@ router.get('/users', async (req, res) => {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
     }
+    where += filterWhere;
 
     const result = await request.query(`
       SELECT u.id, u.displayName, u.userPrincipalName, u.department, u.jobTitle,
@@ -304,12 +429,23 @@ router.get('/groups', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
+    // Parse attribute filters
+    let attrFilters = {};
+    if (req.query.filters) {
+      try { attrFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
+    }
+
     const p = await db.getPool();
     await ensureTagTables(p);
 
     const request = p.request();
     request.input('limit', limit);
     request.input('offset', offset);
+
+    // Validate attribute filters against actual columns
+    const cols = await getGroupCols(p);
+    const colNames = new Set(cols.map(c => c.name));
+    const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'g');
 
     let where = '1=1';
     if (search) {
@@ -320,6 +456,7 @@ router.get('/groups', async (req, res) => {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
     }
+    where += filterWhere;
 
     const result = await request.query(`
       SELECT g.id, g.displayName, g.groupTypeCalculated, g.description,

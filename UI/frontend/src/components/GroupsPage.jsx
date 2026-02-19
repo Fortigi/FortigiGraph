@@ -8,6 +8,21 @@ const TAG_COLORS = [
 
 const PAGE_SIZE = 100;
 
+// Friendly labels for known group column names
+const FIELD_LABELS = {
+  displayName: 'Name',
+  groupTypeCalculated: 'Group Type',
+  description: 'Description',
+  mailEnabled: 'Mail Enabled',
+  securityEnabled: 'Security Enabled',
+  visibility: 'Visibility',
+  membershipRule: 'Membership Rule',
+  isAssignableToRole: 'Role Assignable',
+  onPremisesSyncEnabled: 'On-Prem Sync',
+  mail: 'Mail',
+  resourceProvisioningOptions: 'Provisioning',
+};
+
 export default function GroupsPage({ onBack }) {
   const { authFetch } = useAuth();
 
@@ -16,6 +31,10 @@ export default function GroupsPage({ onBack }) {
   const [total, setTotal] = useState(0);
   const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Column discovery for filters
+  const [availableColumns, setAvailableColumns] = useState([]);
+  const [activeFilters, setActiveFilters] = useState([]);
 
   // Filter state
   const [search, setSearch] = useState('');
@@ -44,7 +63,17 @@ export default function GroupsPage({ onBack }) {
   }, [search]);
 
   // Reset page & selection when filters change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, tagFilter]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, tagFilter, activeFilters]);
+
+  // Fetch available columns for filter dropdowns
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/group-columns');
+        if (res.ok) setAvailableColumns(await res.json());
+      } catch { /* ignore */ }
+    })();
+  }, [authFetch]);
 
   // Fetch tags
   const fetchTags = useCallback(async () => {
@@ -56,6 +85,11 @@ export default function GroupsPage({ onBack }) {
 
   useEffect(() => { fetchTags(); }, [fetchTags]);
 
+  // Build filters object for API
+  const filtersObj = activeFilters.length > 0
+    ? Object.fromEntries(activeFilters.map(f => [f.field, f.value]))
+    : null;
+
   // Fetch groups
   const fetchGroups = useCallback(async () => {
     const version = ++fetchVersion.current;
@@ -64,6 +98,7 @@ export default function GroupsPage({ onBack }) {
       const params = new URLSearchParams({ limit: PAGE_SIZE, offset: page * PAGE_SIZE });
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (tagFilter) params.set('tagId', tagFilter);
+      if (filtersObj) params.set('filters', JSON.stringify(filtersObj));
       const res = await authFetch(`/api/groups?${params}`);
       if (res.ok && version === fetchVersion.current) {
         const json = await res.json();
@@ -72,7 +107,7 @@ export default function GroupsPage({ onBack }) {
       }
     } catch { /* ignore */ }
     if (version === fetchVersion.current) setLoading(false);
-  }, [page, debouncedSearch, tagFilter, authFetch]);
+  }, [page, debouncedSearch, tagFilter, filtersObj, authFetch]);
 
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
 
@@ -92,6 +127,32 @@ export default function GroupsPage({ onBack }) {
       setSelected(new Set(groups.map(g => g.id)));
     }
   };
+
+  // Filter helpers
+  const addFilter = (field, value) => {
+    setActiveFilters(prev => {
+      const existing = prev.findIndex(f => f.field === field);
+      if (existing >= 0) {
+        const next = [...prev];
+        next[existing] = { field, value };
+        return next;
+      }
+      return [...prev, { field, value }];
+    });
+  };
+
+  const removeFilter = (field) => {
+    setActiveFilters(prev => prev.filter(f => f.field !== field));
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters([]);
+    setTagFilter('');
+    setSearch('');
+  };
+
+  // Columns that are already used as active filters
+  const activeFieldSet = new Set(activeFilters.map(f => f.field));
 
   // Tag operations
   const createTag = async () => {
@@ -129,13 +190,17 @@ export default function GroupsPage({ onBack }) {
   };
 
   const assignTagToAll = async () => {
-    if (!actionTag || !debouncedSearch) return;
+    if (!actionTag) return;
     setBusy(true);
     try {
       const res = await authFetch(`/api/tags/${actionTag}/assign-by-filter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityType: 'group', search: debouncedSearch }),
+        body: JSON.stringify({
+          entityType: 'group',
+          search: debouncedSearch || undefined,
+          filters: filtersObj || undefined,
+        }),
       });
       if (res.ok) {
         const json = await res.json();
@@ -172,6 +237,7 @@ export default function GroupsPage({ onBack }) {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = groups.length > 0 && selected.size === groups.length;
+  const hasAnyFilter = activeFilters.length > 0 || tagFilter || debouncedSearch;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -267,8 +333,8 @@ export default function GroupsPage({ onBack }) {
         </div>
       )}
 
-      {/* Search */}
-      <div className="flex items-center gap-3 mb-3">
+      {/* Search + attribute filters */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <input
           type="text"
           value={search}
@@ -276,10 +342,54 @@ export default function GroupsPage({ onBack }) {
           placeholder="Search by group name or description..."
           className="px-3 py-1.5 border border-gray-300 rounded text-sm w-72"
         />
-        {debouncedSearch && (
-          <span className="text-xs text-gray-500">{total} groups match &quot;{debouncedSearch}&quot;</span>
+
+        {/* Attribute filter dropdowns */}
+        {availableColumns
+          .filter(col => !activeFieldSet.has(col.column) && col.values.length >= 1 && col.values.length <= 500)
+          .map(col => (
+            <select
+              key={col.column}
+              value=""
+              onChange={e => { if (e.target.value) addFilter(col.column, e.target.value); }}
+              className="px-2 py-1.5 border border-gray-300 rounded text-sm text-gray-500 bg-white"
+            >
+              <option value="">{FIELD_LABELS[col.column] || col.column}</option>
+              {col.values.map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ))
+        }
+
+        {hasAnyFilter && (
+          <button
+            onClick={clearAllFilters}
+            className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 border border-gray-200"
+          >
+            Clear all
+          </button>
         )}
       </div>
+
+      {/* Active filter pills */}
+      {activeFilters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {activeFilters.map(f => (
+            <span
+              key={f.field}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200"
+            >
+              {FIELD_LABELS[f.field] || f.field}: {f.value}
+              <button
+                onClick={() => removeFilter(f.field)}
+                className="ml-0.5 hover:text-blue-600"
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Action bar */}
       {selected.size > 0 && (
@@ -310,14 +420,14 @@ export default function GroupsPage({ onBack }) {
           >
             Remove Tag
           </button>
-          {debouncedSearch && total > PAGE_SIZE && (
+          {hasAnyFilter && total > selected.size && (
             <>
               <div className="border-l border-blue-200 h-5" />
               <button
                 onClick={assignTagToAll}
                 disabled={!actionTag || busy}
                 className="px-3 py-1 rounded text-sm font-medium text-blue-700 hover:bg-blue-100 border border-blue-300 disabled:opacity-50"
-                title={`Tag all ${total} groups matching "${debouncedSearch}"`}
+                title={`Tag all ${total} groups matching current filters`}
               >
                 Tag all {total} matching
               </button>
@@ -337,7 +447,7 @@ export default function GroupsPage({ onBack }) {
         <div className="text-center text-gray-500 py-12">Loading groups...</div>
       ) : groups.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {debouncedSearch || tagFilter ? 'No groups match the current filters.' : 'No groups found.'}
+          {hasAnyFilter ? 'No groups match the current filters.' : 'No groups found.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
