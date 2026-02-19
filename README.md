@@ -242,20 +242,6 @@ FortigiGraph creates SQL views automatically for instant insights:
 
 FortigiGraph includes an optional web-based Role Mining UI that visualizes your permission data as an interactive matrix, making it easy to discover role patterns and governance gaps.
 
-### Features
-
-- **Permission Matrix**: Interactive heatmap showing user-group assignments with membership type indicators (Direct, Indirect, Eligible, Owner)
-- **Multi-Type Badges**: When a user has multiple relationship types to the same group (e.g. Direct + Owner), each type is shown as its own colored badge in the cell
-- **Access Package Coloring**: Each access package gets a distinct color. Managed cells are colored to match the access package that governs them, making it instantly visible which package controls which assignments
-- **Multi-AP Indicator**: When a cell is managed by multiple access packages, a badge shows the count
-- **Access Package Columns**: SOLL columns sorted by total assignment count (broadest packages like "All Employees" first, targeted packages last)
-- **IST/SOLL/Both Toggle**: Switch between showing all assignments, only unmanaged (IST), or only managed-by-access-package (SOLL)
-- **Server-Side User Limit**: Adjustable slider (default 25 users) that limits data at the SQL level, keeping the UI fast even with hundreds of thousands of assignments
-- **Entra ID Authentication**: Built-in MSAL-based authentication with app registration. Use `-NoAuth` for demo/development environments
-- **Drag-and-Drop**: Reorder rows to group related permissions together
-- **Multi-Filter**: Filter by department, job title, membership type, group type, and more
-- **Excel Export**: Export the matrix with colors, AP coloring, and rich-text membership badges to `.xlsx`
-
 ### Quick Start
 
 ```powershell
@@ -274,11 +260,232 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 ### Architecture
 
-- **Backend**: Node.js + Express serving a REST API that queries the FortigiGraph SQL views
-- **Frontend**: React + Vite + Tailwind CSS + TanStack Table v8
-- **Authentication**: Entra ID (Azure AD) with MSAL, supporting both v1 and v2 token formats
-- **Deployment**: Azure App Service (Linux, Node 20, default P0v3 SKU) with Oryx build-on-deploy
-- **Data**: Reads from `vw_UserPermissionAssignments`, `vw_UserPermissionAssignmentViaAccessPackage`, and related views
+| Layer | Technology | Purpose |
+|---|---|---|
+| **Backend** | Node.js + Express | REST API querying FortigiGraph SQL views |
+| **Frontend** | React + Vite + Tailwind CSS + TanStack Table v8 | Interactive SPA |
+| **Authentication** | Entra ID (MSAL) | Supports v1 + v2 JWT token formats; `-NoAuth` for demos |
+| **Deployment** | Azure App Service (Linux, Node 20, P0v3) | Oryx build-on-deploy |
+| **Data Sources** | `vw_UserPermissionAssignments`, `vw_UserPermissionAssignmentViaAccessPackage`, `GraphUsers`, `GraphGroups` | SQL views + tables created by `Start-FGSync` |
+
+### Pages
+
+The UI has three main pages accessible via navigation:
+
+#### Matrix View (default)
+
+The core visualization — an interactive user-group permission matrix.
+
+- **Rows** = groups, **Columns** = users. Each cell shows the membership types (Direct, Indirect, Eligible, Owner) as colored badges
+- **Access Package Coloring**: Managed cells are colored by their governing access package (15-color palette). Multi-AP cells show a count badge
+- **Access Package Columns**: SOLL columns sorted by assignment count (broadest first, most targeted last)
+- **IST/SOLL Toggle**: Filter to show all assignments, only unmanaged (IST), or only managed (SOLL)
+- **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
+- **Drag-and-Drop**: Reorder rows to group related permissions together
+- **Excel Export**: Full matrix export with AP-colored cells, rich-text badges, and multi-AP notes
+- **Share Link**: Copy a URL that preserves all active filters, user limit, and managed toggle
+
+**Filtering** is split into two sections:
+
+| Section | Fields | Applied |
+|---|---|---|
+| **User Filters** | All user attributes (department, job title, company, city, etc.) + User Tag | Server-side (full dataset) |
+| **Group Filters** | Group name, membership type, Group Tag | Client-side (current page) |
+
+Filters use a pill-based UI: click "+ Add filter" → select field → select value. Active filters appear as removable pills with inline value switching.
+
+#### Users Page
+
+Browse and manage all synced users with pagination.
+
+- **Tag Management**: Create colored tags, assign/remove tags from selected users, bulk-tag all matching a filter
+- **Filtering**: Same pill-based FilterBar with all user attribute columns + User Tag
+- **Text Search**: Search by display name or UPN
+- **Selection**: Checkbox selection with bulk tag operations
+
+#### Groups Page
+
+Browse and manage all synced groups with pagination.
+
+- **Tag Management**: Create colored tags, assign/remove tags from selected groups, bulk-tag by filter
+- **Filtering**: Pill-based FilterBar with all group attribute columns + Group Tag
+- **Text Search**: Search by group name or description
+- **Selection**: Checkbox selection with bulk tag operations
+
+### Tagging System
+
+Tags are user-defined labels (e.g. "VIP", "Contractors", "Finance Groups") that can be assigned to users or groups. They serve two purposes:
+
+1. **Organization**: Visually label entities in the Users/Groups tables
+2. **Filtering**: Use as filter criteria on any page (Users, Groups, or Matrix)
+
+Tags are stored in the `GraphTags` and `GraphTagAssignments` SQL tables (auto-created on first use). Clicking a tag pill on the Users/Groups page adds it as a filter; it also appears as a "User Tag" or "Group Tag" option in the standard filter bar.
+
+### UI API Reference
+
+All endpoints require `Authorization: Bearer <JWT>` unless auth is disabled (`-NoAuth`). The backend runs on port 3001 and serves the React SPA for non-API routes.
+
+#### Unauthenticated Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | Health check. Returns `{ status: "ok", mode: "sql"\|"mock" }` |
+| `GET` | `/api/auth-config` | Auth configuration for MSAL. Returns `{ enabled, clientId?, tenantId? }` |
+
+#### Matrix / Permissions
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/user-columns` | Column discovery for Matrix filters. Returns filterable columns from `GraphUsers` with up to 500 distinct values per column. Includes virtual `__userTag` and `__groupTag` columns if tags exist. |
+| `GET` | `/api/permissions` | Main matrix data. Returns permission assignments with all user attributes, access package mappings, and total user count. |
+| `GET` | `/api/access-package-groups` | Access package → group mapping with role names and assignment counts. |
+| `GET` | `/api/sync-log` | Recent sync log entries from `GraphSyncLog`. |
+
+**GET /api/permissions** query parameters:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `userLimit` | int | Limit to top N users by assignment count. `0` = all users. |
+| `filters` | JSON string | Server-side filters: `{"department":"HR","__userTag":"VIP"}` |
+
+Response:
+```json
+{
+  "data": [
+    {
+      "groupId": "uuid",
+      "groupDisplayName": "SG-Finance-Base",
+      "memberId": "uuid",
+      "memberDisplayName": "Jane Doe",
+      "membershipType": "Direct",
+      "department": "Finance",
+      "jobTitle": "Analyst",
+      "managedByAccessPackage": true
+    }
+  ],
+  "totalUsers": 156,
+  "managedByPackages": [
+    { "memberId": "uuid", "groupId": "uuid", "accessPackageIds": ["ap-001"] }
+  ]
+}
+```
+
+**GET /api/sync-log** query parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | int | 20 | Number of entries (max 100) |
+
+#### Users Page
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/user-columns-page` | Column discovery for Users page filters. Same format as `/api/user-columns` but scoped to the Users page. Includes `__userTag` virtual column. |
+| `GET` | `/api/users` | Paginated user list with tags. |
+
+**GET /api/users** query parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `search` | string | | Search displayName or UPN (LIKE) |
+| `tagId` | int | | Filter by tag ID (legacy, still supported) |
+| `limit` | int | 100 | Page size (max 500) |
+| `offset` | int | 0 | Pagination offset |
+| `filters` | JSON string | | Attribute filters: `{"department":"HR","__userTag":"VIP"}` |
+
+Response:
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "displayName": "Jane Doe",
+      "userPrincipalName": "jane@contoso.com",
+      "department": "Finance",
+      "jobTitle": "Analyst",
+      "companyName": "Contoso",
+      "accountEnabled": true,
+      "tags": [{ "id": 1, "name": "VIP", "color": "#3b82f6" }]
+    }
+  ],
+  "total": 1234
+}
+```
+
+#### Groups Page
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/group-columns` | Column discovery for Groups page filters. Includes `__groupTag` virtual column. |
+| `GET` | `/api/groups` | Paginated group list with tags. |
+
+**GET /api/groups** query parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `search` | string | | Search displayName or description (LIKE) |
+| `tagId` | int | | Filter by tag ID (legacy, still supported) |
+| `limit` | int | 100 | Page size (max 500) |
+| `offset` | int | 0 | Pagination offset |
+| `filters` | JSON string | | Attribute filters: `{"groupTypeCalculated":"Security","__groupTag":"Critical"}` |
+
+Response:
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "displayName": "SG-Finance-Base",
+      "groupTypeCalculated": "Security",
+      "description": "Base access for Finance",
+      "tags": [{ "id": 2, "name": "Critical", "color": "#ef4444" }]
+    }
+  ],
+  "total": 567
+}
+```
+
+#### Tag Management
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tags?entityType=user\|group` | List tags (optionally filtered by entity type). Returns name, color, assignment count. |
+| `POST` | `/api/tags` | Create a tag. Body: `{ name, color?, entityType }`. Unique per (name, entityType). |
+| `PATCH` | `/api/tags/:id` | Update tag name and/or color. Body: `{ name?, color? }` |
+| `DELETE` | `/api/tags/:id` | Delete tag and all its assignments (cascade). |
+| `POST` | `/api/tags/:id/assign` | Assign tag to specific entities. Body: `{ entityIds: ["uuid", ...] }` |
+| `POST` | `/api/tags/:id/unassign` | Remove tag from specific entities. Body: `{ entityIds: ["uuid", ...] }` |
+| `POST` | `/api/tags/:id/assign-by-filter` | Bulk-assign tag to all entities matching a search/filter. Body: `{ entityType, search?, filters? }` |
+
+### Filter Architecture
+
+The UI uses a hybrid filtering approach for optimal performance:
+
+```
+┌─────────────────────────────────────────────────┐
+│ Frontend (React)                                 │
+│                                                  │
+│  activeFilters: [{field, value}, ...]            │
+│         │                                        │
+│         ├── User attribute filters ──────────► Server-side (SQL WHERE)
+│         │   (department, jobTitle, __userTag)     │
+│         │                                        │
+│         └── Relationship filters ──────────────► Client-side (JS filter)
+│             (groupDisplayName, membershipType)   │
+│                                                  │
+│  Column discovery:                               │
+│    /api/user-columns → full dataset values       │
+│    Data rows → current page values               │
+│                                                  │
+│  Debounced fetch (400ms) on filter change        │
+└─────────────────────────────────────────────────┘
+```
+
+**Server-side filters** (applied in SQL) are more efficient for large datasets — they reduce data before it reaches the browser. These include all columns from `GraphUsers` plus the virtual `__userTag` and `__groupTag` tag columns.
+
+**Client-side filters** are applied in JavaScript after data is loaded. These include relationship-level fields like `membershipType` and `groupDisplayName` that come from the permission view rather than the users table.
+
+All filters use parameterized SQL queries to prevent injection. Virtual tag columns (`__userTag`, `__groupTag`) are extracted from the filters object and translated to tag table subqueries before the main query runs.
 
 ---
 
