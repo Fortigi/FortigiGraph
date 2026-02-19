@@ -3,6 +3,8 @@ import { usePermissions } from './hooks/usePermissions';
 import { useAuth } from './auth/AuthGate';
 import MatrixView from './components/MatrixView';
 import SyncLogPage from './components/SyncLogPage';
+import UsersPage from './components/UsersPage';
+import GroupsPage from './components/GroupsPage';
 
 function useHashRoute() {
   const [page, setPage] = useState(window.location.hash.replace('#', '') || 'matrix');
@@ -14,6 +16,13 @@ function useHashRoute() {
   const navigate = useCallback((p) => { window.location.hash = p; }, []);
   return [page, navigate];
 }
+
+const NAV_TABS = [
+  { key: 'matrix',   label: 'Matrix' },
+  { key: 'users',    label: 'Users' },
+  { key: 'groups',   label: 'Groups' },
+  { key: 'sync-log', label: 'Sync Log' },
+];
 
 export default function App() {
   const [userLimit, setUserLimit] = useState(25);
@@ -48,12 +57,6 @@ export default function App() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('sync-log')}
-              className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 hover:bg-gray-100 border border-gray-200"
-            >
-              Sync Log
-            </button>
             {account && (
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <span>{account.name || account.username}</span>
@@ -68,12 +71,33 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {/* Tab navigation */}
+        <nav className="flex items-center gap-1 mt-3 -mb-4 border-b-0">
+          {NAV_TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => navigate(tab.key)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
+                page === tab.key
+                  ? 'bg-gray-50 text-blue-600 border-gray-200'
+                  : 'bg-transparent text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       {/* Content */}
       <main className="p-6">
         {page === 'sync-log' ? (
           <SyncLogPage onBack={() => navigate('matrix')} />
+        ) : page === 'users' ? (
+          <UsersPage onBack={() => navigate('matrix')} />
+        ) : page === 'groups' ? (
+          <GroupsPage onBack={() => navigate('matrix')} />
         ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-500">Loading permission data...</div>

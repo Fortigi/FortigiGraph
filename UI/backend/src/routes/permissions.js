@@ -85,6 +85,25 @@ router.get('/user-columns', async (req, res) => {
       grouped[r.col].push(r.val);
     }
 
+    // Add virtual tag columns (if tag tables exist)
+    try {
+      const tagCheck = await p.request().query(
+        `SELECT OBJECT_ID('dbo.GraphTags', 'U') AS exists`
+      );
+      if (tagCheck.recordset[0].exists) {
+        const tagResult = await p.request().query(`
+          SELECT entityType, name
+          FROM dbo.GraphTags t
+          WHERE EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+          ORDER BY entityType, name
+        `);
+        const userTags = tagResult.recordset.filter(r => r.entityType === 'user').map(r => r.name);
+        const groupTags = tagResult.recordset.filter(r => r.entityType === 'group').map(r => r.name);
+        if (userTags.length > 0) grouped['__userTag'] = userTags;
+        if (groupTags.length > 0) grouped['__groupTag'] = groupTags;
+      }
+    } catch { /* tag tables may not exist yet — skip silently */ }
+
     return res.json(
       Object.entries(grouped).map(([column, values]) => ({ column, values }))
     );
@@ -135,6 +154,26 @@ router.get('/permissions', async (req, res) => {
         .map(c => `u.[${c.name}]`)
         .join(',\n            ');
 
+      // Extract special tag filters before regular validation
+      let userTagFilter = null;
+      let groupTagFilter = null;
+      if (requestedFilters['__userTag']) {
+        userTagFilter = String(requestedFilters['__userTag']);
+        delete requestedFilters['__userTag'];
+      }
+      if (requestedFilters['__groupTag']) {
+        groupTagFilter = String(requestedFilters['__groupTag']);
+        delete requestedFilters['__groupTag'];
+      }
+
+      // Check if tag tables exist (for tag filter queries)
+      let tagTablesExist = false;
+      if (userTagFilter || groupTagFilter) {
+        const tc = await p.request().query(`SELECT OBJECT_ID('dbo.GraphTags', 'U') AS e`);
+        tagTablesExist = !!tc.recordset[0].e;
+        if (!tagTablesExist) { userTagFilter = null; groupTagFilter = null; }
+      }
+
       // Validate and build filter WHERE clause (parameterized)
       const validFilters = [];
       for (const [field, value] of Object.entries(requestedFilters)) {
@@ -144,12 +183,28 @@ router.get('/permissions', async (req, res) => {
       }
 
       let filterWhere = '';
+      let userTagWhere = '';
+      let groupTagWhere = '';
       const addParams = (request) => {
         for (let i = 0; i < validFilters.length; i++) {
           const f = validFilters[i];
           // Use CAST for consistent string comparison (handles bit/int columns)
           filterWhere += ` AND CAST(u.[${f.field}] AS NVARCHAR(400)) = @f${i}`;
           request.input(`f${i}`, f.value);
+        }
+        if (userTagFilter) {
+          userTagWhere = ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
+            SELECT ta.entityId FROM dbo.GraphTagAssignments ta
+            INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+            WHERE t.name = @__userTag AND t.entityType = 'user')`;
+          request.input('__userTag', userTagFilter);
+        }
+        if (groupTagFilter) {
+          groupTagWhere = ` AND UPPER(CAST(p.groupId AS NVARCHAR(36))) IN (
+            SELECT ta.entityId FROM dbo.GraphTagAssignments ta
+            INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+            WHERE t.name = @__groupTag AND t.entityType = 'group')`;
+          request.input('__groupTag', groupTagFilter);
         }
       };
 
@@ -168,6 +223,7 @@ router.get('/permissions', async (req, res) => {
             INNER JOIN GraphUsers u ON p.memberId = u.id
             WHERE p.memberType != '#microsoft.graph.group'
               ${filterWhere}
+              ${userTagWhere}
             GROUP BY p.memberId
             ORDER BY COUNT(*) DESC
           )
@@ -187,13 +243,15 @@ router.get('/permissions', async (req, res) => {
           INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group'
-            AND p.memberId IN (SELECT memberId FROM TopUsers);
+            AND p.memberId IN (SELECT memberId FROM TopUsers)
+            ${groupTagWhere};
 
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           WHERE p.memberType != '#microsoft.graph.group'
-            ${filterWhere};
+            ${filterWhere}
+            ${userTagWhere};
         `);
       } else {
         const request = p.request();
@@ -217,7 +275,9 @@ router.get('/permissions', async (req, res) => {
           INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
           WHERE p.memberType != '#microsoft.graph.group'
-            ${filterWhere};
+            ${filterWhere}
+            ${userTagWhere}
+            ${groupTagWhere};
         `);
       }
 
@@ -229,10 +289,18 @@ router.get('/permissions', async (req, res) => {
           const apRequest = p.request();
           apRequest.input('userLimit', userLimit);
           filterWhere = '';
+          userTagWhere = '';
           const apAddParams = (req2) => {
             for (let i = 0; i < validFilters.length; i++) {
               filterWhere += ` AND CAST(u.[${validFilters[i].field}] AS NVARCHAR(400)) = @f${i}`;
               req2.input(`f${i}`, validFilters[i].value);
+            }
+            if (userTagFilter) {
+              userTagWhere = ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
+                SELECT ta.entityId FROM dbo.GraphTagAssignments ta
+                INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+                WHERE t.name = @__userTag AND t.entityType = 'user')`;
+              req2.input('__userTag', userTagFilter);
             }
           };
           apAddParams(apRequest);
@@ -244,6 +312,7 @@ router.get('/permissions', async (req, res) => {
               INNER JOIN GraphUsers u ON p.memberId = u.id
               WHERE p.memberType != '#microsoft.graph.group'
                 ${filterWhere}
+                ${userTagWhere}
               GROUP BY p.memberId
               ORDER BY COUNT(*) DESC
             )

@@ -28,6 +28,8 @@ const FIELD_LABELS = {
   mail: 'Mail',
   manager: 'Manager',
   onPremisesSamAccountName: 'SAM Account',
+  __userTag: 'User Tag',
+  __groupTag: 'Group Tag',
 };
 
 export default function MatrixView({
