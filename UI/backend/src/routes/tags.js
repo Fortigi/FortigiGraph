@@ -315,6 +315,21 @@ router.get('/user-columns-page', async (req, res) => {
       if (!grouped[r.col]) grouped[r.col] = [];
       grouped[r.col].push(r.val);
     }
+
+    // Add virtual __userTag column (tag names as values)
+    try {
+      await ensureTagTables(p);
+      const tagResult = await p.request().query(`
+        SELECT t.name
+        FROM dbo.GraphTags t
+        WHERE t.entityType = 'user'
+          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        ORDER BY t.name
+      `);
+      const userTags = tagResult.recordset.map(r => r.name);
+      if (userTags.length > 0) grouped['__userTag'] = userTags;
+    } catch { /* tag tables may not exist yet */ }
+
     return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));
   } catch (err) {
     console.error('user-columns-page query failed:', err.message);
@@ -345,6 +360,21 @@ router.get('/group-columns', async (req, res) => {
       if (!grouped[r.col]) grouped[r.col] = [];
       grouped[r.col].push(r.val);
     }
+
+    // Add virtual __groupTag column (tag names as values)
+    try {
+      await ensureTagTables(p);
+      const tagResult = await p.request().query(`
+        SELECT t.name
+        FROM dbo.GraphTags t
+        WHERE t.entityType = 'group'
+          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        ORDER BY t.name
+      `);
+      const groupTags = tagResult.recordset.map(r => r.name);
+      if (groupTags.length > 0) grouped['__groupTag'] = groupTags;
+    } catch { /* tag tables may not exist yet */ }
+
     return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));
   } catch (err) {
     console.error('group-columns query failed:', err.message);
@@ -368,6 +398,13 @@ router.get('/users', async (req, res) => {
       try { attrFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
     }
 
+    // Extract virtual tag filter before column validation
+    let userTagFilter = null;
+    if (attrFilters['__userTag']) {
+      userTagFilter = String(attrFilters['__userTag']);
+      delete attrFilters['__userTag'];
+    }
+
     const p = await db.getPool();
     await ensureTagTables(p);
 
@@ -388,6 +425,13 @@ router.get('/users', async (req, res) => {
     if (tagId) {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
+    }
+    if (userTagFilter) {
+      where += ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
+        SELECT ta.entityId FROM dbo.GraphTagAssignments ta
+        INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+        WHERE t.name = @__userTag AND t.entityType = 'user')`;
+      request.input('__userTag', userTagFilter);
     }
     where += filterWhere;
 
@@ -435,6 +479,13 @@ router.get('/groups', async (req, res) => {
       try { attrFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
     }
 
+    // Extract virtual tag filter before column validation
+    let groupTagFilter = null;
+    if (attrFilters['__groupTag']) {
+      groupTagFilter = String(attrFilters['__groupTag']);
+      delete attrFilters['__groupTag'];
+    }
+
     const p = await db.getPool();
     await ensureTagTables(p);
 
@@ -455,6 +506,13 @@ router.get('/groups', async (req, res) => {
     if (tagId) {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
+    }
+    if (groupTagFilter) {
+      where += ` AND UPPER(CAST(g.id AS NVARCHAR(36))) IN (
+        SELECT ta.entityId FROM dbo.GraphTagAssignments ta
+        INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+        WHERE t.name = @__groupTag AND t.entityType = 'group')`;
+      request.input('__groupTag', groupTagFilter);
     }
     where += filterWhere;
 

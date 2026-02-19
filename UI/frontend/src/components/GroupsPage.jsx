@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import FilterBar from './FilterBar';
 
 const TAG_COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
@@ -8,7 +9,6 @@ const TAG_COLORS = [
 
 const PAGE_SIZE = 100;
 
-// Friendly labels for known group column names
 const FIELD_LABELS = {
   displayName: 'Name',
   groupTypeCalculated: 'Group Type',
@@ -21,6 +21,7 @@ const FIELD_LABELS = {
   onPremisesSyncEnabled: 'On-Prem Sync',
   mail: 'Mail',
   resourceProvisioningOptions: 'Provisioning',
+  __groupTag: 'Group Tag',
 };
 
 export default function GroupsPage({ onBack }) {
@@ -39,7 +40,6 @@ export default function GroupsPage({ onBack }) {
   // Filter state
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(0);
 
   // Selection state
@@ -63,7 +63,7 @@ export default function GroupsPage({ onBack }) {
   }, [search]);
 
   // Reset page & selection when filters change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, tagFilter, activeFilters]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, activeFilters]);
 
   // Fetch available columns for filter dropdowns
   useEffect(() => {
@@ -85,10 +85,27 @@ export default function GroupsPage({ onBack }) {
 
   useEffect(() => { fetchTags(); }, [fetchTags]);
 
-  // Build filters object for API
-  const filtersObj = activeFilters.length > 0
-    ? Object.fromEntries(activeFilters.map(f => [f.field, f.value]))
-    : null;
+  // Build filterFields from availableColumns for FilterBar
+  const filterFields = useMemo(() => {
+    return availableColumns
+      .filter(col => col.values && col.values.length >= 1 && col.values.length <= 500)
+      .map(col => ({
+        key: col.column,
+        label: FIELD_LABELS[col.column] || col.column.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
+      }));
+  }, [availableColumns]);
+
+  // Get filter options for a field
+  const getOptionsForField = useCallback((fieldKey) => {
+    const col = availableColumns.find(c => c.column === fieldKey);
+    return col?.values || [];
+  }, [availableColumns]);
+
+  // Build filters object for API (all activeFilters as key:value)
+  const filtersObj = useMemo(() => {
+    if (activeFilters.length === 0) return null;
+    return Object.fromEntries(activeFilters.map(f => [f.field, f.value]));
+  }, [activeFilters]);
 
   // Fetch groups
   const fetchGroups = useCallback(async () => {
@@ -97,7 +114,6 @@ export default function GroupsPage({ onBack }) {
     try {
       const params = new URLSearchParams({ limit: PAGE_SIZE, offset: page * PAGE_SIZE });
       if (debouncedSearch) params.set('search', debouncedSearch);
-      if (tagFilter) params.set('tagId', tagFilter);
       if (filtersObj) params.set('filters', JSON.stringify(filtersObj));
       const res = await authFetch(`/api/groups?${params}`);
       if (res.ok && version === fetchVersion.current) {
@@ -107,7 +123,7 @@ export default function GroupsPage({ onBack }) {
       }
     } catch { /* ignore */ }
     if (version === fetchVersion.current) setLoading(false);
-  }, [page, debouncedSearch, tagFilter, filtersObj, authFetch]);
+  }, [page, debouncedSearch, filtersObj, authFetch]);
 
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
 
@@ -129,30 +145,21 @@ export default function GroupsPage({ onBack }) {
   };
 
   // Filter helpers
-  const addFilter = (field, value) => {
-    setActiveFilters(prev => {
-      const existing = prev.findIndex(f => f.field === field);
-      if (existing >= 0) {
-        const next = [...prev];
-        next[existing] = { field, value };
-        return next;
-      }
-      return [...prev, { field, value }];
-    });
-  };
+  const addFilter = useCallback((field, value) => {
+    setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
+  }, []);
 
-  const removeFilter = (field) => {
+  const removeFilter = useCallback((field) => {
     setActiveFilters(prev => prev.filter(f => f.field !== field));
-  };
+  }, []);
 
   const clearAllFilters = () => {
     setActiveFilters([]);
-    setTagFilter('');
     setSearch('');
   };
 
-  // Columns that are already used as active filters
-  const activeFieldSet = new Set(activeFilters.map(f => f.field));
+  // Active tag filter (by tag name)
+  const activeGroupTag = activeFilters.find(f => f.field === '__groupTag')?.value || '';
 
   // Tag operations
   const createTag = async () => {
@@ -230,14 +237,18 @@ export default function GroupsPage({ onBack }) {
     setBusy(true);
     try {
       await authFetch(`/api/tags/${tagId}`, { method: 'DELETE' });
-      if (tagFilter === String(tagId)) setTagFilter('');
+      // Clear active filter if this tag was the filtered one
+      const deletedTag = tags.find(t => t.id === tagId);
+      if (deletedTag && activeGroupTag === deletedTag.name) {
+        removeFilter('__groupTag');
+      }
       await Promise.all([fetchTags(), fetchGroups()]);
     } finally { setBusy(false); }
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = groups.length > 0 && selected.size === groups.length;
-  const hasAnyFilter = activeFilters.length > 0 || tagFilter || debouncedSearch;
+  const hasAnyFilter = activeFilters.length > 0 || debouncedSearch;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -253,19 +264,25 @@ export default function GroupsPage({ onBack }) {
         <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
       </div>
 
-      {/* Tag bar */}
+      {/* Tag management bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
         <span className="font-medium text-gray-600">Tags:</span>
         {tags.map(t => (
           <span
             key={t.id}
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer border ${
-              tagFilter === String(t.id)
+              activeGroupTag === t.name
                 ? 'ring-2 ring-offset-1 ring-blue-400'
                 : 'hover:opacity-80'
             }`}
             style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
-            onClick={() => setTagFilter(tagFilter === String(t.id) ? '' : String(t.id))}
+            onClick={() => {
+              if (activeGroupTag === t.name) {
+                removeFilter('__groupTag');
+              } else {
+                addFilter('__groupTag', t.name);
+              }
+            }}
             title={`${t.assignmentCount} groups tagged — click to filter`}
           >
             {t.name}
@@ -285,14 +302,6 @@ export default function GroupsPage({ onBack }) {
         >
           + New Tag
         </button>
-        {tagFilter && (
-          <button
-            onClick={() => setTagFilter('')}
-            className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100"
-          >
-            Clear filter
-          </button>
-        )}
       </div>
 
       {/* Create tag form */}
@@ -333,63 +342,39 @@ export default function GroupsPage({ onBack }) {
         </div>
       )}
 
-      {/* Search + attribute filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      {/* Filter bar + search */}
+      <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+        <FilterBar
+          label="Filters:"
+          filterFields={filterFields}
+          activeFilters={activeFilters}
+          getOptionsForField={getOptionsForField}
+          onAddFilter={addFilter}
+          onRemoveFilter={removeFilter}
+        />
+
+        <div className="border-l border-gray-300 h-5 mx-1" />
+
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search by group name or description..."
-          className="px-3 py-1.5 border border-gray-300 rounded text-sm w-72"
+          className="px-2 py-1 border border-gray-300 rounded text-xs w-64"
         />
 
-        {/* Attribute filter dropdowns */}
-        {availableColumns
-          .filter(col => !activeFieldSet.has(col.column) && col.values.length >= 1 && col.values.length <= 500)
-          .map(col => (
-            <select
-              key={col.column}
-              value=""
-              onChange={e => { if (e.target.value) addFilter(col.column, e.target.value); }}
-              className="px-2 py-1.5 border border-gray-300 rounded text-sm text-gray-500 bg-white"
-            >
-              <option value="">{FIELD_LABELS[col.column] || col.column}</option>
-              {col.values.map(v => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          ))
-        }
-
         {hasAnyFilter && (
-          <button
-            onClick={clearAllFilters}
-            className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 border border-gray-200"
-          >
-            Clear all
-          </button>
+          <>
+            <div className="border-l border-gray-300 h-5 mx-1" />
+            <button
+              onClick={clearAllFilters}
+              className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 border border-gray-200"
+            >
+              Clear all
+            </button>
+          </>
         )}
       </div>
-
-      {/* Active filter pills */}
-      {activeFilters.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          {activeFilters.map(f => (
-            <span
-              key={f.field}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200"
-            >
-              {FIELD_LABELS[f.field] || f.field}: {f.value}
-              <button
-                onClick={() => removeFilter(f.field)}
-                className="ml-0.5 hover:text-blue-600"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* Action bar */}
       {selected.size > 0 && (

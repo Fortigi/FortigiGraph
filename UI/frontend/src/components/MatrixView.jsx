@@ -10,6 +10,8 @@ import MatrixGroupRow from './matrix/MatrixGroupRow';
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
 const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType']);
+// Fields that describe groups / relationships (everything else is a user attribute)
+const GROUP_FIELD_KEYS = new Set(['groupDisplayName', '__groupTag', 'membershipType']);
 // Friendly labels for known fields
 const FIELD_LABELS = {
   department: 'Department',
@@ -105,6 +107,10 @@ export default function MatrixView({
 
     return [...fieldMap.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [data, userColumns]);
+
+  // Split filter fields into user / group categories
+  const userFilterFields = useMemo(() => filterFields.filter(f => !GROUP_FIELD_KEYS.has(f.key)), [filterFields]);
+  const groupFilterFields = useMemo(() => filterFields.filter(f => GROUP_FIELD_KEYS.has(f.key)), [filterFields]);
 
   // Get available values for a specific field.
   // User columns: use server-provided values (full dataset, not just current page).
@@ -410,11 +416,12 @@ export default function MatrixView({
     <div className="flex flex-col gap-3">
       <MatrixToolbar
         filterFields={filterFields}
+        userFilterFields={userFilterFields}
+        groupFilterFields={groupFilterFields}
         activeFilters={activeFilters}
         getOptionsForField={getOptionsForField}
         onAddFilter={addFilter}
         onRemoveFilter={removeFilter}
-        onClearAllFilters={clearAllFilters}
         filterText={filterText}
         setFilterText={setFilterText}
         managedFilter={managedFilter}
