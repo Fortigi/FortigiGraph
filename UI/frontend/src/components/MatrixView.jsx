@@ -36,12 +36,13 @@ export default function MatrixView({
   data, accessPackageGroups = [], managedByPackages = [], totalUsers: serverTotalUsers,
   userLimit, setUserLimit,
   activeFilters, setActiveFilters,
+  managedFilter, setManagedFilter,
+  filterText, setFilterText,
   userColumns,
   refreshing,
+  shareUrl,
 }) {
-  const [filterText, setFilterText] = useState('');
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
-  const [managedFilter, setManagedFilter] = useState('all'); // 'all' | 'unmanaged' | 'managed'
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -381,8 +382,19 @@ export default function MatrixView({
       filterFields,
       accessPackages,
       apGroupMap,
+      shareUrl,
     });
-  }, [users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages, apGroupMap]);
+  }, [users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages, apGroupMap, shareUrl]);
+
+  // Share: copy URL to clipboard
+  const handleShare = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [shareUrl]);
 
   const stats = {
     users: users.length,
@@ -410,6 +422,7 @@ export default function MatrixView({
         userLimit={userLimit}
         setUserLimit={setUserLimit}
         onExportExcel={handleExportExcel}
+        onShare={handleShare}
         onResetRowOrder={rowOrderHook.resetOrder}
         hasCustomRowOrder={rowOrderHook.hasCustomOrder}
         stats={stats}

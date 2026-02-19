@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
+export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap, shareUrl }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -332,6 +332,28 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       legendWs.getCell(r, 2).font = { size: 9 };
       legendWs.getCell(r, 2).border = thinBorder();
     });
+  }
+
+  // Shareable URL
+  if (shareUrl) {
+    // Find next available row after membership legend + filters
+    const legendRows = Object.keys(TYPE_COLORS).length + 1; // legend rows including header
+    const filterRows = (activeFilters && activeFilters.length > 0)
+      ? activeFilters.length + 2 // header + spacer + rows
+      : 0;
+    const urlRow = legendRows + filterRows + 2;
+
+    setHeaderCell(legendWs.getCell(urlRow, 1), 'Shareable Link');
+    const urlCell = legendWs.getCell(urlRow, 2);
+    legendWs.mergeCells(urlRow, 2, urlRow, 3);
+    urlCell.value = { text: shareUrl, hyperlink: shareUrl };
+    urlCell.font = { size: 9, color: { argb: 'FF2563EB' }, underline: true };
+    urlCell.border = thinBorder();
+
+    const noteCell = legendWs.getCell(urlRow + 1, 1);
+    noteCell.value = 'Open this link to reproduce the exact same matrix view with all filters applied.';
+    legendWs.mergeCells(urlRow + 1, 1, urlRow + 1, 3);
+    noteCell.font = { size: 8, italic: true, color: { argb: 'FF6B7280' } };
   }
 
   // ===== Generate & download =====

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import { useAuth } from './auth/AuthGate';
 import MatrixView from './components/MatrixView';
@@ -6,10 +6,58 @@ import SyncLogPage from './components/SyncLogPage';
 import UsersPage from './components/UsersPage';
 import GroupsPage from './components/GroupsPage';
 
+// ─── URL helpers ──────────────────────────────────────────────────
+
+function parseHash() {
+  const raw = window.location.hash.replace('#', '') || 'matrix';
+  const qIndex = raw.indexOf('?');
+  const page = qIndex >= 0 ? raw.substring(0, qIndex) : raw;
+  const params = new URLSearchParams(qIndex >= 0 ? raw.substring(qIndex + 1) : '');
+  return { page, params };
+}
+
+function parseMatrixParams(params) {
+  const limit = params.has('limit') ? (parseInt(params.get('limit')) || 0) : 25;
+  const filters = [];
+  for (const [key, value] of params.entries()) {
+    if (key.startsWith('f.')) {
+      filters.push({ field: key.slice(2), value });
+    }
+  }
+  const managed = params.get('managed') || 'all';
+  const search = params.get('q') || '';
+  return { limit, filters, managed, search };
+}
+
+function buildMatrixHash(state) {
+  const params = new URLSearchParams();
+  if (state.limit > 0) params.set('limit', String(state.limit));
+  if (state.limit === 0) params.set('limit', '0');
+  for (const f of state.filters || []) {
+    params.set(`f.${f.field}`, f.value);
+  }
+  if (state.managed && state.managed !== 'all') params.set('managed', state.managed);
+  if (state.search) params.set('q', state.search);
+  const qs = params.toString();
+  return `matrix${qs ? '?' + qs : ''}`;
+}
+
+export function buildMatrixUrl(state) {
+  const hash = buildMatrixHash(state);
+  return `${window.location.origin}${window.location.pathname}#${hash}`;
+}
+
+// ─── Hash route hook ──────────────────────────────────────────────
+
 function useHashRoute() {
-  const [page, setPage] = useState(window.location.hash.replace('#', '') || 'matrix');
+  const getPage = () => {
+    const raw = window.location.hash.replace('#', '') || 'matrix';
+    const qIndex = raw.indexOf('?');
+    return qIndex >= 0 ? raw.substring(0, qIndex) : raw;
+  };
+  const [page, setPage] = useState(getPage());
   useEffect(() => {
-    const onHash = () => setPage(window.location.hash.replace('#', '') || 'matrix');
+    const onHash = () => setPage(getPage());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -25,11 +73,47 @@ const NAV_TABS = [
 ];
 
 export default function App() {
-  const [userLimit, setUserLimit] = useState(25);
-  const [activeFilters, setActiveFilters] = useState([]);
+  // Parse initial state from URL (runs once)
+  const initial = useMemo(() => {
+    const { page, params } = parseHash();
+    if (page === 'matrix') return parseMatrixParams(params);
+    return { limit: 25, filters: [], managed: 'all', search: '' };
+  }, []);
+
+  // All shareable matrix state lives here
+  const [userLimit, setUserLimit] = useState(initial.limit);
+  const [activeFilters, setActiveFilters] = useState(initial.filters);
+  const [managedFilter, setManagedFilter] = useState(initial.managed);
+  const [filterText, setFilterText] = useState(initial.search);
+
   const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, refreshing, error } = usePermissions(userLimit, activeFilters);
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
+
+  // Sync URL when on matrix page (debounced replaceState — no history entry)
+  useEffect(() => {
+    if (page !== 'matrix') return;
+    const timer = setTimeout(() => {
+      const newHash = buildMatrixHash({
+        limit: userLimit,
+        filters: activeFilters,
+        managed: managedFilter,
+        search: filterText,
+      });
+      if (window.location.hash !== '#' + newHash) {
+        history.replaceState(null, '', '#' + newHash);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [page, userLimit, activeFilters, managedFilter, filterText]);
+
+  // Build shareable URL (stable reference for children)
+  const shareUrl = useMemo(() => buildMatrixUrl({
+    limit: userLimit,
+    filters: activeFilters,
+    managed: managedFilter,
+    search: filterText,
+  }), [userLimit, activeFilters, managedFilter, filterText]);
 
   if (error) {
     return (
@@ -112,8 +196,13 @@ export default function App() {
             setUserLimit={setUserLimit}
             activeFilters={activeFilters}
             setActiveFilters={setActiveFilters}
+            managedFilter={managedFilter}
+            setManagedFilter={setManagedFilter}
+            filterText={filterText}
+            setFilterText={setFilterText}
             userColumns={userColumns}
             refreshing={refreshing}
+            shareUrl={shareUrl}
           />
         )}
       </main>

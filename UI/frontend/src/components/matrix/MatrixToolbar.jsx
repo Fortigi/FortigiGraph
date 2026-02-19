@@ -14,12 +14,14 @@ export default function MatrixToolbar({
   userLimit,
   setUserLimit,
   onExportExcel,
+  onShare,
   onResetRowOrder,
   hasCustomRowOrder,
   stats,
 }) {
   const [addingFilter, setAddingFilter] = useState(false);
   const [newFilterField, setNewFilterField] = useState('');
+  const [copied, setCopied] = useState(false);
 
   // Fields not yet used in active filters
   const availableFields = useMemo(() => {
@@ -207,6 +209,24 @@ export default function MatrixToolbar({
           title="Export matrix to Excel (.xlsx)"
         >
           Export Excel
+        </button>
+
+        <button
+          onClick={async () => {
+            const ok = await onShare();
+            if (ok) {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }
+          }}
+          className={`px-2 py-1 rounded text-xs font-medium border transition-colors ${
+            copied
+              ? 'bg-green-50 text-green-700 border-green-300'
+              : 'text-gray-600 hover:bg-gray-100 border-gray-200'
+          }`}
+          title="Copy shareable link to clipboard"
+        >
+          {copied ? 'Copied!' : 'Share Link'}
         </button>
 
         {hasCustomRowOrder && (
