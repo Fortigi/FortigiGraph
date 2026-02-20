@@ -47,7 +47,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   // ---------- Column widths ----------
   ws.getColumn(1).width = 4;   // empty / drag handle
   ws.getColumn(2).width = 14;  // Category
-  ws.getColumn(3).width = 35;  // Group Name
+  ws.getColumn(3).width = 38;  // Group Name
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
@@ -55,9 +55,8 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     ws.getColumn(apColStart + a).width = 4;
   }
   ws.getColumn(metaColStart).width = 5;     // #
-  ws.getColumn(metaColStart + 1).width = 6;  // %
-  ws.getColumn(metaColStart + 2).width = 10; // Type
-  ws.getColumn(metaColStart + 3).width = 30; // Description
+  ws.getColumn(metaColStart + 1).width = 10; // Type
+  ws.getColumn(metaColStart + 2).width = 30; // Description
 
   // ===== ROW 1: Job titles (merged) =====
   const row1 = ws.getRow(1);
@@ -114,9 +113,8 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
   // Row 1 meta headers
   setHeaderCell(ws.getCell(1, metaColStart), '#', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 1), '%', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 1), 'Type', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Description', true);
 
   // ===== ROW 2: User display names =====
   const row2 = ws.getRow(2);
@@ -237,7 +235,6 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
     // Meta columns
     const memberCount = group.memberCount;
-    const pct = userCount > 0 ? Math.round((memberCount / userCount) * 100) : 0;
 
     const countCell = ws.getCell(rowNum, metaColStart);
     countCell.value = memberCount;
@@ -245,22 +242,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     countCell.alignment = { horizontal: 'center' };
     countCell.border = thinBorder();
 
-    const pctCell = ws.getCell(rowNum, metaColStart + 1);
-    pctCell.value = pct / 100;
-    pctCell.numFmt = '0%';
-    pctCell.font = {
-      size: 8,
-      color: { argb: pct === 100 ? 'FF166534' : pct >= 75 ? 'FF854D0E' : 'FF000000' },
-    };
-    pctCell.alignment = { horizontal: 'center' };
-    pctCell.border = thinBorder();
-
-    const typeCell = ws.getCell(rowNum, metaColStart + 2);
+    const typeCell = ws.getCell(rowNum, metaColStart + 1);
     typeCell.value = group.groupType || '';
     typeCell.font = { size: 8 };
     typeCell.border = thinBorder();
 
-    const descCell = ws.getCell(rowNum, metaColStart + 3);
+    const descCell = ws.getCell(rowNum, metaColStart + 2);
     descCell.value = group.description;
     descCell.font = { size: 8, color: { argb: 'FF666666' } };
     descCell.border = thinBorder();

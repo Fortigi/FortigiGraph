@@ -139,20 +139,13 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
               }}
               title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}${ap.categoryName ? '\nCategory: ' + ap.categoryName : ''}`}
             >
-              {/* Category color indicator at top */}
-              {ap.categoryColor && (
-                <div
-                  style={{ backgroundColor: ap.categoryColor, height: '4px', width: '100%', borderRadius: '0' }}
-                  title={`Category: ${ap.categoryName}`}
-                />
-              )}
               <div
                 className="text-[10px] text-gray-700 font-medium select-none"
                 style={{
                   writingMode: 'vertical-lr',
                   textOrientation: 'mixed',
                   transform: 'rotate(180deg)',
-                  maxHeight: ap.categoryColor ? '206px' : '210px',
+                  maxHeight: '210px',
                   overflow: 'hidden',
                   whiteSpace: 'nowrap',
                   margin: '0 auto',
@@ -166,7 +159,6 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
 
         {/* Right metadata column headers row 1 - empty placeholders */}
         <th className="border-b border-l-2 border-gray-300 bg-gray-100" style={{ minWidth: '40px' }} />
-        <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '45px' }} />
         <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '60px' }} />
         <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '500px' }} />
       </tr>
@@ -242,7 +234,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           )}
         </th>
         <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
-            style={{ left: '124px', minWidth: '250px' }}>
+            style={{ left: '124px', minWidth: '275px' }}>
           Group Name
         </th>
 
@@ -280,11 +272,6 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             onClick={onSortByCount}
             title="Sort by member count (descending)">
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}># &#x25BC;</div>
-        </th>
-        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
-            onClick={onSortByCount}
-            title="Sort by percentage (descending)">
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>% &#x25BC;</div>
         </th>
         <th className={`border-b border-gray-300 px-1 py-1 text-[10px] font-medium cursor-pointer select-none relative ${isTypeFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
             ref={typeFilterRef}>
