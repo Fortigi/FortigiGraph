@@ -356,8 +356,9 @@ export default function MatrixView({
     const groupApBucket = new Map();
     for (const g of groups) {
       let bucket = accessPackages.length; // unmanaged = after all APs
+      const gidUpper = g.id.toUpperCase(); // apGroupMap keys use toUpperCase()
       for (let i = 0; i < accessPackages.length; i++) {
-        if (apGroupMap.has(`${g.id}|${accessPackages[i].id}`)) {
+        if (apGroupMap.has(`${gidUpper}|${accessPackages[i].id}`)) {
           bucket = i;
           break;
         }
