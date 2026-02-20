@@ -211,8 +211,8 @@ router.get('/permissions', async (req, res) => {
 
       let filterWhere = '';
       let groupFilterWhere = '';
-      let userTagWhere = '';
-      let groupTagWhere = '';
+      let userTagJoin = '';
+      let groupTagJoin = '';
       const addParams = (request) => {
         for (let i = 0; i < validUserFilters.length; i++) {
           const f = validUserFilters[i];
@@ -228,17 +228,15 @@ router.get('/permissions', async (req, res) => {
           request.input(`gf${i}`, f.value);
         }
         if (userTagFilter) {
-          userTagWhere = ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
-            SELECT ta.entityId FROM dbo.GraphTagAssignments ta
-            INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-            WHERE t.name = @__userTag AND t.entityType = 'user')`;
+          userTagJoin = `
+            INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
+            INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
           request.input('__userTag', userTagFilter);
         }
         if (groupTagFilter) {
-          groupTagWhere = ` AND UPPER(CAST(p.groupId AS NVARCHAR(36))) IN (
-            SELECT ta.entityId FROM dbo.GraphTagAssignments ta
-            INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-            WHERE t.name = @__groupTag AND t.entityType = 'group')`;
+          groupTagJoin = `
+            INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(p.groupId AS NVARCHAR(36)))
+            INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType = 'group'`;
           request.input('__groupTag', groupTagFilter);
         }
       };
@@ -253,7 +251,7 @@ router.get('/permissions', async (req, res) => {
         addParams(request);
 
         // TopUsers CTE joins GraphGroups when group filters are active
-        const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagFilter
+        const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
           ? `LEFT JOIN GraphGroups g ON p.groupId = g.id` : '';
 
         result = await request.query(`
@@ -262,11 +260,11 @@ router.get('/permissions', async (req, res) => {
             FROM ${permSource} p
             INNER JOIN GraphUsers u ON p.memberId = u.id
             ${topUsersGroupJoin}
+            ${userTagJoin}
+            ${groupTagJoin}
             WHERE p.memberType != '#microsoft.graph.group'
               ${filterWhere}
-              ${userTagWhere}
               ${groupFilterWhere}
-              ${groupTagWhere}
             GROUP BY p.memberId
             ORDER BY COUNT(*) DESC
           )
@@ -285,20 +283,20 @@ router.get('/permissions', async (req, res) => {
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
+          ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
             AND p.memberId IN (SELECT memberId FROM TopUsers)
-            ${groupFilterWhere}
-            ${groupTagWhere};
+            ${groupFilterWhere};
 
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           ${topUsersGroupJoin}
+          ${userTagJoin}
+          ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
             ${filterWhere}
-            ${userTagWhere}
-            ${groupFilterWhere}
-            ${groupTagWhere};
+            ${groupFilterWhere};
         `);
       } else {
         const request = p.request();
@@ -322,11 +320,11 @@ router.get('/permissions', async (req, res) => {
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
+          ${userTagJoin}
+          ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
             ${filterWhere}
-            ${userTagWhere}
-            ${groupFilterWhere}
-            ${groupTagWhere};
+            ${groupFilterWhere};
         `);
       }
 
@@ -338,17 +336,16 @@ router.get('/permissions', async (req, res) => {
           const apRequest = p.request();
           apRequest.input('userLimit', userLimit);
           filterWhere = '';
-          userTagWhere = '';
+          userTagJoin = '';
           const apAddParams = (req2) => {
             for (let i = 0; i < validUserFilters.length; i++) {
               filterWhere += ` AND CAST(u.[${validUserFilters[i].field}] AS NVARCHAR(400)) = @f${i}`;
               req2.input(`f${i}`, validUserFilters[i].value);
             }
             if (userTagFilter) {
-              userTagWhere = ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
-                SELECT ta.entityId FROM dbo.GraphTagAssignments ta
-                INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-                WHERE t.name = @__userTag AND t.entityType = 'user')`;
+              userTagJoin = `
+                INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
+                INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
               req2.input('__userTag', userTagFilter);
             }
           };
@@ -359,9 +356,9 @@ router.get('/permissions', async (req, res) => {
               SELECT TOP (@userLimit) p.memberId
               FROM ${permSource} p
               INNER JOIN GraphUsers u ON p.memberId = u.id
+              ${userTagJoin}
               WHERE p.memberType != '#microsoft.graph.group'
                 ${filterWhere}
-                ${userTagWhere}
               GROUP BY p.memberId
               ORDER BY COUNT(*) DESC
             )

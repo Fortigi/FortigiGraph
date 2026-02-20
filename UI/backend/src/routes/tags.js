@@ -31,6 +31,8 @@ async function ensureTagTables(pool) {
       PRIMARY KEY (tagId, entityId),
       CONSTRAINT FK_TagAssignment_Tag FOREIGN KEY (tagId) REFERENCES dbo.GraphTags(id) ON DELETE CASCADE
     );
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_GraphTagAssignments_entityId' AND object_id = OBJECT_ID('dbo.GraphTagAssignments'))
+      CREATE INDEX IX_GraphTagAssignments_entityId ON dbo.GraphTagAssignments(entityId) INCLUDE(tagId);
   `);
   tablesReady = true;
 }
@@ -426,11 +428,11 @@ router.get('/users', async (req, res) => {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
     }
+    let userTagJoin = '';
     if (userTagFilter) {
-      where += ` AND UPPER(CAST(u.id AS NVARCHAR(36))) IN (
-        SELECT ta.entityId FROM dbo.GraphTagAssignments ta
-        INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-        WHERE t.name = @__userTag AND t.entityType = 'user')`;
+      userTagJoin = `
+        INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
+        INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
       request.input('__userTag', userTagFilter);
     }
     where += filterWhere;
@@ -444,11 +446,12 @@ router.get('/users', async (req, res) => {
               WHERE ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
              ) AS tagString
       FROM dbo.GraphUsers u
+      ${userTagJoin}
       WHERE ${where}
       ORDER BY u.displayName
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
-      SELECT COUNT(*) AS total FROM dbo.GraphUsers u WHERE ${where};
+      SELECT COUNT(*) AS total FROM dbo.GraphUsers u ${userTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(r => {
@@ -507,11 +510,11 @@ router.get('/groups', async (req, res) => {
       where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36))))`;
       request.input('tagId', tagId);
     }
+    let groupTagJoin = '';
     if (groupTagFilter) {
-      where += ` AND UPPER(CAST(g.id AS NVARCHAR(36))) IN (
-        SELECT ta.entityId FROM dbo.GraphTagAssignments ta
-        INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-        WHERE t.name = @__groupTag AND t.entityType = 'group')`;
+      groupTagJoin = `
+        INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(g.id AS NVARCHAR(36)))
+        INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType = 'group'`;
       request.input('__groupTag', groupTagFilter);
     }
     where += filterWhere;
@@ -524,11 +527,12 @@ router.get('/groups', async (req, res) => {
               WHERE ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36)))
              ) AS tagString
       FROM dbo.GraphGroups g
+      ${groupTagJoin}
       WHERE ${where}
       ORDER BY g.displayName
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
-      SELECT COUNT(*) AS total FROM dbo.GraphGroups g WHERE ${where};
+      SELECT COUNT(*) AS total FROM dbo.GraphGroups g ${groupTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(r => {
