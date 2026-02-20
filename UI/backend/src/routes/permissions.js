@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
+import { ensureTagTables } from './tags.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -108,21 +109,18 @@ router.get('/user-columns', async (req, res) => {
       grouped[r.col].push(r.val);
     }
 
-    // Add virtual __userTag column (if tag tables exist)
+    // Add virtual __userTag column (ensure tag tables exist first)
     try {
-      const tagCheck = await p.request().query(
-        `SELECT OBJECT_ID('dbo.GraphTags', 'U') AS exists`
-      );
-      if (tagCheck.recordset[0].exists) {
-        const tagResult = await p.request().query(`
-          SELECT name FROM dbo.GraphTags t
-          WHERE t.entityType = 'user'
-            AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
-          ORDER BY name
-        `);
-        const userTags = tagResult.recordset.map(r => r.name);
-        if (userTags.length > 0) grouped['__userTag'] = userTags;
-      }
+      await ensureTagTables(p);
+      const tagResult = await p.request().query(`
+        SELECT t.name
+        FROM dbo.GraphTags t
+        WHERE t.entityType = 'user'
+          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        ORDER BY t.name
+      `);
+      const userTags = tagResult.recordset.map(r => r.name);
+      if (userTags.length > 0) grouped['__userTag'] = userTags;
     } catch { /* tag tables may not exist yet — skip silently */ }
 
     return res.json(
@@ -130,79 +128,6 @@ router.get('/user-columns', async (req, res) => {
     );
   } catch (err) {
     console.error('user-columns query failed:', err.message);
-    return res.json([]);
-  }
-});
-
-// ─── GET /api/group-columns ──────────────────────────────────────
-// Returns column names + distinct values from GraphGroups for filter dropdowns.
-router.get('/group-columns', async (req, res) => {
-  try {
-    if (!useSql) {
-      // Mock: derive from mock data's group-related fields in permission assignments
-      const mockCols = {};
-      for (const row of permissionAssignments) {
-        for (const key of ['groupTypeCalculated']) {
-          const val = row[key];
-          if (val == null || val === '') continue;
-          if (!mockCols[key]) mockCols[key] = new Set();
-          mockCols[key].add(String(val));
-        }
-      }
-      return res.json(
-        Object.entries(mockCols)
-          .filter(([, vals]) => vals.size >= 1 && vals.size <= 500)
-          .map(([column, vals]) => ({ column, values: [...vals].sort() }))
-      );
-    }
-
-    const p = await db.getPool();
-    const cols = await getGroupColumns(p);
-    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
-
-    if (filterableCols.length === 0) return res.json([]);
-
-    // Single UNION ALL query to get all distinct values in one roundtrip
-    const parts = filterableCols.map(c =>
-      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
-      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphGroups ` +
-      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
-      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
-    );
-
-    const unionSql = parts.join('\nUNION ALL\n') + '\nORDER BY col, val';
-    const result = await p.request().query(unionSql);
-
-    // Group by column, applying aliases to match permission query field names
-    const grouped = {};
-    for (const r of result.recordset) {
-      const aliased = GROUP_COL_ALIASES[r.col] || r.col;
-      if (!grouped[aliased]) grouped[aliased] = [];
-      grouped[aliased].push(r.val);
-    }
-
-    // Add virtual __groupTag column (if tag tables exist)
-    try {
-      const tagCheck = await p.request().query(
-        `SELECT OBJECT_ID('dbo.GraphTags', 'U') AS exists`
-      );
-      if (tagCheck.recordset[0].exists) {
-        const tagResult = await p.request().query(`
-          SELECT name FROM dbo.GraphTags t
-          WHERE t.entityType = 'group'
-            AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
-          ORDER BY name
-        `);
-        const groupTags = tagResult.recordset.map(r => r.name);
-        if (groupTags.length > 0) grouped['__groupTag'] = groupTags;
-      }
-    } catch { /* tag tables may not exist yet — skip silently */ }
-
-    return res.json(
-      Object.entries(grouped).map(([column, values]) => ({ column, values }))
-    );
-  } catch (err) {
-    console.error('group-columns query failed:', err.message);
     return res.json([]);
   }
 });
@@ -262,12 +187,14 @@ router.get('/permissions', async (req, res) => {
         delete requestedFilters['__groupTag'];
       }
 
-      // Check if tag tables exist (for tag filter queries)
-      let tagTablesExist = false;
+      // Ensure tag tables exist for tag filter queries
       if (userTagFilter || groupTagFilter) {
-        const tc = await p.request().query(`SELECT OBJECT_ID('dbo.GraphTags', 'U') AS e`);
-        tagTablesExist = !!tc.recordset[0].e;
-        if (!tagTablesExist) { userTagFilter = null; groupTagFilter = null; }
+        try {
+          await ensureTagTables(p);
+        } catch {
+          userTagFilter = null;
+          groupTagFilter = null;
+        }
       }
 
       // Validate and split filters into user vs group columns (parameterized)

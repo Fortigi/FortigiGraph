@@ -3,6 +3,9 @@ import { useAuth } from '../auth/AuthGate';
 
 const API_BASE = '/api';
 
+// GraphGroups column names → permission query aliases (for Matrix tab)
+const GROUP_COL_ALIASES = { displayName: 'groupDisplayName', description: 'groupDescription' };
+
 export function usePermissions(userLimit = 25, activeFilters = []) {
   const { authFetch } = useAuth();
   const [data, setData] = useState([]);
@@ -24,7 +27,15 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
       .catch(() => { if (!cancelled) setUserColumns([]); });
     authFetch(`${API_BASE}/group-columns`)
       .then(res => res.ok ? res.json() : [])
-      .then(cols => { if (!cancelled) setGroupColumns(cols); })
+      .then(cols => {
+        if (cancelled) return;
+        // Apply aliases so column names match the permission query field names
+        const aliased = cols.map(c => ({
+          ...c,
+          column: GROUP_COL_ALIASES[c.column] || c.column,
+        }));
+        setGroupColumns(aliased);
+      })
       .catch(() => { if (!cancelled) setGroupColumns([]); });
     return () => { cancelled = true; };
   }, [authFetch]);
