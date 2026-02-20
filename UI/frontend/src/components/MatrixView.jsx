@@ -282,6 +282,8 @@ export default function MatrixView({
           displayName: row.accessPackageName,
           catalogName: row.catalogName,
           totalAssignments: row.totalAssignments || 0,
+          categoryName: row.categoryName || null,
+          categoryColor: row.categoryColor || null,
         });
       }
       mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
@@ -303,10 +305,19 @@ export default function MatrixView({
       }
     }
 
-    // Sort access packages by total assignments descending (broadest first)
-    const accessPackages = [...apMap.values()].sort((a, b) =>
-      b.totalAssignments - a.totalAssignments || a.displayName.localeCompare(b.displayName)
-    );
+    // Sort access packages: by category name first, then by total assignments
+    // descending within each category. Uncategorized APs go at the end.
+    const accessPackages = [...apMap.values()].sort((a, b) => {
+      const aCat = a.categoryName;
+      const bCat = b.categoryName;
+      // Uncategorized after all categorized
+      if (aCat && !bCat) return -1;
+      if (!aCat && bCat) return 1;
+      // Both categorized: sort by category name
+      if (aCat && bCat && aCat !== bCat) return aCat.localeCompare(bCat);
+      // Same category (or both uncategorized): sort by total assignments descending
+      return b.totalAssignments - a.totalAssignments || a.displayName.localeCompare(b.displayName);
+    });
     return { accessPackages, apGroupMap: mapping };
   }, [accessPackageGroups, groups, users, managedApMap]);
 

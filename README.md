@@ -144,7 +144,7 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 ### Pages
 
-The UI has four pages accessible via tab navigation:
+The UI has five pages accessible via tab navigation:
 
 #### Matrix View (default)
 
@@ -153,7 +153,7 @@ The core visualization — an interactive user-group permission matrix.
 - **Rows** = groups, **Columns** = users. Each cell shows the membership types (Direct, Indirect, Eligible, Owner) as colored badges
 - **Staircase Sort**: Default row order groups rows by their leftmost access package, creating a visual staircase pattern. Unmanaged groups appear at the bottom
 - **Access Package Coloring**: Managed cells are colored by their governing access package (15-color palette). Multi-AP cells show a count badge
-- **Access Package Columns**: SOLL columns sorted by assignment count (broadest first, most targeted last)
+- **Access Package Columns**: SOLL columns sorted first by category name, then by assignment count within each category; uncategorized access packages appear at the end. Category boundaries are marked with thicker borders and a colored indicator stripe.
 - **IST/SOLL Toggle**: Filter to show all assignments, only unmanaged (IST), or only managed (SOLL)
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Drag-and-Drop**: Reorder rows to group related permissions together
@@ -189,6 +189,17 @@ Browse and manage all synced groups with pagination.
 - **Text Search**: Search by group name or description
 - **Selection**: Checkbox selection with bulk tag operations
 
+#### Access Packages Page
+
+Browse all synced access packages with their catalog, assignment count, and category.
+
+- **Category Management**: Create colored categories, assign a category to selected access packages, or set it directly via an inline dropdown per row
+- **Filtering**: Filter by category (click a category pill) or show only uncategorized packages
+- **Text Search**: Search by access package name or catalog name
+- **Selection**: Checkbox selection with bulk category operations
+
+Unlike tags (which allow multiple per entity), each access package can have only **one** category assigned. Categories drive the column ordering in the Matrix view.
+
 #### Sync Log
 
 View the last 50 sync operations from `GraphSyncLog`, showing timestamps, entity types, row counts, and durations.
@@ -201,6 +212,15 @@ Tags are user-defined labels (e.g. "VIP", "Contractors", "Finance Groups") that 
 2. **Filtering**: Use as filter criteria on any page (Users, Groups, or Matrix)
 
 Tags are stored in the `GraphTags` and `GraphTagAssignments` SQL tables (auto-created on first use). Clicking a tag pill on the Users/Groups page adds it as a filter; it also appears as a "User Tag" or "Group Tag" option in the standard filter bar.
+
+### Category System
+
+Categories are user-defined labels for access packages (e.g. "Identity", "Office 365", "Security"). Unlike tags, each access package can only have **one** category — this enforces clean grouping. Categories serve two purposes:
+
+1. **Organization**: Label access packages on the Access Packages page
+2. **Matrix Column Ordering**: AP columns in the Matrix view are sorted by category name first, then by assignment count within each category. Uncategorized APs appear at the end.
+
+Categories are stored in the `GraphCategories` and `GraphCategoryAssignments` SQL tables (auto-created on first use). The `GraphCategoryAssignments` table has a primary key on `accessPackageId`, enforcing the single-category constraint.
 
 ### UI API Reference
 
@@ -337,6 +357,34 @@ Response:
 | `POST` | `/api/tags/:id/assign` | Assign tag to specific entities. Body: `{ entityIds: ["uuid", ...] }` |
 | `POST` | `/api/tags/:id/unassign` | Remove tag from specific entities. Body: `{ entityIds: ["uuid", ...] }` |
 | `POST` | `/api/tags/:id/assign-by-filter` | Bulk-assign tag to all entities matching a search/filter. Body: `{ entityType, search?, filters? }` |
+
+#### Category Management
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/categories` | List all categories with assignment count. |
+| `POST` | `/api/categories` | Create a category. Body: `{ name, color? }`. Name must be unique. |
+| `PATCH` | `/api/categories/:id` | Update category name and/or color. Body: `{ name?, color? }` |
+| `DELETE` | `/api/categories/:id` | Delete category and all its assignments (cascade). |
+| `POST` | `/api/categories/:id/assign` | Assign category to an access package (replaces any existing category). Body: `{ accessPackageId }` |
+| `POST` | `/api/categories/unassign` | Remove the category from an access package. Body: `{ accessPackageId }` |
+| `GET` | `/api/category-assignments` | All category assignments as flat list (used by Matrix for column ordering). |
+
+#### Access Packages Page
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/access-packages` | Paginated access package list with category info. |
+
+**GET /api/access-packages** query parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `search` | string | | Search displayName or catalog name (LIKE) |
+| `categoryId` | int | | Filter by category ID |
+| `uncategorized` | string | | Set to `true` to show only uncategorized packages |
+| `limit` | int | 100 | Page size (max 500) |
+| `offset` | int | 0 | Pagination offset |
 
 ### Filter Architecture
 

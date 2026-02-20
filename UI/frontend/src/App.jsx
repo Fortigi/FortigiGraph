@@ -5,6 +5,7 @@ import MatrixView from './components/MatrixView';
 import SyncLogPage from './components/SyncLogPage';
 import UsersPage from './components/UsersPage';
 import GroupsPage from './components/GroupsPage';
+import AccessPackagesPage from './components/AccessPackagesPage';
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
@@ -66,10 +67,11 @@ function useHashRoute() {
 }
 
 const NAV_TABS = [
-  { key: 'matrix',   label: 'Matrix' },
-  { key: 'users',    label: 'Users' },
-  { key: 'groups',   label: 'Groups' },
-  { key: 'sync-log', label: 'Sync Log' },
+  { key: 'matrix',           label: 'Matrix' },
+  { key: 'users',            label: 'Users' },
+  { key: 'groups',           label: 'Groups' },
+  { key: 'access-packages',  label: 'Access Packages' },
+  { key: 'sync-log',         label: 'Sync Log' },
 ];
 
 export default function App() {
@@ -182,6 +184,8 @@ export default function App() {
           <UsersPage />
         ) : page === 'groups' ? (
           <GroupsPage />
+        ) : page === 'access-packages' ? (
+          <AccessPackagesPage />
         ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-500">Loading permission data...</div>
