@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { authMiddleware } from './middleware/auth.js';
 import permissionsRouter from './routes/permissions.js';
+import tagsRouter from './routes/tags.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -28,6 +29,7 @@ app.get('/api/auth-config', (req, res) => {
 
 // Auth middleware for all other API routes
 app.use('/api', authMiddleware, permissionsRouter);
+app.use('/api', authMiddleware, tagsRouter);
 
 // In production, serve the frontend build output
 const frontendDist = join(__dirname, '../../frontend/dist');

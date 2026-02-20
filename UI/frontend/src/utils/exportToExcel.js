@@ -4,8 +4,8 @@ import ExcelJS from 'exceljs';
  * Exports the matrix view to an Excel workbook matching the on-screen layout.
  *
  * Layout:
- *   Row 1: (3 blank info cols) | Job Title merged headers | # | % | Type | Description
- *   Row 2: (empty) | Category | Group Name | user names... | # | % | Type | Description
+ *   Row 1: (3 blank info cols) | Job Title merged headers | AP banner | # | % | Type | Description
+ *   Row 2: (empty) | Category | Group Name | user names... | AP names... | # | % | Type | Description
  *   Row 3+: group rows with colored cells
  *
  * Plus a "Legend" sheet showing membership types and active filters.
@@ -27,7 +27,7 @@ const TYPE_COLORS = {
   Owner:    { bg: '9D174D', text: 'FFFFFF' },
 };
 
-export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap }) {
+export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap, shareUrl }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FortigiGraph Role Mining';
   wb.created = new Date();
@@ -38,7 +38,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
   const infoColCount = 3; // (empty) | Category | Group Name
   const userCount = users.length;
-  const metaColStart = infoColCount + userCount + 1; // 1-based
+  const apCount = accessPackages.length;
+
+  // AP columns sit right after users (matching on-screen layout), meta cols at the end
+  const apColStart = infoColCount + userCount + 1; // 1-based
+  const metaColStart = apColStart + apCount;       // 1-based
 
   // ---------- Column widths ----------
   ws.getColumn(1).width = 4;   // empty / drag handle
@@ -47,17 +51,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
+  for (let a = 0; a < apCount; a++) {
+    ws.getColumn(apColStart + a).width = 4;
+  }
   ws.getColumn(metaColStart).width = 5;     // #
   ws.getColumn(metaColStart + 1).width = 6;  // %
   ws.getColumn(metaColStart + 2).width = 10; // Type
   ws.getColumn(metaColStart + 3).width = 30; // Description
-
-  // Access package columns start after metadata
-  const apColStart = metaColStart + 4; // 1-based
-  const apCount = accessPackages.length;
-  for (let a = 0; a < apCount; a++) {
-    ws.getColumn(apColStart + a).width = 4;
-  }
 
   // ===== ROW 1: Job titles (merged) =====
   const row1 = ws.getRow(1);
@@ -95,13 +95,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     cell.border = thinBorder();
   }
 
-  // Row 1 meta headers
-  setHeaderCell(ws.getCell(1, metaColStart), '#', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 1), '%', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
-
-  // Row 1 access package banner
+  // Row 1 access package banner (between users and meta)
   if (apCount > 0) {
     if (apCount > 1) {
       ws.mergeCells(1, apColStart, 1, apColStart + apCount - 1);
@@ -117,6 +111,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     };
     apBanner.border = thinBorder();
   }
+
+  // Row 1 meta headers
+  setHeaderCell(ws.getCell(1, metaColStart), '#', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 1), '%', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
 
   // ===== ROW 2: User display names =====
   const row2 = ws.getRow(2);
@@ -332,6 +332,28 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       legendWs.getCell(r, 2).font = { size: 9 };
       legendWs.getCell(r, 2).border = thinBorder();
     });
+  }
+
+  // Shareable URL
+  if (shareUrl) {
+    // Find next available row after membership legend + filters
+    const legendRows = Object.keys(TYPE_COLORS).length + 1; // legend rows including header
+    const filterRows = (activeFilters && activeFilters.length > 0)
+      ? activeFilters.length + 2 // header + spacer + rows
+      : 0;
+    const urlRow = legendRows + filterRows + 2;
+
+    setHeaderCell(legendWs.getCell(urlRow, 1), 'Shareable Link');
+    const urlCell = legendWs.getCell(urlRow, 2);
+    legendWs.mergeCells(urlRow, 2, urlRow, 3);
+    urlCell.value = { text: shareUrl, hyperlink: shareUrl };
+    urlCell.font = { size: 9, color: { argb: 'FF2563EB' }, underline: true };
+    urlCell.border = thinBorder();
+
+    const noteCell = legendWs.getCell(urlRow + 1, 1);
+    noteCell.value = 'Open this link to reproduce the exact same matrix view with all filters applied.';
+    legendWs.mergeCells(urlRow + 1, 1, urlRow + 1, 3);
+    noteCell.font = { size: 8, italic: true, color: { argb: 'FF6B7280' } };
   }
 
   // ===== Generate & download =====

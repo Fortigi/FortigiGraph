@@ -35,7 +35,7 @@ const statusColors = {
   PartialSuccess: 'bg-yellow-100 text-yellow-800',
 };
 
-export default function SyncLogPage({ onBack }) {
+export default function SyncLogPage() {
   const { authFetch } = useAuth();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,12 +62,6 @@ export default function SyncLogPage({ onBack }) {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center gap-4 mb-6">
-        <button
-          onClick={onBack}
-          className="px-3 py-1.5 rounded text-sm text-gray-600 hover:bg-gray-100 border border-gray-200"
-        >
-          &larr; Back to Matrix
-        </button>
         <h2 className="text-lg font-semibold text-gray-900">Sync Log</h2>
         <span className="text-sm text-gray-500">Last 50 sync operations</span>
       </div>

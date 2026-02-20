@@ -1,12 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
+import FilterBar from '../FilterBar';
 
 export default function MatrixToolbar({
   filterFields,
+  userFilterFields,
   activeFilters,
   getOptionsForField,
   onAddFilter,
   onRemoveFilter,
-  onClearAllFilters,
   filterText,
   setFilterText,
   managedFilter,
@@ -14,158 +15,35 @@ export default function MatrixToolbar({
   userLimit,
   setUserLimit,
   onExportExcel,
+  onShare,
   onResetRowOrder,
   hasCustomRowOrder,
   stats,
 }) {
-  const [addingFilter, setAddingFilter] = useState(false);
-  const [newFilterField, setNewFilterField] = useState('');
-
-  // Fields not yet used in active filters
-  const availableFields = useMemo(() => {
-    const usedFields = new Set(activeFilters.map(f => f.field));
-    return filterFields.filter(f => !usedFields.has(f.key));
-  }, [filterFields, activeFilters]);
-
-  // Options for the field being added
-  const newFilterOptions = useMemo(() => {
-    if (!newFilterField) return [];
-    return getOptionsForField(newFilterField);
-  }, [newFilterField, getOptionsForField]);
-
-  const handleAddFilterValue = (value) => {
-    if (newFilterField && value) {
-      onAddFilter(newFilterField, value);
-    }
-    setAddingFilter(false);
-    setNewFilterField('');
-  };
+  const [copied, setCopied] = useState(false);
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Row 1: Active filters + add filter + controls */}
+      {/* Row 1: User filters + search + user limit slider */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium text-gray-700">Filters:</span>
-
-        {/* Active filter pills */}
-        {activeFilters.map(af => {
-          const field = filterFields.find(f => f.key === af.field);
-          return (
-            <span
-              key={af.field}
-              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs"
-            >
-              <span className="font-medium text-blue-700">{field?.label || af.field}:</span>
-              <select
-                value={af.value}
-                onChange={e => onAddFilter(af.field, e.target.value)}
-                className="bg-transparent border-none text-blue-900 text-xs font-medium cursor-pointer p-0 pr-4"
-              >
-                {getOptionsForField(af.field).map(v => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => onRemoveFilter(af.field)}
-                className="text-blue-400 hover:text-blue-700 font-bold ml-0.5"
-                title="Remove filter"
-              >
-                &times;
-              </button>
-            </span>
-          );
-        })}
-
-        {/* Add filter button / inline selector */}
-        {addingFilter ? (
-          <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-xs">
-            <select
-              autoFocus
-              value={newFilterField}
-              onChange={e => setNewFilterField(e.target.value)}
-              className="bg-transparent border-none text-xs p-0 pr-4"
-            >
-              <option value="">Select field...</option>
-              {availableFields.map(f => (
-                <option key={f.key} value={f.key}>{f.label}</option>
-              ))}
-            </select>
-            {newFilterField && (
-              <>
-                <span className="text-gray-400">=</span>
-                <select
-                  value=""
-                  onChange={e => handleAddFilterValue(e.target.value)}
-                  className="bg-transparent border-none text-xs p-0 pr-4"
-                >
-                  <option value="">Select value...</option>
-                  {newFilterOptions.map(v => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
-              </>
-            )}
-            <button
-              onClick={() => { setAddingFilter(false); setNewFilterField(''); }}
-              className="text-gray-400 hover:text-gray-700 font-bold"
-            >
-              &times;
-            </button>
-          </span>
-        ) : (
-          availableFields.length > 0 && (
-            <button
-              onClick={() => setAddingFilter(true)}
-              className="px-2 py-1 rounded text-xs text-blue-600 hover:bg-blue-50 border border-blue-200 border-dashed"
-            >
-              + Add filter
-            </button>
-          )
-        )}
-
-        {activeFilters.length > 1 && (
-          <button
-            onClick={onClearAllFilters}
-            className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100"
-            title="Clear all filters"
-          >
-            Clear all
-          </button>
-        )}
+        <FilterBar
+          label="User Filters:"
+          filterFields={userFilterFields}
+          activeFilters={activeFilters}
+          getOptionsForField={getOptionsForField}
+          onAddFilter={onAddFilter}
+          onRemoveFilter={onRemoveFilter}
+        />
 
         <div className="border-l border-gray-300 h-5 mx-1" />
 
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            placeholder="Search users or groups..."
-            className="px-2 py-1 border border-gray-300 rounded text-xs w-44"
-          />
-        </div>
-
-        <div className="border-l border-gray-300 h-5 mx-1" />
-
-        <div className="inline-flex rounded border border-gray-300 overflow-hidden">
-          {[
-            { key: 'all',       label: 'All' },
-            { key: 'unmanaged', label: 'Unmanaged' },
-            { key: 'managed',   label: 'Managed' },
-          ].map(opt => (
-            <button
-              key={opt.key}
-              onClick={() => setManagedFilter(opt.key)}
-              className={`px-2 py-1 text-xs font-medium transition-colors ${
-                managedFilter === opt.key
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        <input
+          type="text"
+          value={filterText}
+          onChange={e => setFilterText(e.target.value)}
+          placeholder="Search users or groups..."
+          className="px-2 py-1 border border-gray-300 rounded text-xs w-44"
+        />
 
         <div className="border-l border-gray-300 h-5 mx-1" />
 
@@ -199,6 +77,40 @@ export default function MatrixToolbar({
           </span>
         </div>
 
+        <div className="text-xs text-gray-500 ml-auto">
+          {stats.users === stats.totalUsers ? (
+            <>{stats.users} users</>
+          ) : (
+            <span className="text-amber-600 font-medium">
+              Showing {stats.users} of {stats.totalUsers} users
+            </span>
+          )}
+          {' '}&times; {stats.groups} groups &middot; {stats.memberships} assignments
+        </div>
+      </div>
+
+      {/* Row 2: Managed toggle + actions */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <div className="inline-flex rounded border border-gray-300 overflow-hidden">
+          {[
+            { key: 'all',       label: 'All' },
+            { key: 'unmanaged', label: 'Unmanaged' },
+            { key: 'managed',   label: 'Managed' },
+          ].map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setManagedFilter(opt.key)}
+              className={`px-2 py-1 text-xs font-medium transition-colors ${
+                managedFilter === opt.key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <div className="border-l border-gray-300 h-5 mx-1" />
 
         <button
@@ -207,6 +119,24 @@ export default function MatrixToolbar({
           title="Export matrix to Excel (.xlsx)"
         >
           Export Excel
+        </button>
+
+        <button
+          onClick={async () => {
+            const ok = await onShare();
+            if (ok) {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }
+          }}
+          className={`px-2 py-1 rounded text-xs font-medium border transition-colors ${
+            copied
+              ? 'bg-green-50 text-green-700 border-green-300'
+              : 'text-gray-600 hover:bg-gray-100 border-gray-200'
+          }`}
+          title="Copy shareable link to clipboard"
+        >
+          {copied ? 'Copied!' : 'Share Link'}
         </button>
 
         {hasCustomRowOrder && (
@@ -221,17 +151,6 @@ export default function MatrixToolbar({
             </button>
           </>
         )}
-
-        <div className="text-xs text-gray-500 ml-auto">
-          {stats.users === stats.totalUsers ? (
-            <>{stats.users} users</>
-          ) : (
-            <span className="text-amber-600 font-medium">
-              Showing {stats.users} of {stats.totalUsers} users
-            </span>
-          )}
-          {' '}&times; {stats.groups} groups &middot; {stats.memberships} assignments
-        </div>
       </div>
     </div>
   );

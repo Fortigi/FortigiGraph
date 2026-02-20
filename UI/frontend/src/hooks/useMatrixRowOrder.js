@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 
+// Bump this when the default sort logic changes (e.g., staircase sort introduced).
+// Stored orders from an older version are discarded so the new default takes effect.
+const ROW_ORDER_VERSION = 2;
+
 function getStorageKey(department) {
   return `fgraph-roworder-${department || 'all'}`;
 }
@@ -13,10 +17,12 @@ export function useMatrixRowOrder(department, defaultGroupIds) {
       const raw = localStorage.getItem(getStorageKey(department));
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved.order) {
+        if (saved.order && saved.version === ROW_ORDER_VERSION) {
           setRowOrder(saved.order);
           return;
         }
+        // Discard stale order from older version
+        localStorage.removeItem(getStorageKey(department));
       }
     } catch {}
     setRowOrder(null);
@@ -29,6 +35,7 @@ export function useMatrixRowOrder(department, defaultGroupIds) {
       localStorage.setItem(getStorageKey(department), JSON.stringify({
         department,
         order: rowOrder,
+        version: ROW_ORDER_VERSION,
         updatedAt: new Date().toISOString(),
       }));
     } catch {}

@@ -7,6 +7,7 @@ const config = {
   database: process.env.SQL_DATABASE,
   user: process.env.SQL_USER,
   password: process.env.SQL_PASSWORD,
+  requestTimeout: 120000,  // 2 min – recursive CTE views can be slow on large datasets
   options: {
     encrypt: true,
     trustServerCertificate: false

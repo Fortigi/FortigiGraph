@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
+import { ensureTagTables } from './tags.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -9,23 +10,261 @@ if (useSql) {
   db = await import('../db/connection.js');
 }
 
-// GET /api/permissions - vw_UserPermissionAssignments enriched with display names
-// Optional query params: userLimit (int) - limit to top N users by assignment count
+// ─── User column discovery (cached) ───────────────────────────────
+// Columns from GraphUsers that are excluded from dynamic SELECT/filter
+const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
+// Data types useful for filtering (skip datetime, uniqueidentifier, etc.)
+const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
+// Columns always handled with explicit aliases (not included in dynamic list)
+const ALIASED_COLS = new Set(['displayName', 'userPrincipalName']);
+
+let userColumnsCache = null;
+
+async function getUserColumns(pool) {
+  if (userColumnsCache) return userColumnsCache;
+  const result = await pool.request().query(`
+    SELECT COLUMN_NAME, DATA_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'GraphUsers'
+      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
+    ORDER BY ORDINAL_POSITION
+  `);
+  userColumnsCache = result.recordset.map(r => ({
+    name: r.COLUMN_NAME,
+    type: r.DATA_TYPE,
+  }));
+  return userColumnsCache;
+}
+
+// ─── Group column discovery (cached) ─────────────────────────────
+// Aliases: GraphGroups column names → permission query aliases
+const GROUP_COL_ALIASES = { displayName: 'groupDisplayName', description: 'groupDescription' };
+const GROUP_ALIAS_TO_COL = { groupDisplayName: 'displayName', groupDescription: 'description' };
+
+let groupColumnsCache = null;
+
+async function getGroupColumns(pool) {
+  if (groupColumnsCache) return groupColumnsCache;
+  const result = await pool.request().query(`
+    SELECT COLUMN_NAME, DATA_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'GraphGroups'
+      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
+    ORDER BY ORDINAL_POSITION
+  `);
+  groupColumnsCache = result.recordset.map(r => ({
+    name: r.COLUMN_NAME,
+    type: r.DATA_TYPE,
+  }));
+  return groupColumnsCache;
+}
+
+// ─── GET /api/user-columns ────────────────────────────────────────
+// Returns column names + distinct values from GraphUsers for filter dropdowns.
+// Values come from the FULL dataset (not limited by userLimit), so dropdowns
+// show all possible options regardless of which page of users is loaded.
+router.get('/user-columns', async (req, res) => {
+  try {
+    if (!useSql) {
+      // Mock: derive from mock data
+      const mockCols = {};
+      for (const row of permissionAssignments) {
+        for (const [key, val] of Object.entries(row)) {
+          if (['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType',
+               'groupDisplayName', 'groupTypeCalculated', 'groupDescription',
+               'membershipType', 'managedByAccessPackage'].includes(key)) continue;
+          if (val == null || val === '') continue;
+          if (!mockCols[key]) mockCols[key] = new Set();
+          mockCols[key].add(String(val));
+        }
+      }
+      return res.json(
+        Object.entries(mockCols)
+          .filter(([, vals]) => vals.size >= 1 && vals.size <= 500)
+          .map(([column, vals]) => ({ column, values: [...vals].sort() }))
+      );
+    }
+
+    const p = await db.getPool();
+    const cols = await getUserColumns(p);
+    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
+
+    if (filterableCols.length === 0) return res.json([]);
+
+    // Single UNION ALL query to get all distinct values in one roundtrip
+    const parts = filterableCols.map(c =>
+      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
+      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphUsers ` +
+      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
+      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
+    );
+
+    const unionSql = parts.join('\nUNION ALL\n') + '\nORDER BY col, val';
+    const result = await p.request().query(unionSql);
+
+    // Group by column
+    const grouped = {};
+    for (const r of result.recordset) {
+      if (!grouped[r.col]) grouped[r.col] = [];
+      grouped[r.col].push(r.val);
+    }
+
+    // Add virtual __userTag column (ensure tag tables exist first)
+    try {
+      await ensureTagTables(p);
+      const tagResult = await p.request().query(`
+        SELECT t.name
+        FROM dbo.GraphTags t
+        WHERE t.entityType = 'user'
+          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        ORDER BY t.name
+      `);
+      const userTags = tagResult.recordset.map(r => r.name);
+      if (userTags.length > 0) grouped['__userTag'] = userTags;
+    } catch { /* tag tables may not exist yet — skip silently */ }
+
+    return res.json(
+      Object.entries(grouped).map(([column, values]) => ({ column, values }))
+    );
+  } catch (err) {
+    console.error('user-columns query failed:', err.message);
+    return res.json([]);
+  }
+});
+
+// ─── GET /api/permissions ─────────────────────────────────────────
+// Query params:
+//   userLimit (int)  - limit to top N users by assignment count
+//   filters  (JSON)  - server-side filters: {"department":"HR","groupTypeCalculated":"Security Group"}
+//                       User columns (GraphUsers) and group columns (GraphGroups) both supported.
 router.get('/permissions', async (req, res) => {
   try {
     const userLimit = parseInt(req.query.userLimit) || 0;
 
+    // Parse filters (JSON object of field:value pairs)
+    let requestedFilters = {};
+    if (req.query.filters) {
+      try { requestedFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
+    }
+
     if (useSql) {
       const p = await db.getPool();
+
+      // Prefer materialized tables (fast) with view fallback (slow but always current)
+      const matCheck = await p.request().query(`
+        SELECT
+          OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
+          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists
+      `);
+      const permSource = matCheck.recordset[0].matPermExists
+        ? 'mat_UserPermissionAssignments'
+        : 'vw_UserPermissionAssignments';
+      const apSource = matCheck.recordset[0].matApExists
+        ? 'mat_UserPermissionAssignmentViaAccessPackage'
+        : 'vw_UserPermissionAssignmentViaAccessPackage';
+
+      // Discover user and group columns dynamically
+      const allCols = await getUserColumns(p);
+      const colNames = new Set(allCols.map(c => c.name));
+      const allGroupCols = await getGroupColumns(p);
+      const groupColNames = new Set(allGroupCols.map(c => GROUP_COL_ALIASES[c.name] || c.name));
+
+      // Build dynamic user column SELECT (exclude aliased cols handled explicitly)
+      const dynamicUserCols = allCols
+        .filter(c => !ALIASED_COLS.has(c.name))
+        .map(c => `u.[${c.name}]`)
+        .join(',\n            ');
+
+      // Extract special tag filters before regular validation
+      let userTagFilter = null;
+      let groupTagFilter = null;
+      if (requestedFilters['__userTag']) {
+        userTagFilter = String(requestedFilters['__userTag']);
+        delete requestedFilters['__userTag'];
+      }
+      if (requestedFilters['__groupTag']) {
+        groupTagFilter = String(requestedFilters['__groupTag']);
+        delete requestedFilters['__groupTag'];
+      }
+
+      // Ensure tag tables exist for tag filter queries
+      if (userTagFilter || groupTagFilter) {
+        try {
+          await ensureTagTables(p);
+        } catch {
+          userTagFilter = null;
+          groupTagFilter = null;
+        }
+      }
+
+      // Validate and split filters into user vs group columns (parameterized)
+      const validUserFilters = [];
+      const validGroupFilters = [];
+      for (const [field, value] of Object.entries(requestedFilters)) {
+        if (value == null || String(value) === '') continue;
+        if (colNames.has(field)) {
+          validUserFilters.push({ field, value: String(value) });
+        } else if (groupColNames.has(field)) {
+          validGroupFilters.push({ field, value: String(value) });
+        }
+      }
+
+      let filterWhere = '';
+      let groupFilterWhere = '';
+      let userTagJoin = '';
+      let groupTagJoin = '';
+      const addParams = (request) => {
+        for (let i = 0; i < validUserFilters.length; i++) {
+          const f = validUserFilters[i];
+          // Use CAST for consistent string comparison (handles bit/int columns)
+          filterWhere += ` AND CAST(u.[${f.field}] AS NVARCHAR(400)) = @f${i}`;
+          request.input(`f${i}`, f.value);
+        }
+        for (let i = 0; i < validGroupFilters.length; i++) {
+          const f = validGroupFilters[i];
+          // Map aliased names back to real GraphGroups column names
+          const realCol = GROUP_ALIAS_TO_COL[f.field] || f.field;
+          groupFilterWhere += ` AND CAST(g.[${realCol}] AS NVARCHAR(400)) = @gf${i}`;
+          request.input(`gf${i}`, f.value);
+        }
+        if (userTagFilter) {
+          userTagJoin = `
+            INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
+            INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
+          request.input('__userTag', userTagFilter);
+        }
+        if (groupTagFilter) {
+          groupTagJoin = `
+            INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(p.groupId AS NVARCHAR(36)))
+            INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType = 'group'`;
+          request.input('__groupTag', groupTagFilter);
+        }
+      };
 
       // Main permissions query
       let result;
       if (userLimit > 0) {
-        result = await p.request().input('userLimit', userLimit).query(`
+        const request = p.request();
+        request.input('userLimit', userLimit);
+        filterWhere = ''; // reset before building
+        groupFilterWhere = '';
+        addParams(request);
+
+        // TopUsers CTE joins GraphGroups when group filters are active
+        const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
+          ? `LEFT JOIN GraphGroups g ON p.groupId = g.id` : '';
+
+        result = await request.query(`
           WITH TopUsers AS (
             SELECT TOP (@userLimit) p.memberId
-            FROM vw_UserPermissionAssignments p
+            FROM ${permSource} p
+            INNER JOIN GraphUsers u ON p.memberId = u.id
+            ${topUsersGroupJoin}
+            ${userTagJoin}
+            ${groupTagJoin}
             WHERE p.memberType != '#microsoft.graph.group'
+              ${filterWhere}
+              ${groupFilterWhere}
             GROUP BY p.memberId
             ORDER BY COUNT(*) DESC
           )
@@ -39,25 +278,33 @@ router.get('/permissions', async (req, res) => {
             u.userPrincipalName AS memberUPN,
             p.memberType,
             p.membershipType,
-            u.department,
-            u.jobTitle,
-            u.companyName,
-            u.accountEnabled,
-            u.userType,
-            u.employeeType,
+            ${dynamicUserCols},
             p.managedByAccessPackage
-          FROM vw_UserPermissionAssignments p
-          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          FROM ${permSource} p
+          INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
+          ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
-            AND p.memberId IN (SELECT memberId FROM TopUsers);
+            AND p.memberId IN (SELECT memberId FROM TopUsers)
+            ${groupFilterWhere};
 
           SELECT COUNT(DISTINCT p.memberId) AS totalUsers
-          FROM vw_UserPermissionAssignments p
-          WHERE p.memberType != '#microsoft.graph.group';
+          FROM ${permSource} p
+          INNER JOIN GraphUsers u ON p.memberId = u.id
+          ${topUsersGroupJoin}
+          ${userTagJoin}
+          ${groupTagJoin}
+          WHERE p.memberType != '#microsoft.graph.group'
+            ${filterWhere}
+            ${groupFilterWhere};
         `);
       } else {
-        result = await p.request().query(`
+        const request = p.request();
+        filterWhere = '';
+        groupFilterWhere = '';
+        addParams(request);
+
+        result = await request.query(`
           SELECT
             p.groupId,
             g.displayName AS groupDisplayName,
@@ -68,58 +315,87 @@ router.get('/permissions', async (req, res) => {
             u.userPrincipalName AS memberUPN,
             p.memberType,
             p.membershipType,
-            u.department,
-            u.jobTitle,
-            u.companyName,
-            u.accountEnabled,
-            u.userType,
-            u.employeeType,
+            ${dynamicUserCols},
             p.managedByAccessPackage
-          FROM vw_UserPermissionAssignments p
-          LEFT JOIN GraphUsers u ON p.memberId = u.id
+          FROM ${permSource} p
+          INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
-          WHERE p.memberType != '#microsoft.graph.group';
+          ${userTagJoin}
+          ${groupTagJoin}
+          WHERE p.memberType != '#microsoft.graph.group'
+            ${filterWhere}
+            ${groupFilterWhere};
         `);
       }
 
-      // Separate query for AP mapping (gracefully falls back if view doesn't exist)
+      // AP mapping query — scope to same user set (with filters applied)
       let managedByPackages = [];
       try {
         let apSql;
         if (userLimit > 0) {
+          const apRequest = p.request();
+          apRequest.input('userLimit', userLimit);
+          filterWhere = '';
+          userTagJoin = '';
+          const apAddParams = (req2) => {
+            for (let i = 0; i < validUserFilters.length; i++) {
+              filterWhere += ` AND CAST(u.[${validUserFilters[i].field}] AS NVARCHAR(400)) = @f${i}`;
+              req2.input(`f${i}`, validUserFilters[i].value);
+            }
+            if (userTagFilter) {
+              userTagJoin = `
+                INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
+                INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
+              req2.input('__userTag', userTagFilter);
+            }
+          };
+          apAddParams(apRequest);
+
           apSql = `
+            WITH TopUsers AS (
+              SELECT TOP (@userLimit) p.memberId
+              FROM ${permSource} p
+              INNER JOIN GraphUsers u ON p.memberId = u.id
+              ${userTagJoin}
+              WHERE p.memberType != '#microsoft.graph.group'
+                ${filterWhere}
+              GROUP BY p.memberId
+              ORDER BY COUNT(*) DESC
+            )
             SELECT
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM vw_UserPermissionAssignmentViaAccessPackage ap
-            WHERE ap.userId IN (
-              SELECT TOP (${parseInt(userLimit)}) p.memberId
-              FROM vw_UserPermissionAssignments p
-              WHERE p.memberType != '#microsoft.graph.group'
-              GROUP BY p.memberId
-              ORDER BY COUNT(*) DESC
-            )
+            FROM ${apSource} ap
+            WHERE ap.userId IN (SELECT memberId FROM TopUsers)
             GROUP BY ap.userId, ap.groupId;
           `;
+          const apResult = await apRequest.query(apSql);
+          managedByPackages = (apResult.recordset || [])
+            .filter(r => r.memberId)
+            .map(r => ({
+              memberId: r.memberId,
+              groupId: r.groupId,
+              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+            }));
         } else {
           apSql = `
             SELECT
               ap.userId AS memberId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM vw_UserPermissionAssignmentViaAccessPackage ap
+            FROM ${apSource} ap
             GROUP BY ap.userId, ap.groupId;
           `;
+          const apResult = await p.request().query(apSql);
+          managedByPackages = (apResult.recordset || [])
+            .filter(r => r.memberId)
+            .map(r => ({
+              memberId: r.memberId,
+              groupId: r.groupId,
+              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+            }));
         }
-        const apResult = await p.request().query(apSql);
-        managedByPackages = (apResult.recordset || [])
-          .filter(r => r.memberId)
-          .map(r => ({
-            memberId: r.memberId,
-            groupId: r.groupId,
-            accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
-          }));
       } catch (apErr) {
         console.error('AP mapping query failed (non-fatal):', apErr.message);
       }
@@ -138,8 +414,14 @@ router.get('/permissions', async (req, res) => {
       });
     }
 
-    // Mock data path
+    // Mock data path (supports filters for local dev)
     let mockData = permissionAssignments;
+    // Apply mock filters
+    for (const [field, value] of Object.entries(requestedFilters)) {
+      if (value != null && value !== '') {
+        mockData = mockData.filter(r => String(r[field] ?? '') === String(value));
+      }
+    }
     const allUserIds = [...new Set(mockData.map(r => r.memberId))];
     if (userLimit > 0) {
       const userCounts = {};
