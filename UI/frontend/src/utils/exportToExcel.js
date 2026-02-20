@@ -209,7 +209,9 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
       // Cell background: AP color for managed cells, green for unmanaged
       if (hasMembership) {
-        const cellKeyLower = `${group.id.toLowerCase()}|${users[u].id.toLowerCase()}`;
+        // For owner rows, use realGroupId since managedApMap uses real group IDs
+        const lookupGroupId = group.realGroupId || group.id;
+        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
         const apIds = managedApMap?.get(cellKeyLower);
         let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
         if (apIds && apIds.length > 0 && apIdToIndex) {
@@ -264,13 +266,19 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     descCell.border = thinBorder();
 
     // Access package cells (each AP column uses its own color)
+    const isOwnerRow = !!group.realGroupId;
+    const lookupGid = group.realGroupId || group.id;
     for (let a = 0; a < apCount; a++) {
-      const apKey = `${group.id}|${accessPackages[a].id}`;
+      const apKey = `${lookupGid}|${accessPackages[a].id}`;
       const roleName = apGroupMap?.get(apKey);
       const apCell = ws.getCell(rowNum, apColStart + a);
 
-      if (roleName) {
-        apCell.value = roleName === 'Owner' ? 'O' : 'M';
+      // Owner rows only show Owner roles; regular rows only show non-Owner roles
+      const roleIsOwner = (roleName || '').toLowerCase().includes('owner');
+      const showRole = roleName && (isOwnerRow ? roleIsOwner : !roleIsOwner);
+      if (showRole) {
+        const lower = (roleName || '').toLowerCase();
+        apCell.value = lower.includes('owner') ? 'O' : lower.includes('eligible') ? 'E' : 'D';
         apCell.font = { size: 7, bold: true };
         apCell.alignment = { horizontal: 'center', vertical: 'middle' };
         apCell.fill = {

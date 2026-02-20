@@ -88,7 +88,9 @@ export default function MatrixGroupRow({
         const cellKey = `${group.id}|${user.id}`;
         const managed = managedMap?.has(cellKey);
         // Look up which access packages manage this cell (all keys/IDs normalized to lowercase)
-        const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
+        // For owner rows, use realGroupId since managedApMap uses real group IDs from backend
+        const lookupGroupId = group.realGroupId || group.id;
+        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${user.id.toLowerCase()}`;
         const apIds = managed ? managedApMap?.get(cellKeyLower) : null;
         let apColor = null;
         let apCount = 0;
@@ -117,9 +119,15 @@ export default function MatrixGroupRow({
 
       {/* Access Package cells (SOLL) */}
       {accessPackages.map((ap, idx) => {
-        const apKey = `${group.id}|${ap.id}`;
+        // For owner rows, look up using realGroupId (AP data uses real group IDs)
+        const lookupGid = (group.realGroupId || group.id).toUpperCase();
+        const apKey = `${lookupGid}|${ap.id}`;
         const roleName = apGroupMap?.get(apKey);
-        const hasMapping = !!roleName;
+        // Owner rows only show AP cells where the role is Owner;
+        // regular rows only show non-Owner roles
+        const isOwnerRow = !!group.realGroupId;
+        const roleIsOwner = (roleName || '').toLowerCase().includes('owner');
+        const hasMapping = !!roleName && (isOwnerRow ? roleIsOwner : !roleIsOwner);
         const prevCat = idx > 0 ? (accessPackages[idx - 1].categoryName || null) : undefined;
         const curCat = ap.categoryName || null;
         const isCategoryBoundary = idx === 0 || prevCat !== curCat;
