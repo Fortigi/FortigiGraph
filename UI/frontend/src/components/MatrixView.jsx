@@ -347,9 +347,41 @@ export default function MatrixView({
     }
   }, [uniqueGroupTypes]);
 
-  // Apply custom row order, then filter by group type and tags
+  // Default sort: AP staircase pattern.
+  // Unmanaged groups first (by member count desc), then groups per AP column left-to-right.
+  const apSortedGroups = useMemo(() => {
+    if (accessPackages.length === 0) return groups; // no APs, keep member count sort
+
+    // Build a map: groupId (uppercase) -> index of first AP it belongs to
+    const groupApIndex = new Map();
+    for (const g of groups) {
+      let firstIdx = -1;
+      for (let i = 0; i < accessPackages.length; i++) {
+        if (apGroupMap.has(`${g.id}|${accessPackages[i].id}`)) {
+          firstIdx = i;
+          break;
+        }
+      }
+      groupApIndex.set(g.id, firstIdx);
+    }
+
+    return [...groups].sort((a, b) => {
+      const aIdx = groupApIndex.get(a.id);
+      const bIdx = groupApIndex.get(b.id);
+      // Unmanaged groups (no AP) come first
+      if (aIdx === -1 && bIdx === -1) return b.memberCount - a.memberCount;
+      if (aIdx === -1) return -1;
+      if (bIdx === -1) return 1;
+      // Groups in earlier AP columns come first (staircase)
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      // Same AP: sort by member count descending
+      return b.memberCount - a.memberCount;
+    });
+  }, [groups, accessPackages, apGroupMap]);
+
+  // Apply custom row order (drag), then filter by group type and tags
   const orderedGroups = useMemo(() => {
-    let result = rowOrderHook.getOrderedGroups(groups);
+    let result = rowOrderHook.getOrderedGroups(apSortedGroups);
     if (groupTypeFilter && groupTypeFilter.size > 0) {
       result = result.filter(g => groupTypeFilter.has(g.groupType));
     }
@@ -357,7 +389,7 @@ export default function MatrixView({
       result = result.filter(g => (g.tags || []).some(t => groupTagFilter.has(t.name)));
     }
     return result;
-  }, [groups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter]);
+  }, [apSortedGroups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter]);
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
 
