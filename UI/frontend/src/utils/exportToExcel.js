@@ -4,8 +4,8 @@ import ExcelJS from 'exceljs';
  * Exports the matrix view to an Excel workbook matching the on-screen layout.
  *
  * Layout:
- *   Row 1: (3 blank info cols) | Job Title merged headers | # | % | Type | Description
- *   Row 2: (empty) | Category | Group Name | user names... | # | % | Type | Description
+ *   Row 1: (3 blank info cols) | Job Title merged headers | AP banner | # | % | Type | Description
+ *   Row 2: (empty) | Category | Group Name | user names... | AP names... | # | % | Type | Description
  *   Row 3+: group rows with colored cells
  *
  * Plus a "Legend" sheet showing membership types and active filters.
@@ -38,7 +38,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
   const infoColCount = 3; // (empty) | Category | Group Name
   const userCount = users.length;
-  const metaColStart = infoColCount + userCount + 1; // 1-based
+  const apCount = accessPackages.length;
+
+  // AP columns sit right after users (matching on-screen layout), meta cols at the end
+  const apColStart = infoColCount + userCount + 1; // 1-based
+  const metaColStart = apColStart + apCount;       // 1-based
 
   // ---------- Column widths ----------
   ws.getColumn(1).width = 4;   // empty / drag handle
@@ -47,17 +51,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
+  for (let a = 0; a < apCount; a++) {
+    ws.getColumn(apColStart + a).width = 4;
+  }
   ws.getColumn(metaColStart).width = 5;     // #
   ws.getColumn(metaColStart + 1).width = 6;  // %
   ws.getColumn(metaColStart + 2).width = 10; // Type
   ws.getColumn(metaColStart + 3).width = 30; // Description
-
-  // Access package columns start after metadata
-  const apColStart = metaColStart + 4; // 1-based
-  const apCount = accessPackages.length;
-  for (let a = 0; a < apCount; a++) {
-    ws.getColumn(apColStart + a).width = 4;
-  }
 
   // ===== ROW 1: Job titles (merged) =====
   const row1 = ws.getRow(1);
@@ -95,13 +95,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     cell.border = thinBorder();
   }
 
-  // Row 1 meta headers
-  setHeaderCell(ws.getCell(1, metaColStart), '#', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 1), '%', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
-
-  // Row 1 access package banner
+  // Row 1 access package banner (between users and meta)
   if (apCount > 0) {
     if (apCount > 1) {
       ws.mergeCells(1, apColStart, 1, apColStart + apCount - 1);
@@ -117,6 +111,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     };
     apBanner.border = thinBorder();
   }
+
+  // Row 1 meta headers
+  setHeaderCell(ws.getCell(1, metaColStart), '#', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 1), '%', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Type', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 3), 'Description', true);
 
   // ===== ROW 2: User display names =====
   const row2 = ws.getRow(2);
