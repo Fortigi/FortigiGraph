@@ -26,7 +26,7 @@ const FIELD_LABELS = {
   __userTag: 'User Tag',
 };
 
-export default function UsersPage({ onBack }) {
+export default function UsersPage() {
   const { authFetch } = useAuth();
 
   // Data state
@@ -37,6 +37,7 @@ export default function UsersPage({ onBack }) {
 
   // Column discovery for filters
   const [availableColumns, setAvailableColumns] = useState([]);
+  const [columnsLoading, setColumnsLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
 
   // Filter state
@@ -74,6 +75,7 @@ export default function UsersPage({ onBack }) {
         const res = await authFetch('/api/user-columns-page');
         if (res.ok) setAvailableColumns(await res.json());
       } catch { /* ignore */ }
+      setColumnsLoading(false);
     })();
   }, [authFetch]);
 
@@ -256,12 +258,6 @@ export default function UsersPage({ onBack }) {
     <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-4">
-        <button
-          onClick={onBack}
-          className="px-3 py-1.5 rounded text-sm text-gray-600 hover:bg-gray-100 border border-gray-200"
-        >
-          &larr; Matrix
-        </button>
         <h2 className="text-lg font-semibold text-gray-900">Users</h2>
         <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
       </div>
@@ -353,6 +349,7 @@ export default function UsersPage({ onBack }) {
           getOptionsForField={getOptionsForField}
           onAddFilter={addFilter}
           onRemoveFilter={removeFilter}
+          loading={columnsLoading}
         />
 
         <div className="border-l border-gray-300 h-5 mx-1" />

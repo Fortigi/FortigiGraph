@@ -9,15 +9,15 @@ import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
-const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType']);
-// Fields that describe groups / relationships (everything else is a user attribute)
-const GROUP_FIELD_KEYS = new Set(['groupDisplayName', '__groupTag', 'membershipType']);
+const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
 // Friendly labels for known fields
 const FIELD_LABELS = {
   department: 'Department',
   jobTitle: 'Job Title',
   membershipType: 'Membership Type',
-  groupDisplayName: 'Group',
+  groupDisplayName: 'Group Name',
+  groupTypeCalculated: 'Group Type',
+  groupDescription: 'Group Description',
   companyName: 'Company',
   accountEnabled: 'Account Enabled',
   userType: 'User Type',
@@ -30,6 +30,10 @@ const FIELD_LABELS = {
   mail: 'Mail',
   manager: 'Manager',
   onPremisesSamAccountName: 'SAM Account',
+  mailEnabled: 'Mail Enabled',
+  securityEnabled: 'Security Enabled',
+  visibility: 'Visibility',
+  isAssignableToRole: 'Role Assignable',
   __userTag: 'User Tag',
   __groupTag: 'Group Tag',
 };
@@ -108,9 +112,17 @@ export default function MatrixView({
     return [...fieldMap.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [data, userColumns]);
 
-  // Split filter fields into user / group categories
-  const userFilterFields = useMemo(() => filterFields.filter(f => !GROUP_FIELD_KEYS.has(f.key)), [filterFields]);
-  const groupFilterFields = useMemo(() => filterFields.filter(f => GROUP_FIELD_KEYS.has(f.key)), [filterFields]);
+  // Split filter fields into user / group categories.
+  // User fields = columns known to the server from GraphUsers table + __userTag.
+  // Group fields = everything else (group attributes, relationship fields, __groupTag).
+  const userFilterFields = useMemo(
+    () => filterFields.filter(f => userColumnNames.has(f.key) || f.key === '__userTag'),
+    [filterFields, userColumnNames],
+  );
+  const groupFilterFields = useMemo(
+    () => filterFields.filter(f => !(userColumnNames.has(f.key) || f.key === '__userTag')),
+    [filterFields, userColumnNames],
+  );
 
   // Get available values for a specific field.
   // User columns: use server-provided values (full dataset, not just current page).

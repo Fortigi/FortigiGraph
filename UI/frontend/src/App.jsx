@@ -179,9 +179,9 @@ export default function App() {
         {page === 'sync-log' ? (
           <SyncLogPage onBack={() => navigate('matrix')} />
         ) : page === 'users' ? (
-          <UsersPage onBack={() => navigate('matrix')} />
+          <UsersPage />
         ) : page === 'groups' ? (
-          <GroupsPage onBack={() => navigate('matrix')} />
+          <GroupsPage />
         ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-500">Loading permission data...</div>
