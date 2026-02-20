@@ -5,7 +5,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
 import { exportToExcel } from '../utils/exportToExcel';
 import MatrixToolbar from './matrix/MatrixToolbar';
-import MatrixColumnHeaders from './matrix/MatrixColumnHeaders';
+import MatrixColumnHeaders, { BLANK_TAG } from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
@@ -335,6 +335,8 @@ export default function MatrixView({
     return [...tagMap.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [groups]);
 
+  const hasGroupsWithoutTags = useMemo(() => groups.some(g => !g.tags || g.tags.length === 0), [groups]);
+
   // Default: exclude Distribution and Dynamic group types (user can change)
   const groupTypeDefaultsApplied = useRef(false);
   useEffect(() => {
@@ -382,7 +384,12 @@ export default function MatrixView({
       result = result.filter(g => groupTypeFilter.has(g.groupType));
     }
     if (groupTagFilter && groupTagFilter.size > 0) {
-      result = result.filter(g => (g.tags || []).some(t => groupTagFilter.has(t.name)));
+      const wantBlank = groupTagFilter.has(BLANK_TAG);
+      result = result.filter(g => {
+        const tags = g.tags || [];
+        if (tags.length === 0) return wantBlank;
+        return tags.some(t => groupTagFilter.has(t.name));
+      });
     }
     return result;
   }, [apSortedGroups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter]);
@@ -504,6 +511,7 @@ export default function MatrixView({
                 uniqueGroupTags={uniqueGroupTags}
                 groupTagFilter={groupTagFilter}
                 onGroupTagFilterChange={setGroupTagFilter}
+                hasGroupsWithoutTags={hasGroupsWithoutTags}
               />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>

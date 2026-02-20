@@ -10,7 +10,9 @@ export function getAccessPackageColor(index) {
   return AP_COLORS[index % AP_COLORS.length];
 }
 
-export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange }) {
+export const BLANK_TAG = '__blank__';
+
+export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange, hasGroupsWithoutTags = false }) {
   const [typeFilterOpen, setTypeFilterOpen] = useState(false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const typeFilterRef = useRef(null);
@@ -241,6 +243,17 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 </label>
               </div>
               <div className="max-h-48 overflow-auto py-1">
+                {hasGroupsWithoutTags && (
+                  <label className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-500 italic">
+                    <input
+                      type="checkbox"
+                      checked={!groupTagFilter || groupTagFilter.has(BLANK_TAG)}
+                      onChange={() => toggleTagValue(BLANK_TAG)}
+                      className="rounded"
+                    />
+                    (Blank)
+                  </label>
+                )}
                 {uniqueGroupTags.map(t => (
                   <label key={t.name} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
                     <input
