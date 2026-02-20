@@ -121,26 +121,36 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           </th>
         ))}
 
-        {/* Access Package columns (SOLL) */}
-        {accessPackages.length > 0 && (
-          <th className="border-b border-l-2 border-gray-300 bg-indigo-50 px-1 py-1 text-[10px] text-indigo-700 font-bold"
-              colSpan={accessPackages.length}
-              style={{ height: '120px' }}>
+        {/* Access Package name headers (span both rows) */}
+        {accessPackages.map((ap, idx) => (
+          <th
+            key={ap.id}
+            rowSpan={2}
+            className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
+            style={{
+              backgroundColor: getAccessPackageColor(idx),
+              width: '24px',
+              minWidth: '24px',
+              verticalAlign: 'bottom',
+            }}
+            title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
+          >
             <div
+              className="text-[10px] text-gray-700 font-medium select-none"
               style={{
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',
                 transform: 'rotate(180deg)',
-                maxHeight: '110px',
+                maxHeight: '210px',
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 margin: '0 auto',
               }}
             >
-              Access Packages (SOLL)
+              {ap.displayName}
             </div>
           </th>
-        )}
+        ))}
 
         {/* Right metadata column headers - clickable to sort */}
         <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
@@ -293,7 +303,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             key={user.id}
             className="border-b border-r border-gray-200 px-0 py-0 text-center bg-gray-100"
             style={{
-              height: '200px',
+              height: '100px',
               width: '24px',
               minWidth: '24px',
               verticalAlign: 'bottom',
@@ -306,44 +316,13 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',
                 transform: 'rotate(180deg)',
-                maxHeight: '190px',
+                maxHeight: '95px',
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 margin: '0 auto',
               }}
             >
               {user.displayName}
-            </div>
-          </th>
-        ))}
-
-        {/* Access Package name headers */}
-        {accessPackages.map((ap, idx) => (
-          <th
-            key={ap.id}
-            className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
-            style={{
-              backgroundColor: getAccessPackageColor(idx),
-              height: '200px',
-              width: '24px',
-              minWidth: '24px',
-              verticalAlign: 'bottom',
-            }}
-            title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
-          >
-            <div
-              className="text-[10px] text-gray-700 font-medium select-none"
-              style={{
-                writingMode: 'vertical-lr',
-                textOrientation: 'mixed',
-                transform: 'rotate(180deg)',
-                maxHeight: '190px',
-                overflow: 'hidden',
-                whiteSpace: 'nowrap',
-                margin: '0 auto',
-              }}
-            >
-              {ap.displayName}
             </div>
           </th>
         ))}
