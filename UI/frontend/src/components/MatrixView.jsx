@@ -348,32 +348,28 @@ export default function MatrixView({
   }, [uniqueGroupTypes]);
 
   // Default sort: AP staircase pattern.
-  // Sort by AP membership as a binary vector (column-by-column, left to right).
-  // Groups in the first AP sort first, then second AP, etc. — creating a diagonal staircase.
-  // Groups not in any AP go to the bottom, sorted by member count.
+  // All groups in the leftmost AP first, then next AP, etc. Unmanaged at the bottom.
   const apSortedGroups = useMemo(() => {
     if (accessPackages.length === 0) return groups; // no APs, keep member count sort
 
-    // Build a sort key per group: for each AP column, 0 = in AP, 1 = not in AP.
-    // This produces a lexicographic key that naturally clusters AP memberships.
-    const groupSortKey = new Map();
+    // Assign each group to the AP bucket of its leftmost AP column
+    const groupApBucket = new Map();
     for (const g of groups) {
-      let inAnyAp = false;
-      const bits = [];
-      for (const ap of accessPackages) {
-        const has = apGroupMap.has(`${g.id}|${ap.id}`);
-        bits.push(has ? '0' : '1');
-        if (has) inAnyAp = true;
+      let bucket = accessPackages.length; // unmanaged = after all APs
+      for (let i = 0; i < accessPackages.length; i++) {
+        if (apGroupMap.has(`${g.id}|${accessPackages[i].id}`)) {
+          bucket = i;
+          break;
+        }
       }
-      // Prefix: '0' for managed (in at least one AP), '1' for unmanaged (bottom)
-      groupSortKey.set(g.id, (inAnyAp ? '0' : '1') + bits.join(''));
+      groupApBucket.set(g.id, bucket);
     }
 
     return [...groups].sort((a, b) => {
-      const ka = groupSortKey.get(a.id);
-      const kb = groupSortKey.get(b.id);
-      if (ka !== kb) return ka < kb ? -1 : 1;
-      // Same AP pattern: sort by member count descending
+      const aBucket = groupApBucket.get(a.id);
+      const bBucket = groupApBucket.get(b.id);
+      if (aBucket !== bBucket) return aBucket - bBucket;
+      // Same bucket: sort by member count descending
       return b.memberCount - a.memberCount;
     });
   }, [groups, accessPackages, apGroupMap]);
