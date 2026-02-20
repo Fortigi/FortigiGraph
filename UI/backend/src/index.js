@@ -6,6 +6,7 @@ import { authMiddleware } from './middleware/auth.js';
 import permissionsRouter from './routes/permissions.js';
 import tagsRouter from './routes/tags.js';
 import categoriesRouter from './routes/categories.js';
+import detailsRouter from './routes/details.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -32,6 +33,7 @@ app.get('/api/auth-config', (req, res) => {
 app.use('/api', authMiddleware, permissionsRouter);
 app.use('/api', authMiddleware, tagsRouter);
 app.use('/api', authMiddleware, categoriesRouter);
+app.use('/api', authMiddleware, detailsRouter);
 
 // In production, serve the frontend build output
 const frontendDist = join(__dirname, '../../frontend/dist');

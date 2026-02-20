@@ -6,6 +6,8 @@ import SyncLogPage from './components/SyncLogPage';
 import UsersPage from './components/UsersPage';
 import GroupsPage from './components/GroupsPage';
 import AccessPackagesPage from './components/AccessPackagesPage';
+import UserDetailPage from './components/UserDetailPage';
+import GroupDetailPage from './components/GroupDetailPage';
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
@@ -92,6 +94,47 @@ export default function App() {
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
 
+  // ─── Dynamic detail tabs ──────────────────────────────────────
+  // Each entry: { type: 'user'|'group', id, displayName }
+  const [detailTabs, setDetailTabs] = useState(() => {
+    // Restore detail tab from URL on load (e.g., bookmarked #user:abc)
+    const { page: initPage } = parseHash();
+    if (initPage.startsWith('user:') || initPage.startsWith('group:')) {
+      const [type, ...rest] = initPage.split(':');
+      const id = rest.join(':'); // handle IDs with colons
+      return [{ type, id, displayName: id }];
+    }
+    return [];
+  });
+
+  const openDetailTab = useCallback((type, id, displayName) => {
+    const tabKey = `${type}:${id}`;
+    setDetailTabs(prev => {
+      if (prev.some(t => `${t.type}:${t.id}` === tabKey)) return prev;
+      return [...prev, { type, id, displayName: displayName || id }];
+    });
+    navigate(tabKey);
+  }, [navigate]);
+
+  const closeDetailTab = useCallback((type, id) => {
+    const tabKey = `${type}:${id}`;
+    setDetailTabs(prev => prev.filter(t => `${t.type}:${t.id}` !== tabKey));
+    // Navigate to the previous tab or matrix
+    navigate('matrix');
+  }, [navigate]);
+
+  // When navigating to a detail tab via URL that isn't tracked yet, add it
+  useEffect(() => {
+    if (page.startsWith('user:') || page.startsWith('group:')) {
+      const [type, ...rest] = page.split(':');
+      const id = rest.join(':');
+      setDetailTabs(prev => {
+        if (prev.some(t => t.type === type && t.id === id)) return prev;
+        return [...prev, { type, id, displayName: id }];
+      });
+    }
+  }, [page]);
+
   // Sync URL when on matrix page (debounced replaceState — no history entry)
   useEffect(() => {
     if (page !== 'matrix') return;
@@ -117,6 +160,9 @@ export default function App() {
     search: filterText,
   }), [userLimit, activeFilters, managedFilter, filterText]);
 
+  // Check if current page is a detail tab
+  const isDetailPage = page.startsWith('user:') || page.startsWith('group:');
+
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -130,6 +176,19 @@ export default function App() {
       </div>
     );
   }
+
+  // Render detail page content
+  const renderDetailPage = () => {
+    if (page.startsWith('user:')) {
+      const id = page.substring(5);
+      return <UserDetailPage userId={id} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
+    }
+    if (page.startsWith('group:')) {
+      const id = page.substring(6);
+      return <GroupDetailPage groupId={id} onClose={() => closeDetailTab('group', id)} onOpenDetail={openDetailTab} />;
+    }
+    return null;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -159,12 +218,12 @@ export default function App() {
         </div>
 
         {/* Tab navigation */}
-        <nav className="flex items-center gap-1 mt-3 -mb-4 border-b-0">
+        <nav className="flex items-center gap-1 mt-3 -mb-4 border-b-0 overflow-x-auto">
           {NAV_TABS.map(tab => (
             <button
               key={tab.key}
               onClick={() => navigate(tab.key)}
-              className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors whitespace-nowrap ${
                 page === tab.key
                   ? 'bg-gray-50 text-blue-600 border-gray-200'
                   : 'bg-transparent text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50'
@@ -173,17 +232,50 @@ export default function App() {
               {tab.label}
             </button>
           ))}
+
+          {/* Dynamic detail tabs */}
+          {detailTabs.map(tab => {
+            const tabKey = `${tab.type}:${tab.id}`;
+            const isActive = page === tabKey;
+            const icon = tab.type === 'user' ? 'U' : 'G';
+            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
+            return (
+              <button
+                key={tabKey}
+                onClick={() => navigate(tabKey)}
+                className={`group flex items-center gap-1.5 pl-2 pr-1 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors whitespace-nowrap max-w-[200px] ${
+                  isActive
+                    ? 'bg-gray-50 text-blue-600 border-gray-200'
+                    : 'bg-transparent text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-sm text-[9px] font-bold ${iconBg}`}>{icon}</span>
+                <span className="truncate max-w-[140px]">{tab.displayName}</span>
+                <span
+                  onClick={(e) => { e.stopPropagation(); closeDetailTab(tab.type, tab.id); }}
+                  className="ml-0.5 p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Close"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </span>
+              </button>
+            );
+          })}
         </nav>
       </header>
 
       {/* Content */}
       <main className="p-6">
-        {page === 'sync-log' ? (
+        {isDetailPage ? (
+          renderDetailPage()
+        ) : page === 'sync-log' ? (
           <SyncLogPage />
         ) : page === 'users' ? (
-          <UsersPage />
+          <UsersPage onOpenDetail={openDetailTab} />
         ) : page === 'groups' ? (
-          <GroupsPage />
+          <GroupsPage onOpenDetail={openDetailTab} />
         ) : page === 'access-packages' ? (
           <AccessPackagesPage />
         ) : loading ? (
@@ -208,6 +300,7 @@ export default function App() {
             groupTagMap={groupTagMap}
             refreshing={refreshing}
             shareUrl={shareUrl}
+            onOpenDetail={openDetailTab}
           />
         )}
       </main>

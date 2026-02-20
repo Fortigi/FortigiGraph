@@ -26,7 +26,7 @@ const FIELD_LABELS = {
   __userTag: 'User Tag',
 };
 
-export default function UsersPage() {
+export default function UsersPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
 
   // Data state
@@ -511,7 +511,8 @@ export default function UsersPage() {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-3 py-2 font-medium text-gray-900">{u.displayName}</td>
+                  <td className="px-3 py-2 font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+                    onClick={() => onOpenDetail?.('user', u.id, u.displayName)}>{u.displayName}</td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{u.userPrincipalName}</td>
                   <td className="px-3 py-2 text-gray-600">{u.department || ''}</td>
                   <td className="px-3 py-2 text-gray-600">{u.jobTitle || ''}</td>
