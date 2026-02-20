@@ -3,12 +3,18 @@ import { CSS } from '@dnd-kit/utilities';
 import MatrixCell from './MatrixCell';
 import { getAccessPackageColor } from './MatrixColumnHeaders';
 
-// Map AP resource role names to the same badge style used in user/group cells
-const ROLE_BADGE = {
-  Member:          { letter: 'D', bg: '#166534', text: '#fff' },
-  Owner:           { letter: 'O', bg: '#9d174d', text: '#fff' },
-  EligibleMember:  { letter: 'E', bg: '#854d0e', text: '#fff' },
-};
+// Map AP resource role names to the same badge style used in user/group cells.
+// roleDisplayName from Graph can be "Member", "Owner", "Eligible Member", etc.
+const BADGE_DIRECT   = { letter: 'D', bg: '#166534', text: '#fff' };
+const BADGE_OWNER    = { letter: 'O', bg: '#9d174d', text: '#fff' };
+const BADGE_ELIGIBLE = { letter: 'E', bg: '#854d0e', text: '#fff' };
+
+function getRoleBadge(roleName) {
+  const lower = (roleName || '').toLowerCase();
+  if (lower.includes('owner')) return BADGE_OWNER;
+  if (lower.includes('eligible')) return BADGE_ELIGIBLE;
+  return BADGE_DIRECT;
+}
 
 export default function MatrixGroupRow({
   group,
@@ -130,7 +136,7 @@ export default function MatrixGroupRow({
             title={hasMapping ? `${ap.displayName} (${roleName})${ap.categoryName ? ' — Category: ' + ap.categoryName : ''}` : undefined}
           >
             {hasMapping && (() => {
-              const badge = ROLE_BADGE[roleName] || ROLE_BADGE.Member;
+              const badge = getRoleBadge(roleName);
               return (
                 <span
                   className="inline-block w-4 h-4 rounded-sm text-center font-bold leading-4 text-[9px]"
