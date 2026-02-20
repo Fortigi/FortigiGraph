@@ -122,35 +122,47 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
         ))}
 
         {/* Access Package name headers (span both rows) */}
-        {accessPackages.map((ap, idx) => (
-          <th
-            key={ap.id}
-            rowSpan={2}
-            className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
-            style={{
-              backgroundColor: getAccessPackageColor(idx),
-              width: '24px',
-              minWidth: '24px',
-              verticalAlign: 'bottom',
-            }}
-            title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
-          >
-            <div
-              className="text-[10px] text-gray-700 font-medium select-none"
+        {accessPackages.map((ap, idx) => {
+          const prevCat = idx > 0 ? (accessPackages[idx - 1].categoryName || null) : undefined;
+          const curCat = ap.categoryName || null;
+          const isCategoryBoundary = idx === 0 || prevCat !== curCat;
+          return (
+            <th
+              key={ap.id}
+              rowSpan={2}
+              className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : isCategoryBoundary ? 'border-l-2 border-l-gray-400' : ''}`}
               style={{
-                writingMode: 'vertical-lr',
-                textOrientation: 'mixed',
-                transform: 'rotate(180deg)',
-                maxHeight: '210px',
-                overflow: 'hidden',
-                whiteSpace: 'nowrap',
-                margin: '0 auto',
+                backgroundColor: getAccessPackageColor(idx),
+                width: '24px',
+                minWidth: '24px',
+                verticalAlign: 'bottom',
               }}
+              title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}${ap.categoryName ? '\nCategory: ' + ap.categoryName : ''}`}
             >
-              {ap.displayName}
-            </div>
-          </th>
-        ))}
+              {/* Category color indicator at top */}
+              {ap.categoryColor && (
+                <div
+                  style={{ backgroundColor: ap.categoryColor, height: '4px', width: '100%', borderRadius: '0' }}
+                  title={`Category: ${ap.categoryName}`}
+                />
+              )}
+              <div
+                className="text-[10px] text-gray-700 font-medium select-none"
+                style={{
+                  writingMode: 'vertical-lr',
+                  textOrientation: 'mixed',
+                  transform: 'rotate(180deg)',
+                  maxHeight: ap.categoryColor ? '206px' : '210px',
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                  margin: '0 auto',
+                }}
+              >
+                {ap.displayName}
+              </div>
+            </th>
+          );
+        })}
 
         {/* Right metadata column headers row 1 - empty placeholders */}
         <th className="border-b border-l-2 border-gray-300 bg-gray-100" style={{ minWidth: '40px' }} />

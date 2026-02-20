@@ -107,17 +107,20 @@ export default function MatrixGroupRow({
         const apKey = `${group.id}|${ap.id}`;
         const roleName = apGroupMap?.get(apKey);
         const hasMapping = !!roleName;
+        const prevCat = idx > 0 ? (accessPackages[idx - 1].categoryName || null) : undefined;
+        const curCat = ap.categoryName || null;
+        const isCategoryBoundary = idx === 0 || prevCat !== curCat;
         return (
           <td
             key={ap.id}
-            className={`px-0 py-0 text-center border-r border-b border-gray-100 ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
+            className={`px-0 py-0 text-center border-r border-b border-gray-100 ${idx === 0 ? 'border-l-2 border-l-indigo-300' : isCategoryBoundary ? 'border-l-2 border-l-gray-400' : ''}`}
             style={{
               backgroundColor: hasMapping ? getAccessPackageColor(idx) : undefined,
               minWidth: '24px',
               width: '24px',
               height: '24px',
             }}
-            title={hasMapping ? `${ap.displayName} (${roleName})` : undefined}
+            title={hasMapping ? `${ap.displayName} (${roleName})${ap.categoryName ? ' — Category: ' + ap.categoryName : ''}` : undefined}
           >
             {hasMapping && (
               <span className="text-[9px] font-bold text-gray-700">

@@ -55,13 +55,14 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Four pages — Matrix, Users, Groups, Sync Log
+- **Tab Navigation**: Five pages — Matrix, Users, Groups, Access Packages, Sync Log
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E, O); multi-type cells show all badges side by side
 - **Access Package Coloring**: Each AP gets a distinct color from a 15-color palette; managed cells are colored by their governing AP
 - **Multi-AP Indicator**: Cells managed by multiple access packages show a count badge
-- **Access Package Columns**: SOLL columns sorted by total assignment count (broadest first, most targeted last)
+- **Access Package Categories**: Categories are single-assignment labels for access packages (unlike tags, an AP can only have one category). Categories are managed on the Access Packages page. Stored in `GraphCategories` and `GraphCategoryAssignments` SQL tables (auto-created). Categories drive the AP column ordering in the Matrix view.
+- **Access Package Columns**: SOLL columns sorted first by category name, then by total assignment count within each category; uncategorized APs appear at the end. Category boundaries are marked with thicker borders and a colored indicator stripe.
 - **IST/SOLL Toggle**: Filter matrix to show managed (SOLL), unmanaged (IST), or all assignments
 - **Column Header Filters**: Type and Tags columns have filter dropdowns; Tags includes a "(Blank)" option (sentinel `BLANK_TAG`) to show groups without tags
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
@@ -131,6 +132,7 @@ FortigiGraph/
 │   ├── backend/            # Node.js + Express API server
 │   │   └── src/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
+│   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
 │   │       ├── db/connection.js       # Azure SQL (mssql) connection pool
 │   │       └── mock/data.js           # Mock data for local dev

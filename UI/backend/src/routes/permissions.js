@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
 import { ensureTagTables } from './tags.js';
+import { ensureCategoryTables } from './categories.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -445,6 +446,8 @@ router.get('/permissions', async (req, res) => {
 router.get('/access-package-groups', async (req, res) => {
   try {
     if (useSql) {
+      const p = await db.getPool();
+      await ensureCategoryTables(p);
       const result = await db.query(`
         SELECT
           rrs.accessPackageId,
@@ -453,7 +456,10 @@ router.get('/access-package-groups', async (req, res) => {
           UPPER(rrs.scopeOriginId) AS groupId,
           g.displayName  AS groupName,
           rrs.roleDisplayName AS roleName,
-          ISNULL(ac.cnt, 0) AS totalAssignments
+          ISNULL(ac.cnt, 0) AS totalAssignments,
+          cat.id AS categoryId,
+          cat.name AS categoryName,
+          cat.color AS categoryColor
         FROM dbo.GraphAccessPackageResourceRoleScopes rrs
         INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
         INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
@@ -464,6 +470,8 @@ router.get('/access-package-groups', async (req, res) => {
           WHERE assignmentState = 'delivered'
           GROUP BY accessPackageId
         ) ac ON rrs.accessPackageId = ac.accessPackageId
+        LEFT  JOIN dbo.GraphCategoryAssignments ca ON LOWER(rrs.accessPackageId) = ca.accessPackageId
+        LEFT  JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
         WHERE rrs.scopeOriginSystem = 'AadGroup'
       `);
       return res.json(result.recordset);
