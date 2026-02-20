@@ -3,6 +3,13 @@ import { CSS } from '@dnd-kit/utilities';
 import MatrixCell from './MatrixCell';
 import { getAccessPackageColor } from './MatrixColumnHeaders';
 
+// Map AP resource role names to the same badge style used in user/group cells
+const ROLE_BADGE = {
+  Member:          { letter: 'D', bg: '#166534', text: '#fff' },
+  Owner:           { letter: 'O', bg: '#9d174d', text: '#fff' },
+  EligibleMember:  { letter: 'E', bg: '#854d0e', text: '#fff' },
+};
+
 export default function MatrixGroupRow({
   group,
   users,
@@ -122,11 +129,17 @@ export default function MatrixGroupRow({
             }}
             title={hasMapping ? `${ap.displayName} (${roleName})${ap.categoryName ? ' — Category: ' + ap.categoryName : ''}` : undefined}
           >
-            {hasMapping && (
-              <span className="text-[9px] font-bold text-gray-700">
-                {roleName === 'Owner' ? 'O' : 'M'}
-              </span>
-            )}
+            {hasMapping && (() => {
+              const badge = ROLE_BADGE[roleName] || ROLE_BADGE.Member;
+              return (
+                <span
+                  className="inline-block w-4 h-4 rounded-sm text-center font-bold leading-4 text-[9px]"
+                  style={{ backgroundColor: badge.bg, color: badge.text }}
+                >
+                  {badge.letter}
+                </span>
+              );
+            })()}
           </td>
         );
       })}
