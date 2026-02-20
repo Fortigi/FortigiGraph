@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
 const TYPE_BADGE = {
@@ -49,24 +49,109 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
-export default function GroupDetailPage({ groupId, onClose, onOpenDetail }) {
+export default function GroupDetailPage({ groupId, cachedData, onCacheData, onClose, onOpenDetail }) {
   const { authFetch } = useAuth();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
 
+  // Core data (fast — attributes, tags, counts)
+  const [data, setData] = useState(cachedData?.core || null);
+  const [loading, setLoading] = useState(!cachedData?.core);
+  const [error, setError] = useState(null);
+
+  // Lazy-loaded sections
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [members, setMembers] = useState(cachedData?.members || null);
+  const [membersLoading, setMembersLoading] = useState(false);
+
+  const [apOpen, setApOpen] = useState(false);
+  const [accessPackages, setAccessPackages] = useState(cachedData?.accessPackages || null);
+  const [apLoading, setApLoading] = useState(false);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState(cachedData?.history || null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Fetch core data (attributes + tags + counts)
   useEffect(() => {
+    if (cachedData?.core) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
     authFetch(`/api/group/${encodeURIComponent(groupId)}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => { if (!cancelled) setData(d); })
+      .then(d => {
+        if (!cancelled) {
+          setData(d);
+          onCacheData?.(groupId, 'group', { core: d });
+        }
+      })
       .catch(e => { if (!cancelled) setError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [groupId, authFetch]);
+  }, [groupId, authFetch, cachedData?.core, onCacheData]);
+
+  // Lazy-load members
+  const loadMembers = useCallback(() => {
+    if (members) return;
+    setMembersLoading(true);
+    authFetch(`/api/group/${encodeURIComponent(groupId)}/members`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setMembers(d);
+        onCacheData?.(groupId, 'group', { members: d });
+      })
+      .catch(() => setMembers([]))
+      .finally(() => setMembersLoading(false));
+  }, [groupId, authFetch, members, onCacheData]);
+
+  // Lazy-load access packages
+  const loadAccessPackages = useCallback(() => {
+    if (accessPackages) return;
+    setApLoading(true);
+    authFetch(`/api/group/${encodeURIComponent(groupId)}/access-packages`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setAccessPackages(d);
+        onCacheData?.(groupId, 'group', { accessPackages: d });
+      })
+      .catch(() => setAccessPackages([]))
+      .finally(() => setApLoading(false));
+  }, [groupId, authFetch, accessPackages, onCacheData]);
+
+  // Lazy-load history
+  const loadHistory = useCallback(() => {
+    if (history) return;
+    setHistoryLoading(true);
+    authFetch(`/api/group/${encodeURIComponent(groupId)}/history`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setHistory(d);
+        onCacheData?.(groupId, 'group', { history: d });
+      })
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, [groupId, authFetch, history, onCacheData]);
+
+  // Toggle handlers
+  const toggleMembers = useCallback(() => {
+    setMembersOpen(prev => {
+      if (!prev) loadMembers();
+      return !prev;
+    });
+  }, [loadMembers]);
+
+  const toggleAp = useCallback(() => {
+    setApOpen(prev => {
+      if (!prev) loadAccessPackages();
+      return !prev;
+    });
+  }, [loadAccessPackages]);
+
+  const toggleHistory = useCallback(() => {
+    setHistoryOpen(prev => {
+      if (!prev) loadHistory();
+      return !prev;
+    });
+  }, [loadHistory]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-gray-500">Loading group details...</div>;
@@ -81,27 +166,29 @@ export default function GroupDetailPage({ groupId, onClose, onOpenDetail }) {
   }
   if (!data) return null;
 
-  const { attributes, tags, members, accessPackages, history } = data;
-  const historyDiffs = computeHistoryDiffs(history);
+  const { attributes, tags, memberCount, accessPackageCount, historyCount } = data;
+  const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
 
   // Group members by memberId to show combined membership types
   const groupedMembers = new Map();
-  for (const m of members) {
-    if (!groupedMembers.has(m.memberId)) {
-      groupedMembers.set(m.memberId, {
-        memberId: m.memberId,
-        memberDisplayName: m.memberDisplayName,
-        memberUPN: m.memberUPN,
-        types: [],
-        managed: false,
-      });
+  if (members) {
+    for (const m of members) {
+      if (!groupedMembers.has(m.memberId)) {
+        groupedMembers.set(m.memberId, {
+          memberId: m.memberId,
+          memberDisplayName: m.memberDisplayName,
+          memberUPN: m.memberUPN,
+          types: [],
+          managed: false,
+        });
+      }
+      const g = groupedMembers.get(m.memberId);
+      g.types.push(m.membershipType);
+      if (m.managedByAccessPackage) g.managed = true;
     }
-    const g = groupedMembers.get(m.memberId);
-    g.types.push(m.membershipType);
-    if (m.managedByAccessPackage) g.managed = true;
   }
 
-  const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
+  const historyDiffs = history ? computeHistoryDiffs(history) : [];
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -142,47 +229,27 @@ export default function GroupDetailPage({ groupId, onClose, onOpenDetail }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Attributes */}
-        <Section title="Attributes" count={otherAttributes.length}>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-            {otherAttributes.map(([key, val]) => (
-              <div key={key} className="flex justify-between text-sm">
-                <span className="text-gray-500 truncate mr-2">{friendlyLabel(key)}</span>
-                <span className="text-gray-900 font-medium text-right truncate">{formatValue(val)}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
+      {/* Attributes - full width */}
+      <Section title="Attributes" count={otherAttributes.length}>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5">
+          {otherAttributes.map(([key, val]) => (
+            <div key={key} className="flex justify-between text-sm min-w-0">
+              <span className="text-gray-500 truncate mr-2 shrink-0">{friendlyLabel(key)}</span>
+              <span className="text-gray-900 font-medium text-right truncate">{formatValue(val)}</span>
+            </div>
+          ))}
+        </div>
+      </Section>
 
-        {/* Access Packages */}
-        <Section title="Access Packages" count={accessPackages.length}>
-          {accessPackages.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">Not included in any access packages</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="pb-1 font-medium">Package</th>
-                  <th className="pb-1 font-medium w-20">Role</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accessPackages.map((ap, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="py-1 text-gray-900">{ap.accessPackageName || ap.accessPackageId}</td>
-                    <td className="py-1 text-gray-500 text-xs">{ap.roleName || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
-      </div>
-
-      {/* Members - full width */}
+      {/* Members - collapsible, lazy-loaded */}
       <div className="mt-6">
-        <Section title="Members" count={groupedMembers.size}>
+        <CollapsibleSection
+          title="Members"
+          count={memberCount}
+          open={membersOpen}
+          onToggle={toggleMembers}
+          loading={membersLoading}
+        >
           {groupedMembers.size === 0 ? (
             <p className="text-sm text-gray-400 italic">No members found</p>
           ) : (
@@ -225,57 +292,86 @@ export default function GroupDetailPage({ groupId, onClose, onOpenDetail }) {
               </tbody>
             </table>
           )}
-        </Section>
+        </CollapsibleSection>
       </div>
 
-      {/* Version History */}
+      {/* Access Packages - collapsible, lazy-loaded */}
       <div className="mt-6">
-        <button
-          onClick={() => setHistoryOpen(prev => !prev)}
-          className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2 hover:text-gray-900"
+        <CollapsibleSection
+          title="Access Packages"
+          count={accessPackageCount}
+          open={apOpen}
+          onToggle={toggleAp}
+          loading={apLoading}
         >
-          <span className="text-xs">{historyOpen ? '\u25BC' : '\u25B6'}</span>
-          Version History
-          <span className="text-xs font-normal text-gray-400">({history.length} version{history.length !== 1 ? 's' : ''})</span>
-        </button>
-        {historyOpen && (
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            {historyDiffs.length === 0 ? (
-              <p className="text-sm text-gray-400 italic p-4">No changes recorded</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-2 font-medium w-44">Date</th>
-                    <th className="px-4 py-2 font-medium">Changes</th>
+          {accessPackages && accessPackages.length === 0 ? (
+            <p className="text-sm text-gray-400 italic">Not included in any access packages</p>
+          ) : accessPackages ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-100">
+                  <th className="pb-1 font-medium">Package</th>
+                  <th className="pb-1 font-medium w-20">Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessPackages.map((ap, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-1 text-gray-900">{ap.accessPackageName || ap.accessPackageId}</td>
+                    <td className="py-1 text-gray-500 text-xs">{ap.roleName || '—'}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {historyDiffs.map((diff, i) => (
-                    <tr key={i} className="border-b border-gray-50">
-                      <td className="px-4 py-2 text-gray-600 text-xs align-top whitespace-nowrap">
-                        {formatDate(diff.date)}
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex flex-col gap-1">
-                          {diff.changes.map((c, j) => (
-                            <div key={j} className="text-xs">
-                              <span className="font-medium text-gray-700">{friendlyLabel(c.field)}</span>
-                              <span className="text-gray-400 mx-1">:</span>
-                              <span className="text-red-500 line-through mr-1">{c.from}</span>
-                              <span className="text-gray-400 mr-1">&rarr;</span>
-                              <span className="text-green-600">{c.to}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+        </CollapsibleSection>
+      </div>
+
+      {/* Version History - collapsible, lazy-loaded */}
+      <div className="mt-6">
+        <CollapsibleSection
+          title="Version History"
+          count={historyCount}
+          countLabel={historyCount === 1 ? 'version' : 'versions'}
+          open={historyOpen}
+          onToggle={toggleHistory}
+          loading={historyLoading}
+        >
+          {historyDiffs.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">No changes recorded</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium w-44">Date</th>
+                  <th className="px-4 py-2 font-medium">Changes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyDiffs.map((diff, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="px-4 py-2 text-gray-600 text-xs align-top whitespace-nowrap">
+                      {formatDate(diff.date)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-col gap-1">
+                        {diff.changes.map((c, j) => (
+                          <div key={j} className="text-xs">
+                            <span className="font-medium text-gray-700">{friendlyLabel(c.field)}</span>
+                            <span className="text-gray-400 mx-1">:</span>
+                            <span className="text-red-500 line-through mr-1">{c.from}</span>
+                            <span className="text-gray-400 mr-1">&rarr;</span>
+                            <span className="text-green-600">{c.to}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
       </div>
     </div>
   );
@@ -289,6 +385,31 @@ function Section({ title, count, children }) {
         {count != null && <span className="text-xs font-normal text-gray-400">({count})</span>}
       </h3>
       {children}
+    </div>
+  );
+}
+
+function CollapsibleSection({ title, count, countLabel, open, onToggle, loading, children }) {
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2 hover:text-gray-900"
+      >
+        <span className="text-xs">{open ? '\u25BC' : '\u25B6'}</span>
+        {title}
+        {count != null && (
+          <span className="text-xs font-normal text-gray-400">
+            ({count}{countLabel ? ` ${countLabel}` : ''})
+          </span>
+        )}
+        {loading && <span className="text-xs text-gray-400 animate-pulse">Loading...</span>}
+      </button>
+      {open && !loading && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

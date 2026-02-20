@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import { useAuth } from './auth/AuthGate';
 import MatrixView from './components/MatrixView';
@@ -107,6 +107,15 @@ export default function App() {
     return [];
   });
 
+  // ─── Detail data cache ─────────────────────────────────────────
+  // Keyed by "type:id", stores { core, memberships, accessPackages, history }
+  const detailCacheRef = useRef({});
+
+  const onCacheData = useCallback((id, type, partialData) => {
+    const key = `${type}:${id}`;
+    detailCacheRef.current[key] = { ...detailCacheRef.current[key], ...partialData };
+  }, []);
+
   const openDetailTab = useCallback((type, id, displayName) => {
     const tabKey = `${type}:${id}`;
     setDetailTabs(prev => {
@@ -119,7 +128,7 @@ export default function App() {
   const closeDetailTab = useCallback((type, id) => {
     const tabKey = `${type}:${id}`;
     setDetailTabs(prev => prev.filter(t => `${t.type}:${t.id}` !== tabKey));
-    // Navigate to the previous tab or matrix
+    delete detailCacheRef.current[tabKey];
     navigate('matrix');
   }, [navigate]);
 
@@ -181,11 +190,13 @@ export default function App() {
   const renderDetailPage = () => {
     if (page.startsWith('user:')) {
       const id = page.substring(5);
-      return <UserDetailPage userId={id} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
+      const cacheKey = `user:${id}`;
+      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
     }
     if (page.startsWith('group:')) {
       const id = page.substring(6);
-      return <GroupDetailPage groupId={id} onClose={() => closeDetailTab('group', id)} onOpenDetail={openDetailTab} />;
+      const cacheKey = `group:${id}`;
+      return <GroupDetailPage groupId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('group', id)} onOpenDetail={openDetailTab} />;
     }
     return null;
   };
