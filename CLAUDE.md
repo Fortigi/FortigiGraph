@@ -55,14 +55,17 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI (Beta)
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
+- **Tab Navigation**: Four pages — Matrix, Users, Groups, Sync Log
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
+- **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E, O); multi-type cells show all badges side by side
 - **Access Package Coloring**: Each AP gets a distinct color from a 15-color palette; managed cells are colored by their governing AP
 - **Multi-AP Indicator**: Cells managed by multiple access packages show a count badge
 - **Access Package Columns**: SOLL columns sorted by total assignment count (broadest first, most targeted last)
 - **IST/SOLL Toggle**: Filter matrix to show managed (SOLL), unmanaged (IST), or all assignments
+- **Column Header Filters**: Type and Tags columns have filter dropdowns; Tags includes a "(Blank)" option (sentinel `BLANK_TAG`) to show groups without tags
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
-- **Excel Export**: Full matrix export with AP-colored cells, rich-text multi-type badges, and multi-AP notes
+- **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
 - **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
 
 ## Repository Structure
@@ -133,18 +136,21 @@ FortigiGraph/
 │   │       └── mock/data.js           # Mock data for local dev
 │   └── frontend/           # React + Vite + Tailwind
 │       └── src/
-│           ├── App.jsx                # Root component, userLimit state
+│           ├── App.jsx                # Root component, tab navigation, userLimit state
 │           ├── auth/AuthGate.jsx      # MSAL authentication gate
-│           ├── hooks/usePermissions.js # API hook with debounced refetch
+│           ├── hooks/
+│           │   ├── usePermissions.js  # API hook with debounced refetch
+│           │   └── useMatrixRowOrder.js # Row order persistence (versioned localStorage)
 │           ├── utils/exportToExcel.js # Excel export with AP colors & rich text
 │           └── components/
-│               ├── MatrixView.jsx     # Main matrix orchestrator (managedApMap, apIdToIndex)
+│               ├── MatrixView.jsx     # Main matrix orchestrator (staircase sort, managedApMap, apIdToIndex)
 │               ├── PermissionGrid.jsx # TanStack Table grid view
+│               ├── SyncLogPage.jsx    # Sync log viewer
 │               └── matrix/            # Matrix sub-components
 │                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
 │                   ├── MatrixCell.jsx       # Individual cell (AP-colored bg, multi-type badges)
 │                   ├── MatrixGroupRow.jsx   # Row with DnD support, AP color lookup
-│                   └── MatrixColumnHeaders.jsx  # AP color palette (15 colors)
+│                   └── MatrixColumnHeaders.jsx  # AP color palette (15 colors), column filters
 │
 ├── _Build/                 # Build and publishing scripts
 │   └── CreatePSD.ps1       # Module manifest generation

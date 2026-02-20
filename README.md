@@ -270,19 +270,20 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 ### Pages
 
-The UI has three main pages accessible via navigation:
+The UI has four pages accessible via tab navigation:
 
 #### Matrix View (default)
 
 The core visualization — an interactive user-group permission matrix.
 
 - **Rows** = groups, **Columns** = users. Each cell shows the membership types (Direct, Indirect, Eligible, Owner) as colored badges
+- **Staircase Sort**: Default row order groups rows by their leftmost access package, creating a visual staircase pattern. Unmanaged groups appear at the bottom
 - **Access Package Coloring**: Managed cells are colored by their governing access package (15-color palette). Multi-AP cells show a count badge
 - **Access Package Columns**: SOLL columns sorted by assignment count (broadest first, most targeted last)
 - **IST/SOLL Toggle**: Filter to show all assignments, only unmanaged (IST), or only managed (SOLL)
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Drag-and-Drop**: Reorder rows to group related permissions together
-- **Excel Export**: Full matrix export with AP-colored cells, rich-text badges, and multi-AP notes
+- **Excel Export**: Full matrix export with AP-colored cells, rich-text badges, multi-AP notes, and AP columns next to users (matching the on-screen layout)
 - **Share Link**: Copy a URL that preserves all active filters, user limit, and managed toggle
 
 **Filtering** is split into two sections:
@@ -293,6 +294,8 @@ The core visualization — an interactive user-group permission matrix.
 | **Group Filters** | Group name, membership type, Group Tag | Client-side (current page) |
 
 Filters use a pill-based UI: click "+ Add filter" → select field → select value. Active filters appear as removable pills with inline value switching.
+
+**Column header filters**: The Type and Tags columns have filter dropdowns in the column header. The Tags filter includes a "(Blank)" option to show only groups without any tags assigned.
 
 #### Users Page
 
@@ -311,6 +314,10 @@ Browse and manage all synced groups with pagination.
 - **Filtering**: Pill-based FilterBar with all group attribute columns + Group Tag
 - **Text Search**: Search by group name or description
 - **Selection**: Checkbox selection with bulk tag operations
+
+#### Sync Log
+
+View the last 50 sync operations from `GraphSyncLog`, showing timestamps, entity types, row counts, and durations.
 
 ### Tagging System
 
