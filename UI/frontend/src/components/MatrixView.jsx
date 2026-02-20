@@ -368,10 +368,10 @@ export default function MatrixView({
     return [...groups].sort((a, b) => {
       const aIdx = groupApIndex.get(a.id);
       const bIdx = groupApIndex.get(b.id);
-      // Unmanaged groups (no AP) come first
+      // Unmanaged groups (no AP) come last
       if (aIdx === -1 && bIdx === -1) return b.memberCount - a.memberCount;
-      if (aIdx === -1) return -1;
-      if (bIdx === -1) return 1;
+      if (aIdx === -1) return 1;
+      if (bIdx === -1) return -1;
       // Groups in earlier AP columns come first (staircase)
       if (aIdx !== bIdx) return aIdx - bIdx;
       // Same AP: sort by member count descending
