@@ -58,7 +58,8 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Tab Navigation**: Five pages — Matrix, Users, Groups, Access Packages, Sync Log
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
-- **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E, O); multi-type cells show all badges side by side
+- **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E); multi-type cells show all badges side by side
+- **Owner Row Separation**: Owner (O) memberships are shown in separate rows suffixed with "(Owner)". D, I, E stay together; ownership is a fundamentally different relationship. Synthetic rows use `id: groupId__owner` with `realGroupId` pointing to the original group
 - **Access Package Coloring**: Each AP gets a distinct color from a 15-color palette; managed cells are colored by their governing AP
 - **Multi-AP Indicator**: Cells managed by multiple access packages show a count badge
 - **Access Package Categories**: Categories are single-assignment labels for access packages (unlike tags, an AP can only have one category). Categories are managed on the Access Packages page. Stored in `GraphCategories` and `GraphCategoryAssignments` SQL tables (auto-created). Categories drive the AP column ordering in the Matrix view.

@@ -43,7 +43,6 @@ export default function MatrixGroupRow({
   };
 
   const memberCount = group.memberCount;
-  const pct = totalUsers > 0 ? Math.round((memberCount / totalUsers) * 100) : 0;
 
   return (
     <tr ref={setNodeRef} style={style} className="hover:bg-gray-50/30">
@@ -77,7 +76,7 @@ export default function MatrixGroupRow({
       </td>
       <td
         className="sticky bg-white border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium"
-        style={{ left: '124px', minWidth: '250px', maxWidth: '250px', zIndex: 10 }}
+        style={{ left: '124px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
         title={group.displayName}
       >
         <div className="truncate">{group.displayName}</div>
@@ -88,7 +87,9 @@ export default function MatrixGroupRow({
         const cellKey = `${group.id}|${user.id}`;
         const managed = managedMap?.has(cellKey);
         // Look up which access packages manage this cell (all keys/IDs normalized to lowercase)
-        const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
+        // For owner rows, use realGroupId since managedApMap uses real group IDs from backend
+        const lookupGroupId = group.realGroupId || group.id;
+        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${user.id.toLowerCase()}`;
         const apIds = managed ? managedApMap?.get(cellKeyLower) : null;
         let apColor = null;
         let apCount = 0;
@@ -117,9 +118,15 @@ export default function MatrixGroupRow({
 
       {/* Access Package cells (SOLL) */}
       {accessPackages.map((ap, idx) => {
-        const apKey = `${group.id}|${ap.id}`;
+        // For owner rows, look up using realGroupId (AP data uses real group IDs)
+        const lookupGid = (group.realGroupId || group.id).toUpperCase();
+        const apKey = `${lookupGid}|${ap.id}`;
         const roleName = apGroupMap?.get(apKey);
-        const hasMapping = !!roleName;
+        // Owner rows only show AP cells where the role is Owner;
+        // regular rows only show non-Owner roles
+        const isOwnerRow = !!group.realGroupId;
+        const roleIsOwner = (roleName || '').toLowerCase().includes('owner');
+        const hasMapping = !!roleName && (isOwnerRow ? roleIsOwner : !roleIsOwner);
         const prevCat = idx > 0 ? (accessPackages[idx - 1].categoryName || null) : undefined;
         const curCat = ap.categoryName || null;
         const isCategoryBoundary = idx === 0 || prevCat !== curCat;
@@ -154,12 +161,6 @@ export default function MatrixGroupRow({
       <td className="border-l-2 border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 text-center"
           style={{ minWidth: '40px' }}>
         {memberCount}
-      </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 text-center"
-          style={{ minWidth: '45px' }}>
-        <span style={{ color: pct === 100 ? '#166534' : pct >= 75 ? '#854d0e' : undefined }}>
-          {pct}%
-        </span>
       </td>
       <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
           style={{ minWidth: '60px' }}

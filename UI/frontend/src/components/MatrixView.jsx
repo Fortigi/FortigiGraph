@@ -186,6 +186,9 @@ export default function MatrixView({
   }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames]);
 
   // Build matrix data structures
+  // Owner memberships are split into separate synthetic rows (id: "groupId__owner",
+  // realGroupId: original groupId, displayName suffixed with "(Owner)").
+  // D/I/E memberships stay on the regular group row.
   const { users, groups, memberships, managedMap } = useMemo(() => {
     const userMap = new Map();
     const groupMap = new Map();
@@ -204,7 +207,7 @@ export default function MatrixView({
         });
       }
 
-      // Groups
+      // Always create the base group entry
       if (d.groupId && !groupMap.has(d.groupId)) {
         const name = d.groupDisplayName || d.groupId;
         const tags = groupTagMap?.get(d.groupId.toUpperCase()) || [];
@@ -218,8 +221,27 @@ export default function MatrixView({
         });
       }
 
-      // Memberships
-      const key = `${d.groupId}|${d.memberId}`;
+      // Owner memberships go to a separate synthetic group row
+      const isOwner = d.membershipType === 'Owner';
+      if (isOwner && d.groupId) {
+        const ownerGroupId = `${d.groupId}__owner`;
+        if (!groupMap.has(ownerGroupId)) {
+          const name = d.groupDisplayName || d.groupId;
+          const tags = groupTagMap?.get(d.groupId.toUpperCase()) || [];
+          groupMap.set(ownerGroupId, {
+            id: ownerGroupId,
+            realGroupId: d.groupId,
+            displayName: `${name} (Owner)`,
+            tags,
+            description: d.groupDescription || '',
+            groupType: d.groupTypeCalculated || '',
+          });
+        }
+      }
+
+      // Memberships: Owner -> synthetic owner group, others -> real group
+      const effectiveGroupId = isOwner ? `${d.groupId}__owner` : d.groupId;
+      const key = `${effectiveGroupId}|${d.memberId}`;
       if (!membershipMap.has(key)) {
         membershipMap.set(key, new Set());
       }
@@ -244,8 +266,12 @@ export default function MatrixView({
       group.memberCount = userList.filter(u => membershipMap.has(`${group.id}|${u.id}`)).length;
     }
 
-    // Sort groups by member count descending (most common permissions first)
-    const groups = [...groupMap.values()].sort((a, b) => b.memberCount - a.memberCount);
+    // Sort groups by member count descending; filter out groups with 0 members
+    // (e.g., a base group with only Owner memberships will have 0 members since
+    // those went to the __owner synthetic row)
+    const groups = [...groupMap.values()]
+      .filter(g => g.memberCount > 0)
+      .sort((a, b) => b.memberCount - a.memberCount);
 
     return { users, groups, memberships: membershipMap, managedMap: managed };
   }, [filteredData, groupTagMap]);
@@ -268,7 +294,7 @@ export default function MatrixView({
     if (!accessPackageGroups || accessPackageGroups.length === 0) {
       return { accessPackages: [], apGroupMap: new Map() };
     }
-    const visibleGroupIds = new Set(groups.map(g => g.id.toUpperCase()));
+    const visibleGroupIds = new Set(groups.map(g => (g.realGroupId || g.id).toUpperCase()));
     const visibleUserIds = new Set(users.map(u => u.id.toLowerCase()));
     const apMap = new Map();
     const mapping = new Map(); // "groupId|apId" -> roleName
@@ -369,11 +395,18 @@ export default function MatrixView({
     const groupApBucket = new Map();
     for (const g of groups) {
       let bucket = accessPackages.length; // unmanaged = after all APs
-      const gidUpper = g.id.toUpperCase(); // apGroupMap keys use toUpperCase()
+      const gidUpper = (g.realGroupId || g.id).toUpperCase(); // use realGroupId for owner rows
+      const isOwnerRow = !!g.realGroupId;
       for (let i = 0; i < accessPackages.length; i++) {
-        if (apGroupMap.has(`${gidUpper}|${accessPackages[i].id}`)) {
-          bucket = i;
-          break;
+        const mapKey = `${gidUpper}|${accessPackages[i].id}`;
+        if (apGroupMap.has(mapKey)) {
+          // Owner rows only match AP buckets where the role is Owner
+          const role = apGroupMap.get(mapKey);
+          const roleIsOwner = (role || '').toLowerCase().includes('owner');
+          if (isOwnerRow ? roleIsOwner : !roleIsOwner) {
+            bucket = i;
+            break;
+          }
         }
       }
       groupApBucket.set(g.id, bucket);
