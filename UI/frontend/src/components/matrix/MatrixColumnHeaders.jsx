@@ -208,7 +208,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           )}
         </th>
         <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium"
-            style={{ minWidth: '200px' }}>
+            style={{ minWidth: '500px' }}>
           <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>Description</div>
         </th>
       </tr>

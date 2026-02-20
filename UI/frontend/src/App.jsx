@@ -177,7 +177,7 @@ export default function App() {
       {/* Content */}
       <main className="p-6">
         {page === 'sync-log' ? (
-          <SyncLogPage onBack={() => navigate('matrix')} />
+          <SyncLogPage />
         ) : page === 'users' ? (
           <UsersPage />
         ) : page === 'groups' ? (

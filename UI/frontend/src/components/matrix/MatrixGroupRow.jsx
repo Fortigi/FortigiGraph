@@ -144,7 +144,7 @@ export default function MatrixGroupRow({
           title={group.groupType}>
         {group.groupType}
       </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[200px]"
+      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[500px]"
           title={group.description}>
         <div className="truncate">{group.description}</div>
       </td>
