@@ -352,19 +352,42 @@ export default function MatrixView({
   const apSortedGroups = useMemo(() => {
     if (accessPackages.length === 0) return groups; // no APs, keep member count sort
 
+    // DEBUG: Log AP and mapping data to diagnose staircase sort
+    console.group('[Staircase Sort Debug]');
+    console.log('accessPackages:', accessPackages.map(ap => ({ id: ap.id, name: ap.displayName })));
+    console.log('apGroupMap size:', apGroupMap.size);
+    console.log('apGroupMap keys (first 10):', [...apGroupMap.keys()].slice(0, 10));
+    console.log('groups count:', groups.length);
+    console.log('sample group IDs (first 5):', groups.slice(0, 5).map(g => ({ id: g.id, name: g.displayName })));
+
     // Assign each group to the AP bucket of its leftmost AP column
     const groupApBucket = new Map();
+    let matchCount = 0;
     for (const g of groups) {
       let bucket = accessPackages.length; // unmanaged = after all APs
       const gidUpper = g.id.toUpperCase(); // apGroupMap keys use toUpperCase()
       for (let i = 0; i < accessPackages.length; i++) {
-        if (apGroupMap.has(`${gidUpper}|${accessPackages[i].id}`)) {
+        const lookupKey = `${gidUpper}|${accessPackages[i].id}`;
+        if (apGroupMap.has(lookupKey)) {
           bucket = i;
+          matchCount++;
           break;
         }
       }
       groupApBucket.set(g.id, bucket);
     }
+    console.log('groups matched to AP bucket:', matchCount, '/', groups.length);
+    console.log('unmatched (unmanaged):', groups.length - matchCount);
+
+    // Log bucket assignments
+    const bucketSummary = {};
+    for (const [gid, bucket] of groupApBucket) {
+      const label = bucket < accessPackages.length ? accessPackages[bucket].displayName : '(unmanaged)';
+      if (!bucketSummary[label]) bucketSummary[label] = 0;
+      bucketSummary[label]++;
+    }
+    console.log('bucket assignments:', bucketSummary);
+    console.groupEnd();
 
     return [...groups].sort((a, b) => {
       const aBucket = groupApBucket.get(a.id);
@@ -377,6 +400,7 @@ export default function MatrixView({
 
   // Apply custom row order (drag), then filter by group type and tags
   const orderedGroups = useMemo(() => {
+    console.log('[Row Order] hasCustomOrder:', rowOrderHook.hasCustomOrder);
     let result = rowOrderHook.getOrderedGroups(apSortedGroups);
     if (groupTypeFilter && groupTypeFilter.size > 0) {
       result = result.filter(g => groupTypeFilter.has(g.groupType));
