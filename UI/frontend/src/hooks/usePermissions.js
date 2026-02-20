@@ -10,36 +10,46 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
   const [accessPackageGroups, setAccessPackageGroups] = useState([]);
   const [managedByPackages, setManagedByPackages] = useState([]);
   const [userColumns, setUserColumns] = useState(null); // null = loading
+  const [groupColumns, setGroupColumns] = useState(null); // null = loading
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // true during refetch (filter/limit change)
   const [error, setError] = useState(null);
 
-  // Fetch user columns once on mount (for filter dropdowns + knowing which filters are server-side)
+  // Fetch user and group columns once on mount (for filter dropdowns + knowing which filters are server-side)
   useEffect(() => {
     let cancelled = false;
     authFetch(`${API_BASE}/user-columns`)
       .then(res => res.ok ? res.json() : [])
       .then(cols => { if (!cancelled) setUserColumns(cols); })
       .catch(() => { if (!cancelled) setUserColumns([]); });
+    authFetch(`${API_BASE}/group-columns`)
+      .then(res => res.ok ? res.json() : [])
+      .then(cols => { if (!cancelled) setGroupColumns(cols); })
+      .catch(() => { if (!cancelled) setGroupColumns([]); });
     return () => { cancelled = true; };
   }, [authFetch]);
 
-  // Derive server-side filters: only user attribute columns go to the backend.
-  // Other filters (membershipType, groupDisplayName, etc.) stay client-side.
+  // Derive server-side filters: user and group attribute columns go to the backend.
+  // Other filters (membershipType, etc.) stay client-side.
   const userColumnNames = useMemo(() => {
     if (!userColumns) return new Set();
     return new Set(userColumns.map(c => c.column));
   }, [userColumns]);
 
+  const groupColumnNames = useMemo(() => {
+    if (!groupColumns) return new Set();
+    return new Set(groupColumns.map(c => c.column));
+  }, [groupColumns]);
+
   const serverFilters = useMemo(() => {
     const result = {};
     for (const f of activeFilters) {
-      if (userColumnNames.has(f.field)) {
+      if (userColumnNames.has(f.field) || groupColumnNames.has(f.field)) {
         result[f.field] = f.value;
       }
     }
     return result;
-  }, [activeFilters, userColumnNames]);
+  }, [activeFilters, userColumnNames, groupColumnNames]);
 
   // Stable key for debounce comparison (avoids object reference changes)
   const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
@@ -115,5 +125,5 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
     };
   }, [debouncedLimit, debouncedFilterKey, fetchPermissions, authFetch]);
 
-  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, refreshing, error };
+  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupColumns, loading, refreshing, error };
 }

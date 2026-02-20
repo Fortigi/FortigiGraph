@@ -86,7 +86,7 @@ export default function App() {
   const [managedFilter, setManagedFilter] = useState(initial.managed);
   const [filterText, setFilterText] = useState(initial.search);
 
-  const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, loading, refreshing, error } = usePermissions(userLimit, activeFilters);
+  const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupColumns, loading, refreshing, error } = usePermissions(userLimit, activeFilters);
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
 
@@ -201,6 +201,7 @@ export default function App() {
             filterText={filterText}
             setFilterText={setFilterText}
             userColumns={userColumns}
+            groupColumns={groupColumns}
             refreshing={refreshing}
             shareUrl={shareUrl}
           />

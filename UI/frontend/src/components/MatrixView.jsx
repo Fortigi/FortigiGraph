@@ -12,12 +12,9 @@ import MatrixGroupRow from './matrix/MatrixGroupRow';
 const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
 // Friendly labels for known fields
 const FIELD_LABELS = {
+  // User columns
   department: 'Department',
   jobTitle: 'Job Title',
-  membershipType: 'Membership Type',
-  groupDisplayName: 'Group Name',
-  groupTypeCalculated: 'Group Type',
-  groupDescription: 'Group Description',
   companyName: 'Company',
   accountEnabled: 'Account Enabled',
   userType: 'User Type',
@@ -30,12 +27,21 @@ const FIELD_LABELS = {
   mail: 'Mail',
   manager: 'Manager',
   onPremisesSamAccountName: 'SAM Account',
+  onPremisesSyncEnabled: 'On-Prem Sync',
+  __userTag: 'User Tag',
+  // Group columns (aliased to match permission query field names)
+  groupDisplayName: 'Group Name',
+  groupTypeCalculated: 'Group Type',
+  groupDescription: 'Group Description',
   mailEnabled: 'Mail Enabled',
   securityEnabled: 'Security Enabled',
   visibility: 'Visibility',
   isAssignableToRole: 'Role Assignable',
-  __userTag: 'User Tag',
+  membershipRule: 'Membership Rule',
+  resourceProvisioningOptions: 'Provisioning',
   __groupTag: 'Group Tag',
+  // Relationship fields
+  membershipType: 'Membership Type',
 };
 
 export default function MatrixView({
@@ -45,6 +51,7 @@ export default function MatrixView({
   managedFilter, setManagedFilter,
   filterText, setFilterText,
   userColumns,
+  groupColumns,
   refreshing,
   shareUrl,
 }) {
@@ -61,15 +68,20 @@ export default function MatrixView({
 
   const rowOrderHook = useMatrixRowOrder(storageKey);
 
-  // Set of user column names (for knowing which filters are server-side)
+  // Sets of column names (for knowing which filters are server-side)
   const userColumnNames = useMemo(() => {
     if (!userColumns) return new Set();
     return new Set(userColumns.map(c => c.column));
   }, [userColumns]);
 
-  // Auto-discover filterable fields from data + merge server-provided user columns.
-  // Data-derived fields appear even if not in userColumns (e.g., membershipType, groupDisplayName).
-  // Server-provided user columns appear even if all values are null in the current page.
+  const groupColumnNames = useMemo(() => {
+    if (!groupColumns) return new Set();
+    return new Set(groupColumns.map(c => c.column));
+  }, [groupColumns]);
+
+  // Auto-discover filterable fields from data + merge server-provided user & group columns.
+  // Data-derived fields appear even if not in server columns (e.g., membershipType).
+  // Server-provided columns appear even if all values are null in the current page.
   const filterFields = useMemo(() => {
     const fieldMap = new Map(); // key -> { key, label, dataKey }
 
@@ -95,7 +107,6 @@ export default function MatrixView({
     }
 
     // 2. Add server-provided user columns that aren't already discovered
-    //    (e.g., columns where all values are null in the current page but have values in full dataset)
     if (userColumns) {
       for (const col of userColumns) {
         if (EXCLUDE_FIELDS.has(col.column)) continue;
@@ -109,8 +120,22 @@ export default function MatrixView({
       }
     }
 
+    // 3. Add server-provided group columns that aren't already discovered
+    if (groupColumns) {
+      for (const col of groupColumns) {
+        if (EXCLUDE_FIELDS.has(col.column)) continue;
+        if (!fieldMap.has(col.column) && col.values && col.values.length > 0) {
+          fieldMap.set(col.column, {
+            key: col.column,
+            label: FIELD_LABELS[col.column] || col.column.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
+            dataKey: col.column,
+          });
+        }
+      }
+    }
+
     return [...fieldMap.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [data, userColumns]);
+  }, [data, userColumns, groupColumns]);
 
   // Split filter fields into user / group categories.
   // User fields = columns known to the server from GraphUsers table + __userTag.
@@ -125,7 +150,7 @@ export default function MatrixView({
   );
 
   // Get available values for a specific field.
-  // User columns: use server-provided values (full dataset, not just current page).
+  // Server-provided columns: use server values (full dataset, not just current page).
   // Other fields: derive from loaded data with cross-filter logic.
   const getOptionsForField = useCallback((fieldKey) => {
     // For user columns, return server-provided values (from full dataset)
@@ -135,8 +160,15 @@ export default function MatrixView({
         return serverCol.values;
       }
     }
+    // For group columns, return server-provided values (from full dataset)
+    if (groupColumns) {
+      const serverCol = groupColumns.find(c => c.column === fieldKey);
+      if (serverCol && serverCol.values && serverCol.values.length > 0) {
+        return serverCol.values;
+      }
+    }
 
-    // For non-user columns (membershipType, groupDisplayName, etc.), derive from loaded data
+    // For non-server columns (membershipType, etc.), derive from loaded data
     const field = filterFields.find(f => f.key === fieldKey);
     if (!field) return [];
     // Apply all OTHER active filters first to show contextual values
@@ -154,7 +186,7 @@ export default function MatrixView({
       if (val != null && val !== '') values.add(String(val));
     });
     return [...values].sort();
-  }, [data, activeFilters, filterFields, userColumns]);
+  }, [data, activeFilters, filterFields, userColumns, groupColumns]);
 
   const addFilter = useCallback((field, value) => {
     setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
@@ -168,13 +200,13 @@ export default function MatrixView({
     setActiveFilters([]);
   }, [setActiveFilters]);
 
-  // Apply CLIENT-SIDE filters only (server-side user attribute filters already applied by backend).
-  // Client-side: text search, managed toggle, non-user-column structured filters.
+  // Apply CLIENT-SIDE filters only (server-side user & group attribute filters already applied by backend).
+  // Client-side: text search, managed toggle, non-server-column structured filters (e.g., membershipType).
   const filteredData = useMemo(() => {
     let result = data;
     // Only apply non-server filters client-side
     for (const af of activeFilters) {
-      if (userColumnNames.has(af.field)) continue; // already applied server-side
+      if (userColumnNames.has(af.field) || groupColumnNames.has(af.field)) continue; // already applied server-side
       const field = filterFields.find(f => f.key === af.field);
       if (field) {
         result = result.filter(d => String(d[field.dataKey] ?? '') === af.value);
@@ -194,7 +226,7 @@ export default function MatrixView({
       result = result.filter(d => !d.managedByAccessPackage);
     }
     return result;
-  }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames]);
+  }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames, groupColumnNames]);
 
   // Build matrix data structures
   const { users, groups, memberships, managedMap } = useMemo(() => {
