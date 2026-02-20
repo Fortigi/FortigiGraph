@@ -80,6 +80,16 @@ This creates an Azure Automation Account with:
 - Daily schedules (optional)
 - SQL firewall rule for Azure services
 
+### Step 6: Deploy the Role Mining UI
+
+```powershell
+New-FGUI -ConfigFile '.\Config\mycompany.json'
+```
+
+This deploys a web application to Azure App Service that visualizes your synced data as an interactive permission matrix. It is the recommended way to explore and analyze your Entra ID governance data.
+
+See the [Role Mining UI](#role-mining-ui) section below for full details on the UI features.
+
 ### Verify Your Data
 
 ```powershell
@@ -102,147 +112,11 @@ New-FGSQLReadOnlyUser -ConfigFile '.\Config\mycompany.json'
 
 ---
 
-## Why FortigiGraph?
+## Role Mining UI
 
-### Identity Governance Insights You Can't Get from Entra ID
+FortigiGraph includes a web-based Role Mining UI that visualizes your permission data as an interactive matrix, making it easy to discover role patterns and governance gaps. This is the primary way most users will interact with their synced data.
 
-#### 1. IST vs SOLL Analysis (As-Is vs Should-Be State)
-
-**The Problem**: In Entra ID, you can't easily see the gap between what users *should* have (access package assignments) and what they *actually* have (direct group memberships).
-
-**What FortigiGraph Gives You**:
-
-```sql
--- Find users with DIRECT group memberships when they should only have access through packages
-SELECT * FROM vw_UnmanagedPermissions;
-```
-
-**Use Cases**:
-- Identify "backdoor" access that bypasses governance
-- Clean up direct assignments that should be managed by access packages
-- Audit compliance with access governance policies
-
-#### 2. Access Package Assignment Analysis
-
-**The Problem**: Entra ID doesn't show you aggregate views of who has what through access packages, which packages are most used, or how assignments have changed over time.
-
-```sql
--- Complete view of user permissions via access packages
-SELECT * FROM vw_UserPermissionAssignmentViaAccessPackage;
-
--- All permission assignments (direct, indirect, eligible, owner)
-SELECT * FROM vw_UserPermissionAssignments;
-```
-
-#### 3. Approval Timeline Analysis
-
-**The Problem**: Entra ID doesn't provide aggregate statistics on how long access requests take to approve.
-
-```sql
--- Approval response times with buckets (< 1 hour, 1-4 hours, etc.)
-SELECT * FROM vw_ApprovedRequestTimeline;
-
--- Find pending requests and how long they've been waiting
-SELECT * FROM vw_PendingRequestTimeline WHERE hoursPending > 24;
-
--- Aggregate approval statistics
-SELECT * FROM vw_RequestResponseMetrics;
-```
-
-#### 4. Access Review Insights
-
-**The Problem**: Entra ID shows individual review results, but doesn't aggregate patterns or completion rates.
-
-```sql
--- Access package last review details
-SELECT * FROM vw_AccessPackageLastReview;
-
--- Denied request patterns
-SELECT * FROM vw_DeniedRequestTimeline;
-```
-
-#### 5. Direct vs Governed Access
-
-**The Problem**: You can't easily see which memberships are managed through governance vs direct assignment.
-
-```sql
--- Complete membership analysis: Owner, Direct, Indirect, Eligible
-SELECT * FROM vw_UserPermissionAssignments
-WHERE memberId = 'user-guid-here';
-
--- Recursive group memberships with full paths
-SELECT * FROM vw_GraphGroupMembersRecursive
-WHERE groupId = 'group-guid-here'
-ORDER BY depth;
-```
-
-#### 6. Temporal/Historical Analysis
-
-**The Problem**: Entra ID only shows current state. You can't answer "who had access on this date?"
-
-```sql
--- Who had access to a specific group on January 15th?
-SELECT * FROM GraphGroupMembers
-FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00'
-WHERE groupId = 'your-group-id';
-
--- Track all changes for a specific user
-SELECT userPrincipalName, department, ValidFrom, ValidTo
-FROM GraphUsers FOR SYSTEM_TIME ALL
-WHERE userPrincipalName = 'john.doe@contoso.com'
-ORDER BY ValidFrom DESC;
-```
-
----
-
-## Features
-
-### Core Capabilities
-- **Guided Setup**: `New-FGConfig` wizard creates all Azure resources and config in one go
-- **Easy Authentication**: Service principal and interactive auth with automatic token refresh
-- **Azure SQL Integration**: Temporal tables with automatic version history tracking
-- **High-Performance Sync**: SqlBulkCopy-based operations (20-50x faster than row-by-row)
-- **Parallel Execution**: Sync up to 6 entity types concurrently
-
-### Data Sync
-- **Users**: All user properties including custom/extension attributes
-- **Groups**: Group details with security, type, and organization info
-- **Memberships**: Direct, transitive, PIM eligible, and owner relationships
-- **Access Packages**: Catalogs, packages, assignments, policies, requests, reviews
-- **Automatic Schema Evolution**: Add new columns without recreating tables
-
-### Analytical Views
-FortigiGraph creates SQL views automatically for instant insights:
-
-**Group Membership Views** (via `Initialize-FGGroupMembershipViews`):
-- `vw_GraphGroupMembersRecursive` - All memberships (direct + indirect) with paths
-- `vw_UserPermissionAssignments` - Comprehensive view with all types as separate rows: Owner, Direct, Indirect, Eligible (a user can have multiple types per group, e.g. Direct + Owner)
-
-**Access Package Views** (via `Initialize-FGAccessPackageViews`):
-- `vw_UserPermissionAssignmentViaAccessPackage` - User permissions via access packages
-- `vw_DirectGroupMemberships` - Direct group memberships
-- `vw_DirectGroupOwnerships` - Direct group ownerships
-- `vw_UnmanagedPermissions` - IST vs SOLL gaps
-- `vw_AccessPackageAssignmentDetails` - Assignment details
-- `vw_AccessPackageLastReview` - Last review per package
-- `vw_ApprovedRequestTimeline` - Approval times with response buckets
-- `vw_DeniedRequestTimeline` - Denied request analysis
-- `vw_PendingRequestTimeline` - Aging pending requests
-- `vw_RequestResponseMetrics` - Aggregate approval statistics
-
-### Production Ready
-- **Azure Automation**: One-command setup with `New-FGAzureAutomationAccount`
-- **Config-Driven**: All settings in one JSON file
-- **Secure Credentials**: Encrypted credential storage using Windows DPAPI
-- **Comprehensive Logging**: Sync statistics logged to `GraphSyncLog` table
-
----
-
-## Role Mining UI (Beta)
-
-FortigiGraph includes an optional web-based Role Mining UI that visualizes your permission data as an interactive matrix, making it easy to discover role patterns and governance gaps.
-
-### Quick Start
+### Deployment
 
 ```powershell
 # Deploy the UI (creates Azure App Service + App Registration + deploys code)
@@ -496,6 +370,147 @@ All filters use parameterized SQL queries to prevent injection. Virtual tag colu
 
 ---
 
+## Why FortigiGraph?
+
+### Identity Governance Insights You Can't Get from Entra ID
+
+The Role Mining UI covers the most common analysis scenarios visually. For advanced or custom queries, FortigiGraph's SQL views give you full flexibility.
+
+#### 1. IST vs SOLL Analysis (As-Is vs Should-Be State)
+
+**The Problem**: In Entra ID, you can't easily see the gap between what users *should* have (access package assignments) and what they *actually* have (direct group memberships).
+
+**What FortigiGraph Gives You**:
+
+The Matrix View's IST/SOLL toggle shows this visually. For custom analysis:
+
+```sql
+-- Find users with DIRECT group memberships when they should only have access through packages
+SELECT * FROM vw_UnmanagedPermissions;
+```
+
+**Use Cases**:
+- Identify "backdoor" access that bypasses governance
+- Clean up direct assignments that should be managed by access packages
+- Audit compliance with access governance policies
+
+#### 2. Access Package Assignment Analysis
+
+**The Problem**: Entra ID doesn't show you aggregate views of who has what through access packages, which packages are most used, or how assignments have changed over time.
+
+```sql
+-- Complete view of user permissions via access packages
+SELECT * FROM vw_UserPermissionAssignmentViaAccessPackage;
+
+-- All permission assignments (direct, indirect, eligible, owner)
+SELECT * FROM vw_UserPermissionAssignments;
+```
+
+#### 3. Approval Timeline Analysis
+
+**The Problem**: Entra ID doesn't provide aggregate statistics on how long access requests take to approve.
+
+```sql
+-- Approval response times with buckets (< 1 hour, 1-4 hours, etc.)
+SELECT * FROM vw_ApprovedRequestTimeline;
+
+-- Find pending requests and how long they've been waiting
+SELECT * FROM vw_PendingRequestTimeline WHERE hoursPending > 24;
+
+-- Aggregate approval statistics
+SELECT * FROM vw_RequestResponseMetrics;
+```
+
+#### 4. Access Review Insights
+
+**The Problem**: Entra ID shows individual review results, but doesn't aggregate patterns or completion rates.
+
+```sql
+-- Access package last review details
+SELECT * FROM vw_AccessPackageLastReview;
+
+-- Denied request patterns
+SELECT * FROM vw_DeniedRequestTimeline;
+```
+
+#### 5. Direct vs Governed Access
+
+**The Problem**: You can't easily see which memberships are managed through governance vs direct assignment.
+
+```sql
+-- Complete membership analysis: Owner, Direct, Indirect, Eligible
+SELECT * FROM vw_UserPermissionAssignments
+WHERE memberId = 'user-guid-here';
+
+-- Recursive group memberships with full paths
+SELECT * FROM vw_GraphGroupMembersRecursive
+WHERE groupId = 'group-guid-here'
+ORDER BY depth;
+```
+
+#### 6. Temporal/Historical Analysis
+
+**The Problem**: Entra ID only shows current state. You can't answer "who had access on this date?"
+
+```sql
+-- Who had access to a specific group on January 15th?
+SELECT * FROM GraphGroupMembers
+FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00'
+WHERE groupId = 'your-group-id';
+
+-- Track all changes for a specific user
+SELECT userPrincipalName, department, ValidFrom, ValidTo
+FROM GraphUsers FOR SYSTEM_TIME ALL
+WHERE userPrincipalName = 'john.doe@contoso.com'
+ORDER BY ValidFrom DESC;
+```
+
+---
+
+## Features
+
+### Core Capabilities
+- **Guided Setup**: `New-FGConfig` wizard creates all Azure resources and config in one go
+- **Easy Authentication**: Service principal and interactive auth with automatic token refresh
+- **Azure SQL Integration**: Temporal tables with automatic version history tracking
+- **High-Performance Sync**: SqlBulkCopy-based operations (20-50x faster than row-by-row)
+- **Parallel Execution**: Sync up to 6 entity types concurrently
+- **Role Mining UI**: Interactive web application for visual permission analysis
+
+### Data Sync
+- **Users**: All user properties including custom/extension attributes
+- **Groups**: Group details with security, type, and organization info
+- **Memberships**: Direct, transitive, PIM eligible, and owner relationships
+- **Access Packages**: Catalogs, packages, assignments, policies, requests, reviews
+- **Automatic Schema Evolution**: Add new columns without recreating tables
+
+### Analytical Views
+FortigiGraph creates SQL views automatically for instant insights:
+
+**Group Membership Views** (via `Initialize-FGGroupMembershipViews`):
+- `vw_GraphGroupMembersRecursive` - All memberships (direct + indirect) with paths
+- `vw_UserPermissionAssignments` - Comprehensive view with all types as separate rows: Owner, Direct, Indirect, Eligible (a user can have multiple types per group, e.g. Direct + Owner)
+
+**Access Package Views** (via `Initialize-FGAccessPackageViews`):
+- `vw_UserPermissionAssignmentViaAccessPackage` - User permissions via access packages
+- `vw_DirectGroupMemberships` - Direct group memberships
+- `vw_DirectGroupOwnerships` - Direct group ownerships
+- `vw_UnmanagedPermissions` - IST vs SOLL gaps
+- `vw_AccessPackageAssignmentDetails` - Assignment details
+- `vw_AccessPackageLastReview` - Last review per package
+- `vw_ApprovedRequestTimeline` - Approval times with response buckets
+- `vw_DeniedRequestTimeline` - Denied request analysis
+- `vw_PendingRequestTimeline` - Aging pending requests
+- `vw_RequestResponseMetrics` - Aggregate approval statistics
+
+### Production Ready
+- **Azure Automation**: One-command setup with `New-FGAzureAutomationAccount`
+- **Config-Driven**: All settings in one JSON file
+- **Secure Credentials**: Encrypted credential storage using Windows DPAPI
+- **Comprehensive Logging**: Sync statistics logged to `GraphSyncLog` table
+
+---
+
 ## Config File
 
 The config file drives all FortigiGraph operations. Create one with `New-FGConfig` or manually from the template in `Config/tenantname.json.template`.
@@ -731,7 +746,7 @@ FortigiGraph/
 │   ├── SQL/                # Azure SQL operations (24 functions)
 │   ├── Sync/               # Data synchronization (14 functions)
 │   └── Automation/         # Azure Automation management (4 functions)
-├── UI/                     # Role Mining Web Application (Beta)
+├── UI/                     # Role Mining Web Application
 │   ├── backend/            # Node.js + Express API server
 │   └── frontend/           # React + Vite + Tailwind
 ├── Config/                 # Configuration templates

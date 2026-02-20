@@ -52,7 +52,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - Encrypted variables, runbooks, daily schedules, SQL firewall rules
 - Memory-safe batching mode for large datasets (400 MB Azure sandbox limit)
 
-### 6. Role Mining UI (Beta)
+### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
 - **Tab Navigation**: Four pages — Matrix, Users, Groups, Sync Log
@@ -127,7 +127,7 @@ FortigiGraph/
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
 │
-├── UI/                     # Role Mining Web Application (Beta)
+├── UI/                     # Role Mining Web Application
 │   ├── backend/            # Node.js + Express API server
 │   │   └── src/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
