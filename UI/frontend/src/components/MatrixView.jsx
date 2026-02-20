@@ -268,7 +268,7 @@ export default function MatrixView({
     if (!accessPackageGroups || accessPackageGroups.length === 0) {
       return { accessPackages: [], apGroupMap: new Map() };
     }
-    const visibleGroupIds = new Set(groups.map(g => g.id));
+    const visibleGroupIds = new Set(groups.map(g => g.id.toUpperCase()));
     const visibleUserIds = new Set(users.map(u => u.id.toLowerCase()));
     const apMap = new Map();
     const mapping = new Map(); // "groupId|apId" -> roleName
