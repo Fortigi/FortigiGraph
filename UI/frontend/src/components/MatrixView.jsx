@@ -29,17 +29,6 @@ const FIELD_LABELS = {
   onPremisesSamAccountName: 'SAM Account',
   onPremisesSyncEnabled: 'On-Prem Sync',
   __userTag: 'User Tag',
-  // Group columns (aliased to match permission query field names)
-  groupDisplayName: 'Group Name',
-  groupTypeCalculated: 'Group Type',
-  groupDescription: 'Group Description',
-  mailEnabled: 'Mail Enabled',
-  securityEnabled: 'Security Enabled',
-  visibility: 'Visibility',
-  isAssignableToRole: 'Role Assignable',
-  membershipRule: 'Membership Rule',
-  resourceProvisioningOptions: 'Provisioning',
-  __groupTag: 'Group Tag',
   // Relationship fields
   membershipType: 'Membership Type',
 };
@@ -51,12 +40,12 @@ export default function MatrixView({
   managedFilter, setManagedFilter,
   filterText, setFilterText,
   userColumns,
-  groupColumns,
   groupTagMap,
   refreshing,
   shareUrl,
 }) {
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
+  const [groupTagFilter, setGroupTagFilter] = useState(null); // null = all, Set = selected tag names
 
   // Build a stable storage key from all active filters (sorted for consistency)
   const storageKey = useMemo(() => {
@@ -75,12 +64,7 @@ export default function MatrixView({
     return new Set(userColumns.map(c => c.column));
   }, [userColumns]);
 
-  const groupColumnNames = useMemo(() => {
-    if (!groupColumns) return new Set();
-    return new Set(groupColumns.map(c => c.column));
-  }, [groupColumns]);
-
-  // Auto-discover filterable fields from data + merge server-provided user & group columns.
+  // Auto-discover filterable fields from data + merge server-provided user columns.
   // Data-derived fields appear even if not in server columns (e.g., membershipType).
   // Server-provided columns appear even if all values are null in the current page.
   const filterFields = useMemo(() => {
@@ -121,32 +105,12 @@ export default function MatrixView({
       }
     }
 
-    // 3. Add server-provided group columns that aren't already discovered
-    if (groupColumns) {
-      for (const col of groupColumns) {
-        if (EXCLUDE_FIELDS.has(col.column)) continue;
-        if (!fieldMap.has(col.column) && col.values && col.values.length > 0) {
-          fieldMap.set(col.column, {
-            key: col.column,
-            label: FIELD_LABELS[col.column] || col.column.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
-            dataKey: col.column,
-          });
-        }
-      }
-    }
-
     return [...fieldMap.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [data, userColumns, groupColumns]);
+  }, [data, userColumns]);
 
-  // Split filter fields into user / group categories.
-  // User fields = columns known to the server from GraphUsers table + __userTag.
-  // Group fields = everything else (group attributes, relationship fields, __groupTag).
+  // User filter fields = columns known to the server from GraphUsers table + __userTag.
   const userFilterFields = useMemo(
     () => filterFields.filter(f => userColumnNames.has(f.key) || f.key === '__userTag'),
-    [filterFields, userColumnNames],
-  );
-  const groupFilterFields = useMemo(
-    () => filterFields.filter(f => !(userColumnNames.has(f.key) || f.key === '__userTag')),
     [filterFields, userColumnNames],
   );
 
@@ -161,14 +125,6 @@ export default function MatrixView({
         return serverCol.values;
       }
     }
-    // For group columns, return server-provided values (from full dataset)
-    if (groupColumns) {
-      const serverCol = groupColumns.find(c => c.column === fieldKey);
-      if (serverCol && serverCol.values && serverCol.values.length > 0) {
-        return serverCol.values;
-      }
-    }
-
     // For non-server columns (membershipType, etc.), derive from loaded data
     const field = filterFields.find(f => f.key === fieldKey);
     if (!field) return [];
@@ -187,7 +143,7 @@ export default function MatrixView({
       if (val != null && val !== '') values.add(String(val));
     });
     return [...values].sort();
-  }, [data, activeFilters, filterFields, userColumns, groupColumns]);
+  }, [data, activeFilters, filterFields, userColumns]);
 
   const addFilter = useCallback((field, value) => {
     setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
@@ -207,7 +163,7 @@ export default function MatrixView({
     let result = data;
     // Only apply non-server filters client-side
     for (const af of activeFilters) {
-      if (userColumnNames.has(af.field) || groupColumnNames.has(af.field)) continue; // already applied server-side
+      if (userColumnNames.has(af.field)) continue; // already applied server-side
       const field = filterFields.find(f => f.key === af.field);
       if (field) {
         result = result.filter(d => String(d[field.dataKey] ?? '') === af.value);
@@ -227,7 +183,7 @@ export default function MatrixView({
       result = result.filter(d => !d.managedByAccessPackage);
     }
     return result;
-  }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames, groupColumnNames]);
+  }, [data, activeFilters, filterFields, filterText, managedFilter, userColumnNames]);
 
   // Build matrix data structures
   const { users, groups, memberships, managedMap } = useMemo(() => {
@@ -368,6 +324,17 @@ export default function MatrixView({
     return [...types].sort();
   }, [groups]);
 
+  // Unique group tags for filter dropdown (derived from groups which already have tags attached)
+  const uniqueGroupTags = useMemo(() => {
+    const tagMap = new Map(); // name -> { name, color }
+    groups.forEach(g => {
+      (g.tags || []).forEach(t => {
+        if (!tagMap.has(t.name)) tagMap.set(t.name, { name: t.name, color: t.color });
+      });
+    });
+    return [...tagMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups]);
+
   // Default: exclude Distribution and Dynamic group types (user can change)
   const groupTypeDefaultsApplied = useRef(false);
   useEffect(() => {
@@ -380,14 +347,17 @@ export default function MatrixView({
     }
   }, [uniqueGroupTypes]);
 
-  // Apply custom row order, then filter by group type
+  // Apply custom row order, then filter by group type and tags
   const orderedGroups = useMemo(() => {
     let result = rowOrderHook.getOrderedGroups(groups);
     if (groupTypeFilter && groupTypeFilter.size > 0) {
       result = result.filter(g => groupTypeFilter.has(g.groupType));
     }
+    if (groupTagFilter && groupTagFilter.size > 0) {
+      result = result.filter(g => (g.tags || []).some(t => groupTagFilter.has(t.name)));
+    }
     return result;
-  }, [groups, rowOrderHook.getOrderedGroups, groupTypeFilter]);
+  }, [groups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter]);
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
 
@@ -452,7 +422,6 @@ export default function MatrixView({
       <MatrixToolbar
         filterFields={filterFields}
         userFilterFields={userFilterFields}
-        groupFilterFields={groupFilterFields}
         activeFilters={activeFilters}
         getOptionsForField={getOptionsForField}
         onAddFilter={addFilter}
@@ -504,6 +473,9 @@ export default function MatrixView({
                 uniqueGroupTypes={uniqueGroupTypes}
                 groupTypeFilter={groupTypeFilter}
                 onGroupTypeFilterChange={setGroupTypeFilter}
+                uniqueGroupTags={uniqueGroupTags}
+                groupTagFilter={groupTagFilter}
+                onGroupTagFilterChange={setGroupTagFilter}
               />
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 <tbody>

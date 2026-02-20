@@ -152,5 +152,5 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
     };
   }, [debouncedLimit, debouncedFilterKey, fetchPermissions, authFetch]);
 
-  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupColumns, groupTagMap, loading, refreshing, error };
+  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupTagMap, loading, refreshing, error };
 }

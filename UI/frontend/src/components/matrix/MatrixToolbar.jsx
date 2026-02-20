@@ -4,7 +4,6 @@ import FilterBar from '../FilterBar';
 export default function MatrixToolbar({
   filterFields,
   userFilterFields,
-  groupFilterFields,
   activeFilters,
   getOptionsForField,
   onAddFilter,
@@ -90,19 +89,8 @@ export default function MatrixToolbar({
         </div>
       </div>
 
-      {/* Row 2: Group filters + managed toggle + actions */}
+      {/* Row 2: Managed toggle + actions */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <FilterBar
-          label="Group Filters:"
-          filterFields={groupFilterFields}
-          activeFilters={activeFilters}
-          getOptionsForField={getOptionsForField}
-          onAddFilter={onAddFilter}
-          onRemoveFilter={onRemoveFilter}
-        />
-
-        <div className="border-l border-gray-300 h-5 mx-1" />
-
         <div className="inline-flex rounded border border-gray-300 overflow-hidden">
           {[
             { key: 'all',       label: 'All' },

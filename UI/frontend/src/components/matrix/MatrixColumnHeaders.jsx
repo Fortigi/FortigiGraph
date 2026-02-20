@@ -10,21 +10,26 @@ export function getAccessPackageColor(index) {
   return AP_COLORS[index % AP_COLORS.length];
 }
 
-export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange }) {
+export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange }) {
   const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const typeFilterRef = useRef(null);
+  const tagFilterRef = useRef(null);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
-    if (!typeFilterOpen) return;
+    if (!typeFilterOpen && !tagFilterOpen) return;
     const handler = (e) => {
-      if (typeFilterRef.current && !typeFilterRef.current.contains(e.target)) {
+      if (typeFilterOpen && typeFilterRef.current && !typeFilterRef.current.contains(e.target)) {
         setTypeFilterOpen(false);
+      }
+      if (tagFilterOpen && tagFilterRef.current && !tagFilterRef.current.contains(e.target)) {
+        setTagFilterOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [typeFilterOpen]);
+  }, [typeFilterOpen, tagFilterOpen]);
 
   const isTypeFiltered = groupTypeFilter && groupTypeFilter.size > 0;
 
@@ -42,6 +47,22 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
   };
 
   const selectAllTypes = () => onGroupTypeFilterChange(null);
+
+  const isTagFiltered = groupTagFilter && groupTagFilter.size > 0;
+
+  const toggleTagValue = (val) => {
+    if (!groupTagFilter) {
+      onGroupTagFilterChange(new Set([val]));
+    } else if (groupTagFilter.has(val)) {
+      const next = new Set(groupTagFilter);
+      next.delete(val);
+      onGroupTagFilterChange(next.size === 0 ? null : next);
+    } else {
+      onGroupTagFilterChange(new Set([...groupTagFilter, val]));
+    }
+  };
+
+  const selectAllTags = () => onGroupTagFilterChange(null);
 
   // Group consecutive users by job title for merged headers
   const jobTitleSpans = [];
@@ -196,9 +217,58 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
         <th className="sticky left-0 z-30 bg-gray-100 border-b border-r border-gray-300 px-1 py-1 text-[10px] text-gray-500"
             style={{ minWidth: '24px' }}>
         </th>
-        <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
-            style={{ left: '24px', minWidth: '100px' }}>
-          Tags
+        <th className={`sticky z-30 border-b border-r border-gray-300 px-2 py-1 text-xs text-left font-medium cursor-pointer select-none relative ${isTagFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            style={{ left: '24px', minWidth: '100px' }}
+            ref={tagFilterRef}>
+          <div onClick={() => setTagFilterOpen(prev => !prev)}>
+            Tags {isTagFiltered ? '\u25BC' : '\u25BD'}
+          </div>
+          {tagFilterOpen && (
+            <div
+              className="absolute bg-white border border-gray-300 rounded shadow-lg z-50 text-left"
+              style={{ top: '100%', left: 0, minWidth: '200px' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 border-b border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!isTagFiltered}
+                    onChange={selectAllTags}
+                    className="rounded"
+                  />
+                  (Select All)
+                </label>
+              </div>
+              <div className="max-h-48 overflow-auto py-1">
+                {uniqueGroupTags.map(t => (
+                  <label key={t.name} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={!groupTagFilter || groupTagFilter.has(t.name)}
+                      onChange={() => toggleTagValue(t.name)}
+                      className="rounded"
+                    />
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full border"
+                      style={{ backgroundColor: t.color + '20', borderColor: t.color }}
+                    />
+                    {t.name}
+                  </label>
+                ))}
+              </div>
+              {isTagFiltered && (
+                <div className="px-3 py-1.5 border-t border-gray-200">
+                  <button
+                    onClick={selectAllTags}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </th>
         <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
             style={{ left: '124px', minWidth: '250px' }}>
