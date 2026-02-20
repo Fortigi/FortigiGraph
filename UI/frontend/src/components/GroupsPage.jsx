@@ -46,6 +46,10 @@ export default function GroupsPage() {
   // Selection state
   const [selected, setSelected] = useState(new Set());
 
+  // Sort state
+  const [sortCol, setSortCol] = useState(null);   // null | 'displayName' | 'groupTypeCalculated' | 'description'
+  const [sortDir, setSortDir] = useState('asc');   // 'asc' | 'desc'
+
   // Tag creation state
   const [showCreateTag, setShowCreateTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
@@ -145,6 +149,26 @@ export default function GroupsPage() {
       setSelected(new Set(groups.map(g => g.id)));
     }
   };
+
+  // Sort helpers
+  const toggleSort = (col) => {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedGroups = useMemo(() => {
+    if (!sortCol) return groups;
+    return [...groups].sort((a, b) => {
+      const av = (a[sortCol] ?? '').toString().toLowerCase();
+      const bv = (b[sortCol] ?? '').toString().toLowerCase();
+      const cmp = av.localeCompare(bv);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [groups, sortCol, sortDir]);
 
   // Filter helpers
   const addFilter = useCallback((field, value) => {
@@ -444,14 +468,31 @@ export default function GroupsPage() {
                     className="rounded"
                   />
                 </th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Display Name</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Type</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Description</th>
+                {[
+                  { key: 'displayName',          label: 'Display Name' },
+                  { key: 'groupTypeCalculated',  label: 'Type' },
+                  { key: 'description',          label: 'Description' },
+                ].map(col => (
+                  <th
+                    key={col.key}
+                    onClick={() => toggleSort(col.key)}
+                    className="text-left px-3 py-2 font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-100"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {col.label}
+                      {sortCol === col.key ? (
+                        <span className="text-blue-600 text-[10px]">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
+                      ) : (
+                        <span className="text-gray-300 text-[10px]">{'\u25B4'}</span>
+                      )}
+                    </span>
+                  </th>
+                ))}
                 <th className="text-left px-3 py-2 font-medium text-gray-700">Tags</th>
               </tr>
             </thead>
             <tbody>
-              {groups.map(g => (
+              {sortedGroups.map(g => (
                 <tr
                   key={g.id}
                   className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
