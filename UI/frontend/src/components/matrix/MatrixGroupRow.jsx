@@ -44,13 +44,23 @@ export default function MatrixGroupRow({
         <span className="text-gray-300 text-xs select-none">&#x2630;</span>
       </td>
 
-      {/* Group info columns - sticky left */}
+      {/* Tags column - sticky left */}
       <td
-        className="sticky bg-white border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 whitespace-nowrap"
+        className="sticky bg-white border-r border-b border-gray-200 px-1 py-0.5"
         style={{ left: '24px', minWidth: '100px', maxWidth: '100px', zIndex: 10 }}
-        title={group.category}
       >
-        {group.category}
+        <div className="flex flex-wrap gap-0.5">
+          {(group.tags || []).map(t => (
+            <span
+              key={t.id}
+              className="inline-block px-1 py-0 rounded-full text-[9px] font-medium border leading-tight"
+              style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
+              title={t.name}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
       </td>
       <td
         className="sticky bg-white border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium"

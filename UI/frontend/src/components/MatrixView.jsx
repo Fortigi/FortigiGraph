@@ -52,6 +52,7 @@ export default function MatrixView({
   filterText, setFilterText,
   userColumns,
   groupColumns,
+  groupTagMap,
   refreshing,
   shareUrl,
 }) {
@@ -250,22 +251,12 @@ export default function MatrixView({
       // Groups
       if (d.groupId && !groupMap.has(d.groupId)) {
         const name = d.groupDisplayName || d.groupId;
-        // Parse category from group name prefix
-        const parts = name.split(/[-_]/);
-        let category = '';
-        const prefixMap = {
-          AG: 'App Group', CG: 'Cloud Group', GG: 'Global Group',
-          SG: 'Security', APP: 'Application', ROL: 'Role',
-          ORG: 'Organization', UAW: 'Access', MGT: 'Management',
-        };
-        if (parts.length > 1) {
-          category = prefixMap[parts[0].toUpperCase()] || parts[0];
-        }
+        const tags = groupTagMap?.get(d.groupId.toUpperCase()) || [];
 
         groupMap.set(d.groupId, {
           id: d.groupId,
           displayName: name,
-          category,
+          tags,
           description: d.groupDescription || '',
           groupType: d.groupTypeCalculated || '',
         });
@@ -301,7 +292,7 @@ export default function MatrixView({
     const groups = [...groupMap.values()].sort((a, b) => b.memberCount - a.memberCount);
 
     return { users, groups, memberships: membershipMap, managedMap: managed };
-  }, [filteredData]);
+  }, [filteredData, groupTagMap]);
 
   // Build managed-by-AP map: cellKey (lowercase) -> accessPackageId[] (lowercase)
   // All keys and values normalized to lowercase for case-insensitive matching

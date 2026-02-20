@@ -198,7 +198,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
         </th>
         <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
             style={{ left: '24px', minWidth: '100px' }}>
-          Category
+          Tags
         </th>
         <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
             style={{ left: '124px', minWidth: '250px' }}>

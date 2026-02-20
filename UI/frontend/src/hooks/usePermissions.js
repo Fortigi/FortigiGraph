@@ -14,6 +14,7 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
   const [managedByPackages, setManagedByPackages] = useState([]);
   const [userColumns, setUserColumns] = useState(null); // null = loading
   const [groupColumns, setGroupColumns] = useState(null); // null = loading
+  const [groupTagMap, setGroupTagMap] = useState(null); // null = loading, Map<uppercaseGroupId, [{tagId, tagName, tagColor}]>
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // true during refetch (filter/limit change)
   const [error, setError] = useState(null);
@@ -37,6 +38,21 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
         setGroupColumns(aliased);
       })
       .catch(() => { if (!cancelled) setGroupColumns([]); });
+    authFetch(`${API_BASE}/entity-tags?entityType=group`)
+      .then(res => res.ok ? res.json() : [])
+      .then(rows => {
+        if (cancelled) return;
+        // Build Map<uppercaseEntityId, [{tagId, tagName, tagColor}]>
+        const map = new Map();
+        for (const r of rows) {
+          const key = r.entityId?.toUpperCase();
+          if (!key) continue;
+          if (!map.has(key)) map.set(key, []);
+          map.get(key).push({ id: r.tagId, name: r.tagName, color: r.tagColor });
+        }
+        setGroupTagMap(map);
+      })
+      .catch(() => { if (!cancelled) setGroupTagMap(new Map()); });
     return () => { cancelled = true; };
   }, [authFetch]);
 
@@ -136,5 +152,5 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
     };
   }, [debouncedLimit, debouncedFilterKey, fetchPermissions, authFetch]);
 
-  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupColumns, loading, refreshing, error };
+  return { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupColumns, groupTagMap, loading, refreshing, error };
 }

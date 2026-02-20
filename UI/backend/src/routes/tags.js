@@ -543,4 +543,31 @@ router.get('/groups', async (req, res) => {
   }
 });
 
+// ─── GET /api/entity-tags ────────────────────────────────────────
+// Returns all tag assignments for a given entity type as a flat list.
+// Query params: entityType ('user' | 'group')
+// Response: [{ entityId, tagId, tagName, tagColor }]
+router.get('/entity-tags', async (req, res) => {
+  try {
+    if (!useSql) return res.json([]);
+    const { entityType } = req.query;
+    if (!entityType || !['user', 'group'].includes(entityType)) {
+      return res.status(400).json({ error: 'entityType must be user or group' });
+    }
+    const p = await db.getPool();
+    await ensureTagTables(p);
+    const result = await p.request().input('entityType', entityType).query(`
+      SELECT ta.entityId, t.id AS tagId, t.name AS tagName, t.color AS tagColor
+      FROM dbo.GraphTagAssignments ta
+      INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
+      WHERE t.entityType = @entityType
+      ORDER BY ta.entityId, t.name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error('GET /entity-tags failed:', err.message);
+    res.json([]);
+  }
+});
+
 export default router;
