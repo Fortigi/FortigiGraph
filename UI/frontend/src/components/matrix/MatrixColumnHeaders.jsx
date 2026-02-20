@@ -293,9 +293,10 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             key={user.id}
             className="border-b border-r border-gray-200 px-0 py-0 text-center bg-gray-100"
             style={{
-              height: '100px',
+              height: '200px',
               width: '24px',
               minWidth: '24px',
+              verticalAlign: 'bottom',
             }}
             title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}`}
           >
@@ -305,7 +306,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',
                 transform: 'rotate(180deg)',
-                maxHeight: '95px',
+                maxHeight: '190px',
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 margin: '0 auto',
@@ -323,9 +324,10 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             className={`border-b border-r border-gray-200 px-0 py-0 text-center ${idx === 0 ? 'border-l-2 border-l-indigo-300' : ''}`}
             style={{
               backgroundColor: getAccessPackageColor(idx),
-              height: '100px',
+              height: '200px',
               width: '24px',
               minWidth: '24px',
+              verticalAlign: 'bottom',
             }}
             title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}`}
           >
@@ -335,7 +337,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',
                 transform: 'rotate(180deg)',
-                maxHeight: '95px',
+                maxHeight: '190px',
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 margin: '0 auto',
