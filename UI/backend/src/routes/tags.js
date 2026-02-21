@@ -4,6 +4,9 @@ import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, FILTERA
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
 
+// Validate hex color format (#000000 – #ffffff)
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
 let db = null;
 if (useSql) {
   db = await import('../db/connection.js');
@@ -92,6 +95,7 @@ router.post('/tags', async (req, res) => {
     const { name, color, entityType } = req.body;
     if (!name || !entityType) return res.status(400).json({ error: 'name and entityType required' });
     if (!['user', 'group'].includes(entityType)) return res.status(400).json({ error: 'entityType must be user or group' });
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
 
     const p = await db.getPool();
     await ensureTagTables(p);
@@ -119,6 +123,7 @@ router.patch('/tags/:id', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
     const { name, color } = req.body;
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
     const p = await db.getPool();
     await ensureTagTables(p);
     const request = p.request().input('id', parseInt(req.params.id));
@@ -247,9 +252,10 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
       where += buildFilterWhere(request, filters, colNames, alias, 'bf');
     }
 
+    // Safety cap: limit bulk assignment to 50,000 rows to prevent runaway operations
     const result = await request.query(`
       INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
-      SELECT @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
+      SELECT TOP 50000 @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
       FROM dbo.${table} ${alias}
       WHERE (${where})
         AND UPPER(CAST(${alias}.id AS NVARCHAR(36))) NOT IN (

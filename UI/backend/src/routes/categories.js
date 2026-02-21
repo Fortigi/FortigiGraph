@@ -39,6 +39,9 @@ const TAG_COLORS = [
   '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
 ];
 
+// Validate hex color format (#000000 – #ffffff)
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
 // ─── GET /api/categories ─────────────────────────────────────────
 router.get('/categories', async (req, res) => {
   try {
@@ -65,6 +68,7 @@ router.post('/categories', async (req, res) => {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
     const { name, color } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
 
     const p = await db.getPool();
     await ensureCategoryTables(p);
@@ -91,6 +95,7 @@ router.patch('/categories/:id', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
     const { name, color } = req.body;
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
     const p = await db.getPool();
     await ensureCategoryTables(p);
     const request = p.request().input('id', parseInt(req.params.id));
