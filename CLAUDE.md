@@ -83,6 +83,7 @@ FortigiGraph/
 │   │   ├── Invoke-FGPatchRequest.ps1     # HTTP PATCH wrapper
 │   │   ├── Invoke-FGPutRequest.ps1       # HTTP PUT wrapper
 │   │   ├── Invoke-FGDeleteRequest.ps1    # HTTP DELETE wrapper
+│   │   ├── Update-FGAccessTokenIfExpired.ps1 # Shared token refresh helper
 │   │   └── ...                           # Token management, secure config helpers
 │   │
 │   ├── Generic/                # Microsoft Graph API operations (49)
@@ -97,7 +98,6 @@ FortigiGraph/
 │   │   ├── Sync-FGUser.ps1               # Sync users to SQL
 │   │   ├── Sync-FGGroup.ps1              # Sync groups to SQL
 │   │   ├── Sync-FGGroupMember.ps1        # Sync direct group memberships
-│   │   ├── Sync-FGGroupTransitiveMember.ps1
 │   │   ├── Sync-FGGroupEligibleMember.ps1
 │   │   ├── Sync-FGGroupOwner.ps1
 │   │   ├── Sync-FGAccessPackage.ps1
@@ -106,7 +106,9 @@ FortigiGraph/
 │   │   ├── Sync-FGAccessPackageAssignmentPolicy.ps1
 │   │   ├── Sync-FGAccessPackageAssignmentRequest.ps1
 │   │   ├── Sync-FGAccessPackageAccessReview.ps1
-│   │   └── Sync-FGCatalog.ps1
+│   │   ├── Sync-FGCatalog.ps1
+│   │   ├── Initialize-FGSyncTable.ps1           # Shared table lifecycle helper
+│   │   └── New-FGDataTableFromGraphObjects.ps1  # Shared DataTable builder
 │   │
 │   ├── SQL/                    # Azure SQL operations (24)
 │   │   ├── Invoke-FGSQLCommand.ps1       # Helper for connection lifecycle
@@ -143,7 +145,8 @@ FortigiGraph/
 │           ├── auth/AuthGate.jsx      # MSAL authentication gate
 │           ├── hooks/
 │           │   ├── usePermissions.js  # API hook with debounced refetch
-│           │   └── useMatrixRowOrder.js # Row order persistence (versioned localStorage)
+│           │   ├── useMatrixRowOrder.js # Row order persistence (versioned localStorage)
+│           │   └── useEntityPage.js   # Shared hook for Users/Groups pages (search, filter, tags, pagination)
 │           ├── utils/exportToExcel.js # Excel export with AP colors & rich text
 │           └── components/
 │               ├── MatrixView.jsx     # Main matrix orchestrator (staircase sort, managedApMap, apIdToIndex)
@@ -170,13 +173,13 @@ FortigiGraph/
 
 | Category | Count | Purpose |
 |----------|-------|---------|
-| **Base** | 20 | Authentication, HTTP operations, setup wizard, token management |
+| **Base** | 21 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
-| **Sync** | 14 | High-performance data sync (Start-FGSync + 13 entity syncs) |
+| **Sync** | 15 | High-performance data sync (Start-FGSync + 12 entity syncs + 2 helpers) |
 | **SQL** | 24 | Azure SQL database operations (tables, views, indexes, bulk ops) |
 | **Automation** | 4 | Azure Automation Account management |
 | **Specific** | 9 | High-level idempotent helpers |
-| **Total** | **120 functions** | |
+| **Total** | **122 functions** | |
 
 ## Architecture & Design Patterns
 
@@ -453,48 +456,23 @@ New-FGAzureAutomationAccount -ConfigFile '.\Config\mycompany.json'
 | 5 | `Functions/Generic/Remove-FGAccessPackage.ps1` | 25 | Singular/plural mismatch in loop variable (`$ActiveAccessPackageAssignments.id` vs `$ActiveAccessPackageAssignment.id`) |
 | 6 | `Functions/Generic/Get-FGUserMail.ps1` | 20 | Checks `$MailFolder` instead of `$MailFolderId` |
 | 7 | `Functions/Generic/Get-FGApplicationExtensionProperty.ps1` | 1-2 | Naming convention reversed: function is `Get-ApplicationExtensionProperty` with alias `Get-FGApplicationExtensionProperty` (should be opposite) |
-| 8 | `Functions/Sync/Sync-FGGroupTransitiveMember.ps1` | 72-342 | Missing `try/catch/finally` and `Write-FGSyncLog` — breaks audit trail for this sync type |
+| ~~8~~ | ~~`Functions/Sync/Sync-FGGroupTransitiveMember.ps1`~~ | — | **RESOLVED:** Function removed (legacy, replaced by `vw_GraphGroupMembersRecursive` view) |
 | 9 | `Functions/Base/Use-FGExistingMSALToken.ps1` | 15 | Calls `Get-AccessTokenDetail` instead of `Get-FGAccessTokenDetail` |
 
-### High-Priority Refactoring: DRY Violations in Base HTTP Functions
+### ~~High-Priority Refactoring: DRY Violations in Base HTTP Functions~~ RESOLVED
 
-**Token refresh logic** is duplicated across 6 files (~15 lines each = 90 lines):
-- `Invoke-FGGetRequest.ps1`, `Invoke-FGPostRequest.ps1`, `Invoke-FGPatchRequest.ps1`
-- `Invoke-FGPutRequest.ps1`, `Invoke-FGDeleteRequest.ps1`, `Invoke-FGGetRequestToFile.ps1`
-
-**Action:** Extract to a helper function `Update-FGAccessTokenIfExpired` in `Functions/Base/`:
-```powershell
-function Update-FGAccessTokenIfExpired {
-    $TokenIsStillValid = Confirm-FGAccessTokenValidity
-    if (!$TokenIsStillValid) {
-        if ($global:ClientSecret) {
-            Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
-        } elseif ($global:RefreshToken) {
-            Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
-        } else {
-            throw "Access Token expired and no ClientSecret or RefreshToken available for renewal."
-        }
-    }
-}
-```
-
-**Also duplicated across the same 6 files:**
+**RESOLVED:** `Update-FGAccessTokenIfExpired` extracted to `Functions/Base/Update-FGAccessTokenIfExpired.ps1` and all 6 HTTP functions refactored to use it. Remaining opportunities:
 - Debug output blocks (~8 lines each) → Extract to `Write-FGDebugMessage`
 - Response value extraction (~6 lines each) → Extract to `Get-FGResponseValue`
 
-### High-Priority Refactoring: Sync Function Duplication
+### ~~High-Priority Refactoring: Sync Function Duplication~~ RESOLVED
 
-**Schema validation + table initialization** is duplicated across 9 sync functions (~100 lines each = 900 lines):
-- `Sync-FGUser`, `Sync-FGGroup`, `Sync-FGCatalog`, `Sync-FGAccessPackage`
-- `Sync-FGAccessPackageAssignment`, `Sync-FGAccessPackageAssignmentPolicy`
-- `Sync-FGAccessPackageAssignmentRequest`, `Sync-FGAccessPackageAccessReview`
-- `Sync-FGAccessPackageResourceRoleScope`
+**RESOLVED:** Two helpers extracted to `Functions/Sync/`:
+- `Initialize-FGSyncTable.ps1` — handles table existence, schema evolution, recreation
+- `New-FGDataTableFromGraphObjects.ps1` — builds DataTables with type conversion and custom value resolvers
 
-**Action:** Create `Initialize-FGSyncTable` helper that handles: table existence check, schema evolution (new columns), table recreation, and `Initialize-FGSQLTable` call.
-
-**DataTable population** is also duplicated (~60 lines × 9 functions). Create `New-FGDataTableFromGraphObjects` helper.
-
-**Group fetching** duplicated across 4 group-based syncs (~40 lines × 4). Create `Get-FGGroupsForSync` helper.
+All 9 sync functions refactored to use these helpers. Remaining opportunity:
+- **Group fetching** duplicated across 4 group-based syncs (~40 lines × 4). Create `Get-FGGroupsForSync` helper.
 
 ### High-Priority: Massive Functions to Break Down
 
@@ -518,10 +496,10 @@ function Update-FGAccessTokenIfExpired {
 
 ### Medium-Priority: SQL Function Improvements
 
-**SQL injection risks** (parameterize these):
-- `Get-FGSQLTable.ps1` lines 64-75: Schema/pattern in WHERE via string interpolation
-- `Get-FGSyncLog.ps1` lines 150-154: SyncType/Status in WHERE via string interpolation (mitigated by `[ValidateSet]`)
-- `New-FGSQLReadOnlyUser.ps1` lines 117, 126: Password embedded directly in SQL string
+~~**SQL injection risks** (parameterize these):~~ **RESOLVED**
+- ~~`Get-FGSQLTable.ps1`: Schema/pattern in WHERE via string interpolation~~ → parameterized via `Invoke-FGSQLCommand`
+- ~~`Get-FGSyncLog.ps1`: SyncType/Status in WHERE via string interpolation~~ → parameterized via `Invoke-FGSQLCommand`
+- ~~`New-FGSQLReadOnlyUser.ps1`: Password embedded directly in SQL string~~ → username validated with `[a-zA-Z0-9_]` regex, password escaped
 
 **Connection management inconsistency** — 2 functions bypass `Invoke-FGSQLCommand`:
 - `Write-FGSyncLog.ps1` (lines 98-172): Manual connection management
@@ -535,7 +513,6 @@ function Update-FGAccessTokenIfExpired {
 ### Medium-Priority: Sync Performance & Reliability
 
 **Missing batching options** — these load all data into memory (risk `OutOfMemoryException` for large tenants):
-- `Sync-FGGroupTransitiveMember` — no `-UseBatching` option (unlike `Sync-FGGroupMember`)
 - `Sync-FGGroupOwner` — no batching option
 - `Sync-FGUser` / `Sync-FGGroup` — no batching for very large tenants
 
@@ -575,11 +552,11 @@ function Update-FGAccessTokenIfExpired {
 ### UI Backend Improvements
 
 **Security (Critical):**
-- `index.js` line 14: `app.use(cors())` allows ALL origins — configure explicitly
+- ~~`index.js` line 14: `app.use(cors())` allows ALL origins~~ → **RESOLVED:** CORS now configured with `ALLOWED_ORIGINS` env var; production blocks cross-origin by default
 - No rate limiting on any endpoint — add `express-rate-limit`
 - Error responses leak SQL schema info (table names, column names) — sanitize error messages
 - No audit logging for mutations — log user identity + changes for compliance
-- Auth middleware (`auth.js`) doesn't validate token scopes/roles — any valid Entra ID token is accepted
+- ~~Auth middleware (`auth.js`) doesn't validate token scopes/roles~~ → **RESOLVED:** Added tenant ID validation and optional role-based access control via `AUTH_REQUIRED_ROLES` env var
 - Bulk operations (`/tags/:id/assign-by-filter`) have no row limit — could affect all 100K+ entities
 
 **Performance (Critical):**
@@ -606,8 +583,8 @@ function Update-FGAccessTokenIfExpired {
 - `MatrixCell.jsx` memo comparison (line 80) missing `apNames` prop — stale renders possible
 
 **Code Duplication:**
-- `UsersPage.jsx` / `GroupsPage.jsx`: 95% identical (565 lines each) — extract shared `EntityPage` component or `useEntityPage` hook
-- Tag operation handlers duplicated in UsersPage, GroupsPage, AccessPackagesPage — extract `useTagManagement(entityType)` hook
+- ~~`UsersPage.jsx` / `GroupsPage.jsx`: 95% identical (565 lines each)~~ → **RESOLVED:** Extracted `useEntityPage` hook to `hooks/useEntityPage.js`; both pages reduced from ~565 to ~270 lines
+- Tag operation handlers duplicated in AccessPackagesPage — could use `useEntityPage` hook too
 - `TAG_COLORS` array defined 3 times — move to shared constants
 - Search debounce pattern repeated in 4 places — extract `useDebouncedValue` hook
 - Pagination UI duplicated in 3 pages — extract `PaginationControls` component

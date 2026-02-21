@@ -11,7 +11,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+// Configure CORS — restrict origins in production, allow all in development
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : process.env.NODE_ENV === 'production'
+      ? false  // Disallow cross-origin in production if not explicitly configured
+      : true,  // Allow all origins in development
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Unauthenticated endpoints

@@ -143,21 +143,24 @@ ORDER BY l.SyncType
 "@
         }
         else {
-            # Regular query with filters
+            # Regular query with parameterized filters
             $whereClauses = @()
+            $queryParams = @{}
 
             if ($SyncType) {
-                $whereClauses += "SyncType = '$SyncType'"
+                $whereClauses += "SyncType = @SyncType"
+                $queryParams['@SyncType'] = $SyncType
             }
 
             if ($Status) {
-                $whereClauses += "Status = '$Status'"
+                $whereClauses += "Status = @Status"
+                $queryParams['@Status'] = $Status
             }
 
             $whereClause = if ($whereClauses.Count -gt 0) { "WHERE " + ($whereClauses -join " AND ") } else { "" }
 
             $query = @"
-SELECT TOP $Last
+SELECT TOP (@Last)
     SyncType,
     StartTime,
     EndTime,
@@ -170,10 +173,22 @@ FROM dbo.GraphSyncLog
 $whereClause
 ORDER BY StartTime DESC
 "@
+            $queryParams['@Last'] = $Last
         }
 
-        # Execute query
-        $results = Invoke-FGSQLQuery -Query $query
+        # Execute query with parameterized values
+        $results = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = $using:query
+            foreach ($key in $using:queryParams.Keys) {
+                $cmd.Parameters.AddWithValue($key, $using:queryParams[$key]) | Out-Null
+            }
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $dataTable = New-Object System.Data.DataTable
+            $adapter.Fill($dataTable) | Out-Null
+            return $dataTable
+        }
 
         if (-not $results -or $results.Count -eq 0) {
             Write-Host "No sync log entries found." -ForegroundColor Yellow

@@ -32,10 +32,6 @@ Command-line parameter overrides config file setting
 Sync direct group memberships. Default: Read from config (Sync.GroupMembers.Enabled) or $true
 Command-line parameter overrides config file setting
 
-.PARAMETER SyncGroupTransitiveMembers
-Sync transitive/nested group memberships. Default: Read from config (Sync.GroupTransitiveMembers.Enabled) or $true
-Command-line parameter overrides config file setting
-
 .PARAMETER SyncGroupEligibleMembers
 Sync eligible/PIM group memberships. Default: Read from config (Sync.GroupEligibleMembers.Enabled) or $true
 Command-line parameter overrides config file setting
@@ -139,9 +135,6 @@ Command-line parameter overrides config file setting
     [bool]$SyncGroupMembers = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncGroupTransitiveMembers = $false,  # DEPRECATED: Use vw_GraphGroupMembersRecursive instead
-
-    [Parameter(Mandatory = $false)]
     [bool]$SyncGroupEligibleMembers = $true,
 
     [Parameter(Mandatory = $false)]
@@ -204,7 +197,6 @@ Command-line parameter overrides config file setting
     Users = $null
     Groups = $null
     DirectMembers = $null
-    TransitiveMembers = $null
     EligibleMembers = $null
     Owners = $null
     Catalogs = $null
@@ -300,9 +292,6 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('GroupMembersUseBatching') -eq $false -and $null -ne $config.Sync.GroupMembers.UseBatching) {
             $GroupMembersUseBatching = $config.Sync.GroupMembers.UseBatching
-        }
-        if ($PSBoundParameters.ContainsKey('SyncGroupTransitiveMembers') -eq $false -and $null -ne $config.Sync.GroupTransitiveMembers.Enabled) {
-            $SyncGroupTransitiveMembers = $config.Sync.GroupTransitiveMembers.Enabled
         }
         if ($PSBoundParameters.ContainsKey('SyncGroupEligibleMembers') -eq $false -and $null -ne $config.Sync.GroupEligibleMembers.Enabled) {
             $SyncGroupEligibleMembers = $config.Sync.GroupEligibleMembers.Enabled
@@ -523,7 +512,6 @@ function Write-SyncError {
     $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "GraphUsers" }
     $groupTableName = if ($config.Sync.Groups.TableName) { $config.Sync.Groups.TableName } else { "GraphGroups" }
     $groupMembersTableName = if ($config.Sync.GroupMembers.TableName) { $config.Sync.GroupMembers.TableName } else { "GraphGroupMembers" }
-    $groupTransitiveMembersTableName = if ($config.Sync.GroupTransitiveMembers.TableName) { $config.Sync.GroupTransitiveMembers.TableName } else { "GraphGroupTransitiveMembers" }
     $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "GraphGroupEligibleMembers" }
     $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "GraphGroupOwners" }
     $catalogsTableName = if ($config.Sync.Catalogs.TableName) { $config.Sync.Catalogs.TableName } else { "GraphCatalogs" }
@@ -595,11 +583,6 @@ function Write-SyncError {
                     }
                     "GroupMembers" {
                         $null = Sync-FGGroupMember -TableName $TableName @SyncParams
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
-                    }
-                    "GroupTransitiveMembers" {
-                        $null = Sync-FGGroupTransitiveMember -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -746,31 +729,6 @@ function Write-SyncError {
 
             $jobs += @{
                 Name = "GroupMembers"
-                PowerShell = $ps
-                Handle = $ps.BeginInvoke()
-            }
-        }
-
-        # Create job for GroupTransitiveMembers sync
-        if ($SyncGroupTransitiveMembers) {
-            Write-SyncStep "Starting transitive membership sync job..."
-            $ps = [PowerShell]::Create()
-            $ps.RunspacePool = $runspacePool
-            [void]$ps.AddScript($syncScriptBlock)
-            [void]$ps.AddParameter("SyncType", "GroupTransitiveMembers")
-            [void]$ps.AddParameter("TableName", $groupTransitiveMembersTableName)
-            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
-            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
-            [void]$ps.AddParameter("SqlServer", $sqlServerName)
-            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
-            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
-            [void]$ps.AddParameter("TenantId", $graphTenantId)
-            [void]$ps.AddParameter("ClientId", $graphClientId)
-            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
-            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
-
-            $jobs += @{
-                Name = "GroupTransitiveMembers"
                 PowerShell = $ps
                 Handle = $ps.BeginInvoke()
             }
@@ -1043,10 +1001,6 @@ function Write-SyncError {
                             $script:SyncStats.DirectMembers = $result.Count
                             Write-SyncSuccess "Direct memberships synced: $($result.Count) (table: $groupMembersTableName)"
                         }
-                        "GroupTransitiveMembers" {
-                            $script:SyncStats.TransitiveMembers = $result.Count
-                            Write-SyncSuccess "Transitive memberships synced: $($result.Count) (table: $groupTransitiveMembersTableName)"
-                        }
                         "GroupEligibleMembers" {
                             $script:SyncStats.EligibleMembers = $result.Count
                             Write-SyncSuccess "Eligible memberships synced: $($result.Count) (table: $groupEligibleMembersTableName)"
@@ -1176,20 +1130,6 @@ function Write-SyncError {
                 Write-SyncSuccess "Direct memberships synced: $memberCount (table: $groupMembersTableName)"
             } catch {
                 Write-SyncError "Direct membership sync failed" $_.Exception.Message
-            }
-        }
-
-        # Sync Group Transitive Members (Nested)
-        if ($SyncGroupTransitiveMembers) {
-            Write-SyncStep "Syncing transitive/nested group memberships..."
-            try {
-                Sync-FGGroupTransitiveMember -TableName $groupTransitiveMembersTableName
-
-                $transitiveCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTransitiveMembersTableName" -AsScalar
-                $script:SyncStats.TransitiveMembers = $transitiveCount
-                Write-SyncSuccess "Transitive memberships synced: $transitiveCount (table: $groupTransitiveMembersTableName)"
-            } catch {
-                Write-SyncError "Transitive membership sync failed" $_.Exception.Message
             }
         }
 
@@ -1387,9 +1327,6 @@ function Write-SyncError {
             if ($SyncGroupMembers) {
                 $viewParams.DirectMembersTable = $groupMembersTableName
             }
-            if ($SyncGroupTransitiveMembers) {
-                $viewParams.TransitiveMembersTable = $groupTransitiveMembersTableName
-            }
             if ($SyncGroupEligibleMembers) {
                 $viewParams.EligibleMembersTable = $groupEligibleMembersTableName
             }
@@ -1483,9 +1420,6 @@ function Write-SyncError {
     }
     if ($SyncGroupMembers -and $script:SyncStats.DirectMembers -ne $null) {
         Write-Host "  Direct Memberships:      $($script:SyncStats.DirectMembers)" -ForegroundColor White
-    }
-    if ($SyncGroupTransitiveMembers -and $script:SyncStats.TransitiveMembers -ne $null) {
-        Write-Host "  Transitive Memberships:  $($script:SyncStats.TransitiveMembers)" -ForegroundColor White
     }
     if ($SyncGroupEligibleMembers -and $script:SyncStats.EligibleMembers -ne $null) {
         Write-Host "  Eligible Memberships:    $($script:SyncStats.EligibleMembers)" -ForegroundColor White

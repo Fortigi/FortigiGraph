@@ -58,21 +58,26 @@ function Get-FGSQLTable {
 
     Write-Host "Retrieving table information from database: $($global:FGSQLDatabaseName)" -ForegroundColor Cyan
 
-    # Build the query with optional filters
-    $whereClause = "WHERE t.is_ms_shipped = 0"
+    # Build the query with parameterized filters
+    $whereClauses = @("t.is_ms_shipped = 0")
+    $parameters = @{}
 
     if ($Schema) {
-        $whereClause += " AND s.name = '$Schema'"
+        $whereClauses += "s.name = @SchemaName"
+        $parameters['@SchemaName'] = $Schema
     }
 
     if ($Pattern) {
         $sqlPattern = $Pattern.Replace("*", "%").Replace("?", "_")
-        $whereClause += " AND t.name LIKE '$sqlPattern'"
+        $whereClauses += "t.name LIKE @TablePattern"
+        $parameters['@TablePattern'] = $sqlPattern
     }
 
     if (-not $IncludeSystemTables) {
-        $whereClause += " AND t.temporal_type_desc != 'HISTORY_TABLE'"
+        $whereClauses += "t.temporal_type_desc != 'HISTORY_TABLE'"
     }
+
+    $whereClause = "WHERE " + ($whereClauses -join " AND ")
 
     $query = @"
 SELECT
@@ -94,8 +99,19 @@ ORDER BY s.name, t.name
 "@
 
     try {
-        # Execute query using Invoke-FGSQLQuery
-        $results = Invoke-FGSQLQuery -Query $query
+        # Execute query using Invoke-FGSQLCommand with parameterized values
+        $results = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = $using:query
+            foreach ($key in $using:parameters.Keys) {
+                $cmd.Parameters.AddWithValue($key, $using:parameters[$key]) | Out-Null
+            }
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $dataTable = New-Object System.Data.DataTable
+            $adapter.Fill($dataTable) | Out-Null
+            return $dataTable
+        }
 
         # Check if we got results
         if (-not $results -or $results.Rows.Count -eq 0) {
