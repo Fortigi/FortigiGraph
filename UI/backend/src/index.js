@@ -53,8 +53,22 @@ app.get('*', (req, res, next) => {
   res.sendFile(join(frontendDist, 'index.html'));
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`FortigiGraph UI running on http://localhost:${port}`);
   console.log(`Mode: ${process.env.USE_SQL === 'true' ? 'SQL' : 'Mock data'}`);
   console.log(`Auth: ${process.env.AUTH_ENABLED === 'true' ? 'Entra ID' : 'Disabled'}`);
 });
+
+// Graceful shutdown: close SQL pool before exiting
+async function shutdown(signal) {
+  console.log(`${signal} received, shutting down...`);
+  server.close(async () => {
+    if (process.env.USE_SQL === 'true') {
+      const { closePool } = await import('./db/connection.js');
+      await closePool();
+    }
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

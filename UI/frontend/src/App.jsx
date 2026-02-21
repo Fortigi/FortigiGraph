@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import { useAuth } from './auth/AuthGate';
-import MatrixView from './components/MatrixView';
-import SyncLogPage from './components/SyncLogPage';
-import UsersPage from './components/UsersPage';
-import GroupsPage from './components/GroupsPage';
-import AccessPackagesPage from './components/AccessPackagesPage';
+
+// Lazy-load page components (route-based code splitting)
+const MatrixView = lazy(() => import('./components/MatrixView'));
+const SyncLogPage = lazy(() => import('./components/SyncLogPage'));
+const UsersPage = lazy(() => import('./components/UsersPage'));
+const GroupsPage = lazy(() => import('./components/GroupsPage'));
+const AccessPackagesPage = lazy(() => import('./components/AccessPackagesPage'));
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
@@ -178,38 +180,40 @@ export default function App() {
 
       {/* Content */}
       <main className="p-6">
-        {page === 'sync-log' ? (
-          <SyncLogPage />
-        ) : page === 'users' ? (
-          <UsersPage />
-        ) : page === 'groups' ? (
-          <GroupsPage />
-        ) : page === 'access-packages' ? (
-          <AccessPackagesPage />
-        ) : loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="text-gray-500">Loading permission data...</div>
-          </div>
-        ) : (
-          <MatrixView
-            data={data}
-            accessPackageGroups={accessPackageGroups}
-            managedByPackages={managedByPackages}
-            totalUsers={totalUsers}
-            userLimit={userLimit}
-            setUserLimit={setUserLimit}
-            activeFilters={activeFilters}
-            setActiveFilters={setActiveFilters}
-            managedFilter={managedFilter}
-            setManagedFilter={setManagedFilter}
-            filterText={filterText}
-            setFilterText={setFilterText}
-            userColumns={userColumns}
-            groupTagMap={groupTagMap}
-            refreshing={refreshing}
-            shareUrl={shareUrl}
-          />
-        )}
+        <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-gray-500">Loading...</div></div>}>
+          {page === 'sync-log' ? (
+            <SyncLogPage />
+          ) : page === 'users' ? (
+            <UsersPage />
+          ) : page === 'groups' ? (
+            <GroupsPage />
+          ) : page === 'access-packages' ? (
+            <AccessPackagesPage />
+          ) : loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-gray-500">Loading permission data...</div>
+            </div>
+          ) : (
+            <MatrixView
+              data={data}
+              accessPackageGroups={accessPackageGroups}
+              managedByPackages={managedByPackages}
+              totalUsers={totalUsers}
+              userLimit={userLimit}
+              setUserLimit={setUserLimit}
+              activeFilters={activeFilters}
+              setActiveFilters={setActiveFilters}
+              managedFilter={managedFilter}
+              setManagedFilter={setManagedFilter}
+              filterText={filterText}
+              setFilterText={setFilterText}
+              userColumns={userColumns}
+              groupTagMap={groupTagMap}
+              refreshing={refreshing}
+              shareUrl={shareUrl}
+            />
+          )}
+        </Suspense>
       </main>
     </div>
   );

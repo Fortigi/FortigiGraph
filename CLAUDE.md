@@ -559,28 +559,27 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 - ~~Auth middleware (`auth.js`) doesn't validate token scopes/roles~~ → **RESOLVED:** Added tenant ID validation and optional role-based access control via `AUTH_REQUIRED_ROLES` env var
 - Bulk operations (`/tags/:id/assign-by-filter`) have no row limit — could affect all 100K+ entities
 
-**Performance (Critical):**
-- `tags.js` lines 194-206: N+1 query in tag assignment loop — batch into single INSERT
-- `tags.js` lines 226-231: Same N+1 pattern in unassign loop
-- `tags.js` line 98: Subquery COUNT per row — use LEFT JOIN + GROUP BY instead
-- Column discovery runs on every request — add TTL-based cache (5 min)
+**~~Performance (Critical):~~** **RESOLVED**
+- ~~`tags.js` lines 194-206: N+1 query in tag assignment loop — batch into single INSERT~~ → batched into single parameterized INSERT with NOT EXISTS
+- ~~`tags.js` lines 226-231: Same N+1 pattern in unassign loop~~ → batched into single DELETE with IN clause
+- ~~`tags.js` line 98: Subquery COUNT per row — use LEFT JOIN + GROUP BY instead~~ → replaced with LEFT JOIN + GROUP BY (also fixed same pattern in `categories.js` line 50)
+- ~~Column discovery runs on every request — add TTL-based cache (5 min)~~ → extracted to `db/columnCache.js` with 5-minute TTL
 
 **Code Quality:**
-- Column discovery logic duplicated between `permissions.js` and `tags.js` — extract to shared module
+- ~~Column discovery logic duplicated between `permissions.js` and `tags.js`~~ → **RESOLVED:** extracted to shared `db/columnCache.js` with TTL cache
 - `ensureTagTables` / `ensureCategoryTables` — extract to shared `ensureTable` utility
 - Pagination parameter parsing duplicated across routes
-- `db/connection.js`: No pool error handling, no graceful shutdown, no reconnect logic
+- ~~`db/connection.js`: No pool error handling, no graceful shutdown, no reconnect logic~~ → **RESOLVED:** Added pool error listener with auto-reconnect, `closePool()` export, and graceful SIGTERM/SIGINT shutdown in `index.js`
 - Inconsistent response formats across endpoints — standardize to `{ data, total, ... }`
 
 ### UI Frontend Improvements
 
 **Performance:**
-- No code splitting — all 5 pages bundled eagerly. Use `React.lazy()` for route-based splitting
-- ExcelJS (~200KB) loaded on every page — lazy-load only when export is clicked
+- ~~No code splitting — all 5 pages bundled eagerly~~ → **RESOLVED:** All 5 pages use `React.lazy()` + `<Suspense>` for route-based code splitting
+- ~~ExcelJS (~200KB) loaded on every page~~ → **RESOLVED:** Dynamic `import()` in `handleExportExcel` — ExcelJS only loads when user clicks Export
 - @dnd-kit (~110KB) loaded even when drag not active — lazy-load
 - No virtual scrolling in matrix — becomes slow with 100+ groups
-- Double-filtering: client-side filters re-filter data already filtered server-side
-- `MatrixCell.jsx` memo comparison (line 80) missing `apNames` prop — stale renders possible
+- ~~`MatrixCell.jsx` memo comparison (line 80) missing `apNames` prop — stale renders possible~~ → **RESOLVED:** Added `apNames` to memo comparison
 
 **Code Duplication:**
 - ~~`UsersPage.jsx` / `GroupsPage.jsx`: 95% identical (565 lines each)~~ → **RESOLVED:** Extracted `useEntityPage` hook to `hooks/useEntityPage.js`; both pages reduced from ~565 to ~270 lines

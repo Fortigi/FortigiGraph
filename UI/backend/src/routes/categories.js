@@ -46,9 +46,10 @@ router.get('/categories', async (req, res) => {
     const p = await db.getPool();
     await ensureCategoryTables(p);
     const result = await p.request().query(`
-      SELECT c.*,
-             (SELECT COUNT(*) FROM dbo.GraphCategoryAssignments ca WHERE ca.categoryId = c.id) AS assignmentCount
+      SELECT c.*, ISNULL(COUNT(ca.categoryId), 0) AS assignmentCount
       FROM dbo.GraphCategories c
+      LEFT JOIN dbo.GraphCategoryAssignments ca ON ca.categoryId = c.id
+      GROUP BY c.id, c.name, c.color, c.createdAt
       ORDER BY c.name
     `);
     res.json(result.recordset);

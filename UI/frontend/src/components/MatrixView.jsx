@@ -3,7 +3,6 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
-import { exportToExcel } from '../utils/exportToExcel';
 import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders, { BLANK_TAG } from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
@@ -460,8 +459,9 @@ export default function MatrixView({
     rowOrderHook.updateOrder(sorted.map(g => g.id));
   }, [orderedGroups, rowOrderHook]);
 
-  // Excel export handler
-  const handleExportExcel = useCallback(() => {
+  // Excel export handler (lazy-loads ExcelJS ~200KB only when export is clicked)
+  const handleExportExcel = useCallback(async () => {
+    const { exportToExcel } = await import('../utils/exportToExcel');
     exportToExcel({
       users,
       orderedGroups,
