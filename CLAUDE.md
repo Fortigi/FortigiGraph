@@ -437,3 +437,207 @@ Start-FGSync -ConfigFile '.\Config\mycompany.json'
 # 5. (Optional) Set up Azure Automation for scheduled syncs
 New-FGAzureAutomationAccount -ConfigFile '.\Config\mycompany.json'
 ```
+
+## Codebase Maintenance Analysis (Feb 2026)
+
+> **This section documents known technical debt, bugs, and improvement opportunities discovered during a comprehensive code review. Use this as a backlog for maintenance sprints.**
+
+### Critical Bugs (Must Fix)
+
+| # | File | Line(s) | Issue |
+|---|------|---------|-------|
+| 1 | `Functions/Specific/Confirm-FGUser.ps1` | 17 | Checks `$Group.count` instead of `$User.count` — wrong variable |
+| 2 | `Functions/Specific/Confirm-FGAccessPackagePolicy.ps1` | 16 | Copy-paste bug: checks `$Policy.accessPackageId` instead of `$Policy.displayName` |
+| 3 | `Functions/Specific/Confirm-FGAccessPackage.ps1` | 37 | Uses undefined `$AccessPackageName` — parameter is `$DisplayName` |
+| 4 | `Functions/Generic/Get-FGAccessPackagesAssignments.ps1` | 16 | Uses undefined `$id` — parameter is `$AccessPackageID` |
+| 5 | `Functions/Generic/Remove-FGAccessPackage.ps1` | 25 | Singular/plural mismatch in loop variable (`$ActiveAccessPackageAssignments.id` vs `$ActiveAccessPackageAssignment.id`) |
+| 6 | `Functions/Generic/Get-FGUserMail.ps1` | 20 | Checks `$MailFolder` instead of `$MailFolderId` |
+| 7 | `Functions/Generic/Get-FGApplicationExtensionProperty.ps1` | 1-2 | Naming convention reversed: function is `Get-ApplicationExtensionProperty` with alias `Get-FGApplicationExtensionProperty` (should be opposite) |
+| 8 | `Functions/Sync/Sync-FGGroupTransitiveMember.ps1` | 72-342 | Missing `try/catch/finally` and `Write-FGSyncLog` — breaks audit trail for this sync type |
+| 9 | `Functions/Base/Use-FGExistingMSALToken.ps1` | 15 | Calls `Get-AccessTokenDetail` instead of `Get-FGAccessTokenDetail` |
+
+### High-Priority Refactoring: DRY Violations in Base HTTP Functions
+
+**Token refresh logic** is duplicated across 6 files (~15 lines each = 90 lines):
+- `Invoke-FGGetRequest.ps1`, `Invoke-FGPostRequest.ps1`, `Invoke-FGPatchRequest.ps1`
+- `Invoke-FGPutRequest.ps1`, `Invoke-FGDeleteRequest.ps1`, `Invoke-FGGetRequestToFile.ps1`
+
+**Action:** Extract to a helper function `Update-FGAccessTokenIfExpired` in `Functions/Base/`:
+```powershell
+function Update-FGAccessTokenIfExpired {
+    $TokenIsStillValid = Confirm-FGAccessTokenValidity
+    if (!$TokenIsStillValid) {
+        if ($global:ClientSecret) {
+            Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
+        } elseif ($global:RefreshToken) {
+            Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
+        } else {
+            throw "Access Token expired and no ClientSecret or RefreshToken available for renewal."
+        }
+    }
+}
+```
+
+**Also duplicated across the same 6 files:**
+- Debug output blocks (~8 lines each) → Extract to `Write-FGDebugMessage`
+- Response value extraction (~6 lines each) → Extract to `Get-FGResponseValue`
+
+### High-Priority Refactoring: Sync Function Duplication
+
+**Schema validation + table initialization** is duplicated across 9 sync functions (~100 lines each = 900 lines):
+- `Sync-FGUser`, `Sync-FGGroup`, `Sync-FGCatalog`, `Sync-FGAccessPackage`
+- `Sync-FGAccessPackageAssignment`, `Sync-FGAccessPackageAssignmentPolicy`
+- `Sync-FGAccessPackageAssignmentRequest`, `Sync-FGAccessPackageAccessReview`
+- `Sync-FGAccessPackageResourceRoleScope`
+
+**Action:** Create `Initialize-FGSyncTable` helper that handles: table existence check, schema evolution (new columns), table recreation, and `Initialize-FGSQLTable` call.
+
+**DataTable population** is also duplicated (~60 lines × 9 functions). Create `New-FGDataTableFromGraphObjects` helper.
+
+**Group fetching** duplicated across 4 group-based syncs (~40 lines × 4). Create `Get-FGGroupsForSync` helper.
+
+### High-Priority: Massive Functions to Break Down
+
+| Function | Lines | Suggested Split |
+|----------|-------|----------------|
+| `New-FGConfig.ps1` | 836 | Extract: `Select-FGAzureSubscription`, `Select-FGResourceGroup`, `Select-FGSqlServer`, `Select-FGAutomationAccount`, `Select-FGAppRegistration`, `Get-FGSyncSettings`. Move `New-FGRandomPassword`/`New-FGRandomSqlName`/`New-FGRandomAutomationAccountName` to `Functions/Specific/` |
+| `New-FGAzureAutomationAccount.ps1` | 1,408 | Extract: `New-FGAutomationVariables`, `New-FGAutomationRunbooks`, `New-FGAutomationSchedules` |
+| `New-FGUI.ps1` | 877 | Extract Kudu deployment logic shared with `Update-FGUI.ps1` (~115 lines) into `Deploy-FGUIToAppService` helper |
+
+### High-Priority: Generic Functions Consolidation
+
+**"All" and "AllToFile" function pairs** have 95%+ duplication:
+- `Get-FGGroupMemberAll.ps1` / `Get-FGGroupMemberAllToFile.ps1`
+- `Get-FGGroupTransitiveMemberAll.ps1` / `Get-FGGroupTransitiveMemberAllToFile.ps1`
+
+**Action:** Merge each pair into one function with optional `-OutputFile` parameter. The 52-line JSON restructuring routine is identical in both "ToFile" functions — extract to a shared helper.
+
+**URI filter building** is duplicated across 6+ Get functions (Get-FGUser, Get-FGGroup, Get-FGApplication, Get-FGServicePrincipal, Get-FGCatalog, Get-FGDevice). Consider a shared `Build-FGGraphUri` helper.
+
+**Missing `[cmdletbinding()]`** on: `Get-FGGroupMemberAll`, `Get-FGGroupMemberAllToFile`, `Get-FGGroupTransitiveMemberAll`, `Get-FGGroupTransitiveMemberAllToFile`.
+
+### Medium-Priority: SQL Function Improvements
+
+**SQL injection risks** (parameterize these):
+- `Get-FGSQLTable.ps1` lines 64-75: Schema/pattern in WHERE via string interpolation
+- `Get-FGSyncLog.ps1` lines 150-154: SyncType/Status in WHERE via string interpolation (mitigated by `[ValidateSet]`)
+- `New-FGSQLReadOnlyUser.ps1` lines 117, 126: Password embedded directly in SQL string
+
+**Connection management inconsistency** — 2 functions bypass `Invoke-FGSQLCommand`:
+- `Write-FGSyncLog.ps1` (lines 98-172): Manual connection management
+- `New-FGSQLReadOnlyUser.ps1` (lines 103-141): Manual connection management
+
+**Extract shared SQL helpers:**
+- `Set-FGSQLTableVersioning -Enable/-Disable` (duplicated in `Add-FGSQLTableColumn` and `Clear-FGSQLTable`)
+- `ConvertTo-FGSQLType` / `ConvertTo-FGDotNetType` (duplicated in `Invoke-FGSQLBulkDelete` and `Invoke-FGSQLBulkMerge`)
+- Table name parsing with schema (duplicated in `Clear-FGSQLTable` and `Get-FGSQLTableSchema`)
+
+### Medium-Priority: Sync Performance & Reliability
+
+**Missing batching options** — these load all data into memory (risk `OutOfMemoryException` for large tenants):
+- `Sync-FGGroupTransitiveMember` — no `-UseBatching` option (unlike `Sync-FGGroupMember`)
+- `Sync-FGGroupOwner` — no batching option
+- `Sync-FGUser` / `Sync-FGGroup` — no batching for very large tenants
+
+**Retry logic** only exists in `Sync-FGAccessPackageResourceRoleScope`. Move to `Invoke-FGGetRequest` or create `Invoke-FGGetRequestWithRetry` so all sync functions benefit from transient error handling (429, 503, 504).
+
+**Deduplication** only in some sync functions (`Sync-FGAccessPackageAssignment`, `Sync-FGAccessPackageAssignmentRequest`). Add to `Sync-FGUser`, `Sync-FGGroup`, `Sync-FGGroupMember` to prevent MERGE failures.
+
+**GC calls** only in 2 sync functions. Standardize `[System.GC]::Collect()` every 50 iterations in all batching loops.
+
+**Token refresh during long syncs:** `Start-FGSync` gets a token once at start. For 2+ hour syncs, tokens expire (~1 hour). The token check in `Invoke-FGGetRequest` should handle this, but verify it works correctly within runspaces where global state is copied.
+
+**No dependency enforcement in Start-FGSync:** GroupMembers can start before Groups completes. Consider adding sync phases (Phase 1: Users+Groups, Phase 2: memberships, Phase 3: access packages, Phase 4: materialized views).
+
+### Medium-Priority: Deprecated Patterns
+
+**OAuth2 v1 endpoints** used in 4 files (v1 being deprecated by Microsoft):
+- `Get-FGAccessToken.ps1` line 117: `/oauth2/token`
+- `Get-FGAccessTokenInteractive.ps1` lines 23, 32
+- `Get-FGAccessTokenWithRefreshToken.ps1` line 21
+
+**Action:** Migrate to `/oauth2/v2.0/token` endpoint.
+
+### Medium-Priority: Specific/Automation Cleanup
+
+**Typos** (appear throughout `Functions/Specific/`):
+- "cataloge" → "catalog" (in `Confirm-FGAccessPackage`, `Confirm-FGCatalog`, `Confirm-FGGroupInCatalog`)
+- "More then one" → "More than one" (in 6+ Confirm-FG* functions)
+
+**Dutch comment** in `Confirm-FGGroup.ps1` line 57 — violates English-only rule.
+
+**Duplicate `Invoke-AzureRestApi` / `Invoke-GraphApi`** helpers defined inline in both `New-FGUI.ps1` and `Remove-FGUI.ps1`. Extract to shared helper in `Functions/Base/`.
+
+**Config loading** duplicated across 3 automation functions (`Get-FGAutomationJob`, `Get-FGAutomationRunbook`, `Start-FGAutomationRunbook`). Extract to `Get-FGConfigAzureContext`.
+
+**Confirm-FGGroupMember / Confirm-FGNotGroupMember** share 40+ lines of identical member resolution logic. Extract to `Resolve-FGMemberObjectIds`.
+
+### UI Backend Improvements
+
+**Security (Critical):**
+- `index.js` line 14: `app.use(cors())` allows ALL origins — configure explicitly
+- No rate limiting on any endpoint — add `express-rate-limit`
+- Error responses leak SQL schema info (table names, column names) — sanitize error messages
+- No audit logging for mutations — log user identity + changes for compliance
+- Auth middleware (`auth.js`) doesn't validate token scopes/roles — any valid Entra ID token is accepted
+- Bulk operations (`/tags/:id/assign-by-filter`) have no row limit — could affect all 100K+ entities
+
+**Performance (Critical):**
+- `tags.js` lines 194-206: N+1 query in tag assignment loop — batch into single INSERT
+- `tags.js` lines 226-231: Same N+1 pattern in unassign loop
+- `tags.js` line 98: Subquery COUNT per row — use LEFT JOIN + GROUP BY instead
+- Column discovery runs on every request — add TTL-based cache (5 min)
+
+**Code Quality:**
+- Column discovery logic duplicated between `permissions.js` and `tags.js` — extract to shared module
+- `ensureTagTables` / `ensureCategoryTables` — extract to shared `ensureTable` utility
+- Pagination parameter parsing duplicated across routes
+- `db/connection.js`: No pool error handling, no graceful shutdown, no reconnect logic
+- Inconsistent response formats across endpoints — standardize to `{ data, total, ... }`
+
+### UI Frontend Improvements
+
+**Performance:**
+- No code splitting — all 5 pages bundled eagerly. Use `React.lazy()` for route-based splitting
+- ExcelJS (~200KB) loaded on every page — lazy-load only when export is clicked
+- @dnd-kit (~110KB) loaded even when drag not active — lazy-load
+- No virtual scrolling in matrix — becomes slow with 100+ groups
+- Double-filtering: client-side filters re-filter data already filtered server-side
+- `MatrixCell.jsx` memo comparison (line 80) missing `apNames` prop — stale renders possible
+
+**Code Duplication:**
+- `UsersPage.jsx` / `GroupsPage.jsx`: 95% identical (565 lines each) — extract shared `EntityPage` component or `useEntityPage` hook
+- Tag operation handlers duplicated in UsersPage, GroupsPage, AccessPackagesPage — extract `useTagManagement(entityType)` hook
+- `TAG_COLORS` array defined 3 times — move to shared constants
+- Search debounce pattern repeated in 4 places — extract `useDebouncedValue` hook
+- Pagination UI duplicated in 3 pages — extract `PaginationControls` component
+- `AP_COLORS` array duplicated in `MatrixColumnHeaders.jsx` and `exportToExcel.js`
+
+**Architecture:**
+- `MatrixView.jsx` (584 lines) handles data transformation + row reordering + Excel export + rendering — split into data hook + presentation
+- App.jsx passes 16 props to MatrixView — consider Context or custom hook
+- Prop drilling: MatrixView (36 props) → MatrixToolbar (21 props) → FilterBar (7 props)
+
+**Accessibility:**
+- Filter dropdowns use `<div onClick>` instead of `<button>` — not keyboard accessible
+- Missing `<label>` elements on search inputs (placeholder is not a label)
+- No visible focus indicators on custom inputs
+- Color-only indicators (AP colors, type badges) need non-color alternatives for color-blind users
+
+### Error Handling Consistency (Cross-Cutting)
+
+**PowerShell functions:** ~40+ Generic functions have zero error handling. At minimum, Graph API calls should have try/catch with meaningful error messages. Consider a standard error pattern for all Generic functions.
+
+**Frontend API calls:** Several places silently swallow errors (`catch { /* ignore */ }` in UsersPage line 81, GroupsPage line 79). Should at minimum log to console.
+
+**`$ReturnValue += $Result`** in multiple Base HTTP functions uses `+=` on null, creating unexpected array types. Initialize `$ReturnValue = @()` or use explicit assignment.
+
+### Minor Improvements
+
+- **JSON depth:** Multiple files hardcode `-Depth 10` for `ConvertTo-Json`. Use `-Depth 100` to avoid silent truncation
+- **Base64 padding:** Duplicated in `Get-FGAccessTokenDetail.ps1` for header and payload — extract helper
+- **Config property navigation:** Duplicated across `Get-FGSecureConfigValue`, `Clear-FGSecureConfigValue`, `Test-FGSecureConfigValue` — extract helper
+- **SecureString conversion:** 4 duplicates in `Get-FGSecureConfigValue.ps1` — extract `ConvertFrom-SecureStringToPlainText`
+- **Parameter naming inconsistency** in Generic functions: `$id` vs `$Id`, `$DisplayName` vs `$displayName`, `$ObjectId` vs `$objectId`. Standardize to PascalCase
+- **Invoke-FGPutRequest.ps1** debug output says "PatchRequest" instead of "PutRequest" (copy-paste error)
+- **Device code timeout** hardcoded to 300s in `Get-FGAccessTokenInteractive.ps1` — make parameter with default
