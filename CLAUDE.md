@@ -137,7 +137,8 @@ FortigiGraph/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
 │   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
-│   │       ├── db/connection.js       # Azure SQL (mssql) connection pool
+│   │       ├── db/connection.js       # Azure SQL (mssql) connection pool + graceful shutdown
+│   │       ├── db/columnCache.js      # Shared column discovery cache (5-min TTL)
 │   │       └── mock/data.js           # Mock data for local dev
 │   └── frontend/           # React + Vite + Tailwind
 │       └── src/
@@ -155,7 +156,8 @@ FortigiGraph/
 │               └── matrix/            # Matrix sub-components
 │                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
 │                   ├── MatrixCell.jsx       # Individual cell (AP-colored bg, multi-type badges)
-│                   ├── MatrixGroupRow.jsx   # Row with DnD support, AP color lookup
+│                   ├── MatrixGroupRow.jsx   # DnD-agnostic row (sortable props injected by SortableRow)
+│                   ├── SortableMatrixBody.jsx  # Lazy-loaded: DnD + virtual scrolling wrapper
 │                   └── MatrixColumnHeaders.jsx  # AP color palette (15 colors), column filters
 │
 ├── _Build/                 # Build and publishing scripts
@@ -577,8 +579,8 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 **Performance:**
 - ~~No code splitting — all 5 pages bundled eagerly~~ → **RESOLVED:** All 5 pages use `React.lazy()` + `<Suspense>` for route-based code splitting
 - ~~ExcelJS (~200KB) loaded on every page~~ → **RESOLVED:** Dynamic `import()` in `handleExportExcel` — ExcelJS only loads when user clicks Export
-- @dnd-kit (~110KB) loaded even when drag not active — lazy-load
-- No virtual scrolling in matrix — becomes slow with 100+ groups
+- ~~@dnd-kit (~110KB) loaded even when drag not active — lazy-load~~ → **RESOLVED:** Extracted to `SortableMatrixBody.jsx` (separate chunk, ~60KB), dynamically imported. MatrixView renders static rows immediately, upgrades to sortable when chunk loads
+- ~~No virtual scrolling in matrix — becomes slow with 100+ groups~~ → **RESOLVED:** `@tanstack/react-virtual` virtualizes table rows (overscan=20). During drag, virtualization is disabled so all rows are in the DOM for accurate drop positioning
 - ~~`MatrixCell.jsx` memo comparison (line 80) missing `apNames` prop — stale renders possible~~ → **RESOLVED:** Added `apNames` to memo comparison
 
 **Code Duplication:**

@@ -1,5 +1,3 @@
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import MatrixCell from './MatrixCell';
 import { getAccessPackageColor } from './MatrixColumnHeaders';
 
@@ -26,32 +24,22 @@ export default function MatrixGroupRow({
   apIdToIndex,
   accessPackages = [],
   apGroupMap,
+  // Optional DnD props (provided by SortableRow wrapper)
+  sortableRef,
+  sortableStyle,
+  sortableAttributes,
+  sortableListeners,
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: group.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
   const memberCount = group.memberCount;
 
   return (
-    <tr ref={setNodeRef} style={style} className="hover:bg-gray-50/30">
+    <tr ref={sortableRef} style={sortableStyle || {}} className="hover:bg-gray-50/30">
       {/* Drag handle */}
       <td
         className="sticky left-0 z-10 bg-white border-r border-b border-gray-200 px-1 py-0 text-center cursor-grab active:cursor-grabbing"
         style={{ minWidth: '24px' }}
-        {...attributes}
-        {...listeners}
+        {...(sortableAttributes || {})}
+        {...(sortableListeners || {})}
       >
         <span className="text-gray-300 text-xs select-none">&#x2630;</span>
       </td>
