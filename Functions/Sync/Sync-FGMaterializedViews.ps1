@@ -22,10 +22,19 @@ function Sync-FGMaterializedViews {
     - Uses LEFT JOIN instead of correlated EXISTS for managedByAccessPackage (set-based vs row-by-row)
     - Materializes AP table first, then uses it for the managed check
 
+    .PARAMETER CommandTimeout
+    Maximum seconds per SQL step. Default 1800 (30 minutes).
+    Increase for very large tenants or lower-tier Azure SQL databases.
+
     .EXAMPLE
     Sync-FGMaterializedViews
 
     Materializes all available views into indexed tables.
+
+    .EXAMPLE
+    Sync-FGMaterializedViews -CommandTimeout 3600
+
+    Materializes with a 1-hour timeout per step (for very large tenants).
 
     .NOTES
     Requires:
@@ -42,7 +51,10 @@ function Sync-FGMaterializedViews {
 
     [alias("Sync-MaterializedViews")]
     [CmdletBinding()]
-    Param()
+    Param(
+        [Parameter(Mandatory = $false)]
+        [int]$CommandTimeout = 1800
+    )
 
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
@@ -51,10 +63,11 @@ function Sync-FGMaterializedViews {
     Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materializing views for UI performance..." -ForegroundColor Cyan
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materializing views for UI performance (timeout: ${CommandTimeout}s per step)..." -ForegroundColor Cyan
 
         # Check which views and source tables exist
         $checkCmd = $connection.CreateCommand()
+        $checkCmd.CommandTimeout = 60
         $checkCmd.CommandText = @"
 SELECT
     CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaAccessPackage') THEN 1 ELSE 0 END AS ApViewExists,
@@ -80,9 +93,10 @@ SELECT
         if ($apViewExists) {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Step 1/3: Materializing AP permissions..." -ForegroundColor Cyan
 
-            $cmd = $connection.CreateCommand()
-            $cmd.CommandTimeout = 300  # 5 minutes
-            $cmd.CommandText = @"
+            try {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandTimeout = $CommandTimeout
+                $cmd.CommandText = @"
 IF OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') IS NOT NULL
     DROP TABLE dbo.mat_UserPermissionAssignmentViaAccessPackage;
 
@@ -97,14 +111,20 @@ CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_userId_groupId
 CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_accessPackageId
     ON dbo.mat_UserPermissionAssignmentViaAccessPackage (accessPackageId);
 "@
-            $cmd.ExecuteNonQuery() | Out-Null
+                $cmd.ExecuteNonQuery() | Out-Null
 
-            $countCmd = $connection.CreateCommand()
-            $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignmentViaAccessPackage"
-            $rowCount = $countCmd.ExecuteScalar()
+                $countCmd = $connection.CreateCommand()
+                $countCmd.CommandTimeout = 120
+                $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignmentViaAccessPackage"
+                $rowCount = $countCmd.ExecuteScalar()
 
-            Write-Host "    Materialized mat_UserPermissionAssignmentViaAccessPackage: $rowCount rows" -ForegroundColor Green
-            $materialized++
+                Write-Host "    Materialized mat_UserPermissionAssignmentViaAccessPackage: $rowCount rows" -ForegroundColor Green
+                $materialized++
+            }
+            catch {
+                Write-Host "    Step 1 FAILED (AP permissions): $_" -ForegroundColor Red
+                Write-Host "    Continuing with remaining steps..." -ForegroundColor Yellow
+            }
         }
         else {
             Write-Host "  View vw_UserPermissionAssignmentViaAccessPackage does not exist (optional)" -ForegroundColor Yellow
@@ -120,9 +140,10 @@ CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_accessPackageId
         if ($directMembersExists) {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Step 2/3: Computing recursive memberships..." -ForegroundColor Cyan
 
-            $cmd = $connection.CreateCommand()
-            $cmd.CommandTimeout = 600  # 10 minutes for large tenants
-            $cmd.CommandText = @"
+            try {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandTimeout = $CommandTimeout
+                $cmd.CommandText = @"
 IF OBJECT_ID('tempdb..#RecursiveMemberships') IS NOT NULL DROP TABLE #RecursiveMemberships;
 
 ;WITH RecursiveMemberships AS (
@@ -157,58 +178,68 @@ INTO #RecursiveMemberships
 FROM RecursiveMemberships
 OPTION (MAXRECURSION 100);
 "@
-            $cmd.ExecuteNonQuery() | Out-Null
+                $cmd.ExecuteNonQuery() | Out-Null
 
-            $countCmd = $connection.CreateCommand()
-            $countCmd.CommandText = "SELECT COUNT(*) FROM #RecursiveMemberships"
-            $recursiveCount = $countCmd.ExecuteScalar()
-            Write-Host "    Recursive memberships computed: $recursiveCount rows" -ForegroundColor Green
+                $countCmd = $connection.CreateCommand()
+                $countCmd.CommandTimeout = 120
+                $countCmd.CommandText = "SELECT COUNT(*) FROM #RecursiveMemberships"
+                $recursiveCount = $countCmd.ExecuteScalar()
+                Write-Host "    Recursive memberships computed: $recursiveCount rows" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "    Step 2 FAILED (recursive memberships): $_" -ForegroundColor Red
+                Write-Host "    This is often caused by a low Azure SQL tier (DTU limit). Consider scaling up temporarily or increasing -CommandTimeout." -ForegroundColor Yellow
+                Write-Host "    Skipping Step 3 (depends on Step 2)." -ForegroundColor Yellow
+                $directMembersExists = $false
+            }
 
             # ═══════════════════════════════════════════════════════════════
             # Step 3: Build final materialized table from temp + owners + eligible
             # Uses LEFT JOIN against materialized AP table for managedByAccessPackage
             # instead of correlated EXISTS (set-based vs row-by-row).
             # ═══════════════════════════════════════════════════════════════
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Step 3/3: Building materialized permission table..." -ForegroundColor Cyan
+            if ($directMembersExists) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Step 3/3: Building materialized permission table..." -ForegroundColor Cyan
 
-            # Build UNION ALL dynamically based on available tables
-            $unionParts = @()
-            $unionParts += "SELECT groupId, memberId, memberType, membershipType FROM #RecursiveMemberships"
+                try {
+                    # Build UNION ALL dynamically based on available tables
+                    $unionParts = @()
+                    $unionParts += "SELECT groupId, memberId, memberType, membershipType FROM #RecursiveMemberships"
 
-            if ($ownersExists) {
-                $unionParts += @"
+                    if ($ownersExists) {
+                        $unionParts += @"
 SELECT groupId, ownerId AS memberId, 'user' AS memberType, 'Owner' AS membershipType
 FROM dbo.GraphGroupOwners WHERE ValidTo = '9999-12-31 23:59:59.9999999'
 "@
-            }
+                    }
 
-            if ($eligibleExists) {
-                $unionParts += @"
+                    if ($eligibleExists) {
+                        $unionParts += @"
 SELECT groupId, memberId, memberType, 'Eligible' AS membershipType
 FROM dbo.GraphGroupEligibleMembers WHERE ValidTo = '9999-12-31 23:59:59.9999999'
 "@
-            }
+                    }
 
-            $unionAllSQL = $unionParts -join "`nUNION ALL`n"
+                    $unionAllSQL = $unionParts -join "`nUNION ALL`n"
 
-            # LEFT JOIN for managedByAccessPackage (replaces correlated EXISTS)
-            $apJoinSQL = ""
-            $apColumnSQL = "CAST(0 AS BIT) AS managedByAccessPackage"
+                    # LEFT JOIN for managedByAccessPackage (replaces correlated EXISTS)
+                    $apJoinSQL = ""
+                    $apColumnSQL = "CAST(0 AS BIT) AS managedByAccessPackage"
 
-            if ($apViewExists) {
-                # Use the materialized AP table we just created in Step 1
-                $apJoinSQL = @"
+                    if ($apViewExists) {
+                        # Use the materialized AP table we just created in Step 1
+                        $apJoinSQL = @"
 LEFT JOIN (
     SELECT DISTINCT userId, groupId
     FROM dbo.mat_UserPermissionAssignmentViaAccessPackage
 ) ap ON ap.userId = a.memberId AND ap.groupId = a.groupId
 "@
-                $apColumnSQL = "CAST(CASE WHEN ap.userId IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage"
-            }
+                        $apColumnSQL = "CAST(CASE WHEN ap.userId IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage"
+                    }
 
-            $cmd = $connection.CreateCommand()
-            $cmd.CommandTimeout = 600  # 10 minutes
-            $cmd.CommandText = @"
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandTimeout = $CommandTimeout
+                    $cmd.CommandText = @"
 IF OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') IS NOT NULL
     DROP TABLE dbo.mat_UserPermissionAssignments;
 
@@ -238,14 +269,21 @@ CREATE NONCLUSTERED INDEX IX_mat_UPA_memberType
 
 DROP TABLE #RecursiveMemberships;
 "@
-            $cmd.ExecuteNonQuery() | Out-Null
+                    $cmd.ExecuteNonQuery() | Out-Null
 
-            $countCmd = $connection.CreateCommand()
-            $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignments"
-            $rowCount = $countCmd.ExecuteScalar()
+                    $countCmd = $connection.CreateCommand()
+                    $countCmd.CommandTimeout = 120
+                    $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignments"
+                    $rowCount = $countCmd.ExecuteScalar()
 
-            Write-Host "    Materialized mat_UserPermissionAssignments: $rowCount rows" -ForegroundColor Green
-            $materialized++
+                    Write-Host "    Materialized mat_UserPermissionAssignments: $rowCount rows" -ForegroundColor Green
+                    $materialized++
+                }
+                catch {
+                    Write-Host "    Step 3 FAILED (build permission table): $_" -ForegroundColor Red
+                    Write-Host "    Consider scaling up the Azure SQL tier or increasing -CommandTimeout." -ForegroundColor Yellow
+                }
+            }
         }
         else {
             Write-Warning "  Table GraphGroupMembers does not exist. Run Sync-FGGroupMember first."
