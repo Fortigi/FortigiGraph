@@ -229,16 +229,18 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
         </button>
       </div>
 
-      {/* Attributes - single column list */}
+      {/* Attributes - single column table */}
       <Section title="Attributes" count={otherAttributes.length}>
-        <div className="flex flex-col gap-1">
-          {otherAttributes.map(([key, val]) => (
-            <div key={key} className="flex text-sm min-w-0">
-              <span className="text-gray-500 shrink-0 w-56">{friendlyLabel(key)}</span>
-              <span className="text-gray-900 font-medium truncate">{formatValue(val)}</span>
-            </div>
-          ))}
-        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            {otherAttributes.map(([key, val]) => (
+              <tr key={key} className="border-b border-gray-50 last:border-b-0">
+                <td className="py-1 pr-4 text-gray-500 whitespace-nowrap align-top">{friendlyLabel(key)}</td>
+                <td className="py-1 text-gray-900 font-medium break-all">{formatValue(val)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Section>
 
       {/* Members - collapsible, lazy-loaded */}
