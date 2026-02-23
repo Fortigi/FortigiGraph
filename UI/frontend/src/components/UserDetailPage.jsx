@@ -231,16 +231,18 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
         </button>
       </div>
 
-      {/* Attributes - full width */}
+      {/* Attributes - single column table */}
       <Section title="Attributes" count={otherAttributes.length}>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5">
-          {otherAttributes.map(([key, val]) => (
-            <div key={key} className="flex justify-between text-sm min-w-0">
-              <span className="text-gray-500 truncate mr-2 shrink-0">{friendlyLabel(key)}</span>
-              <span className="text-gray-900 font-medium text-right truncate">{formatValue(val)}</span>
-            </div>
-          ))}
-        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            {otherAttributes.map(([key, val]) => (
+              <tr key={key} className="border-b border-gray-50 last:border-b-0">
+                <td className="py-1 pr-4 text-gray-500 whitespace-nowrap align-top">{friendlyLabel(key)}</td>
+                <td className="py-1 text-gray-900 font-medium break-all">{formatValue(val)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Section>
 
       {/* Group Memberships - collapsible, lazy-loaded */}
