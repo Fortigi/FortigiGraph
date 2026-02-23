@@ -138,7 +138,7 @@ function Invoke-FGGetRequest {
                         } catch { }
                     }
 
-                    Write-Warning "[Invoke-FGGetRequest] Page $pageCount: Transient error (Status: $statusCode). Retry $retryCount/$maxRetries after ${waitTime}s..."
+                    Write-Warning "[Invoke-FGGetRequest] Page ${pageCount}: Transient error (Status: $statusCode). Retry $retryCount/$maxRetries after ${waitTime}s..."
                     Start-Sleep -Seconds $waitTime
 
                     Update-FGAccessTokenIfExpired -DebugFlag 'G'
@@ -146,7 +146,7 @@ function Invoke-FGGetRequest {
                 }
                 else {
                     if ($retryCount -gt 0) {
-                        Write-Warning "[Invoke-FGGetRequest] Page $pageCount: Failed after $retryCount retry attempt(s)"
+                        Write-Warning "[Invoke-FGGetRequest] Page ${pageCount}: Failed after $retryCount retry attempt(s)"
                     }
                     Throw $_
                 }
