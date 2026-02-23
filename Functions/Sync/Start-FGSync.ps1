@@ -180,7 +180,10 @@ Command-line parameter overrides config file setting
     [bool]$SyncAccessPackageAccessReviews = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$GroupMembersUseBatching = $false
+    [bool]$GroupMembersUseBatching = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$AssignmentRequestsUseBatching = $false
 )
 
     $ErrorActionPreference = "Stop"
@@ -316,6 +319,9 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('SyncAccessPackageAssignmentRequests') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentRequests.Enabled) {
             $SyncAccessPackageAssignmentRequests = $config.Sync.AccessPackageAssignmentRequests.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('AssignmentRequestsUseBatching') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentRequests.UseBatching) {
+            $AssignmentRequestsUseBatching = $config.Sync.AccessPackageAssignmentRequests.UseBatching
         }
         if ($PSBoundParameters.ContainsKey('SyncAccessPackageAccessReviews') -eq $false -and $null -ne $config.Sync.AccessPackageAccessReviews.Enabled) {
             $SyncAccessPackageAccessReviews = $config.Sync.AccessPackageAccessReviews.Enabled
@@ -622,7 +628,7 @@ function Write-SyncError {
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignmentRequests" {
-                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName
+                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -912,6 +918,9 @@ function Write-SyncError {
         # Create job for AccessPackageAssignmentRequests sync
         if ($SyncAccessPackageAssignmentRequests) {
             Write-SyncStep "Starting access package assignment requests sync job..."
+            $assignmentRequestSyncParams = @{}
+            if ($AssignmentRequestsUseBatching) { $assignmentRequestSyncParams.UseBatching = $true }
+
             $ps = [PowerShell]::Create()
             $ps.RunspacePool = $runspacePool
             [void]$ps.AddScript($syncScriptBlock)
@@ -926,6 +935,7 @@ function Write-SyncError {
             [void]$ps.AddParameter("ClientId", $graphClientId)
             [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
             [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+            [void]$ps.AddParameter("SyncParams", $assignmentRequestSyncParams)
 
             $jobs += @{
                 Name = "AccessPackageAssignmentRequests"
@@ -1250,9 +1260,13 @@ function Write-SyncError {
 
         # Sync Access Package Assignment Requests
         if ($SyncAccessPackageAssignmentRequests) {
-            Write-SyncStep "Syncing access package assignment requests..."
+            $batchingMode = if ($AssignmentRequestsUseBatching) { " (batched mode)" } else { "" }
+            Write-SyncStep "Syncing access package assignment requests$batchingMode..."
             try {
-                Sync-FGAccessPackageAssignmentRequest -TableName $accessPackageAssignmentRequestsTableName
+                $syncParams = @{ TableName = $accessPackageAssignmentRequestsTableName }
+                if ($AssignmentRequestsUseBatching) { $syncParams.UseBatching = $true }
+
+                Sync-FGAccessPackageAssignmentRequest @syncParams
 
                 $requestCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentRequestsTableName" -AsScalar
                 $script:SyncStats.AccessPackageAssignmentRequests = $requestCount
