@@ -88,7 +88,7 @@ function Sync-FGAccessPackageAssignmentRequest {
         [int]$BatchSize = 100,
 
         [Parameter(Mandatory = $false)]
-        [switch]$UseBatching,
+        [switch]$UseBatching = $true,
 
         [Parameter(Mandatory = $false)]
         [int]$PageSize = 500

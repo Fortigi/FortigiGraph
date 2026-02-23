@@ -183,7 +183,7 @@ Command-line parameter overrides config file setting
     [bool]$GroupMembersUseBatching = $false,
 
     [Parameter(Mandatory = $false)]
-    [bool]$AssignmentRequestsUseBatching = $false
+    [bool]$AssignmentRequestsUseBatching = $true
 )
 
     $ErrorActionPreference = "Stop"
