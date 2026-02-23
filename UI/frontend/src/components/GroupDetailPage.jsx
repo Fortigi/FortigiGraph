@@ -229,13 +229,13 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
         </button>
       </div>
 
-      {/* Attributes - full width */}
+      {/* Attributes - single column list */}
       <Section title="Attributes" count={otherAttributes.length}>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5">
+        <div className="flex flex-col gap-1">
           {otherAttributes.map(([key, val]) => (
-            <div key={key} className="flex justify-between text-sm min-w-0">
-              <span className="text-gray-500 truncate mr-2 shrink-0">{friendlyLabel(key)}</span>
-              <span className="text-gray-900 font-medium text-right truncate">{formatValue(val)}</span>
+            <div key={key} className="flex text-sm min-w-0">
+              <span className="text-gray-500 shrink-0 w-56">{friendlyLabel(key)}</span>
+              <span className="text-gray-900 font-medium truncate">{formatValue(val)}</span>
             </div>
           ))}
         </div>
