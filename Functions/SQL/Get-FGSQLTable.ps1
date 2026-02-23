@@ -104,8 +104,9 @@ ORDER BY s.name, t.name
             param($connection)
             $cmd = $connection.CreateCommand()
             $cmd.CommandText = $using:query
-            foreach ($key in $using:parameters.Keys) {
-                $cmd.Parameters.AddWithValue($key, $using:parameters[$key]) | Out-Null
+            $params = $using:parameters
+            foreach ($key in $params.Keys) {
+                $cmd.Parameters.AddWithValue($key, $params[$key]) | Out-Null
             }
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
             $dataTable = New-Object System.Data.DataTable
