@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
-const TYPE_BADGE = {
-  Direct:   { letter: 'D', bg: '#166534', text: '#fff' },
-  Indirect: { letter: 'I', bg: '#1e40af', text: '#fff' },
-  Eligible: { letter: 'E', bg: '#854d0e', text: '#fff' },
-  Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
-};
-
 const HEADER_FIELDS = ['description', 'groupTypeCalculated'];
 const HIDDEN_FIELDS = new Set(['id', 'displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
 
@@ -19,7 +12,7 @@ function formatDate(val) {
 }
 
 function formatValue(val) {
-  if (val === null || val === undefined) return '—';
+  if (val === null || val === undefined) return '\u2014';
   if (val === true) return 'Yes';
   if (val === false) return 'No';
   if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) return formatDate(val);
@@ -49,7 +42,7 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
-export default function GroupDetailPage({ groupId, cachedData, onCacheData, onClose, onOpenDetail }) {
+export default function GroupDetailPage({ groupId, cachedData, onCacheData, onClose }) {
   const { authFetch } = useAuth();
 
   // Core data (fast — attributes, tags, counts)
@@ -57,15 +50,7 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
   const [loading, setLoading] = useState(!cachedData?.core);
   const [error, setError] = useState(null);
 
-  // Lazy-loaded sections
-  const [membersOpen, setMembersOpen] = useState(false);
-  const [members, setMembers] = useState(cachedData?.members || null);
-  const [membersLoading, setMembersLoading] = useState(false);
-
-  const [apOpen, setApOpen] = useState(false);
-  const [accessPackages, setAccessPackages] = useState(cachedData?.accessPackages || null);
-  const [apLoading, setApLoading] = useState(false);
-
+  // Lazy-loaded history
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -89,34 +74,6 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
     return () => { cancelled = true; };
   }, [groupId, authFetch, cachedData?.core, onCacheData]);
 
-  // Lazy-load members
-  const loadMembers = useCallback(() => {
-    if (members) return;
-    setMembersLoading(true);
-    authFetch(`/api/group/${encodeURIComponent(groupId)}/members`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => {
-        setMembers(d);
-        onCacheData?.(groupId, 'group', { members: d });
-      })
-      .catch(() => setMembers([]))
-      .finally(() => setMembersLoading(false));
-  }, [groupId, authFetch, members, onCacheData]);
-
-  // Lazy-load access packages
-  const loadAccessPackages = useCallback(() => {
-    if (accessPackages) return;
-    setApLoading(true);
-    authFetch(`/api/group/${encodeURIComponent(groupId)}/access-packages`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => {
-        setAccessPackages(d);
-        onCacheData?.(groupId, 'group', { accessPackages: d });
-      })
-      .catch(() => setAccessPackages([]))
-      .finally(() => setApLoading(false));
-  }, [groupId, authFetch, accessPackages, onCacheData]);
-
   // Lazy-load history
   const loadHistory = useCallback(() => {
     if (history) return;
@@ -130,21 +87,6 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
       .catch(() => setHistory([]))
       .finally(() => setHistoryLoading(false));
   }, [groupId, authFetch, history, onCacheData]);
-
-  // Toggle handlers
-  const toggleMembers = useCallback(() => {
-    setMembersOpen(prev => {
-      if (!prev) loadMembers();
-      return !prev;
-    });
-  }, [loadMembers]);
-
-  const toggleAp = useCallback(() => {
-    setApOpen(prev => {
-      if (!prev) loadAccessPackages();
-      return !prev;
-    });
-  }, [loadAccessPackages]);
 
   const toggleHistory = useCallback(() => {
     setHistoryOpen(prev => {
@@ -166,27 +108,9 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
   }
   if (!data) return null;
 
-  const { attributes, tags, memberCount, accessPackageCount, historyCount } = data;
+  const { attributes, tags, historyCount } = data;
   const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
-
-  // Group members by memberId to show combined membership types
-  const groupedMembers = new Map();
-  if (members) {
-    for (const m of members) {
-      if (!groupedMembers.has(m.memberId)) {
-        groupedMembers.set(m.memberId, {
-          memberId: m.memberId,
-          memberDisplayName: m.memberDisplayName,
-          memberUPN: m.memberUPN,
-          types: [],
-          managed: false,
-        });
-      }
-      const g = groupedMembers.get(m.memberId);
-      g.types.push(m.membershipType);
-      if (m.managedByAccessPackage) g.managed = true;
-    }
-  }
+  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/${encodeURIComponent(groupId)}`;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
 
@@ -219,6 +143,13 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
               ))}
             </div>
           )}
+          <a href={entraUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline">
+            Open in Entra ID
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
         </div>
         <button onClick={onClose}
           className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
@@ -242,92 +173,6 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
           </tbody>
         </table>
       </Section>
-
-      {/* Members - collapsible, lazy-loaded */}
-      <div className="mt-6">
-        <CollapsibleSection
-          title="Members"
-          count={memberCount}
-          open={membersOpen}
-          onToggle={toggleMembers}
-          loading={membersLoading}
-        >
-          {groupedMembers.size === 0 ? (
-            <p className="text-sm text-gray-400 italic">No members found</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="pb-1 font-medium">Name</th>
-                  <th className="pb-1 font-medium w-48">UPN</th>
-                  <th className="pb-1 font-medium w-32">Membership</th>
-                  <th className="pb-1 font-medium w-20">Managed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...groupedMembers.values()].map(m => (
-                  <tr key={m.memberId} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
-                    onClick={() => onOpenDetail('user', m.memberId, m.memberDisplayName)}>
-                    <td className="py-1.5 text-blue-600 hover:text-blue-800 font-medium">
-                      {m.memberDisplayName || m.memberId}
-                    </td>
-                    <td className="py-1.5 text-gray-500 text-xs truncate">{m.memberUPN}</td>
-                    <td className="py-1.5">
-                      <div className="flex gap-1">
-                        {m.types.map(type => {
-                          const b = TYPE_BADGE[type];
-                          return b ? (
-                            <span key={type}
-                              className="inline-block w-5 h-5 rounded-sm text-center font-bold text-[10px] leading-5"
-                              style={{ backgroundColor: b.bg, color: b.text }}>
-                              {b.letter}
-                            </span>
-                          ) : <span key={type} className="text-xs text-gray-400">{type}</span>;
-                        })}
-                      </div>
-                    </td>
-                    <td className="py-1.5 text-center">
-                      {m.managed && <span className="text-green-600 text-xs font-medium">AP</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CollapsibleSection>
-      </div>
-
-      {/* Access Packages - collapsible, lazy-loaded */}
-      <div className="mt-6">
-        <CollapsibleSection
-          title="Access Packages"
-          count={accessPackageCount}
-          open={apOpen}
-          onToggle={toggleAp}
-          loading={apLoading}
-        >
-          {accessPackages && accessPackages.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">Not included in any access packages</p>
-          ) : accessPackages ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="pb-1 font-medium">Package</th>
-                  <th className="pb-1 font-medium w-20">Role</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accessPackages.map((ap, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="py-1 text-gray-900">{ap.accessPackageName || ap.accessPackageId}</td>
-                    <td className="py-1 text-gray-500 text-xs">{ap.roleName || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : null}
-        </CollapsibleSection>
-      </div>
 
       {/* Version History - collapsible, lazy-loaded */}
       <div className="mt-6">

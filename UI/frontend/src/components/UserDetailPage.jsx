@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
-const TYPE_BADGE = {
-  Direct:   { letter: 'D', bg: '#166534', text: '#fff' },
-  Indirect: { letter: 'I', bg: '#1e40af', text: '#fff' },
-  Eligible: { letter: 'E', bg: '#854d0e', text: '#fff' },
-  Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
-};
-
 const HEADER_FIELDS = ['userPrincipalName', 'department', 'jobTitle', 'companyName'];
 const HIDDEN_FIELDS = new Set(['id', 'displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
 
@@ -19,7 +12,7 @@ function formatDate(val) {
 }
 
 function formatValue(val) {
-  if (val === null || val === undefined) return '—';
+  if (val === null || val === undefined) return '\u2014';
   if (val === true) return 'Yes';
   if (val === false) return 'No';
   if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) return formatDate(val);
@@ -49,7 +42,7 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
-export default function UserDetailPage({ userId, cachedData, onCacheData, onClose, onOpenDetail }) {
+export default function UserDetailPage({ userId, cachedData, onCacheData, onClose }) {
   const { authFetch } = useAuth();
 
   // Core data (fast — attributes, tags, counts)
@@ -57,15 +50,7 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
   const [loading, setLoading] = useState(!cachedData?.core);
   const [error, setError] = useState(null);
 
-  // Lazy-loaded sections
-  const [membershipsOpen, setMembershipsOpen] = useState(false);
-  const [memberships, setMemberships] = useState(cachedData?.memberships || null);
-  const [membershipsLoading, setMembershipsLoading] = useState(false);
-
-  const [apOpen, setApOpen] = useState(false);
-  const [accessPackages, setAccessPackages] = useState(cachedData?.accessPackages || null);
-  const [apLoading, setApLoading] = useState(false);
-
+  // Lazy-loaded history
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -89,34 +74,6 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
     return () => { cancelled = true; };
   }, [userId, authFetch, cachedData?.core, onCacheData]);
 
-  // Lazy-load memberships
-  const loadMemberships = useCallback(() => {
-    if (memberships) return; // Already loaded
-    setMembershipsLoading(true);
-    authFetch(`/api/user/${encodeURIComponent(userId)}/memberships`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => {
-        setMemberships(d);
-        onCacheData?.(userId, 'user', { memberships: d });
-      })
-      .catch(() => setMemberships([]))
-      .finally(() => setMembershipsLoading(false));
-  }, [userId, authFetch, memberships, onCacheData]);
-
-  // Lazy-load access packages
-  const loadAccessPackages = useCallback(() => {
-    if (accessPackages) return;
-    setApLoading(true);
-    authFetch(`/api/user/${encodeURIComponent(userId)}/access-packages`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(d => {
-        setAccessPackages(d);
-        onCacheData?.(userId, 'user', { accessPackages: d });
-      })
-      .catch(() => setAccessPackages([]))
-      .finally(() => setApLoading(false));
-  }, [userId, authFetch, accessPackages, onCacheData]);
-
   // Lazy-load history
   const loadHistory = useCallback(() => {
     if (history) return;
@@ -130,21 +87,6 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
       .catch(() => setHistory([]))
       .finally(() => setHistoryLoading(false));
   }, [userId, authFetch, history, onCacheData]);
-
-  // Toggle handlers that also trigger loading
-  const toggleMemberships = useCallback(() => {
-    setMembershipsOpen(prev => {
-      if (!prev) loadMemberships();
-      return !prev;
-    });
-  }, [loadMemberships]);
-
-  const toggleAp = useCallback(() => {
-    setApOpen(prev => {
-      if (!prev) loadAccessPackages();
-      return !prev;
-    });
-  }, [loadAccessPackages]);
 
   const toggleHistory = useCallback(() => {
     setHistoryOpen(prev => {
@@ -166,27 +108,9 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
   }
   if (!data) return null;
 
-  const { attributes, tags, membershipCount, accessPackageCount, historyCount } = data;
+  const { attributes, tags, historyCount } = data;
   const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
-
-  // Group memberships by groupId
-  const groupedMemberships = new Map();
-  if (memberships) {
-    for (const m of memberships) {
-      if (!groupedMemberships.has(m.groupId)) {
-        groupedMemberships.set(m.groupId, {
-          groupId: m.groupId,
-          groupDisplayName: m.groupDisplayName,
-          groupTypeCalculated: m.groupTypeCalculated,
-          types: [],
-          managed: false,
-        });
-      }
-      const g = groupedMemberships.get(m.groupId);
-      g.types.push(m.membershipType);
-      if (m.managedByAccessPackage) g.managed = true;
-    }
-  }
+  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/${encodeURIComponent(userId)}`;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
 
@@ -221,6 +145,13 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
               ))}
             </div>
           )}
+          <a href={entraUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline">
+            Open in Entra ID
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
         </div>
         <button onClick={onClose}
           className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
@@ -244,100 +175,6 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
           </tbody>
         </table>
       </Section>
-
-      {/* Group Memberships - collapsible, lazy-loaded */}
-      <div className="mt-6">
-        <CollapsibleSection
-          title="Group Memberships"
-          count={membershipCount}
-          open={membershipsOpen}
-          onToggle={toggleMemberships}
-          loading={membershipsLoading}
-        >
-          {groupedMemberships.size === 0 ? (
-            <p className="text-sm text-gray-400 italic">No group memberships found</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="pb-1 font-medium">Group</th>
-                  <th className="pb-1 font-medium w-24">Type</th>
-                  <th className="pb-1 font-medium w-32">Membership</th>
-                  <th className="pb-1 font-medium w-20">Managed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...groupedMemberships.values()].map(g => (
-                  <tr key={g.groupId} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
-                    onClick={() => onOpenDetail('group', g.groupId, g.groupDisplayName)}>
-                    <td className="py-1.5 text-blue-600 hover:text-blue-800 font-medium">
-                      {g.groupDisplayName || g.groupId}
-                    </td>
-                    <td className="py-1.5 text-gray-500 text-xs">{g.groupTypeCalculated}</td>
-                    <td className="py-1.5">
-                      <div className="flex gap-1">
-                        {g.types.map(type => {
-                          const b = TYPE_BADGE[type];
-                          return b ? (
-                            <span key={type}
-                              className="inline-block w-5 h-5 rounded-sm text-center font-bold text-[10px] leading-5"
-                              style={{ backgroundColor: b.bg, color: b.text }}>
-                              {b.letter}
-                            </span>
-                          ) : <span key={type} className="text-xs text-gray-400">{type}</span>;
-                        })}
-                      </div>
-                    </td>
-                    <td className="py-1.5 text-center">
-                      {g.managed && <span className="text-green-600 text-xs font-medium">AP</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CollapsibleSection>
-      </div>
-
-      {/* Access Packages - collapsible, lazy-loaded */}
-      <div className="mt-6">
-        <CollapsibleSection
-          title="Access Packages"
-          count={accessPackageCount}
-          open={apOpen}
-          onToggle={toggleAp}
-          loading={apLoading}
-        >
-          {accessPackages && accessPackages.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">No access package assignments</p>
-          ) : accessPackages ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="pb-1 font-medium">Package</th>
-                  <th className="pb-1 font-medium w-20">State</th>
-                  <th className="pb-1 font-medium w-28">Assigned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accessPackages.map((ap, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="py-1 text-gray-900">{ap.accessPackageName || ap.accessPackageId}</td>
-                    <td className="py-1">
-                      <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
-                        ap.state === 'delivered' ? 'bg-green-100 text-green-700' :
-                        ap.state === 'expired' ? 'bg-gray-100 text-gray-500' :
-                        'bg-yellow-100 text-yellow-700'
-                      }`}>{ap.state || '—'}</span>
-                    </td>
-                    <td className="py-1 text-gray-500 text-xs">{formatDate(ap.assignedDateTime)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : null}
-        </CollapsibleSection>
-      </div>
 
       {/* Version History - collapsible, lazy-loaded */}
       <div className="mt-6">

@@ -193,12 +193,12 @@ export default function App() {
     if (page.startsWith('user:')) {
       const id = page.substring(5);
       const cacheKey = `user:${id}`;
-      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
+      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} />;
     }
     if (page.startsWith('group:')) {
       const id = page.substring(6);
       const cacheKey = `group:${id}`;
-      return <GroupDetailPage groupId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('group', id)} onOpenDetail={openDetailTab} />;
+      return <GroupDetailPage groupId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('group', id)} />;
     }
     return null;
   };
