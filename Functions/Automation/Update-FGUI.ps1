@@ -93,7 +93,14 @@ function Update-FGUI {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deploying to $WebAppName..." -ForegroundColor Cyan
         Write-Host "  This will take a few minutes (Azure rebuilds the app)..." -ForegroundColor Gray
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue).Token
+        try {
+            $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        } catch {
+            throw "Azure token expired or MFA required. Please run: Connect-AzAccount -AuthScope https://management.azure.com"
+        }
+        if (-not $token) {
+            throw "Failed to acquire Azure access token. Please run: Connect-AzAccount -AuthScope https://management.azure.com"
+        }
 
         $credsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/publishingcredentials/list?api-version=2023-01-01"
         $creds = Invoke-RestMethod -Uri $credsUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json"

@@ -1,7 +1,11 @@
 import { Router } from 'express';
+import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, FILTERABLE_TYPES } from '../db/columnCache.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
+
+// Validate hex color format (#000000 – #ffffff)
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 let db = null;
 if (useSql) {
@@ -40,35 +44,7 @@ async function ensureTagTables(pool) {
 // Re-export for other routes to use
 export { ensureTagTables };
 
-// ─── Column discovery helpers ────────────────────────────────────
-const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
-const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
-
-let userColsCache = null;
-let groupColsCache = null;
-
-async function discoverColumns(pool, table) {
-  const result = await pool.request().query(`
-    SELECT COLUMN_NAME, DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = '${table}'
-      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
-    ORDER BY ORDINAL_POSITION
-  `);
-  return result.recordset.map(r => ({ name: r.COLUMN_NAME, type: r.DATA_TYPE }));
-}
-
-async function getUserCols(pool) {
-  if (userColsCache) return userColsCache;
-  userColsCache = await discoverColumns(pool, 'GraphUsers');
-  return userColsCache;
-}
-
-async function getGroupCols(pool) {
-  if (groupColsCache) return groupColsCache;
-  groupColsCache = await discoverColumns(pool, 'GraphGroups');
-  return groupColsCache;
-}
+// ─── Column discovery helpers (shared TTL cache from db/columnCache.js) ──
 
 // Build parameterized WHERE clause from filters object, validating against actual columns
 function buildFilterWhere(requestObj, filters, validColNames, alias, paramPrefix = 'fl') {
@@ -94,14 +70,15 @@ router.get('/tags', async (req, res) => {
     const { entityType } = req.query;
     const request = p.request();
     let sql = `
-      SELECT t.*,
-             (SELECT COUNT(*) FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id) AS assignmentCount
+      SELECT t.*, ISNULL(COUNT(ta.tagId), 0) AS assignmentCount
       FROM dbo.GraphTags t
+      LEFT JOIN dbo.GraphTagAssignments ta ON ta.tagId = t.id
     `;
     if (entityType) {
       sql += ` WHERE t.entityType = @entityType`;
       request.input('entityType', entityType);
     }
+    sql += ` GROUP BY t.id, t.name, t.color, t.entityType, t.createdAt`;
     sql += ` ORDER BY t.name`;
     const result = await request.query(sql);
     res.json(result.recordset);
@@ -118,6 +95,7 @@ router.post('/tags', async (req, res) => {
     const { name, color, entityType } = req.body;
     if (!name || !entityType) return res.status(400).json({ error: 'name and entityType required' });
     if (!['user', 'group'].includes(entityType)) return res.status(400).json({ error: 'entityType must be user or group' });
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
 
     const p = await db.getPool();
     await ensureTagTables(p);
@@ -145,6 +123,7 @@ router.patch('/tags/:id', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
     const { name, color } = req.body;
+    if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
     const p = await db.getPool();
     await ensureTagTables(p);
     const request = p.request().input('id', parseInt(req.params.id));
@@ -190,21 +169,21 @@ router.post('/tags/:id/assign', async (req, res) => {
     await ensureTagTables(p);
     const tagId = parseInt(req.params.id);
 
-    let inserted = 0;
-    for (const eid of entityIds) {
-      const result = await p.request()
-        .input('tagId', tagId)
-        .input('entityId', String(eid).toUpperCase())
-        .query(`
-          IF NOT EXISTS (SELECT 1 FROM dbo.GraphTagAssignments WHERE tagId = @tagId AND entityId = @entityId)
-          BEGIN
-            INSERT INTO dbo.GraphTagAssignments (tagId, entityId) VALUES (@tagId, @entityId)
-            SELECT 1 AS inserted
-          END
-        `);
-      if (result.recordset?.length > 0) inserted++;
-    }
-    res.json({ ok: true, inserted });
+    // Batch insert all assignments in a single query (avoids N+1 round-trips)
+    const request = p.request().input('tagId', tagId);
+    const valueParams = entityIds.map((eid, i) => {
+      request.input(`eid${i}`, String(eid).toUpperCase());
+      return `@eid${i}`;
+    });
+    const result = await request.query(`
+      INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
+      SELECT @tagId, eid FROM (VALUES ${valueParams.map(p => `(${p})`).join(',')}) AS t(eid)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM dbo.GraphTagAssignments WHERE tagId = @tagId AND entityId = t.eid
+      );
+      SELECT @@ROWCOUNT AS inserted;
+    `);
+    res.json({ ok: true, inserted: result.recordset[0]?.inserted || 0 });
   } catch (err) {
     console.error('POST /tags/:id/assign failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -223,13 +202,18 @@ router.post('/tags/:id/unassign', async (req, res) => {
     await ensureTagTables(p);
     const tagId = parseInt(req.params.id);
 
-    for (const eid of entityIds) {
-      await p.request()
-        .input('tagId', tagId)
-        .input('entityId', String(eid).toUpperCase())
-        .query('DELETE FROM dbo.GraphTagAssignments WHERE tagId = @tagId AND entityId = @entityId');
-    }
-    res.json({ ok: true });
+    // Batch delete all assignments in a single query (avoids N+1 round-trips)
+    const request = p.request().input('tagId', tagId);
+    const idParams = entityIds.map((eid, i) => {
+      request.input(`eid${i}`, String(eid).toUpperCase());
+      return `@eid${i}`;
+    });
+    const result = await request.query(`
+      DELETE FROM dbo.GraphTagAssignments
+      WHERE tagId = @tagId AND entityId IN (${idParams.join(',')});
+      SELECT @@ROWCOUNT AS deleted;
+    `);
+    res.json({ ok: true, deleted: result.recordset[0]?.deleted || 0 });
   } catch (err) {
     console.error('POST /tags/:id/unassign failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -268,9 +252,10 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
       where += buildFilterWhere(request, filters, colNames, alias, 'bf');
     }
 
+    // Safety cap: limit bulk assignment to 50,000 rows to prevent runaway operations
     const result = await request.query(`
       INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
-      SELECT @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
+      SELECT TOP 50000 @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
       FROM dbo.${table} ${alias}
       WHERE (${where})
         AND UPPER(CAST(${alias}.id AS NVARCHAR(36))) NOT IN (

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
 import { ensureTagTables } from './tags.js';
 import { ensureCategoryTables } from './categories.js';
+import { getUserColumns, getGroupColumns, FILTERABLE_TYPES } from '../db/columnCache.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -11,54 +12,12 @@ if (useSql) {
   db = await import('../db/connection.js');
 }
 
-// ─── User column discovery (cached) ───────────────────────────────
-// Columns from GraphUsers that are excluded from dynamic SELECT/filter
-const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
-// Data types useful for filtering (skip datetime, uniqueidentifier, etc.)
-const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
 // Columns always handled with explicit aliases (not included in dynamic list)
 const ALIASED_COLS = new Set(['displayName', 'userPrincipalName']);
 
-let userColumnsCache = null;
-
-async function getUserColumns(pool) {
-  if (userColumnsCache) return userColumnsCache;
-  const result = await pool.request().query(`
-    SELECT COLUMN_NAME, DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'GraphUsers'
-      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
-    ORDER BY ORDINAL_POSITION
-  `);
-  userColumnsCache = result.recordset.map(r => ({
-    name: r.COLUMN_NAME,
-    type: r.DATA_TYPE,
-  }));
-  return userColumnsCache;
-}
-
-// ─── Group column discovery (cached) ─────────────────────────────
 // Aliases: GraphGroups column names → permission query aliases
 const GROUP_COL_ALIASES = { displayName: 'groupDisplayName', description: 'groupDescription' };
 const GROUP_ALIAS_TO_COL = { groupDisplayName: 'displayName', groupDescription: 'description' };
-
-let groupColumnsCache = null;
-
-async function getGroupColumns(pool) {
-  if (groupColumnsCache) return groupColumnsCache;
-  const result = await pool.request().query(`
-    SELECT COLUMN_NAME, DATA_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'GraphGroups'
-      AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
-    ORDER BY ORDINAL_POSITION
-  `);
-  groupColumnsCache = result.recordset.map(r => ({
-    name: r.COLUMN_NAME,
-    type: r.DATA_TYPE,
-  }));
-  return groupColumnsCache;
-}
 
 // ─── GET /api/user-columns ────────────────────────────────────────
 // Returns column names + distinct values from GraphUsers for filter dropdowns.

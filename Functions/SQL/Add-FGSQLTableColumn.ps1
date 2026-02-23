@@ -44,6 +44,7 @@ function Add-FGSQLTableColumn {
 
         # Disable system versioning
         $disableVersioningCmd = $connection.CreateCommand()
+        $disableVersioningCmd.CommandTimeout = 120
         $disableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = OFF);"
         $disableVersioningCmd.ExecuteNonQuery() | Out-Null
 
@@ -54,17 +55,20 @@ function Add-FGSQLTableColumn {
 
             # Add to main table
             $addColumnCmd = $connection.CreateCommand()
+            $addColumnCmd.CommandTimeout = 120
             $addColumnCmd.CommandText = "ALTER TABLE dbo.$TableName ADD [$colName] $sqlType NULL;"
             $addColumnCmd.ExecuteNonQuery() | Out-Null
 
             # Add to history table
             $addHistoryColumnCmd = $connection.CreateCommand()
+            $addHistoryColumnCmd.CommandTimeout = 120
             $addHistoryColumnCmd.CommandText = "ALTER TABLE dbo.${TableName}History ADD [$colName] $sqlType NULL;"
             $addHistoryColumnCmd.ExecuteNonQuery() | Out-Null
         }
 
         # Re-enable system versioning
         $enableVersioningCmd = $connection.CreateCommand()
+        $enableVersioningCmd.CommandTimeout = 120
         $enableVersioningCmd.CommandText = "ALTER TABLE dbo.$TableName SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));"
         $enableVersioningCmd.ExecuteNonQuery() | Out-Null
 

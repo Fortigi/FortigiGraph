@@ -32,10 +32,6 @@ Command-line parameter overrides config file setting
 Sync direct group memberships. Default: Read from config (Sync.GroupMembers.Enabled) or $true
 Command-line parameter overrides config file setting
 
-.PARAMETER SyncGroupTransitiveMembers
-Sync transitive/nested group memberships. Default: Read from config (Sync.GroupTransitiveMembers.Enabled) or $true
-Command-line parameter overrides config file setting
-
 .PARAMETER SyncGroupEligibleMembers
 Sync eligible/PIM group memberships. Default: Read from config (Sync.GroupEligibleMembers.Enabled) or $true
 Command-line parameter overrides config file setting
@@ -139,9 +135,6 @@ Command-line parameter overrides config file setting
     [bool]$SyncGroupMembers = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncGroupTransitiveMembers = $false,  # DEPRECATED: Use vw_GraphGroupMembersRecursive instead
-
-    [Parameter(Mandatory = $false)]
     [bool]$SyncGroupEligibleMembers = $true,
 
     [Parameter(Mandatory = $false)]
@@ -187,7 +180,10 @@ Command-line parameter overrides config file setting
     [bool]$SyncAccessPackageAccessReviews = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$GroupMembersUseBatching = $false
+    [bool]$GroupMembersUseBatching = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$AssignmentRequestsUseBatching = $false
 )
 
     $ErrorActionPreference = "Stop"
@@ -204,7 +200,6 @@ Command-line parameter overrides config file setting
     Users = $null
     Groups = $null
     DirectMembers = $null
-    TransitiveMembers = $null
     EligibleMembers = $null
     Owners = $null
     Catalogs = $null
@@ -301,9 +296,6 @@ function Write-SyncError {
         if ($PSBoundParameters.ContainsKey('GroupMembersUseBatching') -eq $false -and $null -ne $config.Sync.GroupMembers.UseBatching) {
             $GroupMembersUseBatching = $config.Sync.GroupMembers.UseBatching
         }
-        if ($PSBoundParameters.ContainsKey('SyncGroupTransitiveMembers') -eq $false -and $null -ne $config.Sync.GroupTransitiveMembers.Enabled) {
-            $SyncGroupTransitiveMembers = $config.Sync.GroupTransitiveMembers.Enabled
-        }
         if ($PSBoundParameters.ContainsKey('SyncGroupEligibleMembers') -eq $false -and $null -ne $config.Sync.GroupEligibleMembers.Enabled) {
             $SyncGroupEligibleMembers = $config.Sync.GroupEligibleMembers.Enabled
         }
@@ -327,6 +319,9 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('SyncAccessPackageAssignmentRequests') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentRequests.Enabled) {
             $SyncAccessPackageAssignmentRequests = $config.Sync.AccessPackageAssignmentRequests.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('AssignmentRequestsUseBatching') -eq $false -and $null -ne $config.Sync.AccessPackageAssignmentRequests.UseBatching) {
+            $AssignmentRequestsUseBatching = $config.Sync.AccessPackageAssignmentRequests.UseBatching
         }
         if ($PSBoundParameters.ContainsKey('SyncAccessPackageAccessReviews') -eq $false -and $null -ne $config.Sync.AccessPackageAccessReviews.Enabled) {
             $SyncAccessPackageAccessReviews = $config.Sync.AccessPackageAccessReviews.Enabled
@@ -523,7 +518,6 @@ function Write-SyncError {
     $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "GraphUsers" }
     $groupTableName = if ($config.Sync.Groups.TableName) { $config.Sync.Groups.TableName } else { "GraphGroups" }
     $groupMembersTableName = if ($config.Sync.GroupMembers.TableName) { $config.Sync.GroupMembers.TableName } else { "GraphGroupMembers" }
-    $groupTransitiveMembersTableName = if ($config.Sync.GroupTransitiveMembers.TableName) { $config.Sync.GroupTransitiveMembers.TableName } else { "GraphGroupTransitiveMembers" }
     $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "GraphGroupEligibleMembers" }
     $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "GraphGroupOwners" }
     $catalogsTableName = if ($config.Sync.Catalogs.TableName) { $config.Sync.Catalogs.TableName } else { "GraphCatalogs" }
@@ -598,11 +592,6 @@ function Write-SyncError {
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
-                    "GroupTransitiveMembers" {
-                        $null = Sync-FGGroupTransitiveMember -TableName $TableName
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
-                    }
                     "GroupEligibleMembers" {
                         $null = Sync-FGGroupEligibleMember -TableName $TableName
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
@@ -639,7 +628,7 @@ function Write-SyncError {
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignmentRequests" {
-                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName
+                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -746,31 +735,6 @@ function Write-SyncError {
 
             $jobs += @{
                 Name = "GroupMembers"
-                PowerShell = $ps
-                Handle = $ps.BeginInvoke()
-            }
-        }
-
-        # Create job for GroupTransitiveMembers sync
-        if ($SyncGroupTransitiveMembers) {
-            Write-SyncStep "Starting transitive membership sync job..."
-            $ps = [PowerShell]::Create()
-            $ps.RunspacePool = $runspacePool
-            [void]$ps.AddScript($syncScriptBlock)
-            [void]$ps.AddParameter("SyncType", "GroupTransitiveMembers")
-            [void]$ps.AddParameter("TableName", $groupTransitiveMembersTableName)
-            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
-            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
-            [void]$ps.AddParameter("SqlServer", $sqlServerName)
-            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
-            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
-            [void]$ps.AddParameter("TenantId", $graphTenantId)
-            [void]$ps.AddParameter("ClientId", $graphClientId)
-            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
-            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
-
-            $jobs += @{
-                Name = "GroupTransitiveMembers"
                 PowerShell = $ps
                 Handle = $ps.BeginInvoke()
             }
@@ -954,6 +918,9 @@ function Write-SyncError {
         # Create job for AccessPackageAssignmentRequests sync
         if ($SyncAccessPackageAssignmentRequests) {
             Write-SyncStep "Starting access package assignment requests sync job..."
+            $assignmentRequestSyncParams = @{}
+            if ($AssignmentRequestsUseBatching) { $assignmentRequestSyncParams.UseBatching = $true }
+
             $ps = [PowerShell]::Create()
             $ps.RunspacePool = $runspacePool
             [void]$ps.AddScript($syncScriptBlock)
@@ -968,6 +935,7 @@ function Write-SyncError {
             [void]$ps.AddParameter("ClientId", $graphClientId)
             [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
             [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+            [void]$ps.AddParameter("SyncParams", $assignmentRequestSyncParams)
 
             $jobs += @{
                 Name = "AccessPackageAssignmentRequests"
@@ -1042,10 +1010,6 @@ function Write-SyncError {
                         "GroupMembers" {
                             $script:SyncStats.DirectMembers = $result.Count
                             Write-SyncSuccess "Direct memberships synced: $($result.Count) (table: $groupMembersTableName)"
-                        }
-                        "GroupTransitiveMembers" {
-                            $script:SyncStats.TransitiveMembers = $result.Count
-                            Write-SyncSuccess "Transitive memberships synced: $($result.Count) (table: $groupTransitiveMembersTableName)"
                         }
                         "GroupEligibleMembers" {
                             $script:SyncStats.EligibleMembers = $result.Count
@@ -1179,20 +1143,6 @@ function Write-SyncError {
             }
         }
 
-        # Sync Group Transitive Members (Nested)
-        if ($SyncGroupTransitiveMembers) {
-            Write-SyncStep "Syncing transitive/nested group memberships..."
-            try {
-                Sync-FGGroupTransitiveMember -TableName $groupTransitiveMembersTableName
-
-                $transitiveCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupTransitiveMembersTableName" -AsScalar
-                $script:SyncStats.TransitiveMembers = $transitiveCount
-                Write-SyncSuccess "Transitive memberships synced: $transitiveCount (table: $groupTransitiveMembersTableName)"
-            } catch {
-                Write-SyncError "Transitive membership sync failed" $_.Exception.Message
-            }
-        }
-
         # Sync Group Eligible Members (PIM)
         if ($SyncGroupEligibleMembers) {
             Write-SyncStep "Syncing eligible/PIM group memberships..."
@@ -1310,9 +1260,13 @@ function Write-SyncError {
 
         # Sync Access Package Assignment Requests
         if ($SyncAccessPackageAssignmentRequests) {
-            Write-SyncStep "Syncing access package assignment requests..."
+            $batchingMode = if ($AssignmentRequestsUseBatching) { " (batched mode)" } else { "" }
+            Write-SyncStep "Syncing access package assignment requests$batchingMode..."
             try {
-                Sync-FGAccessPackageAssignmentRequest -TableName $accessPackageAssignmentRequestsTableName
+                $syncParams = @{ TableName = $accessPackageAssignmentRequestsTableName }
+                if ($AssignmentRequestsUseBatching) { $syncParams.UseBatching = $true }
+
+                Sync-FGAccessPackageAssignmentRequest @syncParams
 
                 $requestCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentRequestsTableName" -AsScalar
                 $script:SyncStats.AccessPackageAssignmentRequests = $requestCount
@@ -1386,9 +1340,6 @@ function Write-SyncError {
             # Use configured table names
             if ($SyncGroupMembers) {
                 $viewParams.DirectMembersTable = $groupMembersTableName
-            }
-            if ($SyncGroupTransitiveMembers) {
-                $viewParams.TransitiveMembersTable = $groupTransitiveMembersTableName
             }
             if ($SyncGroupEligibleMembers) {
                 $viewParams.EligibleMembersTable = $groupEligibleMembersTableName
@@ -1483,9 +1434,6 @@ function Write-SyncError {
     }
     if ($SyncGroupMembers -and $script:SyncStats.DirectMembers -ne $null) {
         Write-Host "  Direct Memberships:      $($script:SyncStats.DirectMembers)" -ForegroundColor White
-    }
-    if ($SyncGroupTransitiveMembers -and $script:SyncStats.TransitiveMembers -ne $null) {
-        Write-Host "  Transitive Memberships:  $($script:SyncStats.TransitiveMembers)" -ForegroundColor White
     }
     if ($SyncGroupEligibleMembers -and $script:SyncStats.EligibleMembers -ne $null) {
         Write-Host "  Eligible Memberships:    $($script:SyncStats.EligibleMembers)" -ForegroundColor White

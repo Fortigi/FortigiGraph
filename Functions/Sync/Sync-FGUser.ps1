@@ -204,48 +204,8 @@ function Sync-FGUser {
 
     # Check if table exists and handle schema
     try {
-        $tableExists = Test-FGSQLTableExists -TableName $TableName
-
-        if ($tableExists -and -not $RecreateTable) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists. Checking schema..." -ForegroundColor Cyan
-
-            # Get existing columns
-            $existingColumns = Get-FGSQLTableSchema -TableName $TableName
-
-            # Find missing columns
-            $missingColumns = @{}
-            foreach ($attr in $Attributes) {
-                if ($existingColumns -notcontains $attr) {
-                    $missingColumns[$attr] = $columns[$attr]
-                }
-            }
-
-            if ($missingColumns.Count -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Found $($missingColumns.Count) new attribute(s) to add: $($missingColumns.Keys -join ', ')" -ForegroundColor Yellow
-                Add-FGSQLTableColumn -TableName $TableName -Columns $missingColumns
-            }
-            else {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Schema is up to date" -ForegroundColor Green
-            }
-        }
-        elseif ($tableExists -and $RecreateTable) {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Recreating table '$TableName' - all history will be lost!"
-            $confirm = Read-Host "Are you sure? (Y/N)"
-            if ($confirm -notmatch '^[Yy]') {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Operation cancelled." -ForegroundColor Yellow
-                return
-            }
-        }
-        else {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' does not exist. Will be created..." -ForegroundColor Cyan
-        }
-
-        # Create table if needed
-        $tableStillExists = Test-FGSQLTableExists -TableName $TableName
-
-        if (-not $tableStillExists -or $RecreateTable) {
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey 'id' -DropIfExists:$RecreateTable
-        }
+        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable
+        if ($tableReady -eq $false) { return }
     }
     catch {
         throw "Failed to check/create table: $_"
@@ -306,73 +266,13 @@ function Sync-FGUser {
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    $dataTable = New-Object System.Data.DataTable
-
-    # Add columns based on attributes and their SQL types
-    foreach ($attr in $Attributes) {
-        $sqlType = $columns[$attr]
-        $dotNetType = switch -Regex ($sqlType) {
-            'UNIQUEIDENTIFIER' { [guid] }
-            'BIT' { [bool] }
-            'DATETIME2' { [datetime] }
-            'INT' { [int] }
-            'BIGINT' { [long] }
-            default { [string] }
-        }
-        $dataTable.Columns.Add($attr, $dotNetType) | Out-Null
+    # Define custom value resolvers for special attributes
+    $valueResolvers = @{
+        'managerId' = { param($obj) if ($obj.manager -and $obj.manager.id) { [guid]$obj.manager.id } else { $null } }
+        'lastSignInDateTime' = { param($obj) if ($obj.signInActivity -and $obj.signInActivity.lastSignInDateTime) { [datetime]$obj.signInActivity.lastSignInDateTime } else { $null } }
     }
 
-    # Populate DataTable with user data
-    foreach ($user in $allUsers) {
-        $row = $dataTable.NewRow()
-
-        foreach ($attr in $Attributes) {
-            $value = $null
-
-            # Handle special attributes that come from different Graph properties
-            if ($attr -eq 'managerId') {
-                # Manager ID comes from expanded manager object
-                if ($user.manager -and $user.manager.id) {
-                    $value = [guid]$user.manager.id
-                }
-            }
-            elseif ($attr -eq 'lastSignInDateTime') {
-                # Last sign-in comes from signInActivity object
-                if ($user.signInActivity -and $user.signInActivity.lastSignInDateTime) {
-                    $value = [datetime]$user.signInActivity.lastSignInDateTime
-                }
-            }
-            else {
-                # Regular attribute
-                $value = $user.$attr
-            }
-
-            # Convert value to appropriate type or DBNull
-            if ($null -eq $value -or $value -eq '') {
-                $row[$attr] = [DBNull]::Value
-            }
-            else {
-                # Type conversion based on column type
-                $sqlType = $columns[$attr]
-                try {
-                    switch -Regex ($sqlType) {
-                        'UNIQUEIDENTIFIER' { $row[$attr] = [guid]$value }
-                        'BIT' { $row[$attr] = [bool]$value }
-                        'DATETIME2' { $row[$attr] = [datetime]$value }
-                        'INT' { $row[$attr] = [int]$value }
-                        'BIGINT' { $row[$attr] = [long]$value }
-                        default { $row[$attr] = [string]$value }
-                    }
-                }
-                catch {
-                    # If conversion fails, use DBNull
-                    $row[$attr] = [DBNull]::Value
-                }
-            }
-        }
-
-        $dataTable.Rows.Add($row)
-    }
+    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allUsers -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)

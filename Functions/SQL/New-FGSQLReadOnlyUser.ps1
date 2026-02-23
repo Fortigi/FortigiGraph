@@ -97,13 +97,23 @@ function New-FGSQLReadOnlyUser {
     # Shuffle the password
     $password = ($password | Get-Random -Count $password.Count) -join ''
 
+    # Validate username to prevent SQL injection in DDL statements
+    # DDL (CREATE USER, ALTER USER) cannot use parameterized queries
+    if ($Username -notmatch '^[a-zA-Z0-9_]+$') {
+        throw "Username must contain only letters, numbers, and underscores (got: '$Username')"
+    }
+
+    # Escape single quotes in password for safe embedding in DDL
+    # Password is generated internally (not user-supplied) but defense-in-depth
+    $escapedPassword = $password.Replace("'", "''")
+
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Creating read-only user '$Username'..." -ForegroundColor Cyan
 
     try {
         $connection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
         $connection.Open()
 
-        # Check if user already exists
+        # Check if user already exists (parameterized - safe)
         $checkQuery = "SELECT COUNT(*) FROM sys.database_principals WHERE name = @Username"
         $checkCmd = $connection.CreateCommand()
         $checkCmd.CommandText = $checkQuery
@@ -113,8 +123,8 @@ function New-FGSQLReadOnlyUser {
         if ($userExists) {
             Write-Warning "User '$Username' already exists. Resetting password..."
 
-            # Reset password for existing user
-            $alterQuery = "ALTER USER [$Username] WITH PASSWORD = '$password'"
+            # DDL cannot be parameterized; username validated above, password escaped
+            $alterQuery = "ALTER USER [$Username] WITH PASSWORD = N'$escapedPassword'"
             $alterCmd = $connection.CreateCommand()
             $alterCmd.CommandText = $alterQuery
             $alterCmd.ExecuteNonQuery() | Out-Null
@@ -122,13 +132,13 @@ function New-FGSQLReadOnlyUser {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Password reset for existing user '$Username'" -ForegroundColor Green
         }
         else {
-            # Create new user with password
-            $createQuery = "CREATE USER [$Username] WITH PASSWORD = '$password'"
+            # DDL cannot be parameterized; username validated above, password escaped
+            $createQuery = "CREATE USER [$Username] WITH PASSWORD = N'$escapedPassword'"
             $createCmd = $connection.CreateCommand()
             $createCmd.CommandText = $createQuery
             $createCmd.ExecuteNonQuery() | Out-Null
 
-            # Add to db_datareader role
+            # Add to db_datareader role (username validated above)
             $roleQuery = "ALTER ROLE db_datareader ADD MEMBER [$Username]"
             $roleCmd = $connection.CreateCommand()
             $roleCmd.CommandText = $roleQuery
