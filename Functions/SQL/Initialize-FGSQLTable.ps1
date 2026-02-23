@@ -94,6 +94,7 @@ function Initialize-FGSQLTable {
             if ($DropIfExists) {
                 Write-Verbose "Checking if table exists..."
                 $dropCmd = $connection.CreateCommand()
+                $dropCmd.CommandTimeout = 120
                 $dropCmd.CommandText = @"
 IF EXISTS (SELECT * FROM sys.tables WHERE name = '$TableName')
 BEGIN
@@ -126,6 +127,7 @@ WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.${TableName}History));
             Write-Verbose "Creating temporal table with SQL:`n$createTableSQL"
 
             $cmd = $connection.CreateCommand()
+            $cmd.CommandTimeout = 120
             $cmd.CommandText = $createTableSQL
             $cmd.ExecuteNonQuery() | Out-Null
 
