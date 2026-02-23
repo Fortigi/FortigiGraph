@@ -24,24 +24,7 @@ function Invoke-FGDeleteRequest {
     }
 
     #Check if Access token is expired, if so get new one.
-    $TokenIsStillValid = Confirm-FGAccessTokenValidity
-    if (!($TokenIsStillValid)) {
-        
-        If ($Global:DebugMode) {
-            If ($Global:DebugMode.Contains('G')) {
-                Write-Host "Token Expired, getting new one" -ForegroundColor Blue
-            }
-        }
-    
-        If ($global:ClientSecret) {
-            Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
-        }
-        Else {
-            Throw "Access Token expired."
-        }
-    
-    }
-
+    Update-FGAccessTokenIfExpired -DebugFlag 'D'
 
     Try {
         #Run request

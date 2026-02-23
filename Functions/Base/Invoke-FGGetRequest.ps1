@@ -19,26 +19,7 @@ function Invoke-FGGetRequest {
     }
 
     #Check if Access token is expired, if so get new one.
-    $TokenIsStillValid = Confirm-FGAccessTokenValidity
-    if (!($TokenIsStillValid)) {
-
-        If ($Global:DebugMode) {
-            If ($Global:DebugMode.Contains('G')) {
-                Write-Host "Access Token Expired, getting new one" -ForegroundColor Blue
-            }
-        }
-
-        If ($global:ClientSecret) {
-            Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
-        }
-        Elseif ($global:RefreshToken) {
-            Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
-        }
-        Else {
-            Throw "Access Token expired."
-        }
-
-    }
+    Update-FGAccessTokenIfExpired -DebugFlag 'G'
 
     # Get the current (potentially refreshed) access token
     $AccessToken = $Global:AccessToken
@@ -53,13 +34,59 @@ function Invoke-FGGetRequest {
     $pageCount = 0
     $startTime = Get-Date
 
-    Try {
-        #Run request
-        $pageCount++
-        $Result = Invoke-RestMethod -Method Get -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
-    }
-    Catch {
-        Throw $_
+    # Retry settings for transient Graph API errors
+    $maxRetries = 3
+    $retryDelays = @(2, 5, 15)  # Exponential backoff in seconds
+
+    $pageCount++
+    $Result = $null
+    $retryCount = 0
+    $success = $false
+
+    while (-not $success -and $retryCount -le $maxRetries) {
+        try {
+            $Result = Invoke-RestMethod -Method Get -Uri $URI -Headers @{"Authorization" = "Bearer $AccessToken" }
+            $success = $true
+        }
+        catch {
+            $statusCode = $null
+            if ($_.Exception.Response) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+
+            # Also detect transient errors by message content (e.g. "UnknownError" returns vary)
+            $errorMsg = $_.Exception.Message
+            $isTransientError = $statusCode -in @(429, 500, 502, 503, 504) -or $errorMsg -match 'UnknownError|ServiceNotAvailable|GatewayTimeout'
+
+            if ($isTransientError -and $retryCount -lt $maxRetries) {
+                $retryCount++
+
+                # Respect Retry-After header for 429 (throttling)
+                $waitTime = $retryDelays[$retryCount - 1]
+                if ($statusCode -eq 429 -and $_.Exception.Response.Headers) {
+                    try {
+                        $retryAfter = $_.Exception.Response.Headers | Where-Object { $_.Key -eq 'Retry-After' } | Select-Object -ExpandProperty Value -First 1
+                        if ($retryAfter -and [int]::TryParse($retryAfter, [ref]$null)) {
+                            $waitTime = [math]::Max([int]$retryAfter, $waitTime)
+                        }
+                    } catch { }
+                }
+
+                Write-Warning "[Invoke-FGGetRequest] Transient error (Status: $statusCode). Retry $retryCount/$maxRetries after ${waitTime}s..."
+                Start-Sleep -Seconds $waitTime
+
+                # Refresh token before retry in case it expired
+                Update-FGAccessTokenIfExpired -DebugFlag 'G'
+                $AccessToken = $Global:AccessToken
+            }
+            else {
+                # Non-transient error or max retries exhausted
+                if ($retryCount -gt 0) {
+                    Write-Warning "[Invoke-FGGetRequest] Failed after $retryCount retry attempt(s)"
+                }
+                Throw $_
+            }
+        }
     }
 
     #Most get requests will return results in .value but not all.. grr... watch out.. having the propery .value doesn't mean it has a value
@@ -76,33 +103,56 @@ function Invoke-FGGetRequest {
     #By default you only get 100 results... its paged
     While ($Result.'@odata.nextLink') {
         # Check token validity before fetching next page (token may expire during long pagination)
-        $TokenIsStillValid = Confirm-FGAccessTokenValidity
-        if (!($TokenIsStillValid)) {
-            If ($Global:DebugMode -and $Global:DebugMode.Contains('G')) {
-                Write-Host "Access Token Expired during pagination, getting new one" -ForegroundColor Blue
-            }
+        Update-FGAccessTokenIfExpired -DebugFlag 'G'
+        $AccessToken = $Global:AccessToken
 
-            If ($global:ClientSecret) {
-                Get-FGAccessToken -ClientID $Global:ClientID -TenantId $Global:TenantId -ClientSecret $global:ClientSecret
-            }
-            Elseif ($global:RefreshToken) {
-                Get-FGAccessTokenWithRefreshToken -ClientID $Global:ClientID -TenantId $Global:TenantId -RefreshToken $global:RefreshToken
-            }
-            Else {
-                Throw "Access Token expired during pagination."
-            }
+        $pageCount++
+        $nextLink = $Result.'@odata.nextLink'
+        $Result = $null
+        $retryCount = 0
+        $success = $false
 
-            # Update local token variable with refreshed token
-            $AccessToken = $Global:AccessToken
+        while (-not $success -and $retryCount -le $maxRetries) {
+            try {
+                $Result = Invoke-RestMethod -Method Get -Uri $nextLink -Headers @{"Authorization" = "Bearer $AccessToken" }
+                $success = $true
+            }
+            catch {
+                $statusCode = $null
+                if ($_.Exception.Response) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+
+                $errorMsg = $_.Exception.Message
+                $isTransientError = $statusCode -in @(429, 500, 502, 503, 504) -or $errorMsg -match 'UnknownError|ServiceNotAvailable|GatewayTimeout'
+
+                if ($isTransientError -and $retryCount -lt $maxRetries) {
+                    $retryCount++
+                    $waitTime = $retryDelays[$retryCount - 1]
+                    if ($statusCode -eq 429 -and $_.Exception.Response.Headers) {
+                        try {
+                            $retryAfter = $_.Exception.Response.Headers | Where-Object { $_.Key -eq 'Retry-After' } | Select-Object -ExpandProperty Value -First 1
+                            if ($retryAfter -and [int]::TryParse($retryAfter, [ref]$null)) {
+                                $waitTime = [math]::Max([int]$retryAfter, $waitTime)
+                            }
+                        } catch { }
+                    }
+
+                    Write-Warning "[Invoke-FGGetRequest] Page ${pageCount}: Transient error (Status: $statusCode). Retry $retryCount/$maxRetries after ${waitTime}s..."
+                    Start-Sleep -Seconds $waitTime
+
+                    Update-FGAccessTokenIfExpired -DebugFlag 'G'
+                    $AccessToken = $Global:AccessToken
+                }
+                else {
+                    if ($retryCount -gt 0) {
+                        Write-Warning "[Invoke-FGGetRequest] Page ${pageCount}: Failed after $retryCount retry attempt(s)"
+                    }
+                    Throw $_
+                }
+            }
         }
 
-        Try {
-            $pageCount++
-            $Result = Invoke-RestMethod -Method Get -Uri $Result.'@odata.nextLink' -Headers @{"Authorization" = "Bearer $AccessToken" }
-        }
-        Catch {
-            Throw $_
-        }
         $ReturnValue += $Result.value
 
         # Update progress

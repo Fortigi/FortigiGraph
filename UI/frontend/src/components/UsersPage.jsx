@@ -1,13 +1,12 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import useEntityPage from '../hooks/useEntityPage';
 import FilterBar from './FilterBar';
 
 const TAG_COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
   '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
 ];
-
-const PAGE_SIZE = 100;
 
 const FIELD_LABELS = {
   department: 'Department',
@@ -26,283 +25,51 @@ const FIELD_LABELS = {
   __userTag: 'User Tag',
 };
 
+const TABLE_COLUMNS = [
+  { key: 'displayName',       label: 'Display Name' },
+  { key: 'userPrincipalName', label: 'UPN' },
+  { key: 'department',        label: 'Department' },
+  { key: 'jobTitle',          label: 'Job Title' },
+];
+
 export default function UsersPage() {
   const { authFetch } = useAuth();
 
-  // Data state
-  const [users, setUsers] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [tags, setTags] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const ep = useEntityPage({
+    authFetch,
+    entityType: 'user',
+    listEndpoint: '/api/users',
+    columnsEndpoint: '/api/user-columns-page',
+    tagFilterKey: '__userTag',
+  });
 
-  // Column discovery for filters
-  const [availableColumns, setAvailableColumns] = useState([]);
-  const [columnsLoading, setColumnsLoading] = useState(true);
-  const [activeFilters, setActiveFilters] = useState([]);
-
-  // Filter state
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [page, setPage] = useState(0);
-
-  // Selection state
-  const [selected, setSelected] = useState(new Set());
-
-  // Sort state
-  const [sortCol, setSortCol] = useState(null);   // null | 'displayName' | 'userPrincipalName' | 'department' | 'jobTitle'
-  const [sortDir, setSortDir] = useState('asc');   // 'asc' | 'desc'
-
-  // Tag creation state
-  const [showCreateTag, setShowCreateTag] = useState(false);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
-
-  // Action state
-  const [actionTag, setActionTag] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const fetchVersion = useRef(0);
-
-  // Debounce search
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  // Reset page & selection when filters change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, activeFilters]);
-
-  // Fetch available columns for filter dropdowns
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await authFetch('/api/user-columns-page');
-        if (res.ok) setAvailableColumns(await res.json());
-      } catch { /* ignore */ }
-      setColumnsLoading(false);
-    })();
-  }, [authFetch]);
-
-  // Fetch tags
-  const fetchTags = useCallback(async () => {
-    try {
-      const res = await authFetch('/api/tags?entityType=user');
-      if (res.ok) setTags(await res.json());
-    } catch { /* ignore */ }
-  }, [authFetch]);
-
-  useEffect(() => { fetchTags(); }, [fetchTags]);
-
-  // Build filterFields from availableColumns for FilterBar
-  const filterFields = useMemo(() => {
-    return availableColumns
-      .filter(col => col.values && col.values.length >= 1 && col.values.length <= 500)
-      .map(col => ({
-        key: col.column,
-        label: FIELD_LABELS[col.column] || col.column.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim(),
-      }));
-  }, [availableColumns]);
-
-  // Get filter options for a field
-  const getOptionsForField = useCallback((fieldKey) => {
-    const col = availableColumns.find(c => c.column === fieldKey);
-    return col?.values || [];
-  }, [availableColumns]);
-
-  // Build filters object for API (all activeFilters as key:value)
-  const filtersObj = useMemo(() => {
-    if (activeFilters.length === 0) return null;
-    return Object.fromEntries(activeFilters.map(f => [f.field, f.value]));
-  }, [activeFilters]);
-
-  // Fetch users
-  const fetchUsers = useCallback(async () => {
-    const version = ++fetchVersion.current;
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: PAGE_SIZE, offset: page * PAGE_SIZE });
-      if (debouncedSearch) params.set('search', debouncedSearch);
-      if (filtersObj) params.set('filters', JSON.stringify(filtersObj));
-      const res = await authFetch(`/api/users?${params}`);
-      if (res.ok && version === fetchVersion.current) {
-        const json = await res.json();
-        setUsers(json.data);
-        setTotal(json.total);
-      }
-    } catch { /* ignore */ }
-    if (version === fetchVersion.current) setLoading(false);
-  }, [page, debouncedSearch, filtersObj, authFetch]);
-
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
-
-  // Selection helpers
-  const toggleSelect = (id) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (selected.size === users.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(users.map(u => u.id)));
-    }
-  };
-
-  // Sort helpers
-  const toggleSort = (col) => {
-    if (sortCol === col) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortCol(col);
-      setSortDir('asc');
-    }
-  };
-
-  const sortedUsers = useMemo(() => {
-    if (!sortCol) return users;
-    return [...users].sort((a, b) => {
-      const av = (a[sortCol] ?? '').toString().toLowerCase();
-      const bv = (b[sortCol] ?? '').toString().toLowerCase();
-      const cmp = av.localeCompare(bv);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-  }, [users, sortCol, sortDir]);
-
-  // Filter helpers
-  const addFilter = useCallback((field, value) => {
-    setActiveFilters(prev => [...prev.filter(f => f.field !== field), { field, value }]);
-  }, []);
-
-  const removeFilter = useCallback((field) => {
-    setActiveFilters(prev => prev.filter(f => f.field !== field));
-  }, []);
-
-  const clearAllFilters = () => {
-    setActiveFilters([]);
-    setSearch('');
-  };
-
-  // Active tag filter (by tag name)
-  const activeUserTag = activeFilters.find(f => f.field === '__userTag')?.value || '';
-
-  // Tag operations
-  const createTag = async () => {
-    if (!newTagName.trim()) return;
-    setBusy(true);
-    try {
-      const res = await authFetch('/api/tags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newTagName.trim(), color: newTagColor, entityType: 'user' }),
-      });
-      if (res.ok) {
-        setNewTagName('');
-        setShowCreateTag(false);
-        await fetchTags();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || 'Failed to create tag');
-      }
-    } finally { setBusy(false); }
-  };
-
-  const assignTag = async () => {
-    if (!actionTag || selected.size === 0) return;
-    setBusy(true);
-    try {
-      await authFetch(`/api/tags/${actionTag}/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityIds: [...selected] }),
-      });
-      setActionTag('');
-      await Promise.all([fetchUsers(), fetchTags()]);
-    } finally { setBusy(false); }
-  };
-
-  const assignTagToAll = async () => {
-    if (!actionTag) return;
-    setBusy(true);
-    try {
-      const res = await authFetch(`/api/tags/${actionTag}/assign-by-filter`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entityType: 'user',
-          search: debouncedSearch || undefined,
-          filters: filtersObj || undefined,
-        }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        alert(`Tagged ${json.inserted} users`);
-      }
-      setActionTag('');
-      await Promise.all([fetchUsers(), fetchTags()]);
-    } finally { setBusy(false); }
-  };
-
-  const removeTagFromSelected = async () => {
-    if (!actionTag || selected.size === 0) return;
-    setBusy(true);
-    try {
-      await authFetch(`/api/tags/${actionTag}/unassign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityIds: [...selected] }),
-      });
-      setActionTag('');
-      await Promise.all([fetchUsers(), fetchTags()]);
-    } finally { setBusy(false); }
-  };
-
-  const deleteTag = async (tagId) => {
-    if (!confirm('Delete this tag and all its assignments?')) return;
-    setBusy(true);
-    try {
-      await authFetch(`/api/tags/${tagId}`, { method: 'DELETE' });
-      // Clear active filter if this tag was the filtered one
-      const deletedTag = tags.find(t => t.id === tagId);
-      if (deletedTag && activeUserTag === deletedTag.name) {
-        removeFilter('__userTag');
-      }
-      await Promise.all([fetchTags(), fetchUsers()]);
-    } finally { setBusy(false); }
-  };
-
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-  const allOnPageSelected = users.length > 0 && selected.size === users.length;
-  const hasAnyFilter = activeFilters.length > 0 || debouncedSearch;
+  const filterFields = useMemo(() => ep.getFilterFields(FIELD_LABELS), [ep.getFilterFields]);
 
   return (
     <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Users</h2>
-        <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
+        <span className="text-sm text-gray-500">{ep.total.toLocaleString()} total</span>
       </div>
 
       {/* Tag management bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
         <span className="font-medium text-gray-600">Tags:</span>
-        {tags.map(t => (
+        {ep.tags.map(t => (
           <span
             key={t.id}
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer border ${
-              activeUserTag === t.name
+              ep.activeTagFilter === t.name
                 ? 'ring-2 ring-offset-1 ring-blue-400'
                 : 'hover:opacity-80'
             }`}
             style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
             onClick={() => {
-              if (activeUserTag === t.name) {
-                removeFilter('__userTag');
+              if (ep.activeTagFilter === t.name) {
+                ep.removeFilter('__userTag');
               } else {
-                addFilter('__userTag', t.name);
+                ep.addFilter('__userTag', t.name);
               }
             }}
             title={`${t.assignmentCount} users tagged — click to filter`}
@@ -310,7 +77,7 @@ export default function UsersPage() {
             {t.name}
             <span className="text-[10px] opacity-70">({t.assignmentCount})</span>
             <button
-              onClick={(e) => { e.stopPropagation(); deleteTag(t.id); }}
+              onClick={(e) => { e.stopPropagation(); ep.deleteTag(t.id); }}
               className="ml-0.5 hover:opacity-100 opacity-50"
               title="Delete tag"
             >
@@ -319,7 +86,7 @@ export default function UsersPage() {
           </span>
         ))}
         <button
-          onClick={() => setShowCreateTag(!showCreateTag)}
+          onClick={() => ep.setShowCreateTag(!ep.showCreateTag)}
           className="px-2 py-0.5 rounded text-xs text-blue-600 hover:bg-blue-50 border border-blue-200 border-dashed"
         >
           + New Tag
@@ -327,13 +94,13 @@ export default function UsersPage() {
       </div>
 
       {/* Create tag form */}
-      {showCreateTag && (
+      {ep.showCreateTag && (
         <div className="flex items-center gap-2 mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
           <input
             type="text"
-            value={newTagName}
-            onChange={e => setNewTagName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && createTag()}
+            value={ep.newTagName}
+            onChange={e => ep.setNewTagName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && ep.createTag()}
             placeholder="Tag name..."
             className="px-2 py-1 border border-gray-300 rounded text-sm w-48"
             autoFocus
@@ -342,21 +109,21 @@ export default function UsersPage() {
             {TAG_COLORS.map(c => (
               <button
                 key={c}
-                onClick={() => setNewTagColor(c)}
-                className={`w-5 h-5 rounded-full border-2 ${newTagColor === c ? 'border-gray-800 scale-110' : 'border-transparent'}`}
+                onClick={() => ep.setNewTagColor(c)}
+                className={`w-5 h-5 rounded-full border-2 ${ep.newTagColor === c ? 'border-gray-800 scale-110' : 'border-transparent'}`}
                 style={{ backgroundColor: c }}
               />
             ))}
           </div>
           <button
-            onClick={createTag}
-            disabled={!newTagName.trim() || busy}
+            onClick={ep.createTag}
+            disabled={!ep.newTagName.trim() || ep.busy}
             className="px-3 py-1 rounded text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
             Create
           </button>
           <button
-            onClick={() => setShowCreateTag(false)}
+            onClick={() => ep.setShowCreateTag(false)}
             className="px-2 py-1 rounded text-sm text-gray-500 hover:bg-gray-200"
           >
             Cancel
@@ -369,28 +136,28 @@ export default function UsersPage() {
         <FilterBar
           label="Filters:"
           filterFields={filterFields}
-          activeFilters={activeFilters}
-          getOptionsForField={getOptionsForField}
-          onAddFilter={addFilter}
-          onRemoveFilter={removeFilter}
-          loading={columnsLoading}
+          activeFilters={ep.activeFilters}
+          getOptionsForField={ep.getOptionsForField}
+          onAddFilter={ep.addFilter}
+          onRemoveFilter={ep.removeFilter}
+          loading={ep.columnsLoading}
         />
 
         <div className="border-l border-gray-300 h-5 mx-1" />
 
         <input
           type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={ep.search}
+          onChange={e => ep.setSearch(e.target.value)}
           placeholder="Search by name or UPN..."
           className="px-2 py-1 border border-gray-300 rounded text-xs w-56"
         />
 
-        {hasAnyFilter && (
+        {ep.hasAnyFilter && (
           <>
             <div className="border-l border-gray-300 h-5 mx-1" />
             <button
-              onClick={clearAllFilters}
+              onClick={ep.clearAllFilters}
               className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 border border-gray-200"
             >
               Clear all
@@ -400,49 +167,49 @@ export default function UsersPage() {
       </div>
 
       {/* Action bar (visible when items selected) */}
-      {selected.size > 0 && (
+      {ep.selected.size > 0 && (
         <div className="flex items-center gap-3 mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-          <span className="font-medium text-blue-700">{selected.size} selected</span>
+          <span className="font-medium text-blue-700">{ep.selected.size} selected</span>
           <div className="border-l border-blue-200 h-5" />
           <select
-            value={actionTag}
-            onChange={e => setActionTag(e.target.value)}
+            value={ep.actionTag}
+            onChange={e => ep.setActionTag(e.target.value)}
             className="px-2 py-1 border border-gray-300 rounded text-sm"
           >
             <option value="">Select tag...</option>
-            {tags.map(t => (
+            {ep.tags.map(t => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
           <button
-            onClick={assignTag}
-            disabled={!actionTag || busy}
+            onClick={ep.assignTag}
+            disabled={!ep.actionTag || ep.busy}
             className="px-3 py-1 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
           >
             Assign Tag
           </button>
           <button
-            onClick={removeTagFromSelected}
-            disabled={!actionTag || busy}
+            onClick={ep.removeTagFromSelected}
+            disabled={!ep.actionTag || ep.busy}
             className="px-3 py-1 rounded text-sm font-medium text-red-600 hover:bg-red-50 border border-red-200 disabled:opacity-50"
           >
             Remove Tag
           </button>
-          {hasAnyFilter && total > selected.size && (
+          {ep.hasAnyFilter && ep.total > ep.selected.size && (
             <>
               <div className="border-l border-blue-200 h-5" />
               <button
-                onClick={assignTagToAll}
-                disabled={!actionTag || busy}
+                onClick={ep.assignTagToAll}
+                disabled={!ep.actionTag || ep.busy}
                 className="px-3 py-1 rounded text-sm font-medium text-blue-700 hover:bg-blue-100 border border-blue-300 disabled:opacity-50"
-                title={`Tag all ${total} users matching current filters`}
+                title={`Tag all ${ep.total} users matching current filters`}
               >
-                Tag all {total} matching
+                Tag all {ep.total} matching
               </button>
             </>
           )}
           <button
-            onClick={() => setSelected(new Set())}
+            onClick={() => ep.setSelected(new Set())}
             className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 ml-auto"
           >
             Clear selection
@@ -451,11 +218,11 @@ export default function UsersPage() {
       )}
 
       {/* Table */}
-      {loading ? (
+      {ep.loading ? (
         <div className="text-center text-gray-500 py-12">Loading users...</div>
-      ) : users.length === 0 ? (
+      ) : ep.items.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {hasAnyFilter ? 'No users match the current filters.' : 'No users found.'}
+          {ep.hasAnyFilter ? 'No users match the current filters.' : 'No users found.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -465,26 +232,21 @@ export default function UsersPage() {
                 <th className="w-10 px-3 py-2">
                   <input
                     type="checkbox"
-                    checked={allOnPageSelected}
-                    onChange={toggleSelectAll}
+                    checked={ep.allOnPageSelected}
+                    onChange={ep.toggleSelectAll}
                     className="rounded"
                   />
                 </th>
-                {[
-                  { key: 'displayName',        label: 'Display Name' },
-                  { key: 'userPrincipalName',  label: 'UPN' },
-                  { key: 'department',         label: 'Department' },
-                  { key: 'jobTitle',           label: 'Job Title' },
-                ].map(col => (
+                {TABLE_COLUMNS.map(col => (
                   <th
                     key={col.key}
-                    onClick={() => toggleSort(col.key)}
+                    onClick={() => ep.toggleSort(col.key)}
                     className="text-left px-3 py-2 font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-100"
                   >
                     <span className="inline-flex items-center gap-1">
                       {col.label}
-                      {sortCol === col.key ? (
-                        <span className="text-blue-600 text-[10px]">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
+                      {ep.sortCol === col.key ? (
+                        <span className="text-blue-600 text-[10px]">{ep.sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
                       ) : (
                         <span className="text-gray-300 text-[10px]">{'\u25B4'}</span>
                       )}
@@ -495,19 +257,19 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedUsers.map(u => (
+              {ep.sortedItems.map(u => (
                 <tr
                   key={u.id}
                   className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                    selected.has(u.id) ? 'bg-blue-50' : ''
+                    ep.selected.has(u.id) ? 'bg-blue-50' : ''
                   }`}
-                  onClick={() => toggleSelect(u.id)}
+                  onClick={() => ep.toggleSelect(u.id)}
                 >
                   <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
                     <input
                       type="checkbox"
-                      checked={selected.has(u.id)}
-                      onChange={() => toggleSelect(u.id)}
+                      checked={ep.selected.has(u.id)}
+                      onChange={() => ep.toggleSelect(u.id)}
                       className="rounded"
                     />
                   </td>
@@ -536,23 +298,23 @@ export default function UsersPage() {
       )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {ep.totalPages > 1 && (
         <div className="flex items-center justify-between mt-3 text-sm text-gray-600">
           <span>
-            Showing {page * PAGE_SIZE + 1}&ndash;{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()}
+            Showing {ep.page * ep.PAGE_SIZE + 1}&ndash;{Math.min((ep.page + 1) * ep.PAGE_SIZE, ep.total)} of {ep.total.toLocaleString()}
           </span>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPage(p => Math.max(0, p - 1))}
-              disabled={page === 0}
+              onClick={() => ep.setPage(p => Math.max(0, p - 1))}
+              disabled={ep.page === 0}
               className="px-3 py-1 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40"
             >
               Prev
             </button>
-            <span>Page {page + 1} of {totalPages}</span>
+            <span>Page {ep.page + 1} of {ep.totalPages}</span>
             <button
-              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
+              onClick={() => ep.setPage(p => Math.min(ep.totalPages - 1, p + 1))}
+              disabled={ep.page >= ep.totalPages - 1}
               className="px-3 py-1 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40"
             >
               Next

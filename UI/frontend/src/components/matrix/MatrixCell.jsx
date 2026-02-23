@@ -82,6 +82,7 @@ export default memo(MatrixCell, (prev, next) => {
     prev.membershipTypes === next.membershipTypes &&
     prev.managed === next.managed &&
     prev.apColor === next.apColor &&
-    prev.apCount === next.apCount
+    prev.apCount === next.apCount &&
+    prev.apNames === next.apNames
   );
 });

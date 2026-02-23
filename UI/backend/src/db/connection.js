@@ -22,8 +22,24 @@ const config = {
 export async function getPool() {
   if (!pool) {
     pool = await sql.connect(config);
+
+    pool.on('error', (err) => {
+      console.error('SQL pool error:', err.message);
+      pool = null; // Force reconnect on next request
+    });
   }
   return pool;
+}
+
+export async function closePool() {
+  if (pool) {
+    try {
+      await pool.close();
+    } catch (err) {
+      console.error('Error closing SQL pool:', err.message);
+    }
+    pool = null;
+  }
 }
 
 export async function query(text) {

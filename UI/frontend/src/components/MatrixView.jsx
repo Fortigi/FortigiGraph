@@ -1,12 +1,16 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useMatrixRowOrder } from '../hooks/useMatrixRowOrder';
-import { exportToExcel } from '../utils/exportToExcel';
 import MatrixToolbar from './matrix/MatrixToolbar';
 import MatrixColumnHeaders, { BLANK_TAG } from './matrix/MatrixColumnHeaders';
 import MatrixGroupRow from './matrix/MatrixGroupRow';
+
+// Inline arrayMove so MatrixView doesn't depend on @dnd-kit
+function arrayMove(arr, from, to) {
+  const result = [...arr];
+  const [item] = result.splice(from, 1);
+  result.splice(to, 0, item);
+  return result;
+}
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
 const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
@@ -440,10 +444,11 @@ export default function MatrixView({
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
 
-  // Row DnD setup
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
+  // Lazy-load SortableMatrixBody (contains @dnd-kit + @tanstack/react-virtual)
+  const [SortableBody, setSortableBody] = useState(null);
+  useEffect(() => {
+    import('./matrix/SortableMatrixBody').then(m => setSortableBody(() => m.default));
+  }, []);
 
   const handleRowDragEnd = useCallback((event) => {
     const { active, over } = event;
@@ -460,8 +465,9 @@ export default function MatrixView({
     rowOrderHook.updateOrder(sorted.map(g => g.id));
   }, [orderedGroups, rowOrderHook]);
 
-  // Excel export handler
-  const handleExportExcel = useCallback(() => {
+  // Excel export handler (lazy-loads ExcelJS ~200KB only when export is clicked)
+  const handleExportExcel = useCallback(async () => {
+    const { exportToExcel } = await import('../utils/exportToExcel');
     exportToExcel({
       users,
       orderedGroups,
@@ -496,6 +502,26 @@ export default function MatrixView({
   // Number of info columns (drag handle + category + group name)
   const infoColumnCount = 3;
 
+  // Shared column headers element (used by both sortable and static table)
+  const columnHeaders = (
+    <MatrixColumnHeaders
+      users={users}
+      infoColumnCount={infoColumnCount}
+      onSortByCount={handleSortByCount}
+      accessPackages={accessPackages}
+      uniqueGroupTypes={uniqueGroupTypes}
+      groupTypeFilter={groupTypeFilter}
+      onGroupTypeFilterChange={setGroupTypeFilter}
+      uniqueGroupTags={uniqueGroupTags}
+      groupTagFilter={groupTagFilter}
+      onGroupTagFilterChange={setGroupTagFilter}
+      hasGroupsWithoutTags={hasGroupsWithoutTags}
+    />
+  );
+
+  // Ref for the scroll container (needed by virtualizer)
+  const scrollRef = useRef(null);
+
   return (
     <div className="flex flex-col gap-3">
       <MatrixToolbar
@@ -525,7 +551,7 @@ export default function MatrixView({
             : 'No permission data available. Add a filter to narrow down the view.'}
         </div>
       ) : (
-        <div className="relative border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-280px)]">
+        <div ref={scrollRef} className="relative border border-gray-200 rounded-lg overflow-auto max-h-[calc(100vh-280px)]">
           {refreshing && (
             <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
               <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 shadow-sm flex items-center gap-2">
@@ -537,46 +563,42 @@ export default function MatrixView({
               </div>
             </div>
           )}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleRowDragEnd}
-            modifiers={[restrictToVerticalAxis]}
-          >
+          {SortableBody ? (
+            <SortableBody
+              scrollRef={scrollRef}
+              orderedGroups={orderedGroups}
+              groupIds={groupIds}
+              onDragEnd={handleRowDragEnd}
+              columnHeaders={columnHeaders}
+              users={users}
+              memberships={memberships}
+              managedMap={managedMap}
+              managedApMap={managedApMap}
+              apIdToIndex={apIdToIndex}
+              accessPackages={accessPackages}
+              apGroupMap={apGroupMap}
+            />
+          ) : (
             <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
-              <MatrixColumnHeaders
-                users={users}
-                infoColumnCount={infoColumnCount}
-                onSortByCount={handleSortByCount}
-                accessPackages={accessPackages}
-                uniqueGroupTypes={uniqueGroupTypes}
-                groupTypeFilter={groupTypeFilter}
-                onGroupTypeFilterChange={setGroupTypeFilter}
-                uniqueGroupTags={uniqueGroupTags}
-                groupTagFilter={groupTagFilter}
-                onGroupTagFilterChange={setGroupTagFilter}
-                hasGroupsWithoutTags={hasGroupsWithoutTags}
-              />
-              <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
-                <tbody>
-                  {orderedGroups.map(group => (
-                    <MatrixGroupRow
-                      key={group.id}
-                      group={group}
-                      users={users}
-                      totalUsers={users.length}
-                      memberships={memberships}
-                      managedMap={managedMap}
-                      managedApMap={managedApMap}
-                      apIdToIndex={apIdToIndex}
-                      accessPackages={accessPackages}
-                      apGroupMap={apGroupMap}
-                    />
-                  ))}
-                </tbody>
-              </SortableContext>
+              {columnHeaders}
+              <tbody>
+                {orderedGroups.map(group => (
+                  <MatrixGroupRow
+                    key={group.id}
+                    group={group}
+                    users={users}
+                    totalUsers={users.length}
+                    memberships={memberships}
+                    managedMap={managedMap}
+                    managedApMap={managedApMap}
+                    apIdToIndex={apIdToIndex}
+                    accessPackages={accessPackages}
+                    apGroupMap={apGroupMap}
+                  />
+                ))}
+              </tbody>
             </table>
-          </DndContext>
+          )}
         </div>
       )}
     </div>
