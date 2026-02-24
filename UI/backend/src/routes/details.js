@@ -330,10 +330,23 @@ router.get('/access-package/:id', async (req, res) => {
     const pool = await db.getPool();
     const apId = req.params.id;
 
-    // 1. Current attributes
-    const apResult = await timedRequest(pool, 'ap-attributes', res)
-      .input('id', apId)
-      .query('SELECT * FROM GraphAccessPackages WHERE id = @id');
+    // 1. Current attributes + catalog name
+    let apResult;
+    try {
+      apResult = await timedRequest(pool, 'ap-attributes', res)
+        .input('id', apId)
+        .query(`
+        SELECT ap.*, c.displayName AS catalogName
+        FROM GraphAccessPackages ap
+        LEFT JOIN GraphCatalogs c ON ap.catalogId = c.id
+        WHERE ap.id = @id
+      `);
+    } catch {
+      // GraphCatalogs may not exist — fall back to AP-only query
+      apResult = await timedRequest(pool, 'ap-attributes', res)
+        .input('id', apId)
+        .query('SELECT * FROM GraphAccessPackages WHERE id = @id');
+    }
 
     if (apResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Access package not found' });
@@ -364,7 +377,30 @@ router.get('/access-package/:id', async (req, res) => {
       groupCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    // 4. History check
+    // 4. Review count
+    let reviewCount = 0;
+    try {
+      const r = await timedRequest(pool, 'ap-review-count', res)
+        .input('id', apId)
+        .query(`
+        SELECT COUNT(*) AS cnt FROM GraphAccessPackageAccessReviewDecisions WHERE accessPackageId = @id
+      `);
+      reviewCount = r.recordset[0].cnt;
+    } catch { /* table may not exist */ }
+
+    // 5. Pending request count
+    let pendingRequestCount = 0;
+    try {
+      const r = await timedRequest(pool, 'ap-pending-request-count', res)
+        .input('id', apId)
+        .query(`
+        SELECT COUNT(*) AS cnt FROM GraphAccessPackageAssignmentRequests
+        WHERE accessPackageId = @id AND requestState IN ('PendingApproval', 'Delivering', 'Accepted')
+      `);
+      pendingRequestCount = r.recordset[0].cnt;
+    } catch { /* table may not exist */ }
+
+    // 6. History check
     let hasHistory = false;
     try {
       const r = await timedRequest(pool, 'ap-history-check', res)
@@ -378,10 +414,63 @@ router.get('/access-package/:id', async (req, res) => {
       hasHistory = false;
     }
 
-    res.json({ attributes, assignmentCount, groupCount, hasHistory });
+    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, hasHistory });
   } catch (err) {
     console.error('Error fetching access package detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch access package details' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/reviews — Lazy-loaded access reviews
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/reviews', async (req, res) => {
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-reviews', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT
+        id, reviewInstanceId, reviewDefinitionId,
+        reviewedResourceDisplayName,
+        reviewedByDisplayName,
+        reviewedDateTime, decision, justification, recommendation,
+        reviewInstanceStartDateTime, reviewInstanceEndDateTime,
+        reviewInstanceStatus
+      FROM GraphAccessPackageAccessReviewDecisions
+      WHERE accessPackageId = @id
+      ORDER BY reviewedDateTime DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/requests — Lazy-loaded assignment requests
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/requests', async (req, res) => {
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-requests', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT
+        req.id, req.requestType, req.requestState, req.requestStatus,
+        req.justification, req.createdDateTime, req.completedDateTime,
+        u.displayName AS requestorDisplayName, u.userPrincipalName AS requestorUPN
+      FROM GraphAccessPackageAssignmentRequests req
+      LEFT JOIN GraphUsers u ON req.requestorId = u.id
+      WHERE req.accessPackageId = @id
+        AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
+      ORDER BY req.createdDateTime DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    res.json([]);
   }
 });
 

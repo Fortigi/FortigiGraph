@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
-const HEADER_FIELDS = ['catalogName', 'description'];
+const HEADER_FIELDS = ['catalogName', 'catalogId', 'description'];
 const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
 
 function formatDate(val) {
@@ -42,6 +42,19 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
+const DECISION_STYLES = {
+  Approve: 'bg-green-100 text-green-800',
+  Deny: 'bg-red-100 text-red-800',
+  DontKnow: 'bg-yellow-100 text-yellow-800',
+  NotReviewed: 'bg-gray-100 text-gray-600',
+};
+
+const REQUEST_STATE_STYLES = {
+  PendingApproval: 'bg-yellow-100 text-yellow-800',
+  Delivering: 'bg-blue-100 text-blue-800',
+  Accepted: 'bg-green-100 text-green-800',
+};
+
 export default function AccessPackageDetailPage({ accessPackageId, cachedData, onCacheData, onClose }) {
   const { authFetch } = useAuth();
 
@@ -50,7 +63,15 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const [loading, setLoading] = useState(!cachedData?.core);
   const [error, setError] = useState(null);
 
-  // Lazy-loaded history
+  // Lazy-loaded sections
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  const [reviews, setReviews] = useState(cachedData?.reviews || null);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [requests, setRequests] = useState(cachedData?.requests || null);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -74,6 +95,34 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
     return () => { cancelled = true; };
   }, [accessPackageId, authFetch, cachedData?.core, onCacheData]);
 
+  // Lazy-load reviews
+  const loadReviews = useCallback(() => {
+    if (reviews) return;
+    setReviewsLoading(true);
+    authFetch(`/api/access-package/${encodeURIComponent(accessPackageId)}/reviews`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setReviews(d);
+        onCacheData?.(accessPackageId, 'access-package', { reviews: d });
+      })
+      .catch(() => setReviews([]))
+      .finally(() => setReviewsLoading(false));
+  }, [accessPackageId, authFetch, reviews, onCacheData]);
+
+  // Lazy-load requests
+  const loadRequests = useCallback(() => {
+    if (requests) return;
+    setRequestsLoading(true);
+    authFetch(`/api/access-package/${encodeURIComponent(accessPackageId)}/requests`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setRequests(d);
+        onCacheData?.(accessPackageId, 'access-package', { requests: d });
+      })
+      .catch(() => setRequests([]))
+      .finally(() => setRequestsLoading(false));
+  }, [accessPackageId, authFetch, requests, onCacheData]);
+
   // Lazy-load history
   const loadHistory = useCallback(() => {
     if (history) return;
@@ -88,11 +137,16 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
       .finally(() => setHistoryLoading(false));
   }, [accessPackageId, authFetch, history, onCacheData]);
 
+  const toggleReviews = useCallback(() => {
+    setReviewsOpen(prev => { if (!prev) loadReviews(); return !prev; });
+  }, [loadReviews]);
+
+  const toggleRequests = useCallback(() => {
+    setRequestsOpen(prev => { if (!prev) loadRequests(); return !prev; });
+  }, [loadRequests]);
+
   const toggleHistory = useCallback(() => {
-    setHistoryOpen(prev => {
-      if (!prev) loadHistory();
-      return !prev;
-    });
+    setHistoryOpen(prev => { if (!prev) loadHistory(); return !prev; });
   }, [loadHistory]);
 
   if (loading) {
@@ -108,7 +162,8 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   }
   if (!data) return null;
 
-  const { attributes, assignmentCount, groupCount, hasHistory } = data;
+  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, hasHistory } = data;
+  const catalogName = attributes.catalogName || null;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
   const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_ERM/AccessPackageBlade/objectId/${encodeURIComponent(accessPackageId)}`;
@@ -126,8 +181,8 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
             </div>
             <div>
               <h2 className="text-xl font-semibold text-gray-900">{attributes.displayName}</h2>
-              {attributes.catalogName && (
-                <p className="text-sm text-gray-500">Catalog: {attributes.catalogName}</p>
+              {catalogName && (
+                <p className="text-sm text-gray-500">Catalog: {catalogName}</p>
               )}
             </div>
           </div>
@@ -140,6 +195,18 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
               <>
                 {assignmentCount > 0 && <span className="text-gray-400">|</span>}
                 <span>{groupCount} group{groupCount !== 1 ? 's' : ''}</span>
+              </>
+            )}
+            {reviewCount > 0 && (
+              <>
+                {(assignmentCount > 0 || groupCount > 0) && <span className="text-gray-400">|</span>}
+                <span>{reviewCount} review{reviewCount !== 1 ? 's' : ''}</span>
+              </>
+            )}
+            {pendingRequestCount > 0 && (
+              <>
+                <span className="text-gray-400">|</span>
+                <span className="text-yellow-700 font-medium">{pendingRequestCount} pending request{pendingRequestCount !== 1 ? 's' : ''}</span>
               </>
             )}
           </div>
@@ -160,7 +227,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
         </button>
       </div>
 
-      {/* Attributes - single column table */}
+      {/* Attributes */}
       <Section title="Attributes" count={otherAttributes.length}>
         <table className="w-full text-sm">
           <tbody>
@@ -174,8 +241,101 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
         </table>
       </Section>
 
-      {/* Version History - collapsible, lazy-loaded */}
+      {/* Access Reviews */}
       <div className="mt-6">
+        <CollapsibleSection
+          title="Access Reviews"
+          count={reviewCount}
+          open={reviewsOpen}
+          onToggle={toggleReviews}
+          loading={reviewsLoading}
+        >
+          {reviews && reviews.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">No access reviews found</p>
+          ) : reviews && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium">Resource</th>
+                  <th className="px-4 py-2 font-medium">Reviewed By</th>
+                  <th className="px-4 py-2 font-medium">Decision</th>
+                  <th className="px-4 py-2 font-medium">Recommendation</th>
+                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviews.map(r => (
+                  <tr key={r.id} className="border-b border-gray-50">
+                    <td className="px-4 py-2 text-gray-900">{r.reviewedResourceDisplayName || '\u2014'}</td>
+                    <td className="px-4 py-2 text-gray-600">{r.reviewedByDisplayName || '\u2014'}</td>
+                    <td className="px-4 py-2">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${DECISION_STYLES[r.decision] || 'bg-gray-100 text-gray-600'}`}>
+                        {r.decision || '\u2014'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{r.recommendation || '\u2014'}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{formatDate(r.reviewedDateTime)}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{r.reviewInstanceStatus || '\u2014'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      {/* Pending Requests */}
+      <div className="mt-4">
+        <CollapsibleSection
+          title="Pending Requests"
+          count={pendingRequestCount}
+          open={requestsOpen}
+          onToggle={toggleRequests}
+          loading={requestsLoading}
+        >
+          {requests && requests.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">No pending requests</p>
+          ) : requests && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium">Requestor</th>
+                  <th className="px-4 py-2 font-medium">Type</th>
+                  <th className="px-4 py-2 font-medium">State</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Created</th>
+                  <th className="px-4 py-2 font-medium">Justification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map(r => (
+                  <tr key={r.id} className="border-b border-gray-50">
+                    <td className="px-4 py-2 text-gray-900">
+                      <div>{r.requestorDisplayName || '\u2014'}</div>
+                      {r.requestorUPN && <div className="text-xs text-gray-400">{r.requestorUPN}</div>}
+                    </td>
+                    <td className="px-4 py-2 text-gray-600 text-xs">{r.requestType || '\u2014'}</td>
+                    <td className="px-4 py-2">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${REQUEST_STATE_STYLES[r.requestState] || 'bg-gray-100 text-gray-600'}`}>
+                        {r.requestState || '\u2014'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{r.requestStatus || '\u2014'}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{formatDate(r.createdDateTime)}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs truncate max-w-xs" title={r.justification || ''}>
+                      {r.justification || '\u2014'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      {/* Version History */}
+      <div className="mt-4">
         <CollapsibleSection
           title="Version History"
           count={historyCount}
