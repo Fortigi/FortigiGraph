@@ -19,6 +19,10 @@ function New-FGUI {
         [string]$Sku = 'P0v3',
 
         [Parameter(Mandatory = $false)]
+        [ValidateSet('Basic', 'Optimum', 'Fast')]
+        [string]$Scaling = 'Optimum',
+
+        [Parameter(Mandatory = $false)]
         [switch]$UseMockData,
 
         [Parameter(Mandatory = $false)]
@@ -469,6 +473,7 @@ function New-FGUI {
     Write-Host "  Web App:           $WebAppName" -ForegroundColor White
     Write-Host "  URL:               https://$WebAppName.azurewebsites.net" -ForegroundColor White
     Write-Host "  Data mode:         $(if ($UseMockData) { 'Mock data' } else { 'Azure SQL' })" -ForegroundColor White
+    Write-Host "  Scaling:           $Scaling (applied after deployment)" -ForegroundColor White
     Write-Host "  Authentication:    $(if ($uiClientId) { "Entra ID ($uiClientId)" } elseif ($NoAuth) { 'Disabled' } else { 'Disabled' })" -ForegroundColor White
     Write-Host ""
     $proceed = Read-Host "Proceed with deployment? (Y/N)"
@@ -870,12 +875,28 @@ function New-FGUI {
     }
     Write-Host ""
 
+    # ─── Apply Scaling ───────────────────────────────────────────────────
+    if (-not $UseMockData) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Applying '$Scaling' scaling profile..." -ForegroundColor Cyan
+        Write-Host "  This adjusts both the App Service and SQL Database to matched tiers" -ForegroundColor Gray
+        Write-Host "  based on your environment size." -ForegroundColor Gray
+        Write-Host ""
+
+        try {
+            Set-FGUI -ConfigFile $ConfigFile -Scaling $Scaling
+        } catch {
+            Write-Host "  Warning: Could not apply scaling: $_" -ForegroundColor Yellow
+            Write-Host "  You can run Set-FGUI -ConfigFile '$ConfigFile' -Scaling '$Scaling' later." -ForegroundColor Yellow
+        }
+    }
+
     return [PSCustomObject]@{
         WebAppName    = $WebAppName
         URL           = $appUrl
         ResourceGroup = $resourceGroupName
         Location      = $Location
         Sku           = $Sku
+        Scaling       = $Scaling
         DataMode      = if ($UseMockData) { 'Mock' } else { 'SQL' }
         Auth          = if ($uiClientId) { $uiClientId } else { 'Disabled' }
     }

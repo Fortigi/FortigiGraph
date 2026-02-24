@@ -70,7 +70,8 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
 - **Entity Detail Pages**: Click any user or group name (in matrix, Users page, or Groups page) to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id`) supports bookmarking. Drill-through navigation between user and group details.
 - **Performance Monitoring**: Opt-in via `PERF_METRICS_ENABLED=true`. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance page shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
-- **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
+- **Scaling**: `Set-FGUI -Scaling Basic|Optimum|Fast` queries database row counts to determine environment size (Small/Medium/Large), then selects matched App Service + SQL tiers accordingly. Shows estimated monthly costs. `New-FGUI` defaults to Optimum scaling
+- **Deployment**: `New-FGUI` / `Update-FGUI` / `Set-FGUI` / `Remove-FGUI` PowerShell cmdlets
 
 ## Repository Structure
 
@@ -124,11 +125,12 @@ FortigiGraph/
 │   ├── Specific/               # Higher-level helper functions (9)
 │   │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation
 │   │
-│   └── Automation/             # Azure Automation Account management (4)
+│   └── Automation/             # Azure Automation & UI management (5)
 │       ├── New-FGAzureAutomationAccount.ps1
 │       ├── Get-FGAutomationRunbook.ps1
 │       ├── Start-FGAutomationRunbook.ps1
-│       └── Get-FGAutomationJob.ps1
+│       ├── Get-FGAutomationJob.ps1
+│       └── Set-FGUI.ps1                 # Scale App Service + SQL together
 │
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
@@ -189,9 +191,9 @@ FortigiGraph/
 | **Generic** | 49 | Graph API CRUD operations |
 | **Sync** | 15 | High-performance data sync (Start-FGSync + 12 entity syncs + 2 helpers) |
 | **SQL** | 24 | Azure SQL database operations (tables, views, indexes, bulk ops) |
-| **Automation** | 4 | Azure Automation Account management |
+| **Automation** | 5 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
-| **Total** | **122 functions** | |
+| **Total** | **123 functions** | |
 
 ## Architecture & Design Patterns
 
