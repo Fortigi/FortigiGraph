@@ -33,10 +33,10 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   wb.created = new Date();
 
   const ws = wb.addWorksheet('Role Mining Matrix', {
-    views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }],
+    views: [{ state: 'frozen', xSplit: 4, ySplit: 2 }],
   });
 
-  const infoColCount = 3; // (empty) | Category | Group Name
+  const infoColCount = 4; // (empty) | Category | Group Name | GUID
   const userCount = users.length;
   const apCount = accessPackages.length;
 
@@ -48,6 +48,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   ws.getColumn(1).width = 4;   // empty / drag handle
   ws.getColumn(2).width = 14;  // Category
   ws.getColumn(3).width = 38;  // Group Name
+  ws.getColumn(4).width = 38;  // GUID
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
@@ -123,6 +124,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   setHeaderCell(ws.getCell(2, 1), '');
   setHeaderCell(ws.getCell(2, 2), 'Category');
   setHeaderCell(ws.getCell(2, 3), 'Group Name');
+  setHeaderCell(ws.getCell(2, 4), 'GUID');
 
   for (let u = 0; u < userCount; u++) {
     const cell = ws.getCell(2, infoColCount + u + 1);
@@ -177,6 +179,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     nameCell.value = group.displayName;
     nameCell.font = { size: 8, bold: true };
     nameCell.border = thinBorder();
+
+    const guidCell = ws.getCell(rowNum, 4);
+    guidCell.value = group.realGroupId || group.id;
+    guidCell.font = { size: 8, color: { argb: 'FF666666' } };
+    guidCell.border = thinBorder();
 
     // Intersection cells
     for (let u = 0; u < userCount; u++) {

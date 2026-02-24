@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
 const HEADER_FIELDS = ['userPrincipalName', 'department', 'jobTitle', 'companyName'];
-const HIDDEN_FIELDS = new Set(['id', 'displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
+const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
 
 function formatDate(val) {
   if (!val) return '';
@@ -110,7 +110,7 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
 
   const { attributes, tags, hasHistory } = data;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
-  const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
+  const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
   const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/${encodeURIComponent(userId)}`;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
@@ -265,5 +265,6 @@ function CollapsibleSection({ title, count, countLabel, open, onToggle, loading,
 }
 
 function friendlyLabel(key) {
+  if (key === 'id') return 'GUID';
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
 }
