@@ -29,7 +29,7 @@ function New-FGUI {
         [switch]$NoAuth,
 
         [Parameter(Mandatory = $false)]
-        [switch]$PerformanceMetrics,
+        [Nullable[bool]]$PerformanceMetrics,
 
         [Parameter(Mandatory = $false)]
         [switch]$Force
