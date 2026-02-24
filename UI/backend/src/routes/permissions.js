@@ -183,54 +183,25 @@ router.get('/permissions', async (req, res) => {
         }
       };
 
-      // Main permissions query
-      let result;
+      // Combined query — single batch eliminates redundant table scans
+      // Source indicator (mat/view) visible in Performance page timings
+      const sourceTag = permSource.startsWith('mat_') ? 'mat' : 'view';
+
       if (userLimit > 0) {
-        const request = timedRequest(p, 'perm-main-limited', res);
+        const request = timedRequest(p, `perm-combined[${sourceTag}]`, res);
         request.input('userLimit', userLimit);
-        filterWhere = ''; // reset before building
+        filterWhere = '';
         groupFilterWhere = '';
         addParams(request);
 
-        // TopUsers CTE joins GraphGroups when group filters are active
+        // Join GraphGroups in user-count step only when group filters are active
         const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
           ? `LEFT JOIN GraphGroups g ON p.groupId = g.id` : '';
 
-        result = await request.query(`
-          WITH TopUsers AS (
-            SELECT TOP (@userLimit) p.memberId
-            FROM ${permSource} p
-            INNER JOIN GraphUsers u ON p.memberId = u.id
-            ${topUsersGroupJoin}
-            ${userTagJoin}
-            ${groupTagJoin}
-            WHERE p.memberType != '#microsoft.graph.group'
-              ${filterWhere}
-              ${groupFilterWhere}
-            GROUP BY p.memberId
-            ORDER BY COUNT(*) DESC
-          )
-          SELECT
-            p.groupId,
-            g.displayName AS groupDisplayName,
-            g.groupTypeCalculated,
-            g.description AS groupDescription,
-            p.memberId,
-            u.displayName AS memberDisplayName,
-            u.userPrincipalName AS memberUPN,
-            p.memberType,
-            p.membershipType,
-            ${dynamicUserCols},
-            p.managedByAccessPackage
-          FROM ${permSource} p
-          INNER JOIN GraphUsers u ON p.memberId = u.id
-          LEFT JOIN GraphGroups g ON p.groupId = g.id
-          ${groupTagJoin}
-          WHERE p.memberType != '#microsoft.graph.group'
-            AND p.memberId IN (SELECT memberId FROM TopUsers)
-            ${groupFilterWhere};
-
-          SELECT COUNT(DISTINCT p.memberId) AS totalUsers
+        const result = await request.query(`
+          -- Step 1: Per-user membership counts (single scan of ${permSource})
+          SELECT p.memberId, COUNT(*) AS cnt
+          INTO #UserCounts
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           ${topUsersGroupJoin}
@@ -238,15 +209,10 @@ router.get('/permissions', async (req, res) => {
           ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
             ${filterWhere}
-            ${groupFilterWhere};
-        `);
-      } else {
-        const request = timedRequest(p, 'perm-main-full', res);
-        filterWhere = '';
-        groupFilterWhere = '';
-        addParams(request);
+            ${groupFilterWhere}
+          GROUP BY p.memberId;
 
-        result = await request.query(`
+          -- Step 2: Main data for top N users (index seek on memberId)
           SELECT
             p.groupId,
             g.displayName AS groupDisplayName,
@@ -262,93 +228,107 @@ router.get('/permissions', async (req, res) => {
           FROM ${permSource} p
           INNER JOIN GraphUsers u ON p.memberId = u.id
           LEFT JOIN GraphGroups g ON p.groupId = g.id
-          ${userTagJoin}
           ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
-            ${filterWhere}
-            ${groupFilterWhere};
-        `);
-      }
-
-      // AP mapping query — scope to same user set (with filters applied)
-      let managedByPackages = [];
-      try {
-        let apSql;
-        if (userLimit > 0) {
-          const apRequest = timedRequest(p, 'perm-ap-mapping-limited', res);
-          apRequest.input('userLimit', userLimit);
-          filterWhere = '';
-          userTagJoin = '';
-          const apAddParams = (req2) => {
-            for (let i = 0; i < validUserFilters.length; i++) {
-              filterWhere += ` AND CAST(u.[${validUserFilters[i].field}] AS NVARCHAR(400)) = @f${i}`;
-              req2.input(`f${i}`, validUserFilters[i].value);
-            }
-            if (userTagFilter) {
-              userTagJoin = `
-                INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
-                INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
-              req2.input('__userTag', userTagFilter);
-            }
-          };
-          apAddParams(apRequest);
-
-          apSql = `
-            WITH TopUsers AS (
-              SELECT TOP (@userLimit) p.memberId
-              FROM ${permSource} p
-              INNER JOIN GraphUsers u ON p.memberId = u.id
-              ${userTagJoin}
-              WHERE p.memberType != '#microsoft.graph.group'
-                ${filterWhere}
-              GROUP BY p.memberId
-              ORDER BY COUNT(*) DESC
+            AND p.memberId IN (
+              SELECT TOP (@userLimit) memberId FROM #UserCounts ORDER BY cnt DESC
             )
-            SELECT
-              ap.userId AS memberId,
-              ap.groupId,
-              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM ${apSource} ap
-            WHERE ap.userId IN (SELECT memberId FROM TopUsers)
-            GROUP BY ap.userId, ap.groupId;
-          `;
-          const apResult = await apRequest.query(apSql);
-          managedByPackages = (apResult.recordset || [])
-            .filter(r => r.memberId)
-            .map(r => ({
-              memberId: r.memberId,
-              groupId: r.groupId,
-              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
-            }));
-        } else {
-          apSql = `
-            SELECT
-              ap.userId AS memberId,
-              ap.groupId,
-              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM ${apSource} ap
-            GROUP BY ap.userId, ap.groupId;
-          `;
-          const apResult = await timedRequest(p, 'perm-ap-mapping-full', res).query(apSql);
-          managedByPackages = (apResult.recordset || [])
-            .filter(r => r.memberId)
-            .map(r => ({
-              memberId: r.memberId,
-              groupId: r.groupId,
-              accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
-            }));
-        }
-      } catch (apErr) {
-        console.error('AP mapping query failed (non-fatal):', apErr.message);
-      }
+            ${groupFilterWhere};
 
-      if (userLimit > 0) {
+          -- Step 3: Total user count (from temp table — no re-scan)
+          SELECT COUNT(*) AS totalUsers FROM #UserCounts;
+
+          -- Step 4: AP mapping for same top N users (non-fatal)
+          BEGIN TRY
+            SELECT
+              ap.userId AS memberId,
+              ap.groupId,
+              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+            FROM ${apSource} ap
+            WHERE ap.userId IN (
+              SELECT TOP (@userLimit) memberId FROM #UserCounts ORDER BY cnt DESC
+            )
+            GROUP BY ap.userId, ap.groupId;
+          END TRY
+          BEGIN CATCH
+            SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
+                   CAST(NULL AS NVARCHAR(36)) AS groupId,
+                   CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
+            WHERE 1 = 0;
+          END CATCH
+
+          DROP TABLE #UserCounts;
+        `);
+
+        // recordsets: [0]=main data, [1]=totalUsers, [2]=AP mapping
+        const managedByPackages = (result.recordsets[2] || [])
+          .filter(r => r.memberId)
+          .map(r => ({
+            memberId: r.memberId,
+            groupId: r.groupId,
+            accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+          }));
+
         return res.json({
           data: result.recordsets[0],
           totalUsers: result.recordsets[1][0].totalUsers,
           managedByPackages,
         });
       }
+
+      // No user limit — single batch for main data + AP mapping
+      const request = timedRequest(p, `perm-combined[${sourceTag}]`, res);
+      filterWhere = '';
+      groupFilterWhere = '';
+      addParams(request);
+
+      const result = await request.query(`
+        SELECT
+          p.groupId,
+          g.displayName AS groupDisplayName,
+          g.groupTypeCalculated,
+          g.description AS groupDescription,
+          p.memberId,
+          u.displayName AS memberDisplayName,
+          u.userPrincipalName AS memberUPN,
+          p.memberType,
+          p.membershipType,
+          ${dynamicUserCols},
+          p.managedByAccessPackage
+        FROM ${permSource} p
+        INNER JOIN GraphUsers u ON p.memberId = u.id
+        LEFT JOIN GraphGroups g ON p.groupId = g.id
+        ${userTagJoin}
+        ${groupTagJoin}
+        WHERE p.memberType != '#microsoft.graph.group'
+          ${filterWhere}
+          ${groupFilterWhere};
+
+        BEGIN TRY
+          SELECT
+            ap.userId AS memberId,
+            ap.groupId,
+            STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+          FROM ${apSource} ap
+          GROUP BY ap.userId, ap.groupId;
+        END TRY
+        BEGIN CATCH
+          SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
+                 CAST(NULL AS NVARCHAR(36)) AS groupId,
+                 CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
+          WHERE 1 = 0;
+        END CATCH
+      `);
+
+      // recordsets: [0]=main data, [1]=AP mapping
+      const managedByPackages = (result.recordsets[1] || [])
+        .filter(r => r.memberId)
+        .map(r => ({
+          memberId: r.memberId,
+          groupId: r.groupId,
+          accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
+        }));
+
       return res.json({
         data: result.recordsets[0],
         totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
