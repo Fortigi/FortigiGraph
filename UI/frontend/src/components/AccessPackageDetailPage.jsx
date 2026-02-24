@@ -62,6 +62,12 @@ const REQUEST_STATE_STYLES = {
   Accepted: 'bg-green-100 text-green-800',
 };
 
+const ASSIGNMENT_TYPE_STYLES = {
+  'Auto-assigned': 'bg-green-100 text-green-800 border-green-200',
+  'Request-based': 'bg-blue-100 text-blue-800 border-blue-200',
+  'Both': 'bg-purple-100 text-purple-800 border-purple-200',
+};
+
 export default function AccessPackageDetailPage({ accessPackageId, cachedData, onCacheData, onClose }) {
   const { authFetch } = useAuth();
 
@@ -78,6 +84,10 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [requests, setRequests] = useState(cachedData?.requests || null);
   const [requestsLoading, setRequestsLoading] = useState(false);
+
+  const [policiesOpen, setPoliciesOpen] = useState(false);
+  const [policies, setPolicies] = useState(cachedData?.policies || null);
+  const [policiesLoading, setPoliciesLoading] = useState(false);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
@@ -130,6 +140,20 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
       .finally(() => setRequestsLoading(false));
   }, [accessPackageId, authFetch, requests, onCacheData]);
 
+  // Lazy-load policies
+  const loadPolicies = useCallback(() => {
+    if (policies) return;
+    setPoliciesLoading(true);
+    authFetch(`/api/access-package/${encodeURIComponent(accessPackageId)}/policies`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setPolicies(d);
+        onCacheData?.(accessPackageId, 'access-package', { policies: d });
+      })
+      .catch(() => setPolicies([]))
+      .finally(() => setPoliciesLoading(false));
+  }, [accessPackageId, authFetch, policies, onCacheData]);
+
   // Lazy-load history
   const loadHistory = useCallback(() => {
     if (history) return;
@@ -152,6 +176,10 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
     setRequestsOpen(prev => { if (!prev) loadRequests(); return !prev; });
   }, [loadRequests]);
 
+  const togglePolicies = useCallback(() => {
+    setPoliciesOpen(prev => { if (!prev) loadPolicies(); return !prev; });
+  }, [loadPolicies]);
+
   const toggleHistory = useCallback(() => {
     setHistoryOpen(prev => { if (!prev) loadHistory(); return !prev; });
   }, [loadHistory]);
@@ -169,7 +197,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   }
   if (!data) return null;
 
-  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory } = data;
+  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, assignmentType } = data;
   const catalogName = attributes.catalogName || null;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
@@ -187,7 +215,14 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
               AP
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">{attributes.displayName}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-semibold text-gray-900">{attributes.displayName}</h2>
+                {assignmentType && (
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${ASSIGNMENT_TYPE_STYLES[assignmentType] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                    {assignmentType}
+                  </span>
+                )}
+              </div>
               {catalogName && (
                 <p className="text-sm text-gray-500">Catalog: {catalogName}</p>
               )}
@@ -254,6 +289,59 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
           </tbody>
         </table>
       </Section>
+
+      {/* Assignment Policies */}
+      {policyCount > 0 && (
+        <div className="mt-6">
+          <CollapsibleSection
+            title="Assignment Policies"
+            count={policyCount}
+            open={policiesOpen}
+            onToggle={togglePolicies}
+            loading={policiesLoading}
+          >
+            {policies && policies.length === 0 ? (
+              <p className="text-sm text-gray-400 italic p-4">No policies found</p>
+            ) : policies && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                    <th className="px-4 py-2 font-medium">Name</th>
+                    <th className="px-4 py-2 font-medium">Type</th>
+                    <th className="px-4 py-2 font-medium">Duration</th>
+                    <th className="px-4 py-2 font-medium">Extendable</th>
+                    <th className="px-4 py-2 font-medium">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {policies.map(p => (
+                    <tr key={p.id} className="border-b border-gray-50">
+                      <td className="px-4 py-2">
+                        <div className="text-gray-900 font-medium">{p.displayName || '\u2014'}</div>
+                        {p.description && <div className="text-xs text-gray-400 mt-0.5 truncate max-w-xs" title={p.description}>{p.description}</div>}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${p.hasAutoAddRule ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                          {p.hasAutoAddRule ? 'Auto-assigned' : 'Request-based'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-600 text-xs">
+                        {p.durationInDays ? `${p.durationInDays} days` : 'Unlimited'}
+                      </td>
+                      <td className="px-4 py-2 text-gray-600 text-xs">
+                        {p.canExtend ? 'Yes' : 'No'}
+                      </td>
+                      <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">
+                        {formatDate(p.createdDateTime)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CollapsibleSection>
+        </div>
+      )}
 
       {/* Access Reviews */}
       <div className="mt-6">

@@ -416,7 +416,37 @@ router.get('/access-package/:id', async (req, res) => {
       lastReviewedBy = r.recordset[0]?.reviewedByDisplayName || null;
     } catch { /* table may not exist */ }
 
-    // 6. History check
+    // 6. Policy summary — auto-assigned vs request-based
+    let policyCount = 0;
+    let autoAddPolicyCount = 0;
+    try {
+      const r = await timedRequest(pool, 'ap-policy-summary', res)
+        .input('id', apId)
+        .query(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAdd
+        FROM GraphAccessPackageAssignmentPolicies
+        WHERE accessPackageId = @id
+      `);
+      policyCount = r.recordset[0].total;
+      autoAddPolicyCount = r.recordset[0].autoAdd;
+    } catch { /* table may not exist */ }
+
+    // Derive assignment type label
+    let assignmentType = null;
+    if (policyCount > 0) {
+      const requestBasedCount = policyCount - autoAddPolicyCount;
+      if (autoAddPolicyCount > 0 && requestBasedCount > 0) {
+        assignmentType = 'Both';
+      } else if (autoAddPolicyCount > 0) {
+        assignmentType = 'Auto-assigned';
+      } else {
+        assignmentType = 'Request-based';
+      }
+    }
+
+    // 7. History check
     let hasHistory = false;
     try {
       const r = await timedRequest(pool, 'ap-history-check', res)
@@ -430,7 +460,7 @@ router.get('/access-package/:id', async (req, res) => {
       hasHistory = false;
     }
 
-    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory });
+    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, autoAddPolicyCount, assignmentType });
   } catch (err) {
     console.error('Error fetching access package detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch access package details' });
@@ -506,6 +536,28 @@ router.get('/access-package/:id/history', async (req, res) => {
     `);
     res.json(r.recordset.map(cleanRow));
   } catch (err) {
+    res.json([]);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/policies — Lazy-loaded assignment policies
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/policies', async (req, res) => {
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-policies', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT id, displayName, description, canExtend, durationInDays,
+             hasAutoAddRule, createdDateTime, modifiedDateTime
+      FROM GraphAccessPackageAssignmentPolicies
+      WHERE accessPackageId = @id
+      ORDER BY displayName
+    `);
+    res.json(r.recordset);
+  } catch {
     res.json([]);
   }
 });
