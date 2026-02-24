@@ -159,6 +159,31 @@ function Sync-FGAccessPackageAccessReview {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedCount/$($allDefinitions.Count) definitions ($percentComplete%)" -ForegroundColor Gray
         }
 
+        # Extract access package ID from the definition scope
+        # Access package reviews have scope with resourceScopes containing the AP query path,
+        # or principalScopes with accessPackageSubject containing accessPackageId
+        $definitionAccessPackageId = $null
+        if ($definition.scope) {
+            # Check resourceScopes for query path: /identityGovernance/entitlementManagement/accessPackages/{id}
+            if ($definition.scope.resourceScopes) {
+                foreach ($rs in $definition.scope.resourceScopes) {
+                    if ($rs.query -match '/accessPackages/([0-9a-fA-F-]{36})') {
+                        $definitionAccessPackageId = $Matches[1]
+                        break
+                    }
+                }
+            }
+            # Check principalScopes for accessPackageId property
+            if (-not $definitionAccessPackageId -and $definition.scope.principalScopes) {
+                foreach ($ps in $definition.scope.principalScopes) {
+                    if ($ps.accessPackageId) {
+                        $definitionAccessPackageId = $ps.accessPackageId
+                        break
+                    }
+                }
+            }
+        }
+
         # Get instances for this definition
         $instancesUri = "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($definition.id)/instances"
 
@@ -177,18 +202,11 @@ function Sync-FGAccessPackageAccessReview {
                         if ($decisions -and $decisions.Count -gt 0) {
                             # Flatten and store decisions
                             foreach ($decision in $decisions) {
-                                # Try to extract access package ID from the resource
-                                $accessPackageId = $null
-                                if ($decision.resource.id) {
-                                    # The resource ID might be the assignment or access package
-                                    $accessPackageId = $decision.resource.id
-                                }
-
                                 $flatDecision = [PSCustomObject]@{
                                     id = $decision.id
                                     reviewInstanceId = $instance.id
                                     reviewDefinitionId = $definition.id
-                                    accessPackageId = $accessPackageId
+                                    accessPackageId = $definitionAccessPackageId
                                     reviewedResourceId = $decision.resource.id
                                     reviewedResourceDisplayName = $decision.resource.displayName
                                     reviewedBy = $decision.reviewedBy.id
