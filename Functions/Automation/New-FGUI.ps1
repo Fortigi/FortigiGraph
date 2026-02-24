@@ -25,6 +25,9 @@ function New-FGUI {
         [switch]$NoAuth,
 
         [Parameter(Mandatory = $false)]
+        [switch]$PerformanceMetrics,
+
+        [Parameter(Mandatory = $false)]
         [switch]$Force
     )
 
@@ -613,6 +616,9 @@ function New-FGUI {
         $settingsList += @{ name = "SQL_USER";      value = $sqlUser }
         $settingsList += @{ name = "SQL_PASSWORD";  value = $sqlPassword }
     }
+
+    # Performance metrics (opt-in, default off)
+    $settingsList += @{ name = "PERF_METRICS_ENABLED"; value = if ($PerformanceMetrics) { "true" } else { "false" } }
 
     $settingsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings"
 
