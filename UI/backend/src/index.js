@@ -5,16 +5,25 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { authMiddleware } from './middleware/auth.js';
+import { perfMetrics } from './middleware/perfMetrics.js';
+import { enable as enablePerf, isEnabled as isPerfEnabled } from './perf/collector.js';
 import permissionsRouter from './routes/permissions.js';
 import tagsRouter from './routes/tags.js';
 import categoriesRouter from './routes/categories.js';
 import detailsRouter from './routes/details.js';
+import perfRouter from './routes/perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
 const authEnabled = process.env.AUTH_ENABLED === 'true';
+const perfEnabled = process.env.PERF_METRICS_ENABLED === 'true';
+
+// ─── Performance metrics (opt-in via PERF_METRICS_ENABLED=true) ─
+if (perfEnabled) {
+  enablePerf();
+}
 
 // ─── Startup env validation ──────────────────────────────────────
 if (isProduction && !authEnabled) {
@@ -52,11 +61,15 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Server-Timing'],  // Allow browser to read Server-Timing header
 };
 app.use(cors(corsOptions));
 
 // ─── Body parsing with size limit ────────────────────────────────
 app.use(express.json({ limit: '100kb' }));
+
+// ─── Performance metrics middleware (before routes, after body parsing) ─
+app.use('/api', perfMetrics);
 
 // ─── Rate limiting on unauthenticated endpoints ──────────────────
 const publicLimiter = rateLimit({
@@ -86,6 +99,9 @@ app.get('/api/auth-config', publicLimiter, (req, res) => {
   });
 });
 
+// Performance metrics routes (auth-protected)
+app.use('/api', authMiddleware, perfRouter);
+
 // Auth middleware for all other API routes
 app.use('/api', authMiddleware, permissionsRouter);
 app.use('/api', authMiddleware, tagsRouter);
@@ -105,6 +121,7 @@ const server = app.listen(port, () => {
   console.log(`FortigiGraph UI running on http://localhost:${port}`);
   console.log(`Mode: ${process.env.USE_SQL === 'true' ? 'SQL' : 'Mock data'}`);
   console.log(`Auth: ${authEnabled ? 'Entra ID' : 'Disabled'}`);
+  console.log(`Perf: ${isPerfEnabled() ? 'Enabled (Server-Timing headers + /api/perf)' : 'Disabled'}`);
 });
 
 // Graceful shutdown: close SQL pool before exiting

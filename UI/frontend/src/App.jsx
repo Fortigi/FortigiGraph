@@ -10,6 +10,7 @@ const GroupsPage = lazy(() => import('./components/GroupsPage'));
 const AccessPackagesPage = lazy(() => import('./components/AccessPackagesPage'));
 const UserDetailPage = lazy(() => import('./components/UserDetailPage'));
 const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
+const PerfPage = lazy(() => import('./components/PerfPage'));
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ const NAV_TABS = [
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
+  { key: 'performance',      label: 'Performance' },
 ];
 
 export default function App() {
@@ -292,6 +294,8 @@ export default function App() {
             <GroupsPage onOpenDetail={openDetailTab} />
           ) : page === 'access-packages' ? (
             <AccessPackagesPage />
+          ) : page === 'performance' ? (
+            <PerfPage />
           ) : loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-gray-500">Loading permission data...</div>

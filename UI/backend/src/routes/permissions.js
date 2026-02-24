@@ -3,6 +3,7 @@ import { permissionAssignments } from '../mock/data.js';
 import { ensureTagTables } from './tags.js';
 import { ensureCategoryTables } from './categories.js';
 import { getUserColumns, getGroupColumns, FILTERABLE_TYPES } from '../db/columnCache.js';
+import { timedRequest } from '../perf/sqlTimer.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -60,7 +61,7 @@ router.get('/user-columns', async (req, res) => {
     );
 
     const unionSql = parts.join('\nUNION ALL\n') + '\nORDER BY col, val';
-    const result = await p.request().query(unionSql);
+    const result = await timedRequest(p, 'user-columns-values', res).query(unionSql);
 
     // Group by column
     const grouped = {};
@@ -72,7 +73,7 @@ router.get('/user-columns', async (req, res) => {
     // Add virtual __userTag column (ensure tag tables exist first)
     try {
       await ensureTagTables(p);
-      const tagResult = await p.request().query(`
+      const tagResult = await timedRequest(p, 'user-columns-tags', res).query(`
         SELECT t.name
         FROM dbo.GraphTags t
         WHERE t.entityType = 'user'
@@ -111,7 +112,7 @@ router.get('/permissions', async (req, res) => {
       const p = await db.getPool();
 
       // Prefer materialized tables (fast) with view fallback (slow but always current)
-      const matCheck = await p.request().query(`
+      const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
           OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
           OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists
@@ -204,7 +205,7 @@ router.get('/permissions', async (req, res) => {
       // Main permissions query
       let result;
       if (userLimit > 0) {
-        const request = p.request();
+        const request = timedRequest(p, 'perm-main-limited', res);
         request.input('userLimit', userLimit);
         filterWhere = ''; // reset before building
         groupFilterWhere = '';
@@ -259,7 +260,7 @@ router.get('/permissions', async (req, res) => {
             ${groupFilterWhere};
         `);
       } else {
-        const request = p.request();
+        const request = timedRequest(p, 'perm-main-full', res);
         filterWhere = '';
         groupFilterWhere = '';
         addParams(request);
@@ -293,7 +294,7 @@ router.get('/permissions', async (req, res) => {
       try {
         let apSql;
         if (userLimit > 0) {
-          const apRequest = p.request();
+          const apRequest = timedRequest(p, 'perm-ap-mapping-limited', res);
           apRequest.input('userLimit', userLimit);
           filterWhere = '';
           userTagJoin = '';
@@ -347,7 +348,7 @@ router.get('/permissions', async (req, res) => {
             FROM ${apSource} ap
             GROUP BY ap.userId, ap.groupId;
           `;
-          const apResult = await p.request().query(apSql);
+          const apResult = await timedRequest(p, 'perm-ap-mapping-full', res).query(apSql);
           managedByPackages = (apResult.recordset || [])
             .filter(r => r.memberId)
             .map(r => ({
@@ -407,7 +408,7 @@ router.get('/access-package-groups', async (req, res) => {
     if (useSql) {
       const p = await db.getPool();
       await ensureCategoryTables(p);
-      const result = await db.query(`
+      const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
           rrs.accessPackageId,
           ap.displayName AS accessPackageName,
@@ -450,18 +451,15 @@ router.get('/sync-log', async (req, res) => {
 
     if (useSql) {
       const p = await db.getPool();
-      const request = p.request();
-      request.input('limit', limit);
-
       // Check if GraphSyncLog table exists before querying
-      const tableCheck = await request.query(`
+      const tableCheck = await timedRequest(p, 'sync-log-check', res).query(`
         SELECT OBJECT_ID('dbo.GraphSyncLog', 'U') AS tableExists
       `);
       if (!tableCheck.recordset[0].tableExists) {
         return res.json([]);
       }
 
-      const result = await p.request().input('limit', limit).query(`
+      const result = await timedRequest(p, 'sync-log-data', res).input('limit', limit).query(`
         SELECT TOP (@limit)
           Id, SyncType, StartTime, EndTime, DurationSeconds,
           RecordCount, Status, ErrorMessage, TableName, CreatedAt

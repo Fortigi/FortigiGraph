@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as db from '../db/connection.js';
+import { timedRequest } from '../perf/sqlTimer.js';
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.get('/user/:id', async (req, res) => {
     const userId = req.params.id;
 
     // 1. Current attributes
-    const userResult = await pool.request()
+    const userResult = await timedRequest(pool, 'user-attributes', res)
       .input('id', userId)
       .query('SELECT * FROM GraphUsers WHERE id = @id');
 
@@ -45,7 +46,9 @@ router.get('/user/:id', async (req, res) => {
     // 2. Tags
     let tags = [];
     try {
-      const r = await pool.request().input('id', userId).query(`
+      const r = await timedRequest(pool, 'user-tags', res)
+        .input('id', userId)
+        .query(`
         SELECT t.id, t.name, t.color
         FROM GraphTagAssignments ta
         JOIN GraphTags t ON ta.tagId = t.id
@@ -58,7 +61,9 @@ router.get('/user/:id', async (req, res) => {
     let membershipCount = 0;
     try {
       const table = await getPermissionTable(pool);
-      const r = await pool.request().input('id', userId).query(`
+      const r = await timedRequest(pool, 'user-membership-count', res)
+        .input('id', userId)
+        .query(`
         SELECT COUNT(DISTINCT groupId) AS cnt FROM ${table} WHERE memberId = @id
       `);
       membershipCount = r.recordset[0].cnt;
@@ -66,7 +71,9 @@ router.get('/user/:id', async (req, res) => {
 
     let accessPackageCount = 0;
     try {
-      const r = await pool.request().input('id', userId).query(`
+      const r = await timedRequest(pool, 'user-ap-count', res)
+        .input('id', userId)
+        .query(`
         SELECT COUNT(DISTINCT accessPackageId) AS cnt
         FROM GraphAccessPackageAssignments WHERE targetId = @id
       `);
@@ -75,7 +82,9 @@ router.get('/user/:id', async (req, res) => {
 
     let historyCount = 0;
     try {
-      const r = await pool.request().input('id', userId).query(`
+      const r = await timedRequest(pool, 'user-history-count', res)
+        .input('id', userId)
+        .query(`
         SELECT COUNT(*) AS cnt FROM GraphUsers FOR SYSTEM_TIME ALL WHERE id = @id
       `);
       historyCount = r.recordset[0].cnt;
@@ -98,7 +107,9 @@ router.get('/user/:id/memberships', async (req, res) => {
   try {
     const pool = await db.getPool();
     const table = await getPermissionTable(pool);
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'user-memberships', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT groupId, groupDisplayName, groupTypeCalculated,
              membershipType, managedByAccessPackage
       FROM ${table}
@@ -119,7 +130,9 @@ router.get('/user/:id/access-packages', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'user-access-packages', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT DISTINCT
         a.accessPackageId,
         ap.displayName AS accessPackageName,
@@ -144,7 +157,9 @@ router.get('/user/:id/history', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'user-history', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT * FROM GraphUsers FOR SYSTEM_TIME ALL
       WHERE id = @id
       ORDER BY ValidFrom DESC
@@ -166,7 +181,7 @@ router.get('/group/:id', async (req, res) => {
     const groupId = req.params.id;
 
     // 1. Current attributes
-    const groupResult = await pool.request()
+    const groupResult = await timedRequest(pool, 'group-attributes', res)
       .input('id', groupId)
       .query('SELECT * FROM GraphGroups WHERE id = @id');
 
@@ -178,7 +193,9 @@ router.get('/group/:id', async (req, res) => {
     // 2. Tags
     let tags = [];
     try {
-      const r = await pool.request().input('id', groupId).query(`
+      const r = await timedRequest(pool, 'group-tags', res)
+        .input('id', groupId)
+        .query(`
         SELECT t.id, t.name, t.color
         FROM GraphTagAssignments ta
         JOIN GraphTags t ON ta.tagId = t.id
@@ -191,7 +208,9 @@ router.get('/group/:id', async (req, res) => {
     let memberCount = 0;
     try {
       const table = await getPermissionTable(pool);
-      const r = await pool.request().input('id', groupId).query(`
+      const r = await timedRequest(pool, 'group-member-count', res)
+        .input('id', groupId)
+        .query(`
         SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE groupId = @id
       `);
       memberCount = r.recordset[0].cnt;
@@ -199,7 +218,9 @@ router.get('/group/:id', async (req, res) => {
 
     let accessPackageCount = 0;
     try {
-      const r = await pool.request().input('id', groupId).query(`
+      const r = await timedRequest(pool, 'group-ap-count', res)
+        .input('id', groupId)
+        .query(`
         SELECT COUNT(DISTINCT rrs.accessPackageId) AS cnt
         FROM GraphAccessPackageResourceRoleScopes rrs
         WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
@@ -210,7 +231,9 @@ router.get('/group/:id', async (req, res) => {
 
     let historyCount = 0;
     try {
-      const r = await pool.request().input('id', groupId).query(`
+      const r = await timedRequest(pool, 'group-history-count', res)
+        .input('id', groupId)
+        .query(`
         SELECT COUNT(*) AS cnt FROM GraphGroups FOR SYSTEM_TIME ALL WHERE id = @id
       `);
       historyCount = r.recordset[0].cnt;
@@ -233,7 +256,9 @@ router.get('/group/:id/members', async (req, res) => {
   try {
     const pool = await db.getPool();
     const table = await getPermissionTable(pool);
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'group-members', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT memberId, memberDisplayName, memberUPN,
              membershipType, managedByAccessPackage
       FROM ${table}
@@ -254,7 +279,9 @@ router.get('/group/:id/access-packages', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'group-access-packages', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT DISTINCT
         rrs.accessPackageId,
         ap.displayName AS accessPackageName,
@@ -279,7 +306,9 @@ router.get('/group/:id/history', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await pool.request().input('id', req.params.id).query(`
+    const r = await timedRequest(pool, 'group-history', res)
+      .input('id', req.params.id)
+      .query(`
       SELECT * FROM GraphGroups FOR SYSTEM_TIME ALL
       WHERE id = @id
       ORDER BY ValidFrom DESC
