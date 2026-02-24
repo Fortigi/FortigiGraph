@@ -159,22 +159,26 @@ function Sync-FGAccessPackageAccessReview {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedCount/$($allDefinitions.Count) definitions ($percentComplete%)" -ForegroundColor Gray
         }
 
-        # Extract access package ID from the definition scope
-        # Access package reviews have scope with resourceScopes containing the AP query path,
-        # or principalScopes with accessPackageSubject containing accessPackageId
+        # Extract access package ID from the review definition scope
+        # The scope.query contains a filter like: accessPackageId eq 'GUID'
         $definitionAccessPackageId = $null
+        $guidPattern = "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+
         if ($definition.scope) {
-            # Strategy 1: Check resourceScopes for query path containing accessPackages/{id}
-            # The GUID may be quoted with single quotes in the query string
-            if ($definition.scope.resourceScopes) {
+            # Primary: Check scope.query directly (accessReviewQueryScope with accessPackageId eq 'GUID')
+            if ($definition.scope.query -match "accessPackageId\s+eq\s+'$guidPattern'") {
+                $definitionAccessPackageId = $Matches[1]
+            }
+            # Fallback: Check resourceScopes for query path containing accessPackages/{id}
+            if (-not $definitionAccessPackageId -and $definition.scope.resourceScopes) {
                 foreach ($rs in $definition.scope.resourceScopes) {
-                    if ($rs.query -match "accessPackage[s]?[/']+'?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
+                    if ($rs.query -match "accessPackage[s]?[/']+$guidPattern") {
                         $definitionAccessPackageId = $Matches[1]
                         break
                     }
                 }
             }
-            # Strategy 2: Check principalScopes for accessPackageId property
+            # Fallback: Check principalScopes for accessPackageId property
             if (-not $definitionAccessPackageId -and $definition.scope.principalScopes) {
                 foreach ($ps in $definition.scope.principalScopes) {
                     if ($ps.accessPackageId) {
@@ -182,36 +186,6 @@ function Sync-FGAccessPackageAccessReview {
                         break
                     }
                 }
-            }
-            # Strategy 3: Serialize entire scope to JSON and search for any access package GUID reference
-            if (-not $definitionAccessPackageId) {
-                try {
-                    $scopeJson = $definition.scope | ConvertTo-Json -Depth 100 -Compress -ErrorAction SilentlyContinue
-                    if ($scopeJson -match "accessPackage[^""]*?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
-                        $definitionAccessPackageId = $Matches[1]
-                    }
-                } catch { }
-            }
-        }
-        # Strategy 4: Serialize entire definition to JSON as last resort
-        if (-not $definitionAccessPackageId) {
-            try {
-                $defJson = $definition | ConvertTo-Json -Depth 100 -Compress -ErrorAction SilentlyContinue
-                if ($defJson -match "accessPackage[^""]*?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
-                    $definitionAccessPackageId = $Matches[1]
-                }
-            } catch { }
-        }
-
-        # Log first definition's structure for diagnostics
-        if ($processedCount -eq 1) {
-            try {
-                $debugJson = $definition | ConvertTo-Json -Depth 10 -ErrorAction SilentlyContinue
-                Write-Host "  [DEBUG] First definition structure:" -ForegroundColor Yellow
-                Write-Host $debugJson -ForegroundColor Gray
-                Write-Host "  [DEBUG] Extracted accessPackageId: $definitionAccessPackageId" -ForegroundColor Yellow
-            } catch {
-                Write-Host "  [DEBUG] Could not serialize definition: $_" -ForegroundColor Yellow
             }
         }
 
