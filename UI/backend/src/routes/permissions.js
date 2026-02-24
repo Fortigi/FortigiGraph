@@ -96,7 +96,8 @@ router.get('/permissions', async (req, res) => {
       const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
           OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
-          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists
+          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists,
+          OBJECT_ID('dbo.mat_UserCounts', 'U') AS matCountsExists
       `);
       const permSource = matCheck.recordset[0].matPermExists
         ? 'mat_UserPermissionAssignments'
@@ -104,6 +105,7 @@ router.get('/permissions', async (req, res) => {
       const apSource = matCheck.recordset[0].matApExists
         ? 'mat_UserPermissionAssignmentViaAccessPackage'
         : 'vw_UserPermissionAssignmentViaAccessPackage';
+      const hasPrecomputedCounts = !!matCheck.recordset[0].matCountsExists;
 
       // Discover user and group columns dynamically
       const allCols = await getUserColumns(p);
@@ -184,33 +186,54 @@ router.get('/permissions', async (req, res) => {
       };
 
       // Combined query — single batch eliminates redundant table scans
-      // Source indicator (mat/view) visible in Performance page timings
+      // Source indicator (mat/view/pre) visible in Performance page timings
       const sourceTag = permSource.startsWith('mat_') ? 'mat' : 'view';
 
       if (userLimit > 0) {
-        const request = timedRequest(p, `perm-combined[${sourceTag}]`, res);
-        request.input('userLimit', userLimit);
         filterWhere = '';
         groupFilterWhere = '';
+
+        // When no filters are active and pre-computed counts exist, skip the
+        // expensive GROUP BY entirely — just read top N from mat_UserCounts
+        // (instant clustered index scan vs full table scan + hash aggregate)
+        const noFilters = validUserFilters.length === 0 && validGroupFilters.length === 0
+          && !userTagFilter && !groupTagFilter;
+        const usePrecomputed = hasPrecomputedCounts && noFilters;
+
+        const request = timedRequest(p, `perm-combined[${usePrecomputed ? 'pre' : sourceTag}]`, res);
+        request.input('userLimit', userLimit);
         addParams(request);
 
         // Join GraphGroups in user-count step only when group filters are active
         const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
           ? `LEFT JOIN GraphGroups g ON p.groupId = g.id` : '';
 
+        // Step 1: Get top users — pre-computed (instant) or computed (GROUP BY)
+        const step1Sql = usePrecomputed
+          ? `SELECT TOP (@userLimit) memberId, cnt
+             INTO #UserCounts
+             FROM dbo.mat_UserCounts
+             ORDER BY cnt DESC`
+          : `SELECT p.memberId, COUNT(*) AS cnt
+             INTO #UserCounts
+             FROM ${permSource} p
+             INNER JOIN GraphUsers u ON p.memberId = u.id
+             ${topUsersGroupJoin}
+             ${userTagJoin}
+             ${groupTagJoin}
+             WHERE p.memberType != '#microsoft.graph.group'
+               ${filterWhere}
+               ${groupFilterWhere}
+             GROUP BY p.memberId`;
+
+        // Step 3: Total count — from pre-computed table or temp table
+        const step3Sql = usePrecomputed
+          ? `SELECT COUNT(*) AS totalUsers FROM dbo.mat_UserCounts`
+          : `SELECT COUNT(*) AS totalUsers FROM #UserCounts`;
+
         const result = await request.query(`
-          -- Step 1: Per-user membership counts (single scan of ${permSource})
-          SELECT p.memberId, COUNT(*) AS cnt
-          INTO #UserCounts
-          FROM ${permSource} p
-          INNER JOIN GraphUsers u ON p.memberId = u.id
-          ${topUsersGroupJoin}
-          ${userTagJoin}
-          ${groupTagJoin}
-          WHERE p.memberType != '#microsoft.graph.group'
-            ${filterWhere}
-            ${groupFilterWhere}
-          GROUP BY p.memberId;
+          -- Step 1: Top users ${usePrecomputed ? '(pre-computed — no GROUP BY)' : '(computed — GROUP BY)'}
+          ${step1Sql};
 
           -- Step 2: Main data for top N users (index seek on memberId)
           SELECT
@@ -231,12 +254,12 @@ router.get('/permissions', async (req, res) => {
           ${groupTagJoin}
           WHERE p.memberType != '#microsoft.graph.group'
             AND p.memberId IN (
-              SELECT TOP (@userLimit) memberId FROM #UserCounts ORDER BY cnt DESC
+              SELECT memberId FROM #UserCounts
             )
             ${groupFilterWhere};
 
-          -- Step 3: Total user count (from temp table — no re-scan)
-          SELECT COUNT(*) AS totalUsers FROM #UserCounts;
+          -- Step 3: Total user count
+          ${step3Sql};
 
           -- Step 4: AP mapping for same top N users (non-fatal)
           BEGIN TRY
@@ -246,7 +269,7 @@ router.get('/permissions', async (req, res) => {
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM ${apSource} ap
             WHERE ap.userId IN (
-              SELECT TOP (@userLimit) memberId FROM #UserCounts ORDER BY cnt DESC
+              SELECT memberId FROM #UserCounts
             )
             GROUP BY ap.userId, ap.groupId;
           END TRY
