@@ -71,7 +71,7 @@ router.get('/governance/summary', async (req, res) => {
       safeScalar(pool, 'gov-unmanaged', res,
         `SELECT COUNT(*) FROM ${permTable} WHERE managedByAccessPackage = 0 AND membershipType IN ('Direct', 'Eligible')`),
 
-      // Assignment method breakdown (auto vs requested vs admin)
+      // Assignment method breakdown (auto vs requested vs admin vs unknown)
       safeQuery(pool, 'gov-methods', res,
         `SELECT
           assignmentMethod,
@@ -246,6 +246,51 @@ router.get('/governance/pending-requests', async (req, res) => {
         requestState, daysPending, pendingTimeBucket, isOverdue
       FROM vw_PendingRequestTimeline
       ORDER BY daysPending DESC`);
+    res.json(rows);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/governance/review-compliance — Drill-down: per-AP review compliance
+// ?filter=overdue|not-reviewed|on-time (optional)
+// ────────────────────────────────────────────────────────────────
+router.get('/governance/review-compliance', async (req, res) => {
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const filter = req.query.filter; // 'overdue', 'not-reviewed', 'on-time'
+
+    // Build a WHERE clause based on filter
+    let filterClause = '';
+    if (filter === 'overdue') {
+      filterClause = 'AND r.reviewedDateTime > r.reviewInstanceEndDateTime';
+    } else if (filter === 'not-reviewed') {
+      filterClause = "AND r.decision = 'NotReviewed'";
+    } else if (filter === 'on-time') {
+      filterClause = 'AND r.reviewedDateTime <= r.reviewInstanceEndDateTime';
+    }
+
+    const rows = await safeQuery(pool, 'gov-review-compliance-detail', res,
+      `SELECT
+        ap.id AS accessPackageId,
+        ap.displayName AS accessPackageName,
+        c.displayName AS catalogName,
+        COUNT(*) AS totalDecisions,
+        SUM(CASE WHEN r.reviewedDateTime <= r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
+        SUM(CASE WHEN r.reviewedDateTime > r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS overdue,
+        SUM(CASE WHEN r.decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed,
+        MAX(r.reviewedDateTime) AS lastReviewDate,
+        MAX(r.reviewInstanceEndDateTime) AS lastInstanceEndDate
+      FROM GraphAccessPackageAccessReviewDecisions r
+        INNER JOIN GraphAccessPackages ap ON r.accessPackageId = ap.id
+        INNER JOIN GraphCatalogs c ON ap.catalogId = c.id
+      WHERE r.decision IS NOT NULL ${filterClause}
+      GROUP BY ap.id, ap.displayName, c.displayName
+      ORDER BY
+        SUM(CASE WHEN r.decision = 'NotReviewed' THEN 1 ELSE 0 END) DESC,
+        SUM(CASE WHEN r.reviewedDateTime > r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) DESC`);
     res.json(rows);
   } catch (err) {
     res.json([]);

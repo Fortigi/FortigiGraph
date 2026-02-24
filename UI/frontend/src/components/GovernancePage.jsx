@@ -14,7 +14,7 @@ function formatNum(n) {
 }
 
 // ─── Stat card ─────────────────────────────────────────────
-function StatCard({ label, value, sub, color = 'gray' }) {
+function StatCard({ label, value, sub, color = 'gray', onClick }) {
   const colorMap = {
     gray: 'bg-gray-50 border-gray-200',
     blue: 'bg-blue-50 border-blue-200',
@@ -31,11 +31,19 @@ function StatCard({ label, value, sub, color = 'gray' }) {
     yellow: 'text-yellow-900',
     indigo: 'text-indigo-900',
   };
+  const clickable = !!onClick;
   return (
-    <div className={`rounded-lg border p-4 ${colorMap[color] || colorMap.gray}`}>
+    <div
+      className={`rounded-lg border p-4 ${colorMap[color] || colorMap.gray} ${clickable ? 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-blue-300 transition-shadow' : ''}`}
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+    >
       <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</div>
       <div className={`text-2xl font-bold mt-1 ${textMap[color] || textMap.gray}`}>{value}</div>
       {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      {clickable && <div className="text-[10px] text-gray-400 mt-1">Click to view details</div>}
     </div>
   );
 }
@@ -65,19 +73,21 @@ function Section({ title, children }) {
 }
 
 // ─── Collapsible section ───────────────────────────────────
-function CollapsibleSection({ title, count, children, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
+function CollapsibleSection({ title, count, children, defaultOpen = false, open: controlledOpen, onToggle }) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const handleToggle = onToggle || (() => setInternalOpen(o => !o));
   return (
     <div className="bg-white border border-gray-200 rounded-lg mt-6">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={handleToggle}
         className="flex items-center gap-2 text-sm font-semibold text-gray-700 p-5 pb-4 w-full text-left hover:text-gray-900"
       >
-        <span className="text-xs">{open ? '\u25BC' : '\u25B6'}</span>
+        <span className="text-xs">{isOpen ? '\u25BC' : '\u25B6'}</span>
         {title}
         {count != null && <span className="text-xs font-normal text-gray-400">({count})</span>}
       </button>
-      {open && <div className="px-5 pb-5">{children}</div>}
+      {isOpen && <div className="px-5 pb-5">{children}</div>}
     </div>
   );
 }
@@ -95,7 +105,11 @@ export default function GovernancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Load summary (always) + lazy data
+  // Review compliance drill-down
+  const [complianceDrilldown, setComplianceDrilldown] = useState(null); // { filter, data, loading }
+  const [complianceDrilldownOpen, setComplianceDrilldownOpen] = useState(false);
+
+  // Load summary (always)
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -132,6 +146,16 @@ export default function GovernancePage() {
       .then(r => r.json()).then(setPendingRequests).catch(() => setPendingRequests([]));
   }, [authFetch, pendingRequests]);
 
+  // Review compliance drill-down loader
+  const loadComplianceDrilldown = useCallback((filter) => {
+    setComplianceDrilldown({ filter, data: null, loading: true });
+    setComplianceDrilldownOpen(true);
+    authFetch(`/api/governance/review-compliance?filter=${encodeURIComponent(filter)}`)
+      .then(r => r.json())
+      .then(data => setComplianceDrilldown({ filter, data, loading: false }))
+      .catch(() => setComplianceDrilldown({ filter, data: [], loading: false }));
+  }, [authFetch]);
+
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-gray-500">Loading governance data...</div>;
   }
@@ -147,6 +171,13 @@ export default function GovernancePage() {
 
   const { requests, reviews, assignmentMethods } = summary;
   const totalAssignments = summary.managedAssignments + summary.unmanagedAssignments;
+  const totalApAssignments = Object.values(assignmentMethods).reduce((s, v) => s + v, 0);
+
+  const COMPLIANCE_FILTER_LABELS = {
+    'overdue': 'Overdue Reviews',
+    'not-reviewed': 'Not Reviewed',
+    'on-time': 'On-Time Reviews',
+  };
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -163,7 +194,7 @@ export default function GovernancePage() {
         <StatCard
           label="Managed (SOLL)"
           value={`${summary.managedPercent}%`}
-          sub={`${formatNum(summary.managedAssignments)} of ${formatNum(totalAssignments)} assignments`}
+          sub={`${formatNum(summary.managedAssignments)} of ${formatNum(totalAssignments)} group memberships`}
           color={summary.managedPercent >= 70 ? 'green' : summary.managedPercent >= 40 ? 'yellow' : 'red'}
         />
       </div>
@@ -202,15 +233,19 @@ export default function GovernancePage() {
         </div>
 
         {/* Assignment method breakdown */}
-        {Object.keys(assignmentMethods).length > 0 && (
+        {totalApAssignments > 0 && (
           <div className="mt-6 pt-4 border-t border-gray-100">
-            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Assignment Method Breakdown (SOLL)</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              Access Package Assignment Method
+            </h4>
+            <p className="text-xs text-gray-400 mb-3">{formatNum(totalApAssignments)} active AP assignments</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { key: 'Automatic (Policy Rule)', label: 'Automatic', color: 'green' },
                 { key: 'User Requested', label: 'Requested', color: 'blue' },
                 { key: 'Admin Assigned', label: 'Admin', color: 'yellow' },
-              ].map(({ key, label, color }) => (
+                { key: 'Unknown', label: 'Unknown', color: 'gray' },
+              ].filter(({ key }) => (assignmentMethods[key] || 0) > 0).map(({ key, label, color }) => (
                 <StatCard
                   key={key}
                   label={label}
@@ -284,18 +319,21 @@ export default function GovernancePage() {
             value={formatNum(reviews.onTime)}
             sub={`${reviews.onTimePercent}% of decisions`}
             color="green"
+            onClick={() => loadComplianceDrilldown('on-time')}
           />
           <StatCard
             label="Overdue"
             value={formatNum(reviews.overdue)}
             sub={reviews.totalDecisions > 0 ? `${((reviews.overdue / reviews.totalDecisions) * 100).toFixed(1)}%` : '0%'}
             color={reviews.overdue > 0 ? 'red' : 'green'}
+            onClick={reviews.overdue > 0 ? () => loadComplianceDrilldown('overdue') : undefined}
           />
           <StatCard
             label="Not Reviewed"
             value={formatNum(reviews.notReviewed)}
             sub={reviews.totalDecisions > 0 ? `${((reviews.notReviewed / reviews.totalDecisions) * 100).toFixed(1)}%` : '0%'}
             color={reviews.notReviewed > 0 ? 'yellow' : 'green'}
+            onClick={reviews.notReviewed > 0 ? () => loadComplianceDrilldown('not-reviewed') : undefined}
           />
         </div>
 
@@ -315,6 +353,18 @@ export default function GovernancePage() {
           </div>
         )}
       </Section>
+
+      {/* ─── Review Compliance Drill-down ─────────────────── */}
+      {complianceDrilldown && (
+        <CollapsibleSection
+          title={COMPLIANCE_FILTER_LABELS[complianceDrilldown.filter] || 'Review Compliance Details'}
+          count={complianceDrilldown.data?.length}
+          open={complianceDrilldownOpen}
+          onToggle={() => setComplianceDrilldownOpen(o => !o)}
+        >
+          <ComplianceDrilldownSection data={complianceDrilldown} />
+        </CollapsibleSection>
+      )}
 
       {/* ─── Per-Package Metrics ───────────────────────────── */}
       <CollapsibleSection title="Request Metrics per Access Package" count={perPackage?.length}>
@@ -364,6 +414,48 @@ function ResponseTimesSection({ data, onLoad }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ComplianceDrilldownSection({ data: drilldown }) {
+  if (drilldown.loading) return <div className="text-sm text-gray-400 animate-pulse">Loading...</div>;
+  if (!drilldown.data || drilldown.data.length === 0) return <p className="text-sm text-gray-400 italic">No data</p>;
+
+  const rows = drilldown.data;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+            <th className="px-3 py-2 font-medium">Access Package</th>
+            <th className="px-3 py-2 font-medium">Catalog</th>
+            <th className="px-3 py-2 font-medium text-right">Total</th>
+            <th className="px-3 py-2 font-medium text-right">On Time</th>
+            <th className="px-3 py-2 font-medium text-right">Overdue</th>
+            <th className="px-3 py-2 font-medium text-right">Not Reviewed</th>
+            <th className="px-3 py-2 font-medium">Last Review</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.accessPackageId} className={`border-b border-gray-50 ${r.notReviewed > 0 || r.overdue > 0 ? 'hover:bg-yellow-50' : 'hover:bg-gray-50'}`}>
+              <td className="px-3 py-2 text-gray-900 font-medium">{r.accessPackageName}</td>
+              <td className="px-3 py-2 text-gray-500 text-xs">{r.catalogName}</td>
+              <td className="px-3 py-2 text-right text-gray-700">{r.totalDecisions}</td>
+              <td className="px-3 py-2 text-right text-green-700">{r.onTime}</td>
+              <td className="px-3 py-2 text-right">
+                <span className={r.overdue > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{r.overdue}</span>
+              </td>
+              <td className="px-3 py-2 text-right">
+                <span className={r.notReviewed > 0 ? 'text-yellow-700 font-medium' : 'text-gray-400'}>{r.notReviewed}</span>
+              </td>
+              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{formatDate(r.lastReviewDate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
