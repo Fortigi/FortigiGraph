@@ -56,11 +56,19 @@ function Sync-FGMaterializedViews {
         [int]$CommandTimeout = 1800
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
     }
 
-    Invoke-FGSQLCommand -ScriptBlock {
+    try {
+
+    $result = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materializing views for UI performance (timeout: ${CommandTimeout}s per step)..." -ForegroundColor Cyan
@@ -294,5 +302,18 @@ DROP TABLE #RecursiveMemberships;
         return @{
             MaterializedTables = $materialized
         }
+    }
+
+    $syncRecordCount = $result.MaterializedTables
+    $syncStatus = if ($syncRecordCount -ge 2) { "Success" } elseif ($syncRecordCount -ge 1) { "PartialSuccess" } else { "Failed" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        Write-FGSyncLog -SyncType "MaterializedViews" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "mat_UserPermissionAssignments"
     }
 }
