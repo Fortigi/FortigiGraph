@@ -8,7 +8,7 @@ const TAG_COLORS = [
 
 const PAGE_SIZE = 100;
 
-export default function AccessPackagesPage() {
+export default function AccessPackagesPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
 
   // Data state
@@ -446,7 +446,14 @@ export default function AccessPackagesPage() {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-3 py-2 font-medium text-gray-900">{ap.displayName}</td>
+                  <td className="px-3 py-2 font-medium" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => onOpenDetail?.('access-package', ap.id, ap.displayName)}
+                      className="text-blue-600 hover:text-blue-800 hover:underline text-left"
+                    >
+                      {ap.displayName}
+                    </button>
+                  </td>
                   <td className="px-3 py-2 text-gray-600">{ap.catalogName || ''}</td>
                   <td className="px-3 py-2 text-gray-600">{ap.totalAssignments}</td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>

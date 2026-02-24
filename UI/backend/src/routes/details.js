@@ -321,4 +321,88 @@ router.get('/group/:id/history', async (req, res) => {
   }
 });
 
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id — Lightweight: attributes, counts only
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id', async (req, res) => {
+  if (!useSql) return res.json({ attributes: {}, assignmentCount: 0, groupCount: 0, hasHistory: false });
+  try {
+    const pool = await db.getPool();
+    const apId = req.params.id;
+
+    // 1. Current attributes
+    const apResult = await timedRequest(pool, 'ap-attributes', res)
+      .input('id', apId)
+      .query('SELECT * FROM GraphAccessPackages WHERE id = @id');
+
+    if (apResult.recordset.length === 0) {
+      return res.status(404).json({ error: 'Access package not found' });
+    }
+    const attributes = cleanRow(apResult.recordset[0]);
+
+    // 2. Assignment count
+    let assignmentCount = 0;
+    try {
+      const r = await timedRequest(pool, 'ap-assignment-count', res)
+        .input('id', apId)
+        .query(`
+        SELECT COUNT(*) AS cnt FROM GraphAccessPackageAssignments WHERE accessPackageId = @id
+      `);
+      assignmentCount = r.recordset[0].cnt;
+    } catch { /* table may not exist */ }
+
+    // 3. Group count (resources linked to this AP)
+    let groupCount = 0;
+    try {
+      const r = await timedRequest(pool, 'ap-group-count', res)
+        .input('id', apId)
+        .query(`
+        SELECT COUNT(DISTINCT scopeOriginId) AS cnt
+        FROM GraphAccessPackageResourceRoleScopes
+        WHERE accessPackageId = @id AND scopeOriginSystem = 'AadGroup'
+      `);
+      groupCount = r.recordset[0].cnt;
+    } catch { /* table may not exist */ }
+
+    // 4. History check
+    let hasHistory = false;
+    try {
+      const r = await timedRequest(pool, 'ap-history-check', res)
+        .input('id', apId)
+        .query(`
+        SELECT TOP 1 1 AS found FROM GraphAccessPackages FOR SYSTEM_TIME ALL
+        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
+      `);
+      hasHistory = r.recordset.length > 0;
+    } catch {
+      hasHistory = false;
+    }
+
+    res.json({ attributes, assignmentCount, groupCount, hasHistory });
+  } catch (err) {
+    console.error('Error fetching access package detail:', err.message);
+    res.status(500).json({ error: 'Failed to fetch access package details' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/history — Lazy-loaded version history
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/history', async (req, res) => {
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-history', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT * FROM GraphAccessPackages FOR SYSTEM_TIME ALL
+      WHERE id = @id
+      ORDER BY ValidFrom DESC
+    `);
+    res.json(r.recordset.map(cleanRow));
+  } catch (err) {
+    res.json([]);
+  }
+});
+
 export default router;
