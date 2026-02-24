@@ -103,6 +103,13 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'canExtend'
         'durationInDays'
 
+        # Auto-assignment settings (complex object from Graph, stored as JSON)
+        'automaticRequestSettings'
+
+        # Derived: true only when automaticRequestSettings.requestAccessForAllowedTargets = true
+        # Auto-remove-only policies (requestAccessForAllowedTargets = false) do NOT count as auto-add
+        'hasAutoAddRule'
+
         # Metadata
         'createdDateTime'
         'modifiedDateTime'
@@ -142,6 +149,8 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'accessPackageId' = 'UNIQUEIDENTIFIER'
         'canExtend' = 'BIT'
         'durationInDays' = 'INT'
+        'automaticRequestSettings' = 'NVARCHAR(MAX)'
+        'hasAutoAddRule' = 'BIT'
         'createdDateTime' = 'DATETIME2'
         'modifiedDateTime' = 'DATETIME2'
     }
@@ -169,7 +178,10 @@ function Sync-FGAccessPackageAssignmentPolicy {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment policies from Microsoft Graph..." -ForegroundColor Cyan
 
-    $selectProperties = $Attributes -join ','
+    # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
+    $derivedAttributes = @('hasAutoAddRule')
+    $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
+    $selectProperties = $graphAttributes -join ','
     $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies?`$select=$selectProperties"
 
     if ($Filter) {
@@ -203,7 +215,21 @@ function Sync-FGAccessPackageAssignmentPolicy {
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPolicies -Columns $columns -Attributes $Attributes
+    $valueResolvers = @{
+        'automaticRequestSettings' = { param($obj) if ($obj.automaticRequestSettings) { $obj.automaticRequestSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
+        'hasAutoAddRule' = {
+            param($obj)
+            # A policy is auto-add ONLY if automaticRequestSettings exists AND requestAccessForAllowedTargets is true
+            # Auto-remove-only policies (requestAccessForAllowedTargets = false) do NOT count
+            if ($obj.automaticRequestSettings -and $obj.automaticRequestSettings.requestAccessForAllowedTargets -eq $true) {
+                $true
+            } else {
+                $false
+            }
+        }
+    }
+
+    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPolicies -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
