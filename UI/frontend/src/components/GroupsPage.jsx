@@ -29,7 +29,7 @@ const TABLE_COLUMNS = [
   { key: 'description',         label: 'Description' },
 ];
 
-export default function GroupsPage() {
+export default function GroupsPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
 
   const ep = useEntityPage({
@@ -270,7 +270,8 @@ export default function GroupsPage() {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-3 py-2 font-medium text-gray-900">{g.displayName}</td>
+                  <td className="px-3 py-2 font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+                    onClick={() => onOpenDetail?.('group', g.id, g.displayName)}>{g.displayName}</td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{g.groupTypeCalculated || ''}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs max-w-xs truncate" title={g.description || ''}>
                     {g.description || ''}

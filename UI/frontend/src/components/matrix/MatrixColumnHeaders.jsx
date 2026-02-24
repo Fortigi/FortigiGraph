@@ -12,7 +12,7 @@ export function getAccessPackageColor(index) {
 
 export const BLANK_TAG = '__blank__';
 
-export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange, hasGroupsWithoutTags = false }) {
+export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange, hasGroupsWithoutTags = false, onOpenDetail }) {
   const [typeFilterOpen, setTypeFilterOpen] = useState(false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const typeFilterRef = useRef(null);
@@ -251,7 +251,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}`}
           >
             <div
-              className="text-[10px] text-gray-700 font-medium select-none"
+              className="text-[10px] text-gray-700 font-medium cursor-pointer hover:text-blue-600"
               style={{
                 writingMode: 'vertical-lr',
                 textOrientation: 'mixed',
@@ -261,6 +261,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 whiteSpace: 'nowrap',
                 margin: '0 auto',
               }}
+              onClick={() => onOpenDetail?.('user', user.id, user.displayName)}
             >
               {user.displayName}
             </div>

@@ -47,6 +47,7 @@ export default function MatrixView({
   groupTagMap,
   refreshing,
   shareUrl,
+  onOpenDetail,
 }) {
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
   const [groupTagFilter, setGroupTagFilter] = useState(null); // null = all, Set = selected tag names
@@ -516,6 +517,7 @@ export default function MatrixView({
       groupTagFilter={groupTagFilter}
       onGroupTagFilterChange={setGroupTagFilter}
       hasGroupsWithoutTags={hasGroupsWithoutTags}
+      onOpenDetail={onOpenDetail}
     />
   );
 
@@ -577,6 +579,7 @@ export default function MatrixView({
               apIdToIndex={apIdToIndex}
               accessPackages={accessPackages}
               apGroupMap={apGroupMap}
+              onOpenDetail={onOpenDetail}
             />
           ) : (
             <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
@@ -594,6 +597,7 @@ export default function MatrixView({
                     apIdToIndex={apIdToIndex}
                     accessPackages={accessPackages}
                     apGroupMap={apGroupMap}
+                    onOpenDetail={onOpenDetail}
                   />
                 ))}
               </tbody>

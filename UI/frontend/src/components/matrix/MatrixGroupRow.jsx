@@ -24,6 +24,7 @@ export default function MatrixGroupRow({
   apIdToIndex,
   accessPackages = [],
   apGroupMap,
+  onOpenDetail,
   // Optional DnD props (provided by SortableRow wrapper)
   sortableRef,
   sortableStyle,
@@ -67,7 +68,10 @@ export default function MatrixGroupRow({
         style={{ left: '124px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
         title={group.displayName}
       >
-        <div className="truncate">{group.displayName}</div>
+        <div className="truncate cursor-pointer hover:text-blue-600"
+          onClick={() => onOpenDetail?.('group', group.realGroupId || group.id, group.displayName)}>
+          {group.displayName}
+        </div>
       </td>
 
       {/* Intersection cells */}

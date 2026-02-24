@@ -55,7 +55,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Five pages — Matrix, Users, Groups, Access Packages, Sync Log
+- **Tab Navigation**: Five pages — Matrix, Users, Groups, Access Packages, Sync Log — plus dynamic detail tabs
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E); multi-type cells show all badges side by side
@@ -68,6 +68,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Column Header Filters**: Type and Tags columns have filter dropdowns; Tags includes a "(Blank)" option (sentinel `BLANK_TAG`) to show groups without tags
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
+- **Entity Detail Pages**: Click any user or group name (in matrix, Users page, or Groups page) to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id`) supports bookmarking. Drill-through navigation between user and group details.
 - **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
 
 ## Repository Structure
@@ -136,6 +137,7 @@ FortigiGraph/
 │   │   └── src/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
 │   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
+│   │       ├── routes/details.js     # User/group detail endpoints with version history
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
 │   │       ├── db/connection.js       # Azure SQL (mssql) connection pool + graceful shutdown
 │   │       ├── db/columnCache.js      # Shared column discovery cache (5-min TTL)
@@ -153,6 +155,8 @@ FortigiGraph/
 │               ├── MatrixView.jsx     # Main matrix orchestrator (staircase sort, managedApMap, apIdToIndex)
 │               ├── PermissionGrid.jsx # TanStack Table grid view
 │               ├── SyncLogPage.jsx    # Sync log viewer
+│               ├── UserDetailPage.jsx # User detail with attributes, memberships, history
+│               ├── GroupDetailPage.jsx # Group detail with attributes, members, history
 │               └── matrix/            # Matrix sub-components
 │                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
 │                   ├── MatrixCell.jsx       # Individual cell (AP-colored bg, multi-type badges)

@@ -51,6 +51,7 @@ export default function SortableMatrixBody({
   apIdToIndex,
   accessPackages,
   apGroupMap,
+  onOpenDetail,
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -87,6 +88,7 @@ export default function SortableMatrixBody({
     apIdToIndex,
     accessPackages,
     apGroupMap,
+    onOpenDetail,
   };
 
   // When dragging: render all rows (DnD needs full DOM for accurate positioning).
