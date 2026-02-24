@@ -164,16 +164,17 @@ function Sync-FGAccessPackageAccessReview {
         # or principalScopes with accessPackageSubject containing accessPackageId
         $definitionAccessPackageId = $null
         if ($definition.scope) {
-            # Check resourceScopes for query path: /identityGovernance/entitlementManagement/accessPackages/{id}
+            # Strategy 1: Check resourceScopes for query path containing accessPackages/{id}
+            # The GUID may be quoted with single quotes in the query string
             if ($definition.scope.resourceScopes) {
                 foreach ($rs in $definition.scope.resourceScopes) {
-                    if ($rs.query -match '/accessPackages/([0-9a-fA-F-]{36})') {
+                    if ($rs.query -match "accessPackage[s]?[/']+'?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
                         $definitionAccessPackageId = $Matches[1]
                         break
                     }
                 }
             }
-            # Check principalScopes for accessPackageId property
+            # Strategy 2: Check principalScopes for accessPackageId property
             if (-not $definitionAccessPackageId -and $definition.scope.principalScopes) {
                 foreach ($ps in $definition.scope.principalScopes) {
                     if ($ps.accessPackageId) {
@@ -181,6 +182,36 @@ function Sync-FGAccessPackageAccessReview {
                         break
                     }
                 }
+            }
+            # Strategy 3: Serialize entire scope to JSON and search for any access package GUID reference
+            if (-not $definitionAccessPackageId) {
+                try {
+                    $scopeJson = $definition.scope | ConvertTo-Json -Depth 100 -Compress -ErrorAction SilentlyContinue
+                    if ($scopeJson -match "accessPackage[^""]*?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
+                        $definitionAccessPackageId = $Matches[1]
+                    }
+                } catch { }
+            }
+        }
+        # Strategy 4: Serialize entire definition to JSON as last resort
+        if (-not $definitionAccessPackageId) {
+            try {
+                $defJson = $definition | ConvertTo-Json -Depth 100 -Compress -ErrorAction SilentlyContinue
+                if ($defJson -match "accessPackage[^""]*?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})") {
+                    $definitionAccessPackageId = $Matches[1]
+                }
+            } catch { }
+        }
+
+        # Log first definition's structure for diagnostics
+        if ($processedCount -eq 1) {
+            try {
+                $debugJson = $definition | ConvertTo-Json -Depth 10 -ErrorAction SilentlyContinue
+                Write-Host "  [DEBUG] First definition structure:" -ForegroundColor Yellow
+                Write-Host $debugJson -ForegroundColor Gray
+                Write-Host "  [DEBUG] Extracted accessPackageId: $definitionAccessPackageId" -ForegroundColor Yellow
+            } catch {
+                Write-Host "  [DEBUG] Could not serialize definition: $_" -ForegroundColor Yellow
             }
         }
 
