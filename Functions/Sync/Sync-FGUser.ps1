@@ -101,6 +101,12 @@ function Sync-FGUser {
         'mail'
         'onPremisesDistinguishedName'
 
+        # Computed: OU path extracted from onPremisesDistinguishedName
+        'organizationalUnit'
+
+        # Computed: Entra ID Administrative Units (fetched separately)
+        'administrativeUnits'
+
         # Status
         'accountEnabled'
         'userType'
@@ -189,6 +195,8 @@ function Sync-FGUser {
         'preferredLanguage' = 'NVARCHAR(50)'
         'userType' = 'NVARCHAR(50)'
         'managerId' = 'UNIQUEIDENTIFIER'
+        'organizationalUnit' = 'NVARCHAR(1000)'
+        'administrativeUnits' = 'NVARCHAR(MAX)'
     }
 
     # Build column definitions
@@ -214,10 +222,17 @@ function Sync-FGUser {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching users from Microsoft Graph..." -ForegroundColor Cyan
 
-    # Remove special attributes that need expand or separate handling
-    $regularAttributes = $Attributes | Where-Object { $_ -notin @('managerId', 'lastSignInDateTime') }
+    # Remove special attributes that need expand, separate handling, or are computed
+    $regularAttributes = $Attributes | Where-Object { $_ -notin @('managerId', 'lastSignInDateTime', 'organizationalUnit', 'administrativeUnits') }
     $needsManager = $Attributes -contains 'managerId'
     $needsSignInActivity = $Attributes -contains 'lastSignInDateTime'
+    $needsOU = $Attributes -contains 'organizationalUnit'
+    $needsAU = $Attributes -contains 'administrativeUnits'
+
+    # Ensure onPremisesDistinguishedName is fetched from Graph if organizationalUnit is requested
+    if ($needsOU -and $regularAttributes -notcontains 'onPremisesDistinguishedName') {
+        $regularAttributes += 'onPremisesDistinguishedName'
+    }
 
     $selectProperties = $regularAttributes -join ','
     $uri = "https://graph.microsoft.com/v1.0/users?`$select=$selectProperties"
@@ -260,6 +275,37 @@ function Sync-FGUser {
         return
     }
 
+    # Fetch administrative unit memberships if needed
+    $auMemberMap = @{}
+    if ($needsAU) {
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching administrative unit memberships..." -ForegroundColor Cyan
+        try {
+            $auUri = "https://graph.microsoft.com/v1.0/directory/administrativeUnits?`$select=id,displayName"
+            $allAUs = Invoke-FGGetRequest -URI $auUri
+            if ($allAUs) {
+                foreach ($au in $allAUs) {
+                    $membersUri = "https://graph.microsoft.com/v1.0/directory/administrativeUnits/$($au.id)/members?`$select=id"
+                    $members = Invoke-FGGetRequest -URI $membersUri
+                    if ($members) {
+                        foreach ($member in $members) {
+                            if (-not $auMemberMap.ContainsKey($member.id)) {
+                                $auMemberMap[$member.id] = @()
+                            }
+                            $auMemberMap[$member.id] += $au.displayName
+                        }
+                    }
+                }
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($allAUs.Count) administrative unit(s) with $($auMemberMap.Count) member assignments" -ForegroundColor Green
+            }
+            else {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] No administrative units found" -ForegroundColor Gray
+            }
+        }
+        catch {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch administrative units: $_. The 'administrativeUnits' column will be empty."
+        }
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing users to SQL Server..." -ForegroundColor Cyan
 
@@ -270,6 +316,25 @@ function Sync-FGUser {
     $valueResolvers = @{
         'managerId' = { param($obj) if ($obj.manager -and $obj.manager.id) { [guid]$obj.manager.id } else { $null } }
         'lastSignInDateTime' = { param($obj) if ($obj.signInActivity -and $obj.signInActivity.lastSignInDateTime) { [datetime]$obj.signInActivity.lastSignInDateTime } else { $null } }
+        'organizationalUnit' = {
+            param($obj)
+            $dn = $obj.onPremisesDistinguishedName
+            if (-not $dn) { return $null }
+            $parts = $dn -split '(?<!\\),'
+            $ouParts = @($parts | Where-Object { $_ -match '^OU=' } | ForEach-Object { $_ -replace '^OU=', '' })
+            if ($ouParts.Count -gt 0) {
+                [array]::Reverse($ouParts)
+                return ($ouParts -join '/')
+            }
+            return $null
+        }
+        'administrativeUnits' = {
+            param($obj)
+            if ($auMemberMap.ContainsKey($obj.id)) {
+                return ($auMemberMap[$obj.id] -join ', ')
+            }
+            return $null
+        }
     }
 
     $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allUsers -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers
