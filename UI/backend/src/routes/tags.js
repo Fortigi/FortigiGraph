@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, FILTERABLE_TYPES } from '../db/columnCache.js';
+import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, getUserColumnValues, getGroupColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -285,23 +285,9 @@ router.get('/user-columns-page', async (req, res) => {
   try {
     if (!useSql) return res.json([]);
     const p = await db.getPool();
-    const cols = await getUserCols(p);
-    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
-    if (filterableCols.length === 0) return res.json([]);
 
-    const parts = filterableCols.map(c =>
-      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
-      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphUsers ` +
-      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
-      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
-    );
-    const result = await p.request().query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
-
-    const grouped = {};
-    for (const r of result.recordset) {
-      if (!grouped[r.col]) grouped[r.col] = [];
-      grouped[r.col].push(r.val);
-    }
+    // Use cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
+    const grouped = { ...await getUserColumnValues(p) };
 
     // Add virtual __userTag column (tag names as values)
     try {
@@ -330,23 +316,7 @@ router.get('/group-columns', async (req, res) => {
   try {
     if (!useSql) return res.json([]);
     const p = await db.getPool();
-    const cols = await getGroupCols(p);
-    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
-    if (filterableCols.length === 0) return res.json([]);
-
-    const parts = filterableCols.map(c =>
-      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
-      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphGroups ` +
-      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
-      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
-    );
-    const result = await p.request().query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
-
-    const grouped = {};
-    for (const r of result.recordset) {
-      if (!grouped[r.col]) grouped[r.col] = [];
-      grouped[r.col].push(r.val);
-    }
+    const grouped = { ...await getGroupColumnValues(p) };
 
     // Add virtual __groupTag column (tag names as values)
     try {

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
 import { ensureTagTables } from './tags.js';
 import { ensureCategoryTables } from './categories.js';
-import { getUserColumns, getGroupColumns, FILTERABLE_TYPES } from '../db/columnCache.js';
+import { getUserColumns, getGroupColumns, getUserColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
 import { timedRequest } from '../perf/sqlTimer.js';
 
 const router = Router();
@@ -47,28 +47,9 @@ router.get('/user-columns', async (req, res) => {
     }
 
     const p = await db.getPool();
-    const cols = await getUserColumns(p);
-    const filterableCols = cols.filter(c => FILTERABLE_TYPES.has(c.type));
 
-    if (filterableCols.length === 0) return res.json([]);
-
-    // Single UNION ALL query to get all distinct values in one roundtrip
-    const parts = filterableCols.map(c =>
-      `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
-      `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM GraphUsers ` +
-      `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
-      `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
-    );
-
-    const unionSql = parts.join('\nUNION ALL\n') + '\nORDER BY col, val';
-    const result = await timedRequest(p, 'user-columns-values', res).query(unionSql);
-
-    // Group by column
-    const grouped = {};
-    for (const r of result.recordset) {
-      if (!grouped[r.col]) grouped[r.col] = [];
-      grouped[r.col].push(r.val);
-    }
+    // Use cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
+    const grouped = { ...await getUserColumnValues(p) };
 
     // Add virtual __userTag column (ensure tag tables exist first)
     try {

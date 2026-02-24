@@ -108,7 +108,8 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
   }
   if (!data) return null;
 
-  const { attributes, tags, historyCount } = data;
+  const { attributes, tags, hasHistory } = data;
+  const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k));
   const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/${encodeURIComponent(groupId)}`;
 

@@ -28,7 +28,7 @@ async function getPermissionTable(pool) {
 // GET /api/user/:id — Lightweight: attributes, tags, counts only
 // ────────────────────────────────────────────────────────────────
 router.get('/user/:id', async (req, res) => {
-  if (!useSql) return res.json({ attributes: {}, tags: [], membershipCount: 0, accessPackageCount: 0, historyCount: 0 });
+  if (!useSql) return res.json({ attributes: {}, tags: [], membershipCount: 0, accessPackageCount: 0, hasHistory: false });
   try {
     const pool = await db.getPool();
     const userId = req.params.id;
@@ -80,19 +80,20 @@ router.get('/user/:id', async (req, res) => {
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    let historyCount = 0;
+    let hasHistory = false;
     try {
-      const r = await timedRequest(pool, 'user-history-count', res)
+      const r = await timedRequest(pool, 'user-history-check', res)
         .input('id', userId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM GraphUsers FOR SYSTEM_TIME ALL WHERE id = @id
+        SELECT TOP 1 1 AS found FROM GraphUsers FOR SYSTEM_TIME ALL
+        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
       `);
-      historyCount = r.recordset[0].cnt;
+      hasHistory = r.recordset.length > 0;
     } catch {
-      historyCount = 1;
+      hasHistory = false;
     }
 
-    res.json({ attributes, tags, membershipCount, accessPackageCount, historyCount });
+    res.json({ attributes, tags, membershipCount, accessPackageCount, hasHistory });
   } catch (err) {
     console.error('Error fetching user detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch user details' });
@@ -175,7 +176,7 @@ router.get('/user/:id/history', async (req, res) => {
 // GET /api/group/:id — Lightweight: attributes, tags, counts only
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id', async (req, res) => {
-  if (!useSql) return res.json({ attributes: {}, tags: [], memberCount: 0, accessPackageCount: 0, historyCount: 0 });
+  if (!useSql) return res.json({ attributes: {}, tags: [], memberCount: 0, accessPackageCount: 0, hasHistory: false });
   try {
     const pool = await db.getPool();
     const groupId = req.params.id;
@@ -229,19 +230,20 @@ router.get('/group/:id', async (req, res) => {
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    let historyCount = 0;
+    let hasHistory = false;
     try {
-      const r = await timedRequest(pool, 'group-history-count', res)
+      const r = await timedRequest(pool, 'group-history-check', res)
         .input('id', groupId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM GraphGroups FOR SYSTEM_TIME ALL WHERE id = @id
+        SELECT TOP 1 1 AS found FROM GraphGroups FOR SYSTEM_TIME ALL
+        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
       `);
-      historyCount = r.recordset[0].cnt;
+      hasHistory = r.recordset.length > 0;
     } catch {
-      historyCount = 1;
+      hasHistory = false;
     }
 
-    res.json({ attributes, tags, memberCount, accessPackageCount, historyCount });
+    res.json({ attributes, tags, memberCount, accessPackageCount, hasHistory });
   } catch (err) {
     console.error('Error fetching group detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch group details' });
