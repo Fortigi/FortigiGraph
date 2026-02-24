@@ -169,7 +169,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   }
   if (!data) return null;
 
-  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, hasHistory } = data;
+  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory } = data;
   const catalogName = attributes.catalogName || null;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
@@ -221,6 +221,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
             <div className="mt-2 text-sm text-gray-600">
               <span className="text-gray-500">Last Access Review:</span>{' '}
               <span className="font-medium">{formatDate(lastReviewDate)}</span>
+              {lastReviewedBy && <span className="text-gray-500"> by {lastReviewedBy}</span>}
             </div>
           )}
           <a href={entraUrl} target="_blank" rel="noopener noreferrer"
@@ -270,7 +271,8 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
               <thead>
                 <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
                   <th className="px-4 py-2 font-medium">User</th>
-                  <th className="px-4 py-2 font-medium">Review</th>
+                  <th className="px-4 py-2 font-medium">Reviewed By</th>
+                  <th className="px-4 py-2 font-medium">Decision</th>
                   <th className="px-4 py-2 font-medium">Recommendation</th>
                   <th className="px-4 py-2 font-medium">Date</th>
                   <th className="px-4 py-2 font-medium">Status</th>
@@ -279,13 +281,11 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
               <tbody>
                 {reviews.map(r => (
                   <tr key={r.id} className="border-b border-gray-50">
-                    <td className="px-4 py-2 text-gray-900">{r.reviewedResourceDisplayName || '\u2014'}</td>
+                    <td className="px-4 py-2 text-gray-900">{r.principalDisplayName || '\u2014'}</td>
+                    <td className="px-4 py-2 text-gray-600">{r.reviewedByDisplayName || '\u2014'}</td>
                     <td className="px-4 py-2">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${DECISION_STYLES[r.decision] || 'bg-gray-100 text-gray-600'}`}>
-                        {r.decision === 'Approve' ? `${DECISION_LABELS[r.decision]} by ${r.reviewedByDisplayName || 'unknown'}` :
-                         r.decision === 'Deny' ? `${DECISION_LABELS[r.decision]} by ${r.reviewedByDisplayName || 'unknown'}` :
-                         r.decision === 'NotReviewed' ? DECISION_LABELS[r.decision] :
-                         r.decision ? `${r.decision} — ${r.reviewedByDisplayName || 'unknown'}` : '\u2014'}
+                        {DECISION_LABELS[r.decision] || r.decision || '\u2014'}
                       </span>
                     </td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{r.recommendation || '\u2014'}</td>

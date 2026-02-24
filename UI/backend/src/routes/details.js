@@ -400,17 +400,20 @@ router.get('/access-package/:id', async (req, res) => {
       pendingRequestCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    // 5b. Last review date
+    // 5b. Last review date + reviewer
     let lastReviewDate = null;
+    let lastReviewedBy = null;
     try {
       const r = await timedRequest(pool, 'ap-last-review-date', res)
         .input('id', apId)
         .query(`
-        SELECT MAX(reviewedDateTime) AS lastDate
+        SELECT TOP 1 reviewedDateTime, reviewedByDisplayName
         FROM GraphAccessPackageAccessReviewDecisions
         WHERE accessPackageId = @id AND decision IS NOT NULL AND decision <> 'NotReviewed'
+        ORDER BY reviewedDateTime DESC
       `);
-      lastReviewDate = r.recordset[0]?.lastDate || null;
+      lastReviewDate = r.recordset[0]?.reviewedDateTime || null;
+      lastReviewedBy = r.recordset[0]?.reviewedByDisplayName || null;
     } catch { /* table may not exist */ }
 
     // 6. History check
@@ -427,7 +430,7 @@ router.get('/access-package/:id', async (req, res) => {
       hasHistory = false;
     }
 
-    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, hasHistory });
+    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory });
   } catch (err) {
     console.error('Error fetching access package detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch access package details' });
@@ -446,7 +449,7 @@ router.get('/access-package/:id/reviews', async (req, res) => {
       .query(`
       SELECT
         id, reviewInstanceId, reviewDefinitionId,
-        reviewedResourceDisplayName,
+        principalDisplayName,
         reviewedByDisplayName,
         reviewedDateTime, decision, justification, recommendation,
         reviewInstanceStartDateTime, reviewInstanceEndDateTime,

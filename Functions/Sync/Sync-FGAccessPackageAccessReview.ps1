@@ -68,6 +68,8 @@ function Sync-FGAccessPackageAccessReview {
         'reviewInstanceId'             # Which review instance this decision belongs to
         'reviewDefinitionId'           # Which review definition/schedule
         'accessPackageId'              # Which access package was reviewed
+        'principalId'                  # User whose access is being reviewed
+        'principalDisplayName'         # Display name of user being reviewed
         'reviewedResourceId'           # Resource being reviewed (often the access package assignment)
         'reviewedResourceDisplayName'  # Display name of reviewed resource
         'reviewedBy'                   # User ID who performed the review
@@ -89,6 +91,8 @@ function Sync-FGAccessPackageAccessReview {
         'reviewInstanceId' = 'UNIQUEIDENTIFIER'
         'reviewDefinitionId' = 'UNIQUEIDENTIFIER'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
+        'principalDisplayName' = 'NVARCHAR(255)'
         'reviewedResourceId' = 'UNIQUEIDENTIFIER'
         'reviewedResourceDisplayName' = 'NVARCHAR(500)'
         'reviewedBy' = 'UNIQUEIDENTIFIER'
@@ -212,6 +216,8 @@ function Sync-FGAccessPackageAccessReview {
                                     reviewInstanceId = $instance.id
                                     reviewDefinitionId = $definition.id
                                     accessPackageId = $definitionAccessPackageId
+                                    principalId = $decision.principal.id
+                                    principalDisplayName = $decision.principal.displayName
                                     reviewedResourceId = $decision.resource.id
                                     reviewedResourceDisplayName = $decision.resource.displayName
                                     reviewedBy = $decision.reviewedBy.id
