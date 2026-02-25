@@ -78,7 +78,7 @@ const NAV_TABS = [
   { key: 'users',            label: 'Users' },
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
-  { key: 'governance',       label: 'Governance' },
+  { key: 'governance',       label: 'Access Review Compliance' },
   { key: 'sync-log',         label: 'Sync Log' },
   { key: 'performance',      label: 'Performance' },
 ];
