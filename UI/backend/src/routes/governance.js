@@ -15,37 +15,94 @@ async function safeQuery(pool, label, res, sql) {
   }
 }
 
+// ── Shared CTE: per-AP last review instance status ──────────
+// For each access package, finds the most recent review instance,
+// then summarizes decisions within that instance only.
+// Earlier instances are ignored — only the latest matters.
+const LAST_REVIEW_CTE = `
+WITH LatestInstance AS (
+  -- Find the most recent review instance per access package
+  SELECT
+    accessPackageId,
+    MAX(reviewInstanceId) AS reviewInstanceId,
+    MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime,
+    MAX(reviewInstanceStartDateTime) AS reviewInstanceStartDateTime,
+    MAX(reviewInstanceStatus) AS reviewInstanceStatus
+  FROM GraphAccessPackageAccessReviewDecisions
+  WHERE reviewInstanceEndDateTime = (
+    SELECT MAX(r2.reviewInstanceEndDateTime)
+    FROM GraphAccessPackageAccessReviewDecisions r2
+    WHERE r2.accessPackageId = GraphAccessPackageAccessReviewDecisions.accessPackageId
+  )
+  GROUP BY accessPackageId
+),
+LastReviewPerAP AS (
+  -- Summarize decisions within the latest instance only
+  SELECT
+    li.accessPackageId,
+    li.reviewInstanceEndDateTime AS deadline,
+    li.reviewInstanceStartDateTime AS reviewStart,
+    li.reviewInstanceStatus,
+    COUNT(*) AS totalDecisions,
+    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime <= li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
+    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime > li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS reviewedLate,
+    SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed,
+    MAX(d.reviewedDateTime) AS lastReviewedDate,
+    MAX(d.reviewedByDisplayName) AS lastReviewedBy,
+    CASE
+      -- All decisions completed on time
+      WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
+       AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime > li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) = 0
+      THEN 'Compliant'
+      -- Some decisions still pending but deadline hasn't passed yet
+      WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+       AND li.reviewInstanceEndDateTime >= GETUTCDATE()
+      THEN 'In Progress'
+      -- Deadline passed with unreviewed decisions
+      WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+       AND li.reviewInstanceEndDateTime < GETUTCDATE()
+      THEN 'Overdue'
+      -- All reviewed but some were late
+      ELSE 'Reviewed Late'
+    END AS complianceStatus,
+    CASE
+      WHEN li.reviewInstanceEndDateTime < GETUTCDATE()
+      THEN DATEDIFF(DAY, li.reviewInstanceEndDateTime, GETUTCDATE())
+      ELSE 0
+    END AS daysOverdue
+  FROM LatestInstance li
+    INNER JOIN GraphAccessPackageAccessReviewDecisions d
+      ON d.accessPackageId = li.accessPackageId
+      AND d.reviewInstanceId = li.reviewInstanceId
+  GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
+)`;
+
 // ────────────────────────────────────────────────────────────────
-// GET /api/governance/summary — Access review compliance KPIs
+// GET /api/governance/summary — AP-centric review compliance KPIs
 // ────────────────────────────────────────────────────────────────
 router.get('/governance/summary', async (req, res) => {
   if (!useSql) return res.json({});
   try {
     const pool = await db.getPool();
 
-    // Review compliance: on-time vs expired
-    // A review is "on time" if the decision was made before the instance end date
-    const reviewCompliance = await safeQuery(pool, 'gov-review-compliance', res,
-      `SELECT
-        COUNT(*) AS totalDecisions,
-        SUM(CASE WHEN reviewedDateTime <= reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
-        SUM(CASE WHEN reviewedDateTime > reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS overdue,
-        SUM(CASE WHEN decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed
-      FROM GraphAccessPackageAccessReviewDecisions
-      WHERE decision IS NOT NULL`);
+    const rows = await safeQuery(pool, 'gov-summary', res,
+      `${LAST_REVIEW_CTE}
+      SELECT
+        COUNT(*) AS totalAPs,
+        SUM(CASE WHEN complianceStatus = 'Compliant' THEN 1 ELSE 0 END) AS compliant,
+        SUM(CASE WHEN complianceStatus = 'Overdue' THEN 1 ELSE 0 END) AS overdue,
+        SUM(CASE WHEN complianceStatus = 'Reviewed Late' THEN 1 ELSE 0 END) AS reviewedLate,
+        SUM(CASE WHEN complianceStatus = 'In Progress' THEN 1 ELSE 0 END) AS inProgress
+      FROM LastReviewPerAP`);
 
-    const compliance = reviewCompliance[0] || {};
+    const s = rows[0] || {};
 
     res.json({
-      reviews: {
-        totalDecisions: compliance.totalDecisions || 0,
-        onTime: compliance.onTime || 0,
-        overdue: compliance.overdue || 0,
-        notReviewed: compliance.notReviewed || 0,
-        onTimePercent: compliance.totalDecisions > 0
-          ? Math.round(((compliance.onTime || 0) / compliance.totalDecisions) * 1000) / 10
-          : 0,
-      },
+      totalAPs: s.totalAPs || 0,
+      compliant: s.compliant || 0,
+      overdue: s.overdue || 0,
+      reviewedLate: s.reviewedLate || 0,
+      inProgress: s.inProgress || 0,
     });
   } catch (err) {
     console.error('Error fetching governance summary:', err.message);
@@ -54,28 +111,28 @@ router.get('/governance/summary', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// GET /api/governance/review-compliance — Drill-down: per-AP review compliance
-// ?filter=overdue|not-reviewed|on-time (optional)
-// ?category=categoryId (optional — filter to APs in a specific category)
+// GET /api/governance/review-compliance — Per-AP last review status
+// ?filter=compliant|overdue|reviewed-late|in-progress (optional)
+// ?category=categoryId (optional)
 // ────────────────────────────────────────────────────────────────
 router.get('/governance/review-compliance', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const filter = req.query.filter; // 'overdue', 'not-reviewed', 'on-time'
-    const categoryId = req.query.category; // optional category filter
+    const filter = req.query.filter;
+    const categoryId = req.query.category;
 
-    // Build a WHERE clause based on filter
     let filterClause = '';
     if (filter === 'overdue') {
-      filterClause = 'AND r.reviewedDateTime > r.reviewInstanceEndDateTime';
-    } else if (filter === 'not-reviewed') {
-      filterClause = "AND r.decision = 'NotReviewed'";
-    } else if (filter === 'on-time') {
-      filterClause = 'AND r.reviewedDateTime <= r.reviewInstanceEndDateTime';
+      filterClause = "AND lr.complianceStatus = 'Overdue'";
+    } else if (filter === 'reviewed-late') {
+      filterClause = "AND lr.complianceStatus = 'Reviewed Late'";
+    } else if (filter === 'compliant') {
+      filterClause = "AND lr.complianceStatus = 'Compliant'";
+    } else if (filter === 'in-progress') {
+      filterClause = "AND lr.complianceStatus = 'In Progress'";
     }
 
-    // Category filter
     let categoryClause = '';
     const request = timedRequest(pool, 'gov-review-compliance-detail', res);
     if (categoryId) {
@@ -88,28 +145,38 @@ router.get('/governance/review-compliance', async (req, res) => {
     }
 
     const result = await request.query(
-      `SELECT
+      `${LAST_REVIEW_CTE}
+      SELECT
         ap.id AS accessPackageId,
         ap.displayName AS accessPackageName,
         c.displayName AS catalogName,
         cat.name AS categoryName,
         cat.color AS categoryColor,
-        COUNT(*) AS totalDecisions,
-        SUM(CASE WHEN r.reviewedDateTime <= r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
-        SUM(CASE WHEN r.reviewedDateTime > r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS overdue,
-        SUM(CASE WHEN r.decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed,
-        MAX(r.reviewedDateTime) AS lastReviewDate,
-        MAX(r.reviewInstanceEndDateTime) AS lastInstanceEndDate
-      FROM GraphAccessPackageAccessReviewDecisions r
-        INNER JOIN GraphAccessPackages ap ON r.accessPackageId = ap.id
+        lr.complianceStatus,
+        lr.deadline,
+        lr.daysOverdue,
+        lr.totalDecisions,
+        lr.onTime,
+        lr.reviewedLate,
+        lr.notReviewed,
+        lr.lastReviewedDate,
+        lr.lastReviewedBy,
+        lr.reviewInstanceStatus
+      FROM LastReviewPerAP lr
+        INNER JOIN GraphAccessPackages ap ON lr.accessPackageId = ap.id
         LEFT JOIN GraphCatalogs c ON ap.catalogId = c.id
         LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
         LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
-      WHERE r.decision IS NOT NULL ${filterClause} ${categoryClause}
-      GROUP BY ap.id, ap.displayName, c.displayName, cat.name, cat.color
+      WHERE 1=1 ${filterClause} ${categoryClause}
       ORDER BY
-        SUM(CASE WHEN r.decision = 'NotReviewed' THEN 1 ELSE 0 END) DESC,
-        SUM(CASE WHEN r.reviewedDateTime > r.reviewInstanceEndDateTime THEN 1 ELSE 0 END) DESC`);
+        CASE lr.complianceStatus
+          WHEN 'Overdue' THEN 1
+          WHEN 'Reviewed Late' THEN 2
+          WHEN 'In Progress' THEN 3
+          WHEN 'Compliant' THEN 4
+          ELSE 5
+        END,
+        lr.daysOverdue DESC`);
     res.json(result.recordset);
   } catch (err) {
     res.json([]);
