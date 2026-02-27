@@ -12,6 +12,7 @@ const UserDetailPage = lazy(() => import('./components/UserDetailPage'));
 const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
 const AccessPackageDetailPage = lazy(() => import('./components/AccessPackageDetailPage'));
 const PerfPage = lazy(() => import('./components/PerfPage'));
+const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -79,6 +80,7 @@ const NAV_TABS = [
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
+  { key: 'risk-scores',      label: 'Risk Scores' },
   { key: 'performance',      label: 'Performance' },
 ];
 
@@ -303,6 +305,8 @@ export default function App() {
             <GroupsPage onOpenDetail={openDetailTab} />
           ) : page === 'access-packages' ? (
             <AccessPackagesPage onOpenDetail={openDetailTab} />
+          ) : page === 'risk-scores' ? (
+            <RiskScoringPage onOpenDetail={openDetailTab} />
           ) : page === 'performance' ? (
             <PerfPage />
           ) : loading ? (
