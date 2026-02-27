@@ -74,7 +74,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       )}
       {provisioningGap && (
         <span
-          className="absolute -top-1 -left-1 flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-bold leading-none bg-amber-500 text-white border border-amber-600 shadow-sm"
+          className="absolute top-0 left-0 flex items-center justify-center w-2.5 h-2.5 rounded-full text-[6px] font-bold leading-none bg-amber-500 text-white border border-amber-600"
           style={{ zIndex: 2 }}
         >
           !
