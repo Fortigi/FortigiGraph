@@ -417,6 +417,7 @@ router.get('/access-package/:id', async (req, res) => {
     } catch { /* table may not exist */ }
 
     // 6. Policy summary — auto-assigned vs request-based
+    // Check both hasAutoAddRule column AND automaticRequestSettings JSON as fallback
     let policyCount = 0;
     let autoAddPolicyCount = 0;
     try {
@@ -425,7 +426,11 @@ router.get('/access-package/:id', async (req, res) => {
         .query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAdd
+          SUM(CASE
+            WHEN hasAutoAddRule = 1 THEN 1
+            WHEN automaticRequestSettings IS NOT NULL AND LEN(automaticRequestSettings) > 2 THEN 1
+            ELSE 0
+          END) AS autoAdd
         FROM GraphAccessPackageAssignmentPolicies
         WHERE accessPackageId = @id
       `);
@@ -551,7 +556,12 @@ router.get('/access-package/:id/policies', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT id, displayName, description, canExtend, durationInDays,
-             hasAutoAddRule, createdDateTime, modifiedDateTime
+             CASE
+               WHEN hasAutoAddRule = 1 THEN CAST(1 AS BIT)
+               WHEN automaticRequestSettings IS NOT NULL AND LEN(automaticRequestSettings) > 2 THEN CAST(1 AS BIT)
+               ELSE CAST(0 AS BIT)
+             END AS hasAutoAddRule,
+             createdDateTime, modifiedDateTime
       FROM GraphAccessPackageAssignmentPolicies
       WHERE accessPackageId = @id
       ORDER BY displayName

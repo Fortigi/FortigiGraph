@@ -219,13 +219,23 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'automaticRequestSettings' = { param($obj) if ($obj.automaticRequestSettings) { $obj.automaticRequestSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'hasAutoAddRule' = {
             param($obj)
-            # A policy is auto-add ONLY if automaticRequestSettings exists AND requestAccessForAllowedTargets is true
-            # Auto-remove-only policies (requestAccessForAllowedTargets = false) do NOT count
-            if ($obj.automaticRequestSettings -and $obj.automaticRequestSettings.requestAccessForAllowedTargets -eq $true) {
-                $true
-            } else {
-                $false
+            $autoSettings = $obj.automaticRequestSettings
+            if (-not $autoSettings) { return $false }
+
+            # Check requestAccessForAllowedTargets — handle boolean and string representations
+            $val = $autoSettings.requestAccessForAllowedTargets
+            if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
+
+            # If automaticRequestSettings exists as a non-empty object but requestAccessForAllowedTargets
+            # is missing/null, this is still an auto-assignment policy (IGA-created policies may
+            # omit requestAccessForAllowedTargets entirely while having gracePeriodBeforeAccessRemoval etc.)
+            # Check if the object has any properties beyond @odata annotations
+            $props = $autoSettings.PSObject.Properties | Where-Object { $_.Name -notlike '@odata*' }
+            if ($props -and -not $val -and $val -ne $false -and $val -ne 'false') {
+                return $true
             }
+
+            return $false
         }
     }
 
