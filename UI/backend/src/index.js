@@ -11,7 +11,7 @@ import permissionsRouter from './routes/permissions.js';
 import tagsRouter from './routes/tags.js';
 import categoriesRouter from './routes/categories.js';
 import detailsRouter from './routes/details.js';
-import governanceRouter from './routes/governance.js';
+// import governanceRouter from './routes/governance.js'; // temporarily disabled
 import perfRouter from './routes/perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -108,7 +108,7 @@ app.use('/api', authMiddleware, permissionsRouter);
 app.use('/api', authMiddleware, tagsRouter);
 app.use('/api', authMiddleware, categoriesRouter);
 app.use('/api', authMiddleware, detailsRouter);
-app.use('/api', authMiddleware, governanceRouter);
+// app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // In production, serve the frontend build output
 const frontendDist = join(__dirname, '../../frontend/dist');
