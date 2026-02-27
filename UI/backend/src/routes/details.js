@@ -451,6 +451,24 @@ router.get('/access-package/:id', async (req, res) => {
       }
     }
 
+    // 6b. Category
+    let category = null;
+    try {
+      const { ensureCategoryTables } = await import('./categories.js');
+      await ensureCategoryTables(pool);
+      const r = await timedRequest(pool, 'ap-category', res)
+        .input('id', apId)
+        .query(`
+        SELECT cat.id, cat.name, cat.color
+        FROM dbo.GraphCategoryAssignments ca
+        INNER JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
+        WHERE ca.accessPackageId = LOWER(@id)
+      `);
+      if (r.recordset.length > 0) {
+        category = r.recordset[0];
+      }
+    } catch { /* category tables may not exist */ }
+
     // 7. History check
     let hasHistory = false;
     try {
@@ -465,7 +483,7 @@ router.get('/access-package/:id', async (req, res) => {
       hasHistory = false;
     }
 
-    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, autoAddPolicyCount, assignmentType });
+    res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, autoAddPolicyCount, assignmentType, category });
   } catch (err) {
     console.error('Error fetching access package detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch access package details' });

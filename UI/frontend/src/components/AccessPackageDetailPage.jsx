@@ -198,7 +198,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   }
   if (!data) return null;
 
-  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, assignmentType } = data;
+  const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, assignmentType, category } = data;
   const catalogName = attributes.catalogName || null;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
@@ -221,6 +221,14 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
                 {assignmentType && (
                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${ASSIGNMENT_TYPE_STYLES[assignmentType] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                     {assignmentType}
+                  </span>
+                )}
+                {category && (
+                  <span
+                    className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border"
+                    style={{ backgroundColor: category.color + '20', borderColor: category.color, color: category.color }}
+                  >
+                    {category.name}
                   </span>
                 )}
               </div>
