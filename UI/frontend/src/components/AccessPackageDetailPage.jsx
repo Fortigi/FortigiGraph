@@ -65,6 +65,7 @@ const REQUEST_STATE_STYLES = {
 const ASSIGNMENT_TYPE_STYLES = {
   'Auto-assigned': 'bg-green-100 text-green-800 border-green-200',
   'Request-based': 'bg-blue-100 text-blue-800 border-blue-200',
+  'Request-based with auto-removal': 'bg-orange-100 text-orange-800 border-orange-200',
   'Both': 'bg-purple-100 text-purple-800 border-purple-200',
 };
 
@@ -308,8 +309,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
                   <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
                     <th className="px-4 py-2 font-medium">Name</th>
                     <th className="px-4 py-2 font-medium">Type</th>
-                    <th className="px-4 py-2 font-medium">Duration</th>
-                    <th className="px-4 py-2 font-medium">Extendable</th>
+                    <th className="px-4 py-2 font-medium">Scope</th>
                     <th className="px-4 py-2 font-medium">Created</th>
                   </tr>
                 </thead>
@@ -321,15 +321,18 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
                         {p.description && <div className="text-xs text-gray-400 mt-0.5 truncate max-w-xs" title={p.description}>{p.description}</div>}
                       </td>
                       <td className="px-4 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${p.hasAutoAddRule ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                          {p.hasAutoAddRule ? 'Auto-assigned' : 'Request-based'}
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                          p.hasAutoAddRule ? 'bg-green-100 text-green-800'
+                          : p.hasAutoRemoveRule ? 'bg-orange-100 text-orange-800'
+                          : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {p.hasAutoAddRule ? 'Auto-assigned'
+                           : p.hasAutoRemoveRule ? 'Request-based with auto-removal'
+                           : 'Request-based'}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-gray-600 text-xs">
-                        {p.durationInDays ? `${p.durationInDays} days` : 'Unlimited'}
-                      </td>
-                      <td className="px-4 py-2 text-gray-600 text-xs">
-                        {p.canExtend ? 'Yes' : 'No'}
+                        {p.allowedTargetScope || '\u2014'}
                       </td>
                       <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">
                         {formatDate(p.createdDateTime)}

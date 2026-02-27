@@ -416,36 +416,36 @@ router.get('/access-package/:id', async (req, res) => {
       lastReviewedBy = r.recordset[0]?.reviewedByDisplayName || null;
     } catch { /* table may not exist */ }
 
-    // 6. Policy summary — auto-assigned vs request-based
-    // Check both hasAutoAddRule column AND automaticRequestSettings JSON as fallback
+    // 6. Policy summary — auto-assigned vs request-based vs auto-removal
     let policyCount = 0;
     let autoAddPolicyCount = 0;
+    let autoRemovePolicyCount = 0;
     try {
       const r = await timedRequest(pool, 'ap-policy-summary', res)
         .input('id', apId)
         .query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE
-            WHEN hasAutoAddRule = 1 THEN 1
-            WHEN automaticRequestSettings IS NOT NULL AND LEN(automaticRequestSettings) > 2 THEN 1
-            ELSE 0
-          END) AS autoAdd
+          SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAdd,
+          SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnly
         FROM GraphAccessPackageAssignmentPolicies
         WHERE accessPackageId = @id
       `);
       policyCount = r.recordset[0].total;
       autoAddPolicyCount = r.recordset[0].autoAdd;
+      autoRemovePolicyCount = r.recordset[0].autoRemoveOnly;
     } catch { /* table may not exist */ }
 
     // Derive assignment type label
     let assignmentType = null;
     if (policyCount > 0) {
-      const requestBasedCount = policyCount - autoAddPolicyCount;
-      if (autoAddPolicyCount > 0 && requestBasedCount > 0) {
+      const requestBasedCount = policyCount - autoAddPolicyCount - autoRemovePolicyCount;
+      if (autoAddPolicyCount > 0 && (requestBasedCount > 0 || autoRemovePolicyCount > 0)) {
         assignmentType = 'Both';
       } else if (autoAddPolicyCount > 0) {
         assignmentType = 'Auto-assigned';
+      } else if (autoRemovePolicyCount > 0) {
+        assignmentType = 'Request-based with auto-removal';
       } else {
         assignmentType = 'Request-based';
       }
@@ -555,12 +555,9 @@ router.get('/access-package/:id/policies', async (req, res) => {
     const r = await timedRequest(pool, 'ap-policies', res)
       .input('id', req.params.id)
       .query(`
-      SELECT id, displayName, description, canExtend, durationInDays,
-             CASE
-               WHEN hasAutoAddRule = 1 THEN CAST(1 AS BIT)
-               WHEN automaticRequestSettings IS NOT NULL AND LEN(automaticRequestSettings) > 2 THEN CAST(1 AS BIT)
-               ELSE CAST(0 AS BIT)
-             END AS hasAutoAddRule,
+      SELECT id, displayName, description, allowedTargetScope,
+             ISNULL(hasAutoAddRule, CAST(0 AS BIT)) AS hasAutoAddRule,
+             ISNULL(hasAutoRemoveRule, CAST(0 AS BIT)) AS hasAutoRemoveRule,
              createdDateTime, modifiedDateTime
       FROM GraphAccessPackageAssignmentPolicies
       WHERE accessPackageId = @id

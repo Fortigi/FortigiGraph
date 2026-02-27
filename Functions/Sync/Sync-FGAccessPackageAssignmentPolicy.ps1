@@ -113,6 +113,10 @@ function Sync-FGAccessPackageAssignmentPolicy {
         # Auto-remove-only policies (requestAccessForAllowedTargets = false) do NOT count as auto-add
         'hasAutoAddRule'
 
+        # Derived: true when automaticRequestSettings.removeAccessWhenTargetLeavesAllowedTargets = true
+        # Policies with only this flag are "Request-based with auto-removal", not "Auto-assigned"
+        'hasAutoRemoveRule'
+
         # Metadata
         'createdDateTime'
         'modifiedDateTime'
@@ -153,6 +157,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'allowedTargetScope' = 'NVARCHAR(255)'
         'automaticRequestSettings' = 'NVARCHAR(MAX)'
         'hasAutoAddRule' = 'BIT'
+        'hasAutoRemoveRule' = 'BIT'
         'createdDateTime' = 'DATETIME2'
         'modifiedDateTime' = 'DATETIME2'
     }
@@ -182,7 +187,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
     # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
     # accessPackageId is derived from expanded accessPackage navigation property in v1.0
-    $derivedAttributes = @('hasAutoAddRule', 'accessPackageId')
+    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'accessPackageId')
     $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
     $selectProperties = $graphAttributes -join ','
     # Use v1.0 endpoint — automaticRequestSettings only exists in v1.0, not beta
@@ -227,18 +232,21 @@ function Sync-FGAccessPackageAssignmentPolicy {
             $autoSettings = $obj.automaticRequestSettings
             if (-not $autoSettings) { return $false }
 
-            # Check requestAccessForAllowedTargets — handle boolean and string representations
+            # ONLY true when requestAccessForAllowedTargets is explicitly true.
+            # Policies with only removeAccessWhenTargetLeavesAllowedTargets are
+            # auto-REMOVAL policies, NOT auto-assignment policies.
             $val = $autoSettings.requestAccessForAllowedTargets
             if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
 
-            # If automaticRequestSettings exists as a non-empty object but requestAccessForAllowedTargets
-            # is missing/null, this is still an auto-assignment policy (IGA-created policies may
-            # omit requestAccessForAllowedTargets entirely while having gracePeriodBeforeAccessRemoval etc.)
-            # Check if the object has any properties beyond @odata annotations
-            $props = $autoSettings.PSObject.Properties | Where-Object { $_.Name -notlike '@odata*' }
-            if ($props -and -not $val -and $val -ne $false -and $val -ne 'false') {
-                return $true
-            }
+            return $false
+        }
+        'hasAutoRemoveRule' = {
+            param($obj)
+            $autoSettings = $obj.automaticRequestSettings
+            if (-not $autoSettings) { return $false }
+
+            $val = $autoSettings.removeAccessWhenTargetLeavesAllowedTargets
+            if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
 
             return $false
         }
