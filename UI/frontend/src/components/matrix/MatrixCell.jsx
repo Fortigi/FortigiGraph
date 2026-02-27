@@ -7,7 +7,7 @@ const TYPE_INDICATORS = {
   Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
 };
 
-function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames }) {
+function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames, provisioningGap }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
 
   // Background: AP color for managed cells only; unmanaged cells stay white
@@ -27,7 +27,19 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
     } else {
       title = types;
     }
+    if (provisioningGap) {
+      title += '\n\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member';
+    }
+  } else if (provisioningGap) {
+    // AP manages this cell but user has no membership at all
+    title = `\u26a0 Provisioning gap: AP should grant Direct membership but user has no membership`;
+    if (apNames && apNames.length > 0) {
+      title += `\nManaged by: ${apNames.join(', ')}`;
+    }
+    bgColor = apColor || '#dbeafe';
   }
+
+  const needsRelative = apCount > 1 || provisioningGap;
 
   return (
     <td
@@ -37,7 +49,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
         minWidth: '24px',
         width: '24px',
         height: '24px',
-        position: apCount > 1 ? 'relative' : undefined,
+        position: needsRelative ? 'relative' : undefined,
       }}
       title={title}
     >
@@ -59,6 +71,14 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
           })}
         </>
       )}
+      {provisioningGap && (
+        <span
+          className="absolute -top-1 -left-1 flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-bold leading-none bg-amber-500 text-white border border-amber-600 shadow-sm"
+          style={{ zIndex: 2 }}
+        >
+          !
+        </span>
+      )}
       {apCount > 1 && (
         <span
           className="absolute -top-1 -right-1 flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-bold leading-none bg-white text-gray-700 border border-gray-300 shadow-sm"
@@ -77,6 +97,7 @@ export default memo(MatrixCell, (prev, next) => {
     prev.managed === next.managed &&
     prev.apColor === next.apColor &&
     prev.apCount === next.apCount &&
-    prev.apNames === next.apNames
+    prev.apNames === next.apNames &&
+    prev.provisioningGap === next.provisioningGap
   );
 });

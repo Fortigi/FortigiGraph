@@ -213,28 +213,31 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       }
 
       // Cell background: AP color for managed cells only; unmanaged cells stay white
-      if (hasMembership) {
-        // For owner rows, use realGroupId since managedApMap uses real group IDs
-        const lookupGroupId = group.realGroupId || group.id;
-        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
-        const apIds = managedApMap?.get(cellKeyLower);
+      // For owner rows, use realGroupId since managedApMap uses real group IDs
+      const lookupGroupId = group.realGroupId || group.id;
+      const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
+      const apIds = managedApMap?.get(cellKeyLower);
+      if (apIds && apIds.length > 0 && apIdToIndex) {
+        const firstIdx = apIdToIndex.get(apIds[0]);
         let bgArgb = null;
-        if (apIds && apIds.length > 0 && apIdToIndex) {
-          const firstIdx = apIdToIndex.get(apIds[0]);
-          if (firstIdx != null) {
-            bgArgb = hexToArgb(getApColorHex(firstIdx));
-          } else {
-            bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
-          }
-          if (apIds.length > 1) {
-            excelCell.note = `Managed by: ${apIds.length} access packages`;
-          }
+        if (firstIdx != null) {
+          bgArgb = hexToArgb(getApColorHex(firstIdx));
+        } else {
+          bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
         }
         if (bgArgb) excelCell.fill = {
           type: 'pattern',
           pattern: 'solid',
           fgColor: { argb: bgArgb },
         };
+        // Provisioning gap: AP manages cell but no Direct membership
+        const isGap = !memberTypes || !memberTypes.has('Direct');
+        if (apIds.length > 1 || isGap) {
+          const notes = [];
+          if (apIds.length > 1) notes.push(`Managed by: ${apIds.length} access packages`);
+          if (isGap) notes.push('\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member');
+          excelCell.note = notes.join('\n');
+        }
       }
 
       excelCell.border = thinBorder();

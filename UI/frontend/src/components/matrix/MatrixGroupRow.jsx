@@ -95,15 +95,19 @@ export default function MatrixGroupRow({
             return ap ? ap.displayName : id;
           });
         }
+        // Provisioning gap: AP should grant Direct membership but user has no Direct in IST
+        const cellTypes = memberships.get(cellKey);
+        const provisioningGap = managed && apIds && apIds.length > 0 && (!cellTypes || !cellTypes.has('Direct'));
         return (
           <MatrixCell
             key={cellKey}
             cellKey={cellKey}
-            membershipTypes={memberships.get(cellKey)}
+            membershipTypes={cellTypes}
             managed={managed}
             apColor={apColor}
             apCount={apCount}
             apNames={apNames}
+            provisioningGap={provisioningGap}
           />
         );
       })}
