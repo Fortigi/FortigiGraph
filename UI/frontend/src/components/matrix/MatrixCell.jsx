@@ -50,6 +50,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
         width: '24px',
         height: '24px',
         position: needsRelative ? 'relative' : undefined,
+        zIndex: needsRelative ? 1 : undefined,
       }}
       title={title}
     >
