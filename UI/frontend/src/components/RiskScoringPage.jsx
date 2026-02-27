@@ -12,11 +12,11 @@ const TIER_STYLES = {
 };
 
 function TierBadge({ tier }) {
-  const s = TIER_STYLES[tier?.label] || TIER_STYLES.None;
+  const s = TIER_STYLES[tier] || TIER_STYLES.None;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.bg} ${s.text} ${s.border} border`}>
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {tier?.label || 'None'}
+      {tier || 'None'}
     </span>
   );
 }
@@ -45,12 +45,14 @@ function ScoreBreakdown({ entity, onClose }) {
           <div>
             <h3 className="text-lg font-semibold text-gray-900">{entity.displayName}</h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              {entity.entityType === 'user' ? (entity.userPrincipalName || entity.department || '') : (entity.description || '')}
+              {entity.userPrincipalName || entity.department || entity.description || ''}
             </p>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-2xl font-bold" style={{ color: entity.riskTier?.color }}>{entity.finalScore}</div>
+              <div className="text-2xl font-bold" style={{ color: TIER_STYLES[entity.riskTier]?.text === 'text-red-800' ? '#dc2626' : TIER_STYLES[entity.riskTier]?.text === 'text-orange-800' ? '#ea580c' : '#6b7280' }}>
+                {entity.riskScore}
+              </div>
               <TierBadge tier={entity.riskTier} />
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
@@ -65,17 +67,17 @@ function ScoreBreakdown({ entity, onClose }) {
             <h4 className="text-sm font-semibold text-gray-700 mb-2">Score Layers</h4>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Direct (Classifier Match)', score: entity.directScore, weight: '50%' },
-                { label: 'Membership Analysis', score: entity.membershipScore, weight: '20%' },
-                { label: 'Structural/Hygiene', score: entity.structuralScore, weight: '10%' },
-                { label: 'Risk Propagation', score: entity.propagatedScore, weight: '20%' },
+                { label: 'Direct (Classifier Match)', score: entity.riskDirectScore, weight: '50%' },
+                { label: 'Membership Analysis', score: entity.riskMembershipScore, weight: '20%' },
+                { label: 'Structural/Hygiene', score: entity.riskStructuralScore, weight: '10%' },
+                { label: 'Risk Propagation', score: entity.riskPropagatedScore, weight: '20%' },
               ].map(layer => (
                 <div key={layer.label} className="bg-gray-50 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-gray-500">{layer.label}</span>
                     <span className="text-[10px] text-gray-400">{layer.weight}</span>
                   </div>
-                  <ScoreBar score={layer.score} />
+                  <ScoreBar score={layer.score || 0} />
                 </div>
               ))}
             </div>
@@ -89,61 +91,21 @@ function ScoreBreakdown({ entity, onClose }) {
                 {entity.classifierMatches.map((m, i) => (
                   <div key={i} className="bg-blue-50 border border-blue-100 rounded-lg p-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-blue-900">{m.classifierId}</span>
+                      <span className="text-sm font-medium text-blue-900">{m.id}</span>
                       <span className="text-xs font-mono text-blue-700">+{m.score} pts</span>
                     </div>
                     <p className="text-xs text-blue-700 mt-1">{m.rationale}</p>
-                    <span className="text-[10px] text-blue-500 mt-1 inline-block">
-                      Matched on: {m.matchedOn} | Category: {m.category}
-                    </span>
+                    <span className="text-[10px] text-blue-500 mt-1 inline-block">Category: {m.category}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Membership Signals */}
-          {entity.membershipSignals?.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">Membership Signals</h4>
-              <div className="space-y-1">
-                {entity.membershipSignals.map((s, i) => (
-                  <div key={i} className="flex items-center justify-between py-1.5 px-3 bg-purple-50 rounded text-sm">
-                    <span className="text-purple-800">{s.detail}</span>
-                    <span className="text-xs font-mono text-purple-600">+{s.points} pts</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Structural Signals */}
-          {entity.structuralSignals?.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">Structural Signals</h4>
-              <div className="space-y-1">
-                {entity.structuralSignals.map((s, i) => (
-                  <div key={i} className="flex items-center justify-between py-1.5 px-3 bg-amber-50 rounded text-sm">
-                    <span className="text-amber-800">{s.detail}</span>
-                    <span className="text-xs font-mono text-amber-600">+{s.points} pts</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Propagation Source */}
-          {entity.propagationSource && (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">Risk Propagation</h4>
-              <div className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-sm">
-                <span className="text-rose-800">
-                  Inherited from {entity.propagationSource.type} with score {entity.propagationSource.score}
-                </span>
-                <span className="text-xs text-rose-600 block mt-0.5">
-                  Propagated score: +{entity.propagatedScore} pts
-                </span>
-              </div>
+          {/* Scored timestamp */}
+          {entity.riskScoredAt && (
+            <div className="text-xs text-gray-400 pt-2 border-t border-gray-100">
+              Scored at: {new Date(entity.riskScoredAt).toLocaleString()}
             </div>
           )}
         </div>
@@ -152,14 +114,14 @@ function ScoreBreakdown({ entity, onClose }) {
   );
 }
 
-// ─── Distribution Chart (simple bar chart) ───────────────────────────
+// ─── Distribution Chart ──────────────────────────────────────────────
 
 function DistributionChart({ label, byTier, total }) {
   const tiers = ['Critical', 'High', 'Medium', 'Low', 'Minimal', 'None'];
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <h3 className="text-sm font-semibold text-gray-700 mb-1">{label}</h3>
-      <p className="text-xs text-gray-400 mb-3">{total} total</p>
+      <p className="text-xs text-gray-400 mb-3">{total} scored</p>
       <div className="space-y-2">
         {tiers.map(tier => {
           const count = byTier[tier] || 0;
@@ -183,111 +145,62 @@ function DistributionChart({ label, byTier, total }) {
 
 // ─── Entity Table ────────────────────────────────────────────────────
 
-function EntityTable({ entities, entityType, search, tierFilter, onSelect, onOpenDetail }) {
-  const filtered = useMemo(() => {
-    let list = entities || [];
-    if (tierFilter) list = list.filter(e => e.riskTier?.label === tierFilter);
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(e =>
-        e.displayName?.toLowerCase().includes(q) ||
-        e.userPrincipalName?.toLowerCase().includes(q) ||
-        e.description?.toLowerCase().includes(q) ||
-        e.department?.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [entities, tierFilter, search]);
-
-  const [page, setPage] = useState(0);
-  const PAGE_SIZE = 25;
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  // Reset page when filters change
-  useEffect(() => setPage(0), [tierFilter, search]);
+function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
+  if (!entities || entities.length === 0) {
+    return <div className="py-8 text-center text-gray-400">No entities match the current filters</div>;
+  }
 
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-              {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Department</th>}
-              {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Title</th>}
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Score</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-24">Tier</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Direct</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Memb.</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Struct.</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Prop.</th>
-              <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Matches</th>
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200">
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Name</th>
+            {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Department</th>}
+            {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Title</th>}
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Score</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-24">Tier</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Direct</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Memb.</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Struct.</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Prop.</th>
+            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Matches</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entities.map(entity => (
+            <tr
+              key={entity.id}
+              className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+              onClick={() => onSelect(entity)}
+            >
+              <td className="py-2 px-3">
+                <button
+                  className="text-blue-600 hover:underline text-left font-medium"
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (onOpenDetail) onOpenDetail(entityType, entity.id, entity.displayName);
+                  }}
+                >
+                  {entity.displayName}
+                </button>
+                {entityType === 'group' && entity.description && (
+                  <p className="text-xs text-gray-400 truncate max-w-xs">{entity.description}</p>
+                )}
+              </td>
+              {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.department || '\u2014'}</td>}
+              {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.jobTitle || '\u2014'}</td>}
+              <td className="py-2 px-3"><ScoreBar score={entity.riskScore} /></td>
+              <td className="py-2 px-3"><TierBadge tier={entity.riskTier} /></td>
+              <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.riskDirectScore}</td>
+              <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.riskMembershipScore}</td>
+              <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.riskStructuralScore}</td>
+              <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.riskPropagatedScore}</td>
+              <td className="py-2 px-3 text-xs text-gray-500">{entity.classifierMatches?.length || 0}</td>
             </tr>
-          </thead>
-          <tbody>
-            {paged.map(entity => (
-              <tr
-                key={entity.entityId}
-                className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                onClick={() => onSelect(entity)}
-              >
-                <td className="py-2 px-3">
-                  <button
-                    className="text-blue-600 hover:underline text-left font-medium"
-                    onClick={e => {
-                      e.stopPropagation();
-                      if (onOpenDetail) onOpenDetail(entityType, entity.entityId, entity.displayName);
-                    }}
-                  >
-                    {entity.displayName}
-                  </button>
-                  {entityType === 'group' && entity.description && (
-                    <p className="text-xs text-gray-400 truncate max-w-xs">{entity.description}</p>
-                  )}
-                </td>
-                {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.department || '\u2014'}</td>}
-                {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.jobTitle || '\u2014'}</td>}
-                <td className="py-2 px-3"><ScoreBar score={entity.finalScore} /></td>
-                <td className="py-2 px-3"><TierBadge tier={entity.riskTier} /></td>
-                <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.directScore}</td>
-                <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.membershipScore}</td>
-                <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.structuralScore}</td>
-                <td className="py-2 px-3 text-xs font-mono text-gray-500">{entity.propagatedScore}</td>
-                <td className="py-2 px-3 text-xs text-gray-500">{entity.classifierMatches?.length || 0} match{entity.classifierMatches?.length !== 1 ? 'es' : ''}</td>
-              </tr>
-            ))}
-            {paged.length === 0 && (
-              <tr><td colSpan={entityType === 'user' ? 10 : 8} className="py-8 text-center text-gray-400">No entities match the current filters</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-3 px-3">
-          <span className="text-xs text-gray-500">
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
-          </span>
-          <div className="flex gap-1">
-            <button
-              onClick={() => setPage(p => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className="px-2 py-1 text-xs rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-50"
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-              className="px-2 py-1 text-xs rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -296,23 +209,27 @@ function EntityTable({ entities, entityType, search, tierFilter, onSelect, onOpe
 
 export default function RiskScoringPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
-  const [data, setData] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState('groups'); // 'groups' | 'users'
+  const [view, setView] = useState('groups');
   const [tierFilter, setTierFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [entityData, setEntityData] = useState({ data: [], total: 0 });
+  const [entityLoading, setEntityLoading] = useState(false);
+  const [page, setPage] = useState(0);
   const [selectedEntity, setSelectedEntity] = useState(null);
+  const PAGE_SIZE = 25;
 
-  const fetchScores = useCallback(async (force = false) => {
+  // Fetch summary
+  const fetchSummary = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
-      const url = force ? '/api/risk-scores?force=true' : '/api/risk-scores';
-      const res = await authFetch(url);
+      const res = await authFetch('/api/risk-scores');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setData(json);
+      setSummary(json);
+      setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -320,12 +237,37 @@ export default function RiskScoringPage({ onOpenDetail }) {
     }
   }, [authFetch]);
 
-  useEffect(() => { fetchScores(); }, [fetchScores]);
+  // Fetch entity list (paginated, server-side)
+  const fetchEntities = useCallback(async () => {
+    try {
+      setEntityLoading(true);
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(page * PAGE_SIZE),
+      });
+      if (tierFilter) params.set('tier', tierFilter);
+      if (search) params.set('search', search);
 
-  if (loading && !data) {
+      const res = await authFetch(`/api/risk-scores/${view}?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      setEntityData(json);
+    } catch (err) {
+      console.error('Failed to fetch risk entities:', err);
+      setEntityData({ data: [], total: 0 });
+    } finally {
+      setEntityLoading(false);
+    }
+  }, [authFetch, view, page, tierFilter, search]);
+
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
+  useEffect(() => { fetchEntities(); }, [fetchEntities]);
+  useEffect(() => { setPage(0); }, [view, tierFilter, search]);
+
+  if (loading && !summary) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Running risk scoring engine...</div>
+        <div className="text-gray-500">Loading risk scores...</div>
       </div>
     );
   }
@@ -334,16 +276,36 @@ export default function RiskScoringPage({ onOpenDetail }) {
     return (
       <div className="max-w-4xl mx-auto">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="text-red-800 font-semibold">Scoring Error</h3>
+          <h3 className="text-red-800 font-semibold">Error</h3>
           <p className="text-red-600 text-sm mt-1">{error}</p>
-          <button onClick={() => fetchScores(true)} className="mt-3 text-sm text-red-700 underline">Retry</button>
+          <button onClick={fetchSummary} className="mt-3 text-sm text-red-700 underline">Retry</button>
         </div>
       </div>
     );
   }
 
-  const summary = data?.summary;
+  if (summary && !summary.available) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+          <h3 className="text-amber-800 font-semibold text-lg">Risk Scores Not Yet Computed</h3>
+          <p className="text-amber-700 text-sm mt-2">
+            Run the risk scoring engine in PowerShell to compute scores:
+          </p>
+          <pre className="bg-amber-100 rounded-lg p-3 mt-3 text-sm text-amber-900 font-mono text-left inline-block">
+            {`# Connect and score\nConnect-FGSQLServer -ConfigFile .\\Config\\mycompany.json\nInvoke-FGRiskScoring`}
+          </pre>
+          <p className="text-amber-600 text-xs mt-3">
+            Scores are persisted as columns on GraphUsers and GraphGroups. The UI reads them directly.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const s = summary?.summary;
   const tiers = ['Critical', 'High', 'Medium', 'Low', 'Minimal', 'None'];
+  const totalPages = Math.ceil((entityData.total || 0) / PAGE_SIZE);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -352,44 +314,35 @@ export default function RiskScoringPage({ onOpenDetail }) {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Identity Risk Scores</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Heuristic risk scoring based on classifier matching, membership analysis, and structural signals
+            Persisted risk scores computed by <code className="text-xs bg-gray-100 px-1 rounded">Invoke-FGRiskScoring</code>
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {data?.cachedAt && (
-            <span className="text-xs text-gray-400">
-              Scored: {new Date(data.cachedAt).toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={() => fetchScores(true)}
-            disabled={loading}
-            className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 disabled:opacity-50"
-          >
-            {loading ? 'Scoring...' : 'Re-score'}
-          </button>
-        </div>
+        {summary?.scoredAt && (
+          <span className="text-xs text-gray-400">
+            Last scored: {new Date(summary.scoredAt).toLocaleString()}
+          </span>
+        )}
       </div>
 
       {/* Summary Cards */}
-      {summary && (
+      {s && (
         <div className="grid grid-cols-2 gap-4">
-          <DistributionChart label="Groups" byTier={summary.groupsByTier} total={summary.totalGroups} />
-          <DistributionChart label="Users" byTier={summary.usersByTier} total={summary.totalUsers} />
+          <DistributionChart label="Groups" byTier={s.groupsByTier} total={s.totalGroups} />
+          <DistributionChart label="Users" byTier={s.usersByTier} total={s.totalUsers} />
         </div>
       )}
 
-      {/* Top Risks Overview */}
-      {summary && (
+      {/* Top Risks */}
+      {s && (
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Risk Groups</h3>
             <div className="space-y-2">
-              {(summary.topGroups || []).slice(0, 5).map(g => (
-                <div key={g.entityId} className="flex items-center justify-between">
+              {(s.topGroups || []).slice(0, 5).map(g => (
+                <div key={g.id} className="flex items-center justify-between">
                   <span className="text-sm text-gray-800 truncate max-w-[60%]">{g.displayName}</span>
                   <div className="flex items-center gap-2">
-                    <ScoreBar score={g.finalScore} />
+                    <ScoreBar score={g.riskScore} />
                     <TierBadge tier={g.riskTier} />
                   </div>
                 </div>
@@ -399,11 +352,11 @@ export default function RiskScoringPage({ onOpenDetail }) {
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Risk Users</h3>
             <div className="space-y-2">
-              {(summary.topUsers || []).slice(0, 5).map(u => (
-                <div key={u.entityId} className="flex items-center justify-between">
+              {(s.topUsers || []).slice(0, 5).map(u => (
+                <div key={u.id} className="flex items-center justify-between">
                   <span className="text-sm text-gray-800 truncate max-w-[60%]">{u.displayName}</span>
                   <div className="flex items-center gap-2">
-                    <ScoreBar score={u.finalScore} />
+                    <ScoreBar score={u.riskScore} />
                     <TierBadge tier={u.riskTier} />
                   </div>
                 </div>
@@ -415,7 +368,6 @@ export default function RiskScoringPage({ onOpenDetail }) {
 
       {/* Entity Tables */}
       <div className="bg-white rounded-lg border border-gray-200">
-        {/* Toolbar */}
         <div className="border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <button
@@ -424,7 +376,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
                 view === 'groups' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
-              Groups ({data?.groups?.length || 0})
+              Groups
             </button>
             <button
               onClick={() => setView('users')}
@@ -432,24 +384,20 @@ export default function RiskScoringPage({ onOpenDetail }) {
                 view === 'users' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
-              Users ({data?.users?.length || 0})
+              Users
             </button>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Tier Filter */}
             <select
               value={tierFilter}
               onChange={e => setTierFilter(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700"
             >
               <option value="">All tiers</option>
-              {tiers.map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {tiers.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
-            {/* Search */}
             <input
               type="text"
               placeholder={`Search ${view}...`}
@@ -460,21 +408,34 @@ export default function RiskScoringPage({ onOpenDetail }) {
           </div>
         </div>
 
-        {/* Table */}
-        <EntityTable
-          entities={view === 'groups' ? data?.groups : data?.users}
-          entityType={view === 'groups' ? 'group' : 'user'}
-          search={search}
-          tierFilter={tierFilter}
-          onSelect={setSelectedEntity}
-          onOpenDetail={onOpenDetail}
-        />
+        {entityLoading ? (
+          <div className="py-8 text-center text-gray-400">Loading...</div>
+        ) : (
+          <EntityTable
+            entities={entityData.data}
+            entityType={view === 'groups' ? 'group' : 'user'}
+            onSelect={setSelectedEntity}
+            onOpenDetail={onOpenDetail}
+          />
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+            <span className="text-xs text-gray-500">
+              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, entityData.total)} of {entityData.total}
+            </span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className="px-2 py-1 text-xs rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-50">Prev</button>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+                className="px-2 py-1 text-xs rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-50">Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Score Breakdown Modal */}
-      {selectedEntity && (
-        <ScoreBreakdown entity={selectedEntity} onClose={() => setSelectedEntity(null)} />
-      )}
+      {selectedEntity && <ScoreBreakdown entity={selectedEntity} onClose={() => setSelectedEntity(null)} />}
     </div>
   );
 }

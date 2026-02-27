@@ -13,7 +13,7 @@ import categoriesRouter from './routes/categories.js';
 import detailsRouter from './routes/details.js';
 // import governanceRouter from './routes/governance.js'; // temporarily disabled
 import perfRouter from './routes/perf.js';
-import riskRouter from './routes/risk.js';
+import riskRouter from './routes/riskScores.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
