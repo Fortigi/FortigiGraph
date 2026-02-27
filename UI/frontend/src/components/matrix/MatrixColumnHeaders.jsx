@@ -140,7 +140,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
               title={`${ap.displayName}\nCatalog: ${ap.catalogName || ''}${ap.categoryName ? '\nCategory: ' + ap.categoryName : ''}`}
             >
               <div
-                className="text-[10px] text-gray-700 font-medium select-none"
+                className="text-[10px] text-gray-700 font-medium select-none cursor-pointer hover:text-blue-600"
                 style={{
                   writingMode: 'vertical-lr',
                   textOrientation: 'mixed',
@@ -150,6 +150,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                   whiteSpace: 'nowrap',
                   margin: '0 auto',
                 }}
+                onClick={() => onOpenDetail?.('access-package', ap.id, ap.displayName)}
               >
                 {ap.displayName}
               </div>

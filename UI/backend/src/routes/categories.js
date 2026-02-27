@@ -221,7 +221,10 @@ router.get('/access-packages', async (req, res) => {
       SELECT ap.id, ap.displayName, ap.description,
              c.displayName AS catalogName, c.id AS catalogId,
              ISNULL(ac.cnt, 0) AS totalAssignments,
-             cat.id AS categoryId, cat.name AS categoryName, cat.color AS categoryColor
+             cat.id AS categoryId, cat.name AS categoryName, cat.color AS categoryColor,
+             ISNULL(pol.policyCount, 0) AS policyCount,
+             ISNULL(pol.autoAddCount, 0) AS autoAddCount,
+             ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount
       FROM dbo.GraphAccessPackages ap
       INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
       LEFT JOIN (
@@ -232,6 +235,14 @@ router.get('/access-packages', async (req, res) => {
       ) ac ON ap.id = ac.accessPackageId
       LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
       LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
+      LEFT JOIN (
+        SELECT accessPackageId,
+               COUNT(*) AS policyCount,
+               SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddCount,
+               SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnlyCount
+        FROM dbo.GraphAccessPackageAssignmentPolicies
+        GROUP BY accessPackageId
+      ) pol ON ap.id = pol.accessPackageId
       WHERE ${where}
       ORDER BY ap.displayName
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
@@ -244,15 +255,32 @@ router.get('/access-packages', async (req, res) => {
       WHERE ${where};
     `);
 
-    const data = result.recordsets[0].map(r => ({
-      id: r.id,
-      displayName: r.displayName,
-      description: r.description,
-      catalogName: r.catalogName,
-      catalogId: r.catalogId,
-      totalAssignments: r.totalAssignments,
-      category: r.categoryId ? { id: r.categoryId, name: r.categoryName, color: r.categoryColor } : null,
-    }));
+    const data = result.recordsets[0].map(r => {
+      // Derive assignment type from policy counts
+      let assignmentType = null;
+      if (r.policyCount > 0) {
+        const requestBasedCount = r.policyCount - r.autoAddCount - r.autoRemoveOnlyCount;
+        if (r.autoAddCount > 0 && (requestBasedCount > 0 || r.autoRemoveOnlyCount > 0)) {
+          assignmentType = 'Both';
+        } else if (r.autoAddCount > 0) {
+          assignmentType = 'Auto-assigned';
+        } else if (r.autoRemoveOnlyCount > 0) {
+          assignmentType = 'Request-based with auto-removal';
+        } else {
+          assignmentType = 'Request-based';
+        }
+      }
+      return {
+        id: r.id,
+        displayName: r.displayName,
+        description: r.description,
+        catalogName: r.catalogName,
+        catalogId: r.catalogId,
+        totalAssignments: r.totalAssignments,
+        category: r.categoryId ? { id: r.categoryId, name: r.categoryName, color: r.categoryColor } : null,
+        assignmentType,
+      };
+    });
 
     res.json({ data, total: result.recordsets[1][0].total });
   } catch (err) {

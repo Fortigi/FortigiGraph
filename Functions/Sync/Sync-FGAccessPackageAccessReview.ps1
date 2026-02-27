@@ -68,6 +68,8 @@ function Sync-FGAccessPackageAccessReview {
         'reviewInstanceId'             # Which review instance this decision belongs to
         'reviewDefinitionId'           # Which review definition/schedule
         'accessPackageId'              # Which access package was reviewed
+        'principalId'                  # User whose access is being reviewed
+        'principalDisplayName'         # Display name of user being reviewed
         'reviewedResourceId'           # Resource being reviewed (often the access package assignment)
         'reviewedResourceDisplayName'  # Display name of reviewed resource
         'reviewedBy'                   # User ID who performed the review
@@ -89,6 +91,8 @@ function Sync-FGAccessPackageAccessReview {
         'reviewInstanceId' = 'UNIQUEIDENTIFIER'
         'reviewDefinitionId' = 'UNIQUEIDENTIFIER'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
+        'principalDisplayName' = 'NVARCHAR(255)'
         'reviewedResourceId' = 'UNIQUEIDENTIFIER'
         'reviewedResourceDisplayName' = 'NVARCHAR(500)'
         'reviewedBy' = 'UNIQUEIDENTIFIER'
@@ -159,6 +163,36 @@ function Sync-FGAccessPackageAccessReview {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Progress: $processedCount/$($allDefinitions.Count) definitions ($percentComplete%)" -ForegroundColor Gray
         }
 
+        # Extract access package ID from the review definition scope
+        # The scope.query contains a filter like: accessPackageId eq 'GUID'
+        $definitionAccessPackageId = $null
+        $guidPattern = "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+
+        if ($definition.scope) {
+            # Primary: Check scope.query directly (accessReviewQueryScope with accessPackageId eq 'GUID')
+            if ($definition.scope.query -match "accessPackageId\s+eq\s+'$guidPattern'") {
+                $definitionAccessPackageId = $Matches[1]
+            }
+            # Fallback: Check resourceScopes for query path containing accessPackages/{id}
+            if (-not $definitionAccessPackageId -and $definition.scope.resourceScopes) {
+                foreach ($rs in $definition.scope.resourceScopes) {
+                    if ($rs.query -match "accessPackage[s]?[/']+$guidPattern") {
+                        $definitionAccessPackageId = $Matches[1]
+                        break
+                    }
+                }
+            }
+            # Fallback: Check principalScopes for accessPackageId property
+            if (-not $definitionAccessPackageId -and $definition.scope.principalScopes) {
+                foreach ($ps in $definition.scope.principalScopes) {
+                    if ($ps.accessPackageId) {
+                        $definitionAccessPackageId = $ps.accessPackageId
+                        break
+                    }
+                }
+            }
+        }
+
         # Get instances for this definition
         $instancesUri = "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($definition.id)/instances"
 
@@ -177,18 +211,13 @@ function Sync-FGAccessPackageAccessReview {
                         if ($decisions -and $decisions.Count -gt 0) {
                             # Flatten and store decisions
                             foreach ($decision in $decisions) {
-                                # Try to extract access package ID from the resource
-                                $accessPackageId = $null
-                                if ($decision.resource.id) {
-                                    # The resource ID might be the assignment or access package
-                                    $accessPackageId = $decision.resource.id
-                                }
-
                                 $flatDecision = [PSCustomObject]@{
                                     id = $decision.id
                                     reviewInstanceId = $instance.id
                                     reviewDefinitionId = $definition.id
-                                    accessPackageId = $accessPackageId
+                                    accessPackageId = $definitionAccessPackageId
+                                    principalId = $decision.principal.id
+                                    principalDisplayName = $decision.principal.displayName
                                     reviewedResourceId = $decision.resource.id
                                     reviewedResourceDisplayName = $decision.resource.displayName
                                     reviewedBy = $decision.reviewedBy.id

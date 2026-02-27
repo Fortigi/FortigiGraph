@@ -33,10 +33,10 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   wb.created = new Date();
 
   const ws = wb.addWorksheet('Role Mining Matrix', {
-    views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }],
+    views: [{ state: 'frozen', xSplit: 4, ySplit: 2 }],
   });
 
-  const infoColCount = 3; // (empty) | Category | Group Name
+  const infoColCount = 4; // (empty) | Category | Group Name | GUID
   const userCount = users.length;
   const apCount = accessPackages.length;
 
@@ -48,6 +48,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   ws.getColumn(1).width = 4;   // empty / drag handle
   ws.getColumn(2).width = 14;  // Category
   ws.getColumn(3).width = 38;  // Group Name
+  ws.getColumn(4).width = 38;  // GUID
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
@@ -123,6 +124,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   setHeaderCell(ws.getCell(2, 1), '');
   setHeaderCell(ws.getCell(2, 2), 'Category');
   setHeaderCell(ws.getCell(2, 3), 'Group Name');
+  setHeaderCell(ws.getCell(2, 4), 'GUID');
 
   for (let u = 0; u < userCount; u++) {
     const cell = ws.getCell(2, infoColCount + u + 1);
@@ -178,6 +180,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     nameCell.font = { size: 8, bold: true };
     nameCell.border = thinBorder();
 
+    const guidCell = ws.getCell(rowNum, 4);
+    guidCell.value = group.realGroupId || group.id;
+    guidCell.font = { size: 8, color: { argb: 'FF666666' } };
+    guidCell.border = thinBorder();
+
     // Intersection cells
     for (let u = 0; u < userCount; u++) {
       const cellKey = `${group.id}|${users[u].id}`;
@@ -205,29 +212,32 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
         }
       }
 
-      // Cell background: AP color for managed cells, green for unmanaged
-      if (hasMembership) {
-        // For owner rows, use realGroupId since managedApMap uses real group IDs
-        const lookupGroupId = group.realGroupId || group.id;
-        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
-        const apIds = managedApMap?.get(cellKeyLower);
-        let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
-        if (apIds && apIds.length > 0 && apIdToIndex) {
-          const firstIdx = apIdToIndex.get(apIds[0]);
-          if (firstIdx != null) {
-            bgArgb = hexToArgb(getApColorHex(firstIdx));
-          } else {
-            bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
-          }
-          if (apIds.length > 1) {
-            excelCell.note = `Managed by: ${apIds.length} access packages`;
-          }
+      // Cell background: AP color for managed cells only; unmanaged cells stay white
+      // For owner rows, use realGroupId since managedApMap uses real group IDs
+      const lookupGroupId = group.realGroupId || group.id;
+      const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
+      const apIds = managedApMap?.get(cellKeyLower);
+      if (apIds && apIds.length > 0 && apIdToIndex) {
+        const firstIdx = apIdToIndex.get(apIds[0]);
+        let bgArgb = null;
+        if (firstIdx != null) {
+          bgArgb = hexToArgb(getApColorHex(firstIdx));
+        } else {
+          bgArgb = 'FFDBEAFE'; // fallback blue for managed without index
         }
-        excelCell.fill = {
+        if (bgArgb) excelCell.fill = {
           type: 'pattern',
           pattern: 'solid',
           fgColor: { argb: bgArgb },
         };
+        // Provisioning gap: AP manages cell but no Direct membership
+        const isGap = !memberTypes || !memberTypes.has('Direct');
+        if (apIds.length > 1 || isGap) {
+          const notes = [];
+          if (apIds.length > 1) notes.push(`Managed by: ${apIds.length} access packages`);
+          if (isGap) notes.push('\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member');
+          excelCell.note = notes.join('\n');
+        }
       }
 
       excelCell.border = thinBorder();

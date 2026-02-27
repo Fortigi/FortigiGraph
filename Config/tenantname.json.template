@@ -124,7 +124,10 @@
     "WebAppName": "ui-12345",
     "AppServicePlanName": "ui-12345-plan",
     "Location": "northeurope",
-    "Sku": "B1",
+    "Sku": "B2",
+    "Scaling": "Optimum",
+    "SqlSku": "S1",
+    "EnvironmentSize": "Medium",
     "URL": "https://ui-12345.azurewebsites.net",
     "Auth": {
       "AppRegistrationName": "FortigiGraph-UI-ui-12345",

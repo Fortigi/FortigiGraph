@@ -55,7 +55,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Five pages — Matrix, Users, Groups, Access Packages, Sync Log — plus dynamic detail tabs
+- **Tab Navigation**: Six pages — Matrix, Users, Groups, Access Packages, Sync Log, Performance — plus dynamic detail tabs
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E); multi-type cells show all badges side by side
@@ -69,7 +69,9 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
 - **Entity Detail Pages**: Click any user or group name (in matrix, Users page, or Groups page) to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id`) supports bookmarking. Drill-through navigation between user and group details.
-- **Deployment**: `New-FGUI` / `Update-FGUI` / `Remove-FGUI` PowerShell cmdlets
+- **Performance Monitoring**: Opt-in via `PERF_METRICS_ENABLED=true`. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance page shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
+- **Scaling**: `Set-FGUI -Scaling Basic|Optimum|Fast` queries database row counts to determine environment size (Small/Medium/Large), then selects matched App Service + SQL tiers accordingly. Shows estimated monthly costs. `New-FGUI` defaults to Optimum scaling
+- **Deployment**: `New-FGUI` / `Update-FGUI` / `Set-FGUI` / `Remove-FGUI` PowerShell cmdlets
 
 ## Repository Structure
 
@@ -123,11 +125,12 @@ FortigiGraph/
 │   ├── Specific/               # Higher-level helper functions (9)
 │   │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation
 │   │
-│   └── Automation/             # Azure Automation Account management (4)
+│   └── Automation/             # Azure Automation & UI management (5)
 │       ├── New-FGAzureAutomationAccount.ps1
 │       ├── Get-FGAutomationRunbook.ps1
 │       ├── Start-FGAutomationRunbook.ps1
-│       └── Get-FGAutomationJob.ps1
+│       ├── Get-FGAutomationJob.ps1
+│       └── Set-FGUI.ps1                 # Scale App Service + SQL together
 │
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
@@ -138,7 +141,11 @@ FortigiGraph/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
 │   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
 │   │       ├── routes/details.js     # User/group detail endpoints with version history
+│   │       ├── routes/perf.js        # Performance metrics API (/api/perf, export, clear)
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
+│   │       ├── middleware/perfMetrics.js  # Request timing + Server-Timing headers
+│   │       ├── perf/collector.js      # Ring buffer metrics collector with aggregation
+│   │       ├── perf/sqlTimer.js       # SQL query timer wrapper (per-query instrumentation)
 │   │       ├── db/connection.js       # Azure SQL (mssql) connection pool + graceful shutdown
 │   │       ├── db/columnCache.js      # Shared column discovery cache (5-min TTL)
 │   │       └── mock/data.js           # Mock data for local dev
@@ -157,6 +164,7 @@ FortigiGraph/
 │               ├── SyncLogPage.jsx    # Sync log viewer
 │               ├── UserDetailPage.jsx # User detail with attributes, memberships, history
 │               ├── GroupDetailPage.jsx # Group detail with attributes, members, history
+│               ├── PerfPage.jsx      # Performance metrics viewer (summary, recent, slowest, export)
 │               └── matrix/            # Matrix sub-components
 │                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
 │                   ├── MatrixCell.jsx       # Individual cell (AP-colored bg, multi-type badges)
@@ -183,9 +191,9 @@ FortigiGraph/
 | **Generic** | 49 | Graph API CRUD operations |
 | **Sync** | 15 | High-performance data sync (Start-FGSync + 12 entity syncs + 2 helpers) |
 | **SQL** | 24 | Azure SQL database operations (tables, views, indexes, bulk ops) |
-| **Automation** | 4 | Azure Automation Account management |
+| **Automation** | 5 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
-| **Total** | **122 functions** | |
+| **Total** | **123 functions** | |
 
 ## Architecture & Design Patterns
 

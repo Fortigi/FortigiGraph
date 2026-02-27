@@ -253,10 +253,84 @@ FROM dbo.vw_DirectGroupOwnerships
 
         # View 8: Access Package Assignment Details (with Request Type)
         # Shows HOW each access package was assigned (automatic, requested, admin)
+        # Enhanced: uses policy data as fallback when request records are missing
         $view5Name = "vw_AccessPackageAssignmentDetails"
-        $view5Sql = @"
+
+        # Check if hasAutoAddRule column exists in the policies table (requires re-sync after upgrade)
+        $hasAutoAddColumn = $false
+        try {
+            $checkCmd = $connection.CreateCommand()
+            $checkCmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$AssignmentPoliciesTable' AND COLUMN_NAME = 'hasAutoAddRule'"
+            $result = $checkCmd.ExecuteScalar()
+            $checkCmd.Dispose()
+            $hasAutoAddColumn = ($null -ne $result)
+        } catch { }
+
+        if ($hasAutoAddColumn) {
+            # Enhanced view: uses policy data to infer assignment method when request data is missing
+            $view5Sql = @"
+-- Access Package Assignment Details View (Enhanced with Policy-Based Inference)
+-- When a matching request record exists, uses requestType directly (SystemAdd/UserAdd/AdminAdd).
+-- When no request record exists, falls back to policy analysis:
+--   - If AP only has auto-add policies -> 'Automatic (Policy Rule)'
+--   - If AP has no auto-add policies -> 'Requested / Admin Assigned'
+--   - If AP has a mix of both -> 'Unknown (Mixed Policies)'
+-- Auto-remove-only policies (requestAccessForAllowedTargets=false) are NOT counted as auto-add.
+CREATE VIEW dbo.$view5Name AS
+WITH APPolicyType AS (
+    SELECT
+        accessPackageId,
+        COUNT(*) AS totalPolicies,
+        SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddPolicies
+    FROM dbo.$AssignmentPoliciesTable
+    GROUP BY accessPackageId
+)
+SELECT
+    a.id AS assignmentId,
+    a.targetId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    a.accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    a.assignmentState AS assignmentState,
+    COALESCE(req.requestType, 'Unknown') AS requestType,
+    COALESCE(req.requestState, 'Unknown') AS requestState,
+    COALESCE(req.requestStatus, 'Unknown') AS requestStatus,
+    req.justification,
+    req.createdDateTime AS requestCreatedDateTime,
+    req.completedDateTime AS requestCompletedDateTime,
+    CASE
+        WHEN req.requestType = 'SystemAdd' THEN 'Automatic (Policy Rule)'
+        WHEN req.requestType = 'UserAdd' THEN 'User Requested'
+        WHEN req.requestType = 'AdminAdd' THEN 'Admin Assigned'
+        -- Fallback: infer from policy types when no request record exists
+        WHEN apt.totalPolicies > 0 AND apt.autoAddPolicies = apt.totalPolicies THEN 'Automatic (Policy Rule)'
+        WHEN apt.totalPolicies > 0 AND apt.autoAddPolicies = 0 THEN 'Requested / Admin Assigned'
+        WHEN apt.totalPolicies > 0 AND apt.autoAddPolicies > 0 AND apt.autoAddPolicies < apt.totalPolicies THEN 'Unknown (Mixed Policies)'
+        ELSE 'Unknown'
+    END AS assignmentMethod
+FROM dbo.$AssignmentsTable a
+    INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+    LEFT JOIN dbo.$AssignmentRequestsTable req
+        ON a.accessPackageId = req.accessPackageId
+        AND a.targetId = req.requestorId
+        AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
+        AND req.requestState = 'Delivered'
+    LEFT JOIN APPolicyType apt
+        ON a.accessPackageId = apt.accessPackageId
+WHERE a.assignmentState = 'delivered'
+"@
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using enhanced assignment method detection (policy-based fallback)" -ForegroundColor Cyan
+        }
+        else {
+            # Original view: no policy data available yet
+            $view5Sql = @"
 -- Access Package Assignment Details View
 -- Shows how each access package assignment was granted (automatic, user-requested, or admin-assigned)
+-- NOTE: Re-sync assignment policies (Sync-FGAccessPackageAssignmentPolicy) to enable policy-based inference
 CREATE VIEW dbo.$view5Name AS
 SELECT
     a.id AS assignmentId,
@@ -290,6 +364,8 @@ FROM dbo.$AssignmentsTable a
         AND req.requestState = 'Delivered'
 WHERE a.assignmentState = 'delivered'
 "@
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using basic assignment method detection (re-sync policies to enable policy-based inference)" -ForegroundColor Yellow
+        }
 
         # View 6: Last Access Review Per Access Package
         # Shows when each access package was last reviewed and by whom

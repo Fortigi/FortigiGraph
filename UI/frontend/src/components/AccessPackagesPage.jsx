@@ -8,7 +8,16 @@ const TAG_COLORS = [
 
 const PAGE_SIZE = 100;
 
-export default function AccessPackagesPage() {
+const ASSIGNMENT_TYPE_STYLES = {
+  'Auto-assigned': 'bg-green-100 text-green-800 border-green-200',
+  'Request-based': 'bg-blue-100 text-blue-800 border-blue-200',
+  'Request-based with auto-removal': 'bg-orange-100 text-orange-800 border-orange-200',
+  'Both': 'bg-purple-100 text-purple-800 border-purple-200',
+};
+
+const ASSIGNMENT_TYPES = ['Auto-assigned', 'Request-based', 'Request-based with auto-removal', 'Both'];
+
+export default function AccessPackagesPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
 
   // Data state
@@ -22,6 +31,7 @@ export default function AccessPackagesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState(null); // null = all, number = categoryId, 'uncategorized' = no category
+  const [typeFilter, setTypeFilter] = useState(null); // null = all, string = assignment type
 
   // Selection state
   const [selected, setSelected] = useState(new Set());
@@ -48,7 +58,7 @@ export default function AccessPackagesPage() {
   }, [search]);
 
   // Reset page & selection when filters change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, categoryFilter]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, categoryFilter, typeFilter]);
 
   // Fetch categories
   const fetchCategories = useCallback(async () => {
@@ -113,9 +123,15 @@ export default function AccessPackagesPage() {
     }
   };
 
+  // Apply client-side type filter, then sort
+  const filteredPackages = useMemo(() => {
+    if (!typeFilter) return packages;
+    return packages.filter(p => p.assignmentType === typeFilter);
+  }, [packages, typeFilter]);
+
   const sortedPackages = useMemo(() => {
-    if (!sortCol) return packages;
-    return [...packages].sort((a, b) => {
+    if (!sortCol) return filteredPackages;
+    return [...filteredPackages].sort((a, b) => {
       let av, bv;
       if (sortCol === 'totalAssignments') {
         av = a.totalAssignments || 0;
@@ -126,6 +142,9 @@ export default function AccessPackagesPage() {
       if (sortCol === 'category') {
         av = (a.category?.name ?? '').toLowerCase();
         bv = (b.category?.name ?? '').toLowerCase();
+      } else if (sortCol === 'assignmentType') {
+        av = (a.assignmentType ?? '').toLowerCase();
+        bv = (b.assignmentType ?? '').toLowerCase();
       } else {
         av = (a[sortCol] ?? '').toString().toLowerCase();
         bv = (b[sortCol] ?? '').toString().toLowerCase();
@@ -133,7 +152,7 @@ export default function AccessPackagesPage() {
       const cmp = av.localeCompare(bv);
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [packages, sortCol, sortDir]);
+  }, [filteredPackages, sortCol, sortDir]);
 
   // Category operations
   const createCategory = async () => {
@@ -220,7 +239,7 @@ export default function AccessPackagesPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = packages.length > 0 && selected.size === packages.length;
-  const hasAnyFilter = categoryFilter !== null || debouncedSearch;
+  const hasAnyFilter = categoryFilter !== null || typeFilter !== null || debouncedSearch;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -313,7 +332,7 @@ export default function AccessPackagesPage() {
         </div>
       )}
 
-      {/* Search bar */}
+      {/* Search bar + type filter */}
       <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
         <input
           type="text"
@@ -322,11 +341,21 @@ export default function AccessPackagesPage() {
           placeholder="Search by name or catalog..."
           className="px-2 py-1 border border-gray-300 rounded text-xs w-56"
         />
+        <select
+          value={typeFilter || ''}
+          onChange={e => setTypeFilter(e.target.value || null)}
+          className="px-2 py-1 border border-gray-300 rounded text-xs"
+        >
+          <option value="">All types</option>
+          {ASSIGNMENT_TYPES.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
         {hasAnyFilter && (
           <>
             <div className="border-l border-gray-300 h-5 mx-1" />
             <button
-              onClick={() => { setCategoryFilter(null); setSearch(''); }}
+              onClick={() => { setCategoryFilter(null); setTypeFilter(null); setSearch(''); }}
               className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 border border-gray-200"
             >
               Clear all
@@ -397,6 +426,7 @@ export default function AccessPackagesPage() {
                   { key: 'displayName',      label: 'Name' },
                   { key: 'catalogName',      label: 'Catalog' },
                   { key: 'totalAssignments', label: 'Assignments' },
+                  { key: 'assignmentType',   label: 'Type' },
                 ].map(col => (
                   <th
                     key={col.key}
@@ -446,9 +476,23 @@ export default function AccessPackagesPage() {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-3 py-2 font-medium text-gray-900">{ap.displayName}</td>
+                  <td className="px-3 py-2 font-medium" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => onOpenDetail?.('access-package', ap.id, ap.displayName)}
+                      className="text-blue-600 hover:text-blue-800 hover:underline text-left"
+                    >
+                      {ap.displayName}
+                    </button>
+                  </td>
                   <td className="px-3 py-2 text-gray-600">{ap.catalogName || ''}</td>
                   <td className="px-3 py-2 text-gray-600">{ap.totalAssignments}</td>
+                  <td className="px-3 py-2">
+                    {ap.assignmentType && (
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${ASSIGNMENT_TYPE_STYLES[ap.assignmentType] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                        {ap.assignmentType}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <select
                       value={ap.category?.id || ''}

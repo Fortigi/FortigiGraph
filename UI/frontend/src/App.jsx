@@ -10,6 +10,9 @@ const GroupsPage = lazy(() => import('./components/GroupsPage'));
 const AccessPackagesPage = lazy(() => import('./components/AccessPackagesPage'));
 const UserDetailPage = lazy(() => import('./components/UserDetailPage'));
 const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
+const AccessPackageDetailPage = lazy(() => import('./components/AccessPackageDetailPage'));
+const PerfPage = lazy(() => import('./components/PerfPage'));
+// const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
@@ -76,6 +79,7 @@ const NAV_TABS = [
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
+  { key: 'performance',      label: 'Performance' },
 ];
 
 export default function App() {
@@ -101,9 +105,10 @@ export default function App() {
   const [detailTabs, setDetailTabs] = useState(() => {
     // Restore detail tab from URL on load (e.g., bookmarked #user:abc)
     const { page: initPage } = parseHash();
-    if (initPage.startsWith('user:') || initPage.startsWith('group:')) {
-      const [type, ...rest] = initPage.split(':');
-      const id = rest.join(':'); // handle IDs with colons
+    if (initPage.startsWith('user:') || initPage.startsWith('group:') || initPage.startsWith('access-package:')) {
+      const sepIdx = initPage.indexOf(':');
+      const type = initPage.substring(0, sepIdx);
+      const id = initPage.substring(sepIdx + 1);
       return [{ type, id, displayName: id }];
     }
     return [];
@@ -136,9 +141,10 @@ export default function App() {
 
   // When navigating to a detail tab via URL that isn't tracked yet, add it
   useEffect(() => {
-    if (page.startsWith('user:') || page.startsWith('group:')) {
-      const [type, ...rest] = page.split(':');
-      const id = rest.join(':');
+    if (page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:')) {
+      const sepIdx = page.indexOf(':');
+      const type = page.substring(0, sepIdx);
+      const id = page.substring(sepIdx + 1);
       setDetailTabs(prev => {
         if (prev.some(t => t.type === type && t.id === id)) return prev;
         return [...prev, { type, id, displayName: id }];
@@ -172,7 +178,7 @@ export default function App() {
   }), [userLimit, activeFilters, managedFilter, filterText]);
 
   // Check if current page is a detail tab
-  const isDetailPage = page.startsWith('user:') || page.startsWith('group:');
+  const isDetailPage = page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:');
 
   if (error) {
     return (
@@ -199,6 +205,11 @@ export default function App() {
       const id = page.substring(6);
       const cacheKey = `group:${id}`;
       return <GroupDetailPage groupId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('group', id)} />;
+    }
+    if (page.startsWith('access-package:')) {
+      const id = page.substring(15);
+      const cacheKey = `access-package:${id}`;
+      return <AccessPackageDetailPage accessPackageId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('access-package', id)} />;
     }
     return null;
   };
@@ -250,8 +261,8 @@ export default function App() {
           {detailTabs.map(tab => {
             const tabKey = `${tab.type}:${tab.id}`;
             const isActive = page === tabKey;
-            const icon = tab.type === 'user' ? 'U' : 'G';
-            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
+            const icon = tab.type === 'user' ? 'U' : tab.type === 'group' ? 'G' : 'AP';
+            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : tab.type === 'group' ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700';
             return (
               <button
                 key={tabKey}
@@ -291,7 +302,9 @@ export default function App() {
           ) : page === 'groups' ? (
             <GroupsPage onOpenDetail={openDetailTab} />
           ) : page === 'access-packages' ? (
-            <AccessPackagesPage />
+            <AccessPackagesPage onOpenDetail={openDetailTab} />
+          ) : page === 'performance' ? (
+            <PerfPage />
           ) : loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-gray-500">Loading permission data...</div>

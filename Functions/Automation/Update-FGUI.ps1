@@ -3,7 +3,10 @@ function Update-FGUI {
     [CmdletBinding(DefaultParameterSetName = 'ConfigFile')]
     Param(
         [Parameter(Mandatory = $true, ParameterSetName = 'ConfigFile')]
-        [string]$ConfigFile
+        [string]$ConfigFile,
+
+        [Parameter(Mandatory = $false)]
+        [Nullable[bool]]$PerformanceMetrics
     )
 
     # Suppress Az module deprecation warnings
@@ -47,6 +50,34 @@ function Update-FGUI {
     }
 
     $subId = (Get-AzContext).Subscription.Id
+
+    # ─── Update App Settings (if -PerformanceMetrics specified) ──────────
+    if ($null -ne $PerformanceMetrics) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updating app settings..." -ForegroundColor Cyan
+
+        try {
+            $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        } catch {
+            throw "Azure token expired or MFA required. Please run: Connect-AzAccount -AuthScope https://management.azure.com"
+        }
+
+        $settingsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings/list?api-version=2023-01-01"
+        $currentSettings = Invoke-RestMethod -Uri $settingsUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json"
+
+        $properties = @{}
+        foreach ($prop in $currentSettings.properties.PSObject.Properties) {
+            $properties[$prop.Name] = $prop.Value
+        }
+
+        $properties["PERF_METRICS_ENABLED"] = if ($PerformanceMetrics) { "true" } else { "false" }
+
+        $putUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings?api-version=2023-01-01"
+        $body = @{ properties = $properties } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Uri $putUri -Method PUT -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body $body | Out-Null
+
+        $perfState = if ($PerformanceMetrics) { "Enabled" } else { "Disabled" }
+        Write-Host "  Performance metrics: $perfState" -ForegroundColor Green
+    }
 
     # ─── Package Code ─────────────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Packaging UI for deployment..." -ForegroundColor Cyan

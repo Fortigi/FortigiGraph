@@ -56,11 +56,19 @@ function Sync-FGMaterializedViews {
         [int]$CommandTimeout = 1800
     )
 
+    # Track sync timing for logging
+    $syncStartTime = Get-Date
+    $syncStatus = "Failed"
+    $syncErrorMessage = $null
+    $syncRecordCount = 0
+
     if (-not $global:FGSQLConnectionString) {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
     }
 
-    Invoke-FGSQLCommand -ScriptBlock {
+    try {
+
+    $result = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materializing views for UI performance (timeout: ${CommandTimeout}s per step)..." -ForegroundColor Cyan
@@ -289,10 +297,86 @@ DROP TABLE #RecursiveMemberships;
             Write-Warning "  Table GraphGroupMembers does not exist. Run Sync-FGGroupMember first."
         }
 
+        # ═══════════════════════════════════════════════════════════════
+        # Step 4: Update statistics + pre-compute user counts
+        # SELECT INTO doesn't create statistics, so the query optimizer
+        # chooses terrible plans. Also pre-compute per-user membership
+        # counts so the UI doesn't need GROUP BY on every page load.
+        # ═══════════════════════════════════════════════════════════════
+        if ($materialized -gt 0) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Step 4: Updating statistics and building user counts..." -ForegroundColor Cyan
+
+            try {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandTimeout = $CommandTimeout
+                $cmd.CommandText = @"
+-- Update statistics so the query optimizer has accurate data distribution info
+UPDATE STATISTICS dbo.mat_UserPermissionAssignments;
+
+-- Pre-compute per-user membership counts (eliminates GROUP BY from every API request)
+IF OBJECT_ID('dbo.mat_UserCounts', 'U') IS NOT NULL
+    DROP TABLE dbo.mat_UserCounts;
+
+SELECT memberId, COUNT(*) AS cnt
+INTO dbo.mat_UserCounts
+FROM dbo.mat_UserPermissionAssignments
+WHERE memberType != '#microsoft.graph.group'
+GROUP BY memberId;
+
+CREATE CLUSTERED INDEX IX_mat_UC_cnt_desc
+    ON dbo.mat_UserCounts (cnt DESC, memberId);
+
+CREATE NONCLUSTERED INDEX IX_mat_UC_memberId
+    ON dbo.mat_UserCounts (memberId)
+    INCLUDE (cnt);
+
+UPDATE STATISTICS dbo.mat_UserCounts;
+"@
+                $cmd.ExecuteNonQuery() | Out-Null
+
+                $countCmd = $connection.CreateCommand()
+                $countCmd.CommandTimeout = 120
+                $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserCounts"
+                $userCountRows = $countCmd.ExecuteScalar()
+
+                Write-Host "    Updated statistics and built mat_UserCounts: $userCountRows users" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "    Step 4 FAILED (statistics/user counts): $_" -ForegroundColor Red
+                Write-Host "    Continuing — UI will fall back to GROUP BY." -ForegroundColor Yellow
+            }
+        }
+
+        # Update statistics on AP table too if it was materialized
+        if ($apViewExists) {
+            try {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandTimeout = 300
+                $cmd.CommandText = "UPDATE STATISTICS dbo.mat_UserPermissionAssignmentViaAccessPackage"
+                $cmd.ExecuteNonQuery() | Out-Null
+            }
+            catch {
+                Write-Host "    AP statistics update failed (non-critical): $_" -ForegroundColor Yellow
+            }
+        }
+
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materialization complete: $materialized table(s) refreshed" -ForegroundColor Green
 
         return @{
             MaterializedTables = $materialized
         }
+    }
+
+    $syncRecordCount = $result.MaterializedTables
+    $syncStatus = if ($syncRecordCount -ge 2) { "Success" } elseif ($syncRecordCount -ge 1) { "PartialSuccess" } else { "Failed" }
+
+    } # End try
+    catch {
+        $syncErrorMessage = $_.Exception.Message
+        $syncStatus = "Failed"
+        throw
+    }
+    finally {
+        Write-FGSyncLog -SyncType "MaterializedViews" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "mat_UserPermissionAssignments"
     }
 }

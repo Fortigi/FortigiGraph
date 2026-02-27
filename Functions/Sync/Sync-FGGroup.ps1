@@ -101,6 +101,7 @@ function Sync-FGGroup {
         'description'
         'mail'
         'mailNickname'
+        'onPremisesDistinguishedName'
 
         # Type & Security
         'mailEnabled'

@@ -90,18 +90,32 @@ function Sync-FGAccessPackageAssignmentPolicy {
     try {
 
     # Define default attributes
+    # NOTE: Uses v1.0 Graph endpoint (not beta) because automaticRequestSettings
+    # is only available in v1.0.  Beta has canExtend/durationInDays instead, but
+    # those are NOT available in v1.0.  accessPackageId is derived from the
+    # expanded accessPackage navigation property.
     $defaultAttributes = @(
         # Identity
         'id'
         'displayName'
         'description'
 
-        # Relationships
+        # Relationships (derived from $expand=accessPackage)
         'accessPackageId'
 
-        # Request settings
-        'canExtend'
-        'durationInDays'
+        # v1.0 policy scope
+        'allowedTargetScope'
+
+        # Auto-assignment settings (complex object from Graph, stored as JSON)
+        'automaticRequestSettings'
+
+        # Derived: true only when automaticRequestSettings.requestAccessForAllowedTargets = true
+        # Auto-remove-only policies (requestAccessForAllowedTargets = false) do NOT count as auto-add
+        'hasAutoAddRule'
+
+        # Derived: true when automaticRequestSettings.removeAccessWhenTargetLeavesAllowedTargets = true
+        # Policies with only this flag are "Request-based with auto-removal", not "Auto-assigned"
+        'hasAutoRemoveRule'
 
         # Metadata
         'createdDateTime'
@@ -140,8 +154,10 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
         'accessPackageId' = 'UNIQUEIDENTIFIER'
-        'canExtend' = 'BIT'
-        'durationInDays' = 'INT'
+        'allowedTargetScope' = 'NVARCHAR(255)'
+        'automaticRequestSettings' = 'NVARCHAR(MAX)'
+        'hasAutoAddRule' = 'BIT'
+        'hasAutoRemoveRule' = 'BIT'
         'createdDateTime' = 'DATETIME2'
         'modifiedDateTime' = 'DATETIME2'
     }
@@ -169,8 +185,13 @@ function Sync-FGAccessPackageAssignmentPolicy {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access package assignment policies from Microsoft Graph..." -ForegroundColor Cyan
 
-    $selectProperties = $Attributes -join ','
-    $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies?`$select=$selectProperties"
+    # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
+    # accessPackageId is derived from expanded accessPackage navigation property in v1.0
+    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'accessPackageId')
+    $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
+    $selectProperties = $graphAttributes -join ','
+    # Use v1.0 endpoint — automaticRequestSettings only exists in v1.0, not beta
+    $uri = "https://graph.microsoft.com/v1.0/identityGovernance/entitlementManagement/assignmentPolicies?`$select=$selectProperties&`$expand=accessPackage(`$select=id)"
 
     if ($Filter) {
         $uri += "&`$filter=$Filter"
@@ -203,7 +224,35 @@ function Sync-FGAccessPackageAssignmentPolicy {
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPolicies -Columns $columns -Attributes $Attributes
+    $valueResolvers = @{
+        'accessPackageId' = { param($obj) if ($obj.accessPackage -and $obj.accessPackage.id) { $obj.accessPackage.id } else { $null } }
+        'automaticRequestSettings' = { param($obj) if ($obj.automaticRequestSettings) { $obj.automaticRequestSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
+        'hasAutoAddRule' = {
+            param($obj)
+            $autoSettings = $obj.automaticRequestSettings
+            if (-not $autoSettings) { return $false }
+
+            # ONLY true when requestAccessForAllowedTargets is explicitly true.
+            # Policies with only removeAccessWhenTargetLeavesAllowedTargets are
+            # auto-REMOVAL policies, NOT auto-assignment policies.
+            $val = $autoSettings.requestAccessForAllowedTargets
+            if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
+
+            return $false
+        }
+        'hasAutoRemoveRule' = {
+            param($obj)
+            $autoSettings = $obj.automaticRequestSettings
+            if (-not $autoSettings) { return $false }
+
+            $val = $autoSettings.removeAccessWhenTargetLeavesAllowedTargets
+            if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
+
+            return $false
+        }
+    }
+
+    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPolicies -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)

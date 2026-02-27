@@ -77,33 +77,41 @@ export default function MatrixGroupRow({
       {/* Intersection cells */}
       {users.map(user => {
         const cellKey = `${group.id}|${user.id}`;
+        const isOwnerRow = !!group.realGroupId;
         const managed = managedMap?.has(cellKey);
-        // Look up which access packages manage this cell (all keys/IDs normalized to lowercase)
-        // For owner rows, use realGroupId since managedApMap uses real group IDs from backend
-        const lookupGroupId = group.realGroupId || group.id;
-        const cellKeyLower = `${lookupGroupId.toLowerCase()}|${user.id.toLowerCase()}`;
-        const apIds = managed ? managedApMap?.get(cellKeyLower) : null;
+        // Owner rows are never managed by APs (APs grant Direct membership, not Owner).
+        // Only look up AP details for non-owner rows.
         let apColor = null;
         let apCount = 0;
         let apNames = null;
-        if (apIds && apIds.length > 0) {
-          apCount = apIds.length;
-          const firstIdx = apIdToIndex?.get(apIds[0]);
-          if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
-          apNames = apIds.map(id => {
-            const ap = accessPackages.find(a => a.id.toLowerCase() === id);
-            return ap ? ap.displayName : id;
-          });
+        let apIds = null;
+        if (!isOwnerRow && managed) {
+          const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
+          apIds = managedApMap?.get(cellKeyLower) || null;
+          if (apIds && apIds.length > 0) {
+            apCount = apIds.length;
+            const firstIdx = apIdToIndex?.get(apIds[0]);
+            if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
+            apNames = apIds.map(id => {
+              const ap = accessPackages.find(a => a.id.toLowerCase() === id);
+              return ap ? ap.displayName : id;
+            });
+          }
         }
+        // Provisioning gap: AP should grant Direct membership but user has no Direct in IST
+        // Never applies to owner rows (APs don't manage ownership).
+        const cellTypes = memberships.get(cellKey);
+        const provisioningGap = !isOwnerRow && managed && apIds && apIds.length > 0 && (!cellTypes || !cellTypes.has('Direct'));
         return (
           <MatrixCell
             key={cellKey}
             cellKey={cellKey}
-            membershipTypes={memberships.get(cellKey)}
+            membershipTypes={cellTypes}
             managed={managed}
             apColor={apColor}
             apCount={apCount}
             apNames={apNames}
+            provisioningGap={provisioningGap}
           />
         );
       })}
