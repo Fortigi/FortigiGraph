@@ -253,7 +253,9 @@ export default function MatrixView({
       membershipMap.get(key).add(d.membershipType);
 
       // Track managedByAccessPackage per cell (boolean from view, used for filtering)
-      if (d.managedByAccessPackage) {
+      // Owner rows are NOT managed by APs — the managedByAccessPackage flag from the
+      // SQL view checks AP→Direct membership, which doesn't apply to Owner relationships.
+      if (d.managedByAccessPackage && !isOwner) {
         managed.set(key, true);
       }
     });
