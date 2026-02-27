@@ -212,13 +212,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
         }
       }
 
-      // Cell background: AP color for managed cells, green for unmanaged
+      // Cell background: AP color for managed cells only; unmanaged cells stay white
       if (hasMembership) {
         // For owner rows, use realGroupId since managedApMap uses real group IDs
         const lookupGroupId = group.realGroupId || group.id;
         const cellKeyLower = `${lookupGroupId.toLowerCase()}|${users[u].id.toLowerCase()}`;
         const apIds = managedApMap?.get(cellKeyLower);
-        let bgArgb = 'FFDCFCE7'; // default: light green (unmanaged)
+        let bgArgb = null;
         if (apIds && apIds.length > 0 && apIdToIndex) {
           const firstIdx = apIdToIndex.get(apIds[0]);
           if (firstIdx != null) {
@@ -230,7 +230,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
             excelCell.note = `Managed by: ${apIds.length} access packages`;
           }
         }
-        excelCell.fill = {
+        if (bgArgb) excelCell.fill = {
           type: 'pattern',
           pattern: 'solid',
           fgColor: { argb: bgArgb },

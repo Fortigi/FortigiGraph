@@ -10,16 +10,10 @@ const TYPE_INDICATORS = {
 function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
 
-  // Background: AP color for managed cells (if known), fallback blue for managed, green for unmanaged
+  // Background: AP color for managed cells only; unmanaged cells stay white
   let bgColor;
-  if (hasMembership) {
-    if (managed && apColor) {
-      bgColor = apColor;
-    } else if (managed) {
-      bgColor = '#dbeafe';
-    } else {
-      bgColor = '#dcfce7';
-    }
+  if (hasMembership && managed) {
+    bgColor = apColor || '#dbeafe';
   }
 
   // Tooltip
