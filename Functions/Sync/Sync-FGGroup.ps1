@@ -128,6 +128,7 @@ function Sync-FGGroup {
         'onPremisesSecurityIdentifier'
         'onPremisesNetBiosName'
         'onPremisesDomainName'
+        'onPremisesDistinguishedName'
     )
 
     # Determine which attributes to use
@@ -184,12 +185,13 @@ function Sync-FGGroup {
         'onPremisesSecurityIdentifier' = 'NVARCHAR(255)'
         'onPremisesNetBiosName' = 'NVARCHAR(255)'
         'onPremisesDomainName' = 'NVARCHAR(255)'
+        'onPremisesDistinguishedName' = 'NVARCHAR(1000)'
         'onPremisesProvisioningErrors' = 'NVARCHAR(MAX)'
         'proxyAddresses' = 'NVARCHAR(MAX)'
     }
 
-    # Add calculated field (not a Graph attribute, computed during sync)
-    $calculatedField = 'groupTypeCalculated'
+    # Add calculated fields (not Graph attributes, computed during sync)
+    $calculatedFields = @('groupTypeCalculated', 'organizationalUnit', 'administrativeUnits')
 
     # Build column definitions
     $columns = @{}
@@ -201,8 +203,10 @@ function Sync-FGGroup {
         }
         $columns[$attr] = $sqlType
     }
-    # Add calculated column
-    $columns[$calculatedField] = 'NVARCHAR(100)'
+    # Add calculated columns
+    $columns['groupTypeCalculated'] = 'NVARCHAR(100)'
+    $columns['organizationalUnit'] = 'NVARCHAR(1000)'
+    $columns['administrativeUnits'] = 'NVARCHAR(MAX)'
 
     # Check if table exists and handle schema
     try {
@@ -218,7 +222,7 @@ function Sync-FGGroup {
 
     # Ensure attributes needed for groupTypeCalculated are always fetched from Graph
     $graphAttributes = $Attributes
-    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions', 'membershipRule')) {
+    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions', 'membershipRule', 'onPremisesDistinguishedName')) {
         if ($graphAttributes -notcontains $required) {
             $graphAttributes += $required
         }
@@ -251,18 +255,47 @@ function Sync-FGGroup {
         return
     }
 
+    # Fetch administrative unit memberships
+    $auMemberMap = @{}
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching administrative unit memberships..." -ForegroundColor Cyan
+    try {
+        $auUri = "https://graph.microsoft.com/v1.0/directory/administrativeUnits?`$select=id,displayName"
+        $allAUs = Invoke-FGGetRequest -URI $auUri
+        if ($allAUs) {
+            foreach ($au in $allAUs) {
+                $membersUri = "https://graph.microsoft.com/v1.0/directory/administrativeUnits/$($au.id)/members?`$select=id"
+                $members = Invoke-FGGetRequest -URI $membersUri
+                if ($members) {
+                    foreach ($member in $members) {
+                        if (-not $auMemberMap.ContainsKey($member.id)) {
+                            $auMemberMap[$member.id] = @()
+                        }
+                        $auMemberMap[$member.id] += $au.displayName
+                    }
+                }
+            }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($allAUs.Count) administrative unit(s) with $($auMemberMap.Count) member assignments" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] No administrative units found" -ForegroundColor Gray
+        }
+    }
+    catch {
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch administrative units: $_. The 'administrativeUnits' column will be empty."
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing groups to SQL Server..." -ForegroundColor Cyan
 
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    # Include calculated field in the attribute list for DataTable creation
-    $allColumns = $Attributes + @($calculatedField)
+    # Include calculated fields in the attribute list for DataTable creation
+    $allColumns = $Attributes + $calculatedFields
 
-    # Define a resolver for the calculated groupTypeCalculated field
+    # Define resolvers for the calculated fields
     $valueResolvers = @{
-        $calculatedField = {
+        'groupTypeCalculated' = {
             param($obj)
             $groupTypesValue = $obj.groupTypes
             $isUnified = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'Unified'
@@ -276,6 +309,25 @@ function Sync-FGGroup {
             else { $baseType = 'Mail Enabled Security Group' }
 
             if ($isDynamic) { "Dynamic $baseType" } else { $baseType }
+        }
+        'organizationalUnit' = {
+            param($obj)
+            $dn = $obj.onPremisesDistinguishedName
+            if (-not $dn) { return $null }
+            $parts = $dn -split '(?<!\\),'
+            $ouParts = @($parts | Where-Object { $_ -match '^OU=' } | ForEach-Object { $_ -replace '^OU=', '' })
+            if ($ouParts.Count -gt 0) {
+                [array]::Reverse($ouParts)
+                return ($ouParts -join '/')
+            }
+            return $null
+        }
+        'administrativeUnits' = {
+            param($obj)
+            if ($auMemberMap.ContainsKey($obj.id)) {
+                return ($auMemberMap[$obj.id] -join ', ')
+            }
+            return $null
         }
     }
 
