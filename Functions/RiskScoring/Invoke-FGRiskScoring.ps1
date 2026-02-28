@@ -120,7 +120,10 @@ function Invoke-FGRiskScoring {
         'riskStructuralScore'     = 'INT'
         'riskPropagatedScore'     = 'INT'
         'riskClassifierMatches'   = 'NVARCHAR(MAX)'
+        'riskExplanation'         = 'NVARCHAR(MAX)'
         'riskScoredAt'            = 'DATETIME2'
+        'riskOverride'            = 'INT'
+        'riskOverrideReason'      = 'NVARCHAR(500)'
     }
 
     foreach ($tableName in @('GraphUsers', 'GraphGroups')) {
@@ -317,17 +320,23 @@ function Invoke-FGRiskScoring {
 
         $bestScore = 0
         $matches = @()
+        $directReasons = @()
 
         foreach ($c in $groupClassifiers) {
             $nameMatch = Test-PatternMatch -Text $name -Patterns $c.name_patterns
             $descMatch = Test-PatternMatch -Text $desc -Patterns $c.description_patterns
             if ($nameMatch -or $descMatch) {
                 $matches += @{ id = $c.id; category = $c.category; score = [int]$c.base_score; rationale = $c.rationale }
+                $matchedOn = @()
+                if ($nameMatch) { $matchedOn += "name" }
+                if ($descMatch) { $matchedOn += "description" }
+                $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') ($($c.rationale)) [+$($c.base_score)]"
                 if ([int]$c.base_score -gt $bestScore) { $bestScore = [int]$c.base_score }
             }
         }
 
         if ($matches.Count -gt 0) { $groupMatchCount++ }
+        if ($directReasons.Count -eq 0) { $directReasons += "No classifier patterns matched" }
 
         $groupScores[$gId] = @{
             directScore = $bestScore
@@ -335,6 +344,12 @@ function Invoke-FGRiskScoring {
             membershipScore = 0
             structuralScore = 0
             propagatedScore = 0
+            explanation = @{
+                direct = @{ score = $bestScore; reasons = $directReasons }
+                membership = @{ score = 0; reasons = @() }
+                structural = @{ score = 0; reasons = @() }
+                propagated = @{ score = 0; reasons = @() }
+            }
         }
     }
     Write-Host "  Groups matched: $groupMatchCount / $($groups.Rows.Count)" -ForegroundColor Gray
@@ -350,6 +365,7 @@ function Invoke-FGRiskScoring {
 
         $bestScore = 0
         $matches = @()
+        $directReasons = @()
 
         foreach ($c in $userClassifiers) {
             $titleMatch = Test-PatternMatch -Text $title -Patterns $c.title_patterns
@@ -357,11 +373,17 @@ function Invoke-FGRiskScoring {
             $upnMatch = Test-PatternMatch -Text $upn -Patterns $c.upn_patterns
             if ($titleMatch -or $nameMatch -or $upnMatch) {
                 $matches += @{ id = $c.id; category = $c.category; score = [int]$c.base_score; rationale = $c.rationale }
+                $matchedOn = @()
+                if ($titleMatch) { $matchedOn += "job title" }
+                if ($nameMatch) { $matchedOn += "display name" }
+                if ($upnMatch) { $matchedOn += "UPN" }
+                $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') ($($c.rationale)) [+$($c.base_score)]"
                 if ([int]$c.base_score -gt $bestScore) { $bestScore = [int]$c.base_score }
             }
         }
 
         if ($matches.Count -gt 0) { $userMatchCount++ }
+        if ($directReasons.Count -eq 0) { $directReasons += "No classifier patterns matched" }
 
         $userScores[$uId] = @{
             directScore = $bestScore
@@ -369,6 +391,12 @@ function Invoke-FGRiskScoring {
             membershipScore = 0
             structuralScore = 0
             propagatedScore = 0
+            explanation = @{
+                direct = @{ score = $bestScore; reasons = $directReasons }
+                membership = @{ score = 0; reasons = @() }
+                structural = @{ score = 0; reasons = @() }
+                propagated = @{ score = 0; reasons = @() }
+            }
         }
     }
     Write-Host "  Users matched:  $userMatchCount / $($users.Rows.Count)" -ForegroundColor Gray
@@ -383,23 +411,36 @@ function Invoke-FGRiskScoring {
     # Score groups based on membership characteristics
     foreach ($gId in $groupScores.Keys) {
         $score = 0
+        $reasons = @()
         $members = if ($groupMembers.ContainsKey($gId)) { $groupMembers[$gId] } else { @() }
         $eligible = if ($groupEligible.ContainsKey($gId)) { $groupEligible[$gId] } else { @() }
         $ownrs = if ($groupOwnerMap.ContainsKey($gId)) { $groupOwnerMap[$gId] } else { @() }
 
         # Small group = concentrated risk
-        if ($members.Count -gt 0 -and $members.Count -le 5) { $score += 5 }
+        if ($members.Count -gt 0 -and $members.Count -le 5) {
+            $score += 5
+            $reasons += "Small group with $($members.Count) member(s) — concentrated access risk [+5]"
+        }
         # Has PIM-eligible members
-        if ($eligible.Count -gt 0) { $score += 10 }
+        if ($eligible.Count -gt 0) {
+            $score += 10
+            $reasons += "$($eligible.Count) PIM-eligible member(s) — indicates privileged access [+10]"
+        }
         # No owner but has members
-        if ($ownrs.Count -eq 0 -and $members.Count -gt 0) { $score += 5 }
+        if ($ownrs.Count -eq 0 -and $members.Count -gt 0) {
+            $score += 5
+            $reasons += "No owner assigned while having $($members.Count) member(s) — ungoverned group [+5]"
+        }
 
+        if ($reasons.Count -eq 0) { $reasons += "No membership-based risk signals detected" }
         $groupScores[$gId].membershipScore = [Math]::Min($score, 40)
+        $groupScores[$gId].explanation.membership = @{ score = [Math]::Min($score, 40); reasons = $reasons }
     }
 
     # Score users based on their memberships
     foreach ($uId in $userScores.Keys) {
         $score = 0
+        $reasons = @()
         $memberships = if ($userMemberships.ContainsKey($uId)) { $userMemberships[$uId] } else { @() }
         $ownerships = if ($userOwnershipMap.ContainsKey($uId)) { $userOwnershipMap[$uId] } else { @() }
         $eligible = if ($userEligible.ContainsKey($uId)) { $userEligible[$uId] } else { @() }
@@ -409,27 +450,45 @@ function Invoke-FGRiskScoring {
         # High membership count
         if ($totalGroups -gt 15) {
             $points = [Math]::Min(15, [Math]::Floor(($totalGroups - 15) / 3) * 3)
-            if ($points -gt 0) { $score += $points }
+            if ($points -gt 0) {
+                $score += $points
+                $reasons += "Member of $totalGroups groups (above threshold of 15) — broad access footprint [+$points]"
+            }
         }
 
         # Member of high-risk groups (direct score > 70)
         $highRiskCount = 0
+        $highRiskNames = @()
         foreach ($gId in $memberships) {
             if ($groupScores.ContainsKey($gId) -and $groupScores[$gId].directScore -gt 70) {
                 $highRiskCount++
+                # Resolve group name for explanation
+                $gRow = $groups.Select("id = '$gId'")
+                if ($gRow.Count -gt 0) { $highRiskNames += $gRow[0].displayName.ToString() }
             }
         }
-        if ($highRiskCount -gt 0) { $score += 15 }
+        if ($highRiskCount -gt 0) {
+            $score += 15
+            $namesList = if ($highRiskNames.Count -le 3) { $highRiskNames -join ', ' } else { ($highRiskNames[0..2] -join ', ') + " +$($highRiskNames.Count - 3) more" }
+            $reasons += "Member of $highRiskCount high-risk group(s): $namesList [+15]"
+        }
 
         # PIM-eligible
         if ($eligible.Count -gt 0) {
-            $score += [Math]::Min(20, $eligible.Count * 5)
+            $pimPoints = [Math]::Min(20, $eligible.Count * 5)
+            $score += $pimPoints
+            $reasons += "PIM-eligible for $($eligible.Count) group(s) — can activate privileged access [+$pimPoints]"
         }
 
         # Many ownerships
-        if ($ownerships.Count -gt 3) { $score += 5 }
+        if ($ownerships.Count -gt 3) {
+            $score += 5
+            $reasons += "Owner of $($ownerships.Count) groups — high administrative responsibility [+5]"
+        }
 
+        if ($reasons.Count -eq 0) { $reasons += "No membership-based risk signals detected" }
         $userScores[$uId].membershipScore = [Math]::Min($score, 40)
+        $userScores[$uId].explanation.membership = @{ score = [Math]::Min($score, 40); reasons = $reasons }
     }
 
     Write-Host "  Membership analysis complete" -ForegroundColor Gray
@@ -444,43 +503,70 @@ function Invoke-FGRiskScoring {
     foreach ($row in $groups.Rows) {
         $gId = $row.id.ToString()
         $score = 0
+        $reasons = @()
 
         # No description
-        if ($row.description -is [DBNull] -or [string]::IsNullOrWhiteSpace($row.description.ToString())) { $score += 3 }
+        if ($row.description -is [DBNull] -or [string]::IsNullOrWhiteSpace($row.description.ToString())) {
+            $score += 3
+            $reasons += "No description set — poor documentation hygiene [+3]"
+        }
         # Mail-enabled security group
         $mailEnabled = if ($row.mailEnabled -is [DBNull]) { $false } else { [bool]$row.mailEnabled }
         $secEnabled = if ($row.securityEnabled -is [DBNull]) { $false } else { [bool]$row.securityEnabled }
-        if ($mailEnabled -and $secEnabled) { $score += 3 }
+        if ($mailEnabled -and $secEnabled) {
+            $score += 3
+            $reasons += "Mail-enabled security group — dual-purpose increases attack surface [+3]"
+        }
         # Role-assignable
         $roleAssignable = if ($row.isAssignableToRole -is [DBNull]) { $false } else { [bool]$row.isAssignableToRole }
-        if ($roleAssignable) { $score += 15 }
+        if ($roleAssignable) {
+            $score += 15
+            $reasons += "Role-assignable group — can be assigned Entra ID directory roles [+15]"
+        }
         # Dynamic membership
         $membershipRule = if ($row.membershipRuleProcessingState -is [DBNull]) { "" } else { $row.membershipRuleProcessingState.ToString() }
-        if ($membershipRule -eq 'On') { $score += 3 }
+        if ($membershipRule -eq 'On') {
+            $score += 3
+            $reasons += "Dynamic membership rule active — membership changes automatically [+3]"
+        }
 
+        if ($reasons.Count -eq 0) { $reasons += "No structural risk signals detected" }
         $groupScores[$gId].structuralScore = [Math]::Min($score, 25)
+        $groupScores[$gId].explanation.structural = @{ score = [Math]::Min($score, 25); reasons = $reasons }
     }
 
     foreach ($row in $users.Rows) {
         $uId = $row.id.ToString()
         $score = 0
+        $reasons = @()
 
         # Account disabled
         $enabled = if ($row.accountEnabled -is [DBNull]) { $true } else { [bool]$row.accountEnabled }
-        if (-not $enabled) { $score += 5 }
+        if (-not $enabled) {
+            $score += 5
+            $reasons += "Account is disabled but still has group memberships [+5]"
+        }
 
         # Stale sign-in (90+ days)
         if (-not ($row.lastSignInDateTime -is [DBNull])) {
             $lastSignIn = [DateTime]$row.lastSignInDateTime
             $daysSince = ([DateTime]::UtcNow - $lastSignIn).Days
-            if ($daysSince -gt 90) { $score += 10 }
+            if ($daysSince -gt 90) {
+                $score += 10
+                $reasons += "Last sign-in $daysSince days ago — stale account with active permissions [+10]"
+            }
         }
 
         # Guest user
         $userType = if ($row.userType -is [DBNull]) { "" } else { $row.userType.ToString() }
-        if ($userType -eq 'Guest') { $score += 5 }
+        if ($userType -eq 'Guest') {
+            $score += 5
+            $reasons += "External guest account — higher risk for data exfiltration [+5]"
+        }
 
+        if ($reasons.Count -eq 0) { $reasons += "No structural risk signals detected" }
         $userScores[$uId].structuralScore = [Math]::Min($score, 25)
+        $userScores[$uId].explanation.structural = @{ score = [Math]::Min($score, 25); reasons = $reasons }
     }
 
     Write-Host "  Structural analysis complete" -ForegroundColor Gray
@@ -512,24 +598,46 @@ function Invoke-FGRiskScoring {
     foreach ($uId in $userScores.Keys) {
         $memberships = if ($userMemberships.ContainsKey($uId)) { $userMemberships[$uId] } else { @() }
         $maxGroupScore = 0
+        $maxGroupId = $null
         foreach ($gId in $memberships) {
             if ($groupPreProp.ContainsKey($gId) -and $groupPreProp[$gId] -gt $maxGroupScore) {
                 $maxGroupScore = $groupPreProp[$gId]
+                $maxGroupId = $gId
             }
         }
-        $userScores[$uId].propagatedScore = [int]($maxGroupScore * $propagationGroupToUser)
+        $propScore = [int]($maxGroupScore * $propagationGroupToUser)
+        $userScores[$uId].propagatedScore = $propScore
+        $propReasons = @()
+        if ($propScore -gt 0 -and $maxGroupId) {
+            $gRow = $groups.Select("id = '$maxGroupId'")
+            $gName = if ($gRow.Count -gt 0) { $gRow[0].displayName.ToString() } else { $maxGroupId }
+            $propReasons += "Inherits 30% of riskiest group '$gName' (score $maxGroupScore) = $propScore [+$propScore]"
+        }
+        if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from group memberships" }
+        $userScores[$uId].explanation.propagated = @{ score = $propScore; reasons = $propReasons }
     }
 
     # User → Group: group inherits 25% of riskiest member
     foreach ($gId in $groupScores.Keys) {
         $members = if ($groupMembers.ContainsKey($gId)) { $groupMembers[$gId] } else { @() }
         $maxUserScore = 0
+        $maxUserId = $null
         foreach ($uId in $members) {
             if ($userPreProp.ContainsKey($uId) -and $userPreProp[$uId] -gt $maxUserScore) {
                 $maxUserScore = $userPreProp[$uId]
+                $maxUserId = $uId
             }
         }
-        $groupScores[$gId].propagatedScore = [int]($maxUserScore * $propagationUserToGroup)
+        $propScore = [int]($maxUserScore * $propagationUserToGroup)
+        $groupScores[$gId].propagatedScore = $propScore
+        $propReasons = @()
+        if ($propScore -gt 0 -and $maxUserId) {
+            $uRow = $users.Select("id = '$maxUserId'")
+            $uName = if ($uRow.Count -gt 0) { $uRow[0].displayName.ToString() } else { $maxUserId }
+            $propReasons += "Inherits 25% of riskiest member '$uName' (score $maxUserScore) = $propScore [+$propScore]"
+        }
+        if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from group members" }
+        $groupScores[$gId].explanation.propagated = @{ score = $propScore; reasons = $propReasons }
     }
 
     Write-Host "  Propagation complete" -ForegroundColor Gray
@@ -564,8 +672,9 @@ function Invoke-FGRiskScoring {
         $gs = $groupScores[$gId]
         $final = [Math]::Min(100, [int]($wDirect * $gs.directScore + $wMembership * $gs.membershipScore + $wStructural * $gs.structuralScore + $wPropagated * $gs.propagatedScore))
         $tier = Get-RiskTier -Score $final
-        $matchJson = ($gs.classifierMatches | ConvertTo-Json -Depth 10 -Compress)
+        $matchJson = ($gs.classifierMatches | ConvertTo-Json -Depth 100 -Compress)
         if ($gs.classifierMatches.Count -eq 0) { $matchJson = "[]" }
+        $explainJson = ($gs.explanation | ConvertTo-Json -Depth 100 -Compress)
 
         $groupUpdates += @{
             id = $gId
@@ -576,6 +685,7 @@ function Invoke-FGRiskScoring {
             riskStructuralScore = $gs.structuralScore
             riskPropagatedScore = $gs.propagatedScore
             riskClassifierMatches = $matchJson
+            riskExplanation = $explainJson
         }
     }
 
@@ -585,8 +695,9 @@ function Invoke-FGRiskScoring {
         $us = $userScores[$uId]
         $final = [Math]::Min(100, [int]($wDirect * $us.directScore + $wMembership * $us.membershipScore + $wStructural * $us.structuralScore + $wPropagated * $us.propagatedScore))
         $tier = Get-RiskTier -Score $final
-        $matchJson = ($us.classifierMatches | ConvertTo-Json -Depth 10 -Compress)
+        $matchJson = ($us.classifierMatches | ConvertTo-Json -Depth 100 -Compress)
         if ($us.classifierMatches.Count -eq 0) { $matchJson = "[]" }
+        $explainJson = ($us.explanation | ConvertTo-Json -Depth 100 -Compress)
 
         $userUpdates += @{
             id = $uId
@@ -597,6 +708,7 @@ function Invoke-FGRiskScoring {
             riskStructuralScore = $us.structuralScore
             riskPropagatedScore = $us.propagatedScore
             riskClassifierMatches = $matchJson
+            riskExplanation = $explainJson
         }
     }
 
@@ -628,6 +740,7 @@ UPDATE dbo.GraphGroups SET
     riskStructuralScore = @riskStructuralScore,
     riskPropagatedScore = @riskPropagatedScore,
     riskClassifierMatches = @riskClassifierMatches,
+    riskExplanation = @riskExplanation,
     riskScoredAt = @riskScoredAt
 WHERE id = @id
 "@
@@ -639,6 +752,7 @@ WHERE id = @id
                 $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
                 $cmd.ExecuteNonQuery() | Out-Null
             }
@@ -669,6 +783,7 @@ UPDATE dbo.GraphUsers SET
     riskStructuralScore = @riskStructuralScore,
     riskPropagatedScore = @riskPropagatedScore,
     riskClassifierMatches = @riskClassifierMatches,
+    riskExplanation = @riskExplanation,
     riskScoredAt = @riskScoredAt
 WHERE id = @id
 "@
@@ -680,6 +795,7 @@ WHERE id = @id
                 $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
                 $cmd.ExecuteNonQuery() | Out-Null
             }
