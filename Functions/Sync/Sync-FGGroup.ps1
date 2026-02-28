@@ -128,7 +128,6 @@ function Sync-FGGroup {
         'onPremisesSecurityIdentifier'
         'onPremisesNetBiosName'
         'onPremisesDomainName'
-        'onPremisesDistinguishedName'
     )
 
     # Determine which attributes to use
