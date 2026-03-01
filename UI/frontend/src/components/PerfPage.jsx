@@ -40,7 +40,8 @@ export default function PerfPage() {
       setSummary(summaryRes);
       setRecentData(recentRes);
       setSlowData(slowRes);
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch performance metrics:', err);
       setSummary({ enabled: false });
     } finally {
       setLoading(false);
@@ -65,7 +66,7 @@ export default function PerfPage() {
       a.download = `fortigraph-perf-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch { /* ignore */ }
+    } catch (err) { console.error('Failed to export performance data:', err); }
   }, [authFetch]);
 
   const handleClear = useCallback(async () => {

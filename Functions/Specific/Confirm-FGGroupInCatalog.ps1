@@ -11,24 +11,24 @@ function Confirm-FGGroupInCatalog {
 
     $CatalogId = $Catalog.id
 
-    [array]$CatalogeGroups = Get-FGCatalogeGroup -CatalogId $CatalogId
-    [array]$CatalogeGroup = $CatalogeGroups | Where-Object { $_.displayName -eq $GroupName }
+    [array]$CatalogGroups = Get-FGCatalogGroup -CatalogId $CatalogId
+    [array]$CatalogGroup = $CatalogGroups | Where-Object { $_.displayName -eq $GroupName }
 
-    $CatalogeName = $Catalog.displayName
+    $CatalogName = $Catalog.displayName
 
-    if ($CatalogeGroup.count -eq 1) {
-        Write-Host "Confirmed GroupInCatalog: $GroupName is in cataloge: $CatalogeName" -ForegroundColor Green
+    if ($CatalogGroup.count -eq 1) {
+        Write-Host "Confirmed GroupInCatalog: $GroupName is in catalog: $CatalogName" -ForegroundColor Green
     }
-    elseif ($CatalogeGroup.count -gt 1) {
-        throw "More then one group found for group: $GroupName"
+    elseif ($CatalogGroup.count -gt 1) {
+        throw "More than one group found for group: $GroupName"
     }
     else {
-        Write-Host "Adding GroupInCatalog: $GroupName to cataloge: $CatalogeName" -ForegroundColor Yellow
+        Write-Host "Adding GroupInCatalog: $GroupName to catalog: $CatalogName" -ForegroundColor Yellow
         Add-FGGroupToCatalog -CatalogId $CatalogId -GroupName $GroupName
     }
 
-    [array]$CatalogeGroups = Get-FGCatalogeGroup -CatalogId $CatalogId
-    $CatalogeGroup = $CatalogeGroups | Where-Object { $_.displayName -eq $GroupName }
+    [array]$CatalogGroups = Get-FGCatalogGroup -CatalogId $CatalogId
+    $CatalogGroup = $CatalogGroups | Where-Object { $_.displayName -eq $GroupName }
 
-    return $CatalogeGroup
+    return $CatalogGroup
 }

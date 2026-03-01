@@ -64,7 +64,7 @@ export default function useEntityPage({ authFetch, entityType, listEndpoint, col
       try {
         const res = await authFetch(columnsEndpoint);
         if (res.ok) setAvailableColumns(await res.json());
-      } catch { /* column discovery failure is non-critical */ }
+      } catch (err) { console.error('Failed to fetch columns:', err); }
       setColumnsLoading(false);
     })();
   }, [authFetch, columnsEndpoint]);
@@ -74,7 +74,7 @@ export default function useEntityPage({ authFetch, entityType, listEndpoint, col
     try {
       const res = await authFetch(`/api/tags?entityType=${entityType}`);
       if (res.ok) setTags(await res.json());
-    } catch { /* tag fetch failure is non-critical */ }
+    } catch (err) { console.error('Failed to fetch tags:', err); }
   }, [authFetch, entityType]);
 
   useEffect(() => { fetchTags(); }, [fetchTags]);
@@ -99,7 +99,7 @@ export default function useEntityPage({ authFetch, entityType, listEndpoint, col
         setItems(json.data);
         setTotal(json.total);
       }
-    } catch { /* fetch failure handled by loading state */ }
+    } catch (err) { console.error(`Failed to fetch ${entityType}s:`, err); }
     if (version === fetchVersion.current) setLoading(false);
   }, [page, debouncedSearch, filtersObj, authFetch, listEndpoint]);
 

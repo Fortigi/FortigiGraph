@@ -21,7 +21,7 @@ function Confirm-FGNotGroupMember {
 
             if ($MemberGroupObjectID) {
                 If ($MemberGroupObjectID.count -gt 1) {
-                    throw "More then one posible match found, for member: $Member of Group: $GroupName"
+                    throw "More than one possible match found, for member: $Member of Group: $GroupName"
                 }
                 Else {
                     $MemberObjectIDs += $MemberGroupObjectID
@@ -29,7 +29,7 @@ function Confirm-FGNotGroupMember {
             }
             elseif ($MemberUserObjectID) {
                 If ($MemberUserObjectID.count -gt 1) {
-                    throw "More then one posible match found, for member: $Member of Group: $GroupName"
+                    throw "More than one possible match found, for member: $Member of Group: $GroupName"
                 }
                 Else {
                     $MemberObjectIDs += $MemberUserObjectID

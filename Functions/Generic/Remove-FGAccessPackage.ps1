@@ -22,7 +22,7 @@ function Remove-FGAccessPackage {
             $Body = @{
                 requestType = "AdminRemove"
                 assignment  = @{
-                    id = $ActiveAccessPackageAssignments.id
+                    id = $ActiveAccessPackageAssignment.id
                 }
             }
 

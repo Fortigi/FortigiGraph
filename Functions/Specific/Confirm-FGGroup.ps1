@@ -26,7 +26,7 @@ function Confirm-FGGroup {
         }
     }
     elseif ($Group.count -gt 1) {
-        throw "More then one group found with name: $GroupName"
+        throw "More than one group found with name: $GroupName"
     }
     else {
         Write-Host ("Creating Group:" + $GroupName) -ForegroundColor Yellow
@@ -54,7 +54,7 @@ function Confirm-FGGroup {
         New-FGGroup @Group
 
         #Get Group with all attributes.. including the object ID.
-        #Soms duurt het even voor de groep gemaakt is. Probeer het direct, als het niet lukt probeer het opnieuw na 5 seconde voor maximaal 6 keer.
+        # Group creation may take a moment. Try immediately, retry after 5 seconds up to 6 times.
         $GroupIsCreated = $False
         $Count = 0
 

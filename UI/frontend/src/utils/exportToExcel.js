@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { TYPE_COLORS as TYPE_COLORS_SRC, AP_COLORS } from './colors';
 
 /**
  * Exports the matrix view to an Excel workbook matching the on-screen layout.
@@ -19,13 +20,13 @@ function hexToArgb(hex) {
   return 'FFFFFFFF';
 }
 
-// Membership type colors (matching MatrixCell TYPE_INDICATORS)
-const TYPE_COLORS = {
-  Direct:   { bg: '166534', text: 'FFFFFF' },
-  Indirect: { bg: '1E40AF', text: 'FFFFFF' },
-  Eligible: { bg: '854D0E', text: 'FFFFFF' },
-  Owner:    { bg: '9D174D', text: 'FFFFFF' },
-};
+// Derive Excel-friendly color format (no # prefix, uppercase) from shared TYPE_COLORS
+const TYPE_COLORS = Object.fromEntries(
+  Object.entries(TYPE_COLORS_SRC).map(([key, val]) => [
+    key,
+    { bg: val.bg.replace('#', '').toUpperCase(), text: val.text.replace('#', '').toUpperCase().replace(/^FF/, '') },
+  ])
+);
 
 export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap, shareUrl }) {
   const wb = new ExcelJS.Workbook();
@@ -400,13 +401,6 @@ function setHeaderCell(cell, value, rotated = false) {
   }
 }
 
-// Access package color palette (matches MatrixColumnHeaders AP_COLORS)
-const AP_COLORS_HEX = [
-  '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
-  '#fed7aa', '#99f6e4', '#c7d2fe', '#fecdd3', '#d9f99d',
-  '#fef08a', '#a5f3fc', '#c4b5fd', '#fda4af', '#bef264',
-];
-
 function getApColorHex(index) {
-  return AP_COLORS_HEX[index % AP_COLORS_HEX.length];
+  return AP_COLORS[index % AP_COLORS.length];
 }

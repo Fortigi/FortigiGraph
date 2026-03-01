@@ -1,11 +1,5 @@
 import { memo } from 'react';
-
-const TYPE_INDICATORS = {
-  Direct:   { letter: 'D', bg: '#166534', text: '#fff' },
-  Indirect: { letter: 'I', bg: '#1e40af', text: '#fff' },
-  Eligible: { letter: 'E', bg: '#854d0e', text: '#fff' },
-  Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
-};
+import { TYPE_COLORS } from '../../utils/colors';
 
 function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames, provisioningGap }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
@@ -57,7 +51,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       {hasMembership && (
         <>
           {[...membershipTypes].map(type => {
-            const ind = TYPE_INDICATORS[type];
+            const ind = TYPE_COLORS[type];
             return ind ? (
               <span
                 key={type}

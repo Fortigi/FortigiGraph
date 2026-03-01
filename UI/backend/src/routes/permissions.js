@@ -81,7 +81,7 @@ router.get('/user-columns', async (req, res) => {
 //                       User columns (GraphUsers) and group columns (GraphGroups) both supported.
 router.get('/permissions', async (req, res) => {
   try {
-    const userLimit = parseInt(req.query.userLimit) || 0;
+    const userLimit = Math.min(Math.max(parseInt(req.query.userLimit) || 0, 0), 10000);
 
     // Parse filters (JSON object of field:value pairs)
     let requestedFilters = {};
@@ -382,7 +382,7 @@ router.get('/permissions', async (req, res) => {
     res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
     console.error('permissions query failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -498,7 +498,8 @@ router.get('/sync-log', async (req, res) => {
     mockLogs.sort((a, b) => new Date(b.StartTime) - new Date(a.StartTime));
     res.json(mockLogs.slice(0, limit));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('sync-log query failed:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
