@@ -19,7 +19,7 @@ function New-FGUI {
         [string]$Sku = 'P0v3',
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('Basic', 'Optimum', 'Fast')]
+        [ValidateSet('Tiny', 'Basic', 'Optimum', 'Fast')]
         [string]$Scaling = 'Optimum',
 
         [Parameter(Mandatory = $false)]
@@ -230,6 +230,143 @@ function New-FGUI {
 
     $subId = (Get-AzContext).Subscription.Id
     $tenantId = (Get-AzContext).Tenant.Id
+
+    # ─── Interactive Scaling Selection ────────────────────────────────────────
+    if (-not $PSBoundParameters.ContainsKey('Scaling') -and -not $UseMockData) {
+
+        # SKU cost definitions (same as Set-FGUI)
+        $skuCostInfo = @{
+            'Basic' = @{ SqlCost = 4.99 }
+            'S0'    = @{ SqlCost = 15.03 }
+            'S1'    = @{ SqlCost = 30.05 }
+            'S2'    = @{ SqlCost = 75.05 }
+            'S3'    = @{ SqlCost = 150.17 }
+            'B1'    = @{ AppCost = 13.14 }
+            'B2'    = @{ AppCost = 26.28 }
+            'P0v3'  = @{ AppCost = 74.46 }
+            'P1v3'  = @{ AppCost = 126.29 }
+        }
+
+        # Context-aware scaling matrix (same as Set-FGUI)
+        $scalingOptions = @{
+            'Small' = @{
+                'Tiny'    = @('Basic', 'B1')
+                'Basic'   = @('Basic', 'B1')
+                'Optimum' = @('S0',    'B1')
+                'Fast'    = @('S1',    'B2')
+            }
+            'Medium' = @{
+                'Tiny'    = @('Basic', 'B1')
+                'Basic'   = @('S0',    'B1')
+                'Optimum' = @('S1',    'B2')
+                'Fast'    = @('S2',    'P0v3')
+            }
+            'Large' = @{
+                'Tiny'    = @('S0',    'B1')
+                'Basic'   = @('S1',    'B2')
+                'Optimum' = @('S2',    'B2')
+                'Fast'    = @('S3',    'P1v3')
+            }
+        }
+
+        # Detect environment size
+        $envSize = 'Small'
+        $envUserCount = 0
+        $envTotalRows = 0
+
+        if ($Global:FGSQLConnectionString) {
+            try {
+                $rowCounts = Invoke-FGSQLCommand -ScriptBlock {
+                    param($connection)
+                    $counts = @{}
+                    foreach ($table in @('GraphUsers', 'GraphGroups', 'GraphGroupMembers', 'mat_UserPermissionAssignments')) {
+                        try {
+                            $cmd = $connection.CreateCommand()
+                            $cmd.CommandText = "SELECT COUNT(*) FROM [$table]"
+                            $counts[$table] = [int]$cmd.ExecuteScalar()
+                        } catch { $counts[$table] = 0 }
+                    }
+                    return $counts
+                }
+
+                $envUserCount = if ($rowCounts['GraphUsers']) { $rowCounts['GraphUsers'] } else { 0 }
+                $matCount = if ($rowCounts['mat_UserPermissionAssignments']) { $rowCounts['mat_UserPermissionAssignments'] } else { 0 }
+                $memberCount = if ($rowCounts['GraphGroupMembers']) { $rowCounts['GraphGroupMembers'] } else { 0 }
+                $envTotalRows = if ($matCount -gt 0) { $matCount } else { $memberCount }
+
+                if ($envTotalRows -lt 50000) { $envSize = 'Small' }
+                elseif ($envTotalRows -le 500000) { $envSize = 'Medium' }
+                else { $envSize = 'Large' }
+            } catch {
+                Write-Host "  Could not query database for sizing. Using default (Small)." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  No SQL connection active. Tip: run Connect-FGSQLServer first for accurate sizing." -ForegroundColor Gray
+        }
+
+        # Determine recommendation based on user count
+        $recommended = 'Optimum'
+        if ($envUserCount -gt 0) {
+            if ($envUserCount -lt 500) { $recommended = 'Tiny' }
+            elseif ($envUserCount -lt 5000) { $recommended = 'Basic' }
+            elseif ($envUserCount -lt 50000) { $recommended = 'Optimum' }
+            else { $recommended = 'Fast' }
+        }
+
+        # Show interactive menu
+        Write-Host ""
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Choose a scaling profile" -ForegroundColor Cyan
+        if ($envUserCount -gt 0) {
+            Write-Host "  Environment: $envSize ($($envUserCount.ToString('N0')) users, $($envTotalRows.ToString('N0')) total rows)" -ForegroundColor Gray
+        } elseif ($envTotalRows -gt 0) {
+            Write-Host "  Environment: $envSize ($($envTotalRows.ToString('N0')) total rows)" -ForegroundColor Gray
+        } else {
+            Write-Host "  Environment: $envSize (no sync data yet - you can change scaling later with Set-FGUI)" -ForegroundColor Gray
+        }
+        Write-Host ""
+
+        $profileNames = @('Tiny', 'Basic', 'Optimum', 'Fast')
+        $profileDescriptions = @{
+            'Tiny'    = 'Cheapest option for very small setups (< 500 users)'
+            'Basic'   = 'Cost-optimized, minimum viable performance'
+            'Optimum' = 'Balanced performance and cost (production recommended)'
+            'Fast'    = 'Maximum performance for demanding workloads'
+        }
+
+        $idx = 1
+        foreach ($name in $profileNames) {
+            $skus = $scalingOptions[$envSize][$name]
+            $sqlCost = $skuCostInfo[$skus[0]].SqlCost
+            $appCost = $skuCostInfo[$skus[1]].AppCost
+            $total = [math]::Round($sqlCost + $appCost, 2)
+            $rec = if ($name -eq $recommended) { " <-- recommended" } else { "" }
+            $color = if ($name -eq $recommended) { "Yellow" } else { "White" }
+            Write-Host "  [$idx] $($name.PadRight(8))  $($skus[1].PadRight(5)) + $($skus[0].PadRight(6))  ~`$$total/mo$rec" -ForegroundColor $color
+            Write-Host "      $($profileDescriptions[$name])" -ForegroundColor Gray
+            $idx++
+        }
+
+        Write-Host ""
+        $choice = Read-Host "Select scaling profile [1-4, default=$recommended]"
+
+        $Scaling = switch ($choice) {
+            '1' { 'Tiny' }
+            '2' { 'Basic' }
+            '3' { 'Optimum' }
+            '4' { 'Fast' }
+            default { $recommended }
+        }
+
+        Write-Host "  Selected: $Scaling" -ForegroundColor Green
+        Write-Host ""
+
+        # Set initial App Service SKU to match the chosen scaling profile
+        # This avoids creating at P0v3 then immediately scaling down
+        if (-not $PSBoundParameters.ContainsKey('Sku')) {
+            $chosenSkus = $scalingOptions[$envSize][$Scaling]
+            $Sku = $chosenSkus[1]
+        }
+    }
 
     # ─── Verify Resource Group ─────────────────────────────────────────────
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Verifying resource group: $resourceGroupName..." -ForegroundColor Cyan
