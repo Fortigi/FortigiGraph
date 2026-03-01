@@ -304,10 +304,14 @@ function New-FGUI {
             Write-Host "  No SQL connection active. Tip: run Connect-FGSQLServer first for accurate sizing." -ForegroundColor Gray
         }
 
+        # Check if Tiny is redundant for this environment size
+        $tinyMatchesBasic = ($scalingOptions[$envSize]['Tiny'][0] -eq $scalingOptions[$envSize]['Basic'][0]) -and
+                            ($scalingOptions[$envSize]['Tiny'][1] -eq $scalingOptions[$envSize]['Basic'][1])
+
         # Determine recommendation based on user count
         $recommended = 'Optimum'
         if ($envUserCount -gt 0) {
-            if ($envUserCount -lt 500) { $recommended = 'Tiny' }
+            if ($envUserCount -lt 500) { $recommended = if ($tinyMatchesBasic) { 'Basic' } else { 'Tiny' } }
             elseif ($envUserCount -lt 5000) { $recommended = 'Basic' }
             elseif ($envUserCount -lt 50000) { $recommended = 'Optimum' }
             else { $recommended = 'Fast' }
@@ -325,13 +329,19 @@ function New-FGUI {
         }
         Write-Host ""
 
-        $profileNames = @('Tiny', 'Basic', 'Optimum', 'Fast')
+        $allProfiles = @('Tiny', 'Basic', 'Optimum', 'Fast')
         $profileDescriptions = @{
             'Tiny'    = 'Cheapest option for very small setups (< 500 users)'
             'Basic'   = 'Cost-optimized, minimum viable performance'
             'Optimum' = 'Balanced performance and cost (production recommended)'
             'Fast'    = 'Maximum performance for demanding workloads'
         }
+
+        # Skip Tiny when it resolves to the same SKUs as Basic
+        $profileNames = @(foreach ($p in $allProfiles) {
+            if ($p -eq 'Tiny' -and $tinyMatchesBasic) { continue }
+            $p
+        })
 
         $idx = 1
         foreach ($name in $profileNames) {
@@ -347,14 +357,13 @@ function New-FGUI {
         }
 
         Write-Host ""
-        $choice = Read-Host "Select scaling profile [1-4, default=$recommended]"
+        $maxChoice = $profileNames.Count
+        $choice = Read-Host "Select scaling profile [1-$maxChoice, default=$recommended]"
 
-        $Scaling = switch ($choice) {
-            '1' { 'Tiny' }
-            '2' { 'Basic' }
-            '3' { 'Optimum' }
-            '4' { 'Fast' }
-            default { $recommended }
+        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $maxChoice) {
+            $Scaling = $profileNames[[int]$choice - 1]
+        } else {
+            $Scaling = $recommended
         }
 
         Write-Host "  Selected: $Scaling" -ForegroundColor Green
