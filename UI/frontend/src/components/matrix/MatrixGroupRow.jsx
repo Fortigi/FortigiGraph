@@ -98,10 +98,11 @@ export default function MatrixGroupRow({
             });
           }
         }
-        // Provisioning gap: AP should grant Direct membership but user has no Direct in IST
+        // Provisioning gap: AP manages this cell but user has neither Direct nor Eligible membership.
+        // Eligible is valid because APs can grant PIM-eligible access (not just Direct).
         // Never applies to owner rows (APs don't manage ownership).
         const cellTypes = memberships.get(cellKey);
-        const provisioningGap = !isOwnerRow && managed && apIds && apIds.length > 0 && (!cellTypes || !cellTypes.has('Direct'));
+        const provisioningGap = !isOwnerRow && managed && apIds && apIds.length > 0 && (!cellTypes || (!cellTypes.has('Direct') && !cellTypes.has('Eligible')));
         return (
           <MatrixCell
             key={cellKey}

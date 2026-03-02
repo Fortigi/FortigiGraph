@@ -22,11 +22,11 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       title = types;
     }
     if (provisioningGap) {
-      title += '\n\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member';
+      title += '\n\u26a0 Provisioning gap: AP manages this group but user has no Direct or Eligible membership';
     }
   } else if (provisioningGap) {
     // AP manages this cell but user has no membership at all
-    title = `\u26a0 Provisioning gap: AP should grant Direct membership but user has no membership`;
+    title = `\u26a0 Provisioning gap: AP manages this group but user has no membership`;
     if (apNames && apNames.length > 0) {
       title += `\nManaged by: ${apNames.join(', ')}`;
     }

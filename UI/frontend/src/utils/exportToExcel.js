@@ -231,12 +231,12 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
           pattern: 'solid',
           fgColor: { argb: bgArgb },
         };
-        // Provisioning gap: AP manages cell but no Direct membership
-        const isGap = !memberTypes || !memberTypes.has('Direct');
+        // Provisioning gap: AP manages cell but no Direct or Eligible membership
+        const isGap = !memberTypes || (!memberTypes.has('Direct') && !memberTypes.has('Eligible'));
         if (apIds.length > 1 || isGap) {
           const notes = [];
           if (apIds.length > 1) notes.push(`Managed by: ${apIds.length} access packages`);
-          if (isGap) notes.push('\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member');
+          if (isGap) notes.push('\u26a0 Provisioning gap: AP manages this group but user has no Direct or Eligible membership');
           excelCell.note = notes.join('\n');
         }
       }
