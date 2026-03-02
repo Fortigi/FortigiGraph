@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../auth/AuthGate';
-
-const TAG_COLORS = [
-  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
-];
+import { TAG_COLORS } from '../utils/colors';
 
 const PAGE_SIZE = 100;
 
@@ -65,7 +61,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     try {
       const res = await authFetch('/api/categories');
       if (res.ok) setCategories(await res.json());
-    } catch { /* ignore */ }
+    } catch (err) { console.error('Failed to fetch categories:', err); }
   }, [authFetch]);
 
   useEffect(() => { fetchCategories(); }, [fetchCategories]);
@@ -90,7 +86,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
         setPackages(json.data);
         setTotal(json.total);
       }
-    } catch { /* ignore */ }
+    } catch (err) { console.error('Failed to fetch access packages:', err); }
     if (version === fetchVersion.current) setLoading(false);
   }, [page, debouncedSearch, categoryFilter, authFetch]);
 

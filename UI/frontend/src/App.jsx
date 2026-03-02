@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { usePermissions } from './hooks/usePermissions';
 import { useAuth } from './auth/AuthGate';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Lazy-load page components (route-based code splitting)
 const MatrixView = lazy(() => import('./components/MatrixView'));
@@ -215,6 +216,7 @@ export default function App() {
   };
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
@@ -333,5 +335,6 @@ export default function App() {
         </Suspense>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }

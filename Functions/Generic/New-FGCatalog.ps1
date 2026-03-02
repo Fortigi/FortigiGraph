@@ -4,7 +4,7 @@ function New-FGCatalog {
     Param
     (
         [Parameter(Mandatory = $true)]
-        [string]$CatalogeName,
+        [string]$CatalogName,
         [Parameter(Mandatory = $true)]
         [string]$Description,
         [Parameter(Mandatory = $true)]
@@ -14,7 +14,7 @@ function New-FGCatalog {
     $URI = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageCatalogs"
 
     $Body = @{
-        displayName         = $CatalogeName
+        displayName         = $CatalogName
         description         = $description
         isExternallyVisible = $isExternallyVisible
     }

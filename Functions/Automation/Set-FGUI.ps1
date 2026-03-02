@@ -12,23 +12,26 @@ function Set-FGUI {
     (500K+ rows) — there's no need to overprovision.
 
     Profiles:
+    - Tiny:    Cheapest possible. For very small setups (< 500 users). All features work.
     - Basic:   Minimum viable performance for the environment size. Cost-optimized.
     - Optimum: Good balance of performance and cost. Recommended for production.
     - Fast:    Maximum performance for the environment size. For demanding workloads.
 
     The actual SKUs selected depend on your data:
 
-    Environment     Basic                Optimum              Fast
-    ──────────────────────────────────────────────────────────────────────────
-    Small (<50K)    Basic+B1  (~$18/mo)  S0+B1    (~$28/mo)  S1+B2    (~$56/mo)
-    Medium (50-500K) S0+B1   (~$28/mo)  S1+B2    (~$56/mo)  S2+P0v3  (~$149/mo)
-    Large (>500K)   S1+B2    (~$56/mo)  S2+B2    (~$101/mo) S3+P1v3  (~$252/mo)
+    Environment      Tiny                 Basic                Optimum              Fast
+    ──────────────────────────────────────────────────────────────────────────────────────────
+    Small (<50K)     (same as Basic)      Basic+B1  (~$18/mo)  S0+B1    (~$28/mo)  S1+B2    (~$56/mo)
+    Medium (50-500K) Basic+B1  (~$18/mo)  S0+B1     (~$28/mo)  S1+B2    (~$56/mo)  S2+P0v3  (~$149/mo)
+    Large (>500K)    S0+B1     (~$28/mo)  S1+B2     (~$56/mo)  S2+B2    (~$101/mo) S3+P1v3  (~$252/mo)
+
+    Note: Tiny is hidden when it resolves to the same SKUs as Basic (currently Small environments).
 
     .PARAMETER ConfigFile
     Path to the FortigiGraph config file (created by New-FGConfig).
 
     .PARAMETER Scaling
-    The scaling profile to apply: Basic, Optimum, or Fast.
+    The scaling profile to apply: Tiny, Basic, Optimum, or Fast.
 
     .EXAMPLE
     Set-FGUI -ConfigFile .\Config\mycompany.json -Scaling Optimum
@@ -54,7 +57,7 @@ function Set-FGUI {
         [string]$ConfigFile,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet('Basic', 'Optimum', 'Fast')]
+        [ValidateSet('Tiny', 'Basic', 'Optimum', 'Fast')]
         [string]$Scaling
     )
 
@@ -82,16 +85,19 @@ function Set-FGUI {
     # Each entry: @(SqlSku, AppServiceSku)
     $scalingMatrix = @{
         'Small' = @{
+            'Tiny'    = @('Basic', 'B1')
             'Basic'   = @('Basic', 'B1')
             'Optimum' = @('S0',    'B1')
             'Fast'    = @('S1',    'B2')
         }
         'Medium' = @{
+            'Tiny'    = @('Basic', 'B1')
             'Basic'   = @('S0',    'B1')
             'Optimum' = @('S1',    'B2')
             'Fast'    = @('S2',    'P0v3')
         }
         'Large' = @{
+            'Tiny'    = @('S0',    'B1')
             'Basic'   = @('S1',    'B2')
             'Optimum' = @('S2',    'B2')
             'Fast'    = @('S3',    'P1v3')
@@ -255,6 +261,15 @@ function Set-FGUI {
         Write-Host "  Users: $($userCount.ToString('N0'))  |  Groups: $($groupCount.ToString('N0'))  |  Memberships: $($membershipCount.ToString('N0'))" -ForegroundColor Gray
     }
 
+    # ─── Check if Tiny is redundant for this environment size ─────────────
+    $tinyMatchesBasic = ($scalingMatrix[$environmentSize]['Tiny'][0] -eq $scalingMatrix[$environmentSize]['Basic'][0]) -and
+                        ($scalingMatrix[$environmentSize]['Tiny'][1] -eq $scalingMatrix[$environmentSize]['Basic'][1])
+
+    if ($Scaling -eq 'Tiny' -and $tinyMatchesBasic) {
+        Write-Host "  Note: Tiny and Basic are identical for $environmentSize environments. Using Basic." -ForegroundColor Gray
+        $Scaling = 'Basic'
+    }
+
     # ─── Resolve Target SKUs ─────────────────────────────────────────────
     $targetSkus = $scalingMatrix[$environmentSize][$Scaling]
     $targetSqlSku = $targetSkus[0]
@@ -319,9 +334,10 @@ function Set-FGUI {
     Write-Host "  Scaling profile: $Scaling (for $environmentSize environment)" -ForegroundColor Yellow
     Write-Host ""
 
-    # Show all profiles for context
+    # Show all profiles for context (skip Tiny when identical to Basic)
     Write-Host "  Available profiles for $environmentSize environment:" -ForegroundColor White
-    foreach ($profile in @('Basic', 'Optimum', 'Fast')) {
+    foreach ($profile in @('Tiny', 'Basic', 'Optimum', 'Fast')) {
+        if ($profile -eq 'Tiny' -and $tinyMatchesBasic) { continue }
         $pSkus = $scalingMatrix[$environmentSize][$profile]
         $pSqlInfo = $skuInfo[$pSkus[0]]
         $pAppInfo = $skuInfo[$pSkus[1]]

@@ -8,7 +8,7 @@ function Confirm-FGAccessPackageResource {
         [Parameter(Mandatory = $true)]
         $Group,
         [Parameter(Mandatory = $true)]
-        $CatalogeGroup
+        $CatalogGroup
     )
 
     $GroupDisplayName = $Group.displayName
@@ -20,7 +20,7 @@ function Confirm-FGAccessPackageResource {
     }
     Else {
         Write-Host "Adding AccessPackageResource Group: $GroupDisplayName to Access Package: $AccessPackageName" -ForegroundColor Yellow
-        AddFGGroupToAccessPackage -AccessPackageID $AccessPackage.id -GroupId $Group.id -CatalogeGroupID $CatalogeGroup.id
+        AddFGGroupToAccessPackage -AccessPackageID $AccessPackage.id -GroupId $Group.id -CatalogGroupID $CatalogGroup.id
     }
 
     $Result = Get-FGAccessPackagesResource -AccessPackageID $AccessPackage.id

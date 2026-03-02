@@ -58,7 +58,7 @@ router.get('/categories', async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error('GET /categories failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -86,7 +86,7 @@ router.post('/categories', async (req, res) => {
       return res.status(409).json({ error: 'A category with this name already exists' });
     }
     console.error('POST /categories failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -109,7 +109,7 @@ router.patch('/categories/:id', async (req, res) => {
     res.json(result.recordset[0] || null);
   } catch (err) {
     console.error('PATCH /categories failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -125,7 +125,7 @@ router.delete('/categories/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /categories failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -156,7 +156,7 @@ router.post('/categories/:id/assign', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /categories/:id/assign failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -177,7 +177,7 @@ router.post('/categories/unassign', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /categories/unassign failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -187,7 +187,7 @@ router.get('/access-packages', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0 });
 
-    const search = req.query.search || '';
+    const search = (req.query.search || '').trim().slice(0, 200);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
@@ -285,7 +285,7 @@ router.get('/access-packages', async (req, res) => {
     res.json({ data, total: result.recordsets[1][0].total });
   } catch (err) {
     console.error('GET /access-packages failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

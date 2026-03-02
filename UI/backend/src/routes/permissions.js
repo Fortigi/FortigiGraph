@@ -81,7 +81,7 @@ router.get('/user-columns', async (req, res) => {
 //                       User columns (GraphUsers) and group columns (GraphGroups) both supported.
 router.get('/permissions', async (req, res) => {
   try {
-    const userLimit = parseInt(req.query.userLimit) || 0;
+    const userLimit = Math.min(Math.max(parseInt(req.query.userLimit) || 0, 0), 10000);
 
     // Parse filters (JSON object of field:value pairs)
     let requestedFilters = {};
@@ -214,7 +214,7 @@ router.get('/permissions', async (req, res) => {
              INTO #UserCounts
              FROM dbo.mat_UserCounts
              ORDER BY cnt DESC`
-          : `SELECT p.memberId, COUNT(*) AS cnt
+          : `SELECT TOP (@userLimit) p.memberId, COUNT(*) AS cnt
              INTO #UserCounts
              FROM ${permSource} p
              INNER JOIN GraphUsers u ON p.memberId = u.id
@@ -224,12 +224,21 @@ router.get('/permissions', async (req, res) => {
              WHERE p.memberType != '#microsoft.graph.group'
                ${filterWhere}
                ${groupFilterWhere}
-             GROUP BY p.memberId`;
+             GROUP BY p.memberId
+             ORDER BY cnt DESC`;
 
-        // Step 3: Total count — from pre-computed table or temp table
+        // Step 3: Total count — must reflect ALL matching users, not just the TOP N
         const step3Sql = usePrecomputed
           ? `SELECT COUNT(*) AS totalUsers FROM dbo.mat_UserCounts`
-          : `SELECT COUNT(*) AS totalUsers FROM #UserCounts`;
+          : `SELECT COUNT(DISTINCT p.memberId) AS totalUsers
+             FROM ${permSource} p
+             INNER JOIN GraphUsers u ON p.memberId = u.id
+             ${topUsersGroupJoin}
+             ${userTagJoin}
+             ${groupTagJoin}
+             WHERE p.memberType != '#microsoft.graph.group'
+               ${filterWhere}
+               ${groupFilterWhere}`;
 
         const result = await request.query(`
           -- Step 1: Top users ${usePrecomputed ? '(pre-computed — no GROUP BY)' : '(computed — GROUP BY)'}
@@ -382,7 +391,7 @@ router.get('/permissions', async (req, res) => {
     res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
     console.error('permissions query failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -498,7 +507,8 @@ router.get('/sync-log', async (req, res) => {
     mockLogs.sort((a, b) => new Date(b.StartTime) - new Date(a.StartTime));
     res.json(mockLogs.slice(0, limit));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('sync-log query failed:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

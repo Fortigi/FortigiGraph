@@ -21,7 +21,7 @@ function Invoke-FGPutRequest {
     If ($Global:DebugMode) {
         If ($Global:DebugMode.Contains('P')) {
             Write-Host "++++++++++++++++++++++++++++++++++++++++++++++++ Debug Message ++++++++++++++++++++++++++++++++++++++++++++++++++++++++" -ForegroundColor Blue
-            Write-Host "Invoke-FGPatchRequest" -ForegroundColor Blue
+            Write-Host "Invoke-FGPutRequest" -ForegroundColor Blue
             Write-Host $URI -ForegroundColor Blue
             Write-Host $Body -ForegroundColor Blue
         }

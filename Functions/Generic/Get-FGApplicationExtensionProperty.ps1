@@ -1,5 +1,5 @@
-﻿function Get-ApplicationExtensionProperty {
-    [alias("Get-FGApplicationExtensionProperty")]
+﻿function Get-FGApplicationExtensionProperty {
+    [alias("Get-ApplicationExtensionProperty")]
     [cmdletbinding()]
     Param
     (

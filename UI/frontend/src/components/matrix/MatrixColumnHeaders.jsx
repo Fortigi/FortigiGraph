@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-
-const AP_COLORS = [
-  '#fde68a', '#a7f3d0', '#bfdbfe', '#ddd6fe', '#fbcfe8',
-  '#fed7aa', '#99f6e4', '#c7d2fe', '#fecdd3', '#d9f99d',
-  '#fef08a', '#a5f3fc', '#c4b5fd', '#fda4af', '#bef264',
-];
+import { AP_COLORS } from '../../utils/colors';
 
 export function getAccessPackageColor(index) {
   return AP_COLORS[index % AP_COLORS.length];
