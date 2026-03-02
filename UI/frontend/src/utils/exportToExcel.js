@@ -231,12 +231,18 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
           pattern: 'solid',
           fgColor: { argb: bgArgb },
         };
-        // Provisioning gap: AP manages cell but no Direct or Eligible membership
-        const isGap = !memberTypes || (!memberTypes.has('Direct') && !memberTypes.has('Eligible'));
+        // Provisioning gap: check each AP's resource role against the user's actual membership
+        const lookupGid = (group.realGroupId || group.id).toUpperCase();
+        const isGap = apIds.some(apId => {
+          const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
+          const expectsEligible = role.toLowerCase().includes('eligible');
+          if (expectsEligible) return !memberTypes || !memberTypes.has('Eligible');
+          return !memberTypes || !memberTypes.has('Direct');
+        });
         if (apIds.length > 1 || isGap) {
           const notes = [];
           if (apIds.length > 1) notes.push(`Managed by: ${apIds.length} access packages`);
-          if (isGap) notes.push('\u26a0 Provisioning gap: AP manages this group but user has no Direct or Eligible membership');
+          if (isGap) notes.push('\u26a0 Provisioning gap: user lacks the membership type specified by the access package');
           excelCell.note = notes.join('\n');
         }
       }
