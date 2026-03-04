@@ -42,7 +42,7 @@ function Invoke-FGPostRequest {
         $ReturnValue = $Result.value
     }
     else {
-        $ReturnValue += $Result
+        $ReturnValue = $Result
     }
 
     return $ReturnValue

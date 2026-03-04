@@ -17,13 +17,13 @@ function Confirm-FGGroupInCatalog {
     $CatalogeName = $Catalog.displayName
 
     if ($CatalogeGroup.count -eq 1) {
-        Write-Host "Confirmed GroupInCatalog: $GroupName is in cataloge: $CatalogeName" -ForegroundColor Green
+        Write-Host "Confirmed GroupInCatalog: $GroupName is in catalog: $CatalogeName" -ForegroundColor Green
     }
     elseif ($CatalogeGroup.count -gt 1) {
-        throw "More then one group found for group: $GroupName"
+        throw "More than one group found for group: $GroupName"
     }
     else {
-        Write-Host "Adding GroupInCatalog: $GroupName to cataloge: $CatalogeName" -ForegroundColor Yellow
+        Write-Host "Adding GroupInCatalog: $GroupName to catalog: $CatalogeName" -ForegroundColor Yellow
         Add-FGGroupToCatalog -CatalogId $CatalogId -GroupName $GroupName
     }
 

@@ -18,7 +18,7 @@ function Confirm-FGAccessPackage {
     [array]$AccessPackage = $AccessPackages | Where-object { $_.displayName -eq $DisplayName }
 
     if ($AccessPackage.count -eq 1) {
-        Write-Host "Confirmed AccessPackage: $DisplayName is in cataloge: $CatalogeName" -ForegroundColor Green
+        Write-Host "Confirmed AccessPackage: $DisplayName is in catalog: $CatalogeName" -ForegroundColor Green
 
         If ($AccessPackage.Description -eq $Description) {
             Write-Host ("Confirmed AccessPackage Description: " + $Description) -ForegroundColor Green
@@ -31,10 +31,10 @@ function Confirm-FGAccessPackage {
 
     }
     elseif ($AccessPackage.count -gt 1) {
-        throw "More then one AccessPackage found for AccessPackageName: $DisplayName"
+        throw "More than one AccessPackage found for AccessPackageName: $DisplayName"
     }
     else {
-        Write-Host "Adding AccessPackages: $AccessPackageName to cataloge: $CatalogeName" -ForegroundColor Yellow
+        Write-Host "Adding AccessPackage: $DisplayName to catalog: $CatalogeName" -ForegroundColor Yellow
         New-FGAccessPackage -CatalogId $CatalogId -DisplayName $DisplayName -Description $Description
     }
 

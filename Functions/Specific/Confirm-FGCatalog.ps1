@@ -14,13 +14,13 @@ function Confirm-FGCatalog {
     [array]$Catalogs = Get-FGCatalog
     [array]$Catalog = $Catalogs | Where-object { $_.displayName -eq $CatalogName }
     if ($Catalog.count -eq 1) {
-        Write-Host "Confirmed Cataloge: $CatalogName exists" -ForegroundColor Green
+        Write-Host "Confirmed Catalog: $CatalogName exists" -ForegroundColor Green
     }
     elseif ($Catalog.count -gt 1) {
-        throw "More then one cataloge found for CatalogeName: $CatalogName"
+        throw "More than one catalog found for CatalogName: $CatalogName"
     }
     else {
-        Write-Host "Adding cataloge: $CatalogName" -ForegroundColor Yellow
+        Write-Host "Adding catalog: $CatalogName" -ForegroundColor Yellow
         New-FGCatalog -CatalogeName $CatalogName -Description $Description -IsExternallyVisible $IsExternallyVisible
     }
 

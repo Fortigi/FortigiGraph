@@ -94,7 +94,7 @@ function Invoke-FGGetRequest {
         $ReturnValue = $Result.value
     }
     else {
-        $ReturnValue += $Result
+        $ReturnValue = $Result
     }
 
     # Show progress if there are multiple pages (nextLink exists)

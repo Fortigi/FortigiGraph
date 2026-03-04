@@ -12,7 +12,7 @@ function Use-FGExistingMSALToken {
 
     $global:AccessTokenObject = $Token
     $global:AccessToken = $Token.AccessToken
-    $AccessTokenDetail = Get-AccessTokenDetail
+    $AccessTokenDetail = Get-FGAccessTokenDetail
     $global:TenantId = $AccessTokenDetail.tid
     $global:ClientId = $AccessTokenDetail.appid    
 }
