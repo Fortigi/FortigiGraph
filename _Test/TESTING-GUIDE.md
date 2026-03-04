@@ -589,8 +589,69 @@ Remove-Item _Test\exports\* -ErrorAction SilentlyContinue
 | `Test-RiskScoring.ps1` | 4 | Yes + LLM key | 5-10 min | Risk profile, classifiers, scoring |
 | `Test-UIBackend.ps1` | 5 | Yes (deployed) | ~30 sec | Backend API endpoint validation |
 | `e2e/*.spec.js` (Playwright) | 5 | No (mock) | ~30 sec | Browser rendering, navigation, interactions |
+| **`Run-AllTests.ps1`** | **All** | **Varies** | **20-45 min** | **Single-command runner for the entire suite** |
 
-### Running All Automated Tests
+### Single-Command Full Suite
+
+Use `Run-AllTests.ps1` to run everything with one command. It runs all phases sequentially, skips phases that lack required parameters, and prints a combined summary at the end.
+
+```powershell
+# ── First time (creates SQL Server + runs all tests) ──────────────
+pwsh -File _Test\Run-AllTests.ps1 `
+    -ConfigFile _Test\config.test.json `
+    -FirstRun `
+    -LLMProvider Anthropic -LLMApiKey "sk-ant-..." `
+    -UIBaseUrl "https://fg-test.azurewebsites.net"
+
+# ── Regression run (reuses SQL, skips risk scoring) ───────────────
+pwsh -File _Test\Run-AllTests.ps1 `
+    -ConfigFile _Test\config.test.json
+
+# ── Offline only (no Azure, no config needed) ─────────────────────
+pwsh -File _Test\Run-AllTests.ps1
+
+# ── Full suite, abort on first failure ────────────────────────────
+pwsh -File _Test\Run-AllTests.ps1 `
+    -ConfigFile _Test\config.test.json `
+    -StopOnFailure
+
+# ── Skip specific phases ──────────────────────────────────────────
+pwsh -File _Test\Run-AllTests.ps1 `
+    -ConfigFile _Test\config.test.json `
+    -SkipIntegration `
+    -SkipE2E
+```
+
+**Phase execution logic:**
+
+| Phase | Runs When | Skip Flag |
+|-------|-----------|-----------|
+| 1. Unit Tests | Always | — |
+| 2a. Simple Diagnostics | `-ConfigFile` provided | — |
+| 2b. Graph API | `-ConfigFile` provided | — |
+| 3. Integration | `-ConfigFile` provided | `-SkipIntegration` |
+| 4. Risk Scoring | `-ConfigFile` + `-LLMProvider` + `-LLMApiKey` | `-SkipRiskScoring` |
+| 5a. UI Backend API | `-UIBaseUrl` provided | `-SkipUIBackend` |
+| 5b. UI E2E (Playwright) | Node.js installed | `-SkipE2E` |
+
+The runner produces a summary like:
+
+```
+╔══════════════════════════════════════════════════╗
+║           FORTIGRAPH TEST SUITE RESULTS          ║
+╠══════════════════════════════════════════════════╣
+║   ✓ 1. Unit Tests                       8.2s    ║
+║   ✓ 2a. Simple Diagnostics             3.1s    ║
+║   ✓ 2b. Graph API                      12.4s   ║
+║   ✓ 3. Integration (fast)              287.3s  ║
+║   ✗ 4. Risk Scoring                    45.2s   ║
+║   ✓ 5b. UI E2E Browser Tests           18.7s   ║
+╠══════════════════════════════════════════════════╣
+║   Passed: 5 / 6                Total: 375s     ║
+╚══════════════════════════════════════════════════╝
+```
+
+### Running Individual Tests
 
 ```powershell
 # Phase 1: Offline
