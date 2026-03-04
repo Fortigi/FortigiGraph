@@ -365,6 +365,63 @@ pwsh -File _Test\Test-UIBackend.ps1 -BaseUrl "https://fg-test-ui.azurewebsites.n
 - `/api/perf` returns performance metrics (if enabled)
 - Error handling: invalid endpoints return 404
 
+### Run UI E2E Tests (Browser Tests)
+
+Playwright E2E tests validate that UI pages render correctly, navigation works, and interactive features function. These run against the **mock backend** — no Azure or SQL required.
+
+**First-time setup:**
+
+```bash
+cd UI/frontend
+npm install
+npx playwright install chromium
+```
+
+**Run tests:**
+
+```bash
+# Headless (CI-friendly)
+npm run test:e2e
+
+# See the browser while tests run
+npm run test:e2e:headed
+
+# Interactive test runner with time-travel debugging
+npm run test:e2e:ui
+```
+
+Playwright automatically starts the mock backend (`USE_SQL=false`) and Vite dev server. No manual startup needed.
+
+**What it tests (8 test files, ~50 assertions):**
+
+| Test File | What It Validates |
+|-----------|-------------------|
+| `navigation.spec.js` | App loads, all 8 tabs visible, tab switching, hash routing, no auth gate in NoAuth mode |
+| `matrix.spec.js` | Matrix renders rows/columns, user limit slider, IST/SOLL toggle, D/I/E badges, share/export buttons, filter dropdowns |
+| `users-page.spec.js` | User table, search debounce, tag creation flow, pagination, checkbox selection, click-to-detail |
+| `groups-page.spec.js` | Group table, search filtering, tag management, click-to-detail |
+| `access-packages.spec.js` | AP table, search, category creation flow, assignment type badges, pagination |
+| `sync-log.spec.js` | Table or empty state, column headers, status badge colors |
+| `risk-scoring.spec.js` | Page renders, tier badges, score bars, no unhandled errors |
+| `org-chart.spec.js` | Page renders, search input, no crashes, can navigate away |
+| `performance.spec.js` | View tabs (Summary/Recent/Slow), tab switching, export button |
+| `detail-pages.spec.js` | Hash-based detail routing, detail tabs in nav, multiple tabs, close button |
+
+**Test reports** are saved to `UI/frontend/playwright-report/` (open `index.html` in a browser).
+
+**Screenshots on failure** are saved to `UI/frontend/test-results/`.
+
+### Run E2E Tests Against Deployed UI
+
+To test against a live deployment instead of mock data:
+
+```bash
+cd UI/frontend
+BASE_URL=https://your-app.azurewebsites.net npx playwright test
+```
+
+Note: Tag/category creation tests will create real data in SQL when running against a live deployment.
+
 ---
 
 ## 8. Phase 6: UI Feature Walkthrough (Manual)
@@ -531,6 +588,7 @@ Remove-Item _Test\exports\* -ErrorAction SilentlyContinue
 | `Test-Integration-Fast.ps1` | 3 | Yes (reuse) | 5-10 min | Regression: clear + re-sync |
 | `Test-RiskScoring.ps1` | 4 | Yes + LLM key | 5-10 min | Risk profile, classifiers, scoring |
 | `Test-UIBackend.ps1` | 5 | Yes (deployed) | ~30 sec | Backend API endpoint validation |
+| `e2e/*.spec.js` (Playwright) | 5 | No (mock) | ~30 sec | Browser rendering, navigation, interactions |
 
 ### Running All Automated Tests
 
@@ -550,6 +608,9 @@ pwsh -File _Test\Test-RiskScoring.ps1 -ConfigFile _Test\config.test.json -LLMPro
 
 # Phase 5: UI backend (after deploying)
 pwsh -File _Test\Test-UIBackend.ps1 -BaseUrl "https://your-ui.azurewebsites.net" [-BearerToken "..."]
+
+# Phase 5b: UI E2E browser tests (no Azure needed — uses mock backend)
+cd UI/frontend && npx playwright install chromium && npm run test:e2e
 ```
 
 ### Logs
