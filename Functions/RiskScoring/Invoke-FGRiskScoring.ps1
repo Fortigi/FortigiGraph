@@ -99,34 +99,43 @@ function Invoke-FGRiskScoring {
 
     $classifiers = $null
 
+    # Priority 1: Explicit file path parameter
     if ($ClassifierRulesetPath) {
-        # Explicit path provided — it MUST exist
         if (-not (Test-Path $ClassifierRulesetPath)) {
             throw "Classifier ruleset not found: $ClassifierRulesetPath`nVerify the path and try again."
         }
         Write-Host "  Loading classifiers: $ClassifierRulesetPath" -ForegroundColor Gray
         $classifiers = Get-Content -Path $ClassifierRulesetPath -Raw | ConvertFrom-Json
-    } elseif ($config -and $config.RiskScoring.ClassifierRulesetPath) {
-        # Path came from config file — warn but fall back
+    }
+
+    # Priority 2: SQL table (primary storage, saved by New-FGRiskClassifiers)
+    if (-not $classifiers -and $global:FGSQLConnectionString) {
+        $sqlId = if ($config -and $config.RiskScoring.CustomerDomain) { $config.RiskScoring.CustomerDomain } else { $null }
+        $classifiers = Get-FGRiskClassifiers -Id $sqlId
+        if ($classifiers) {
+            $src = if ($sqlId) { "SQL (id=$sqlId)" } else { "SQL (latest)" }
+            Write-Host "  Loading classifiers from $src" -ForegroundColor Gray
+        }
+    }
+
+    # Priority 3: Config file path (legacy/fallback)
+    if (-not $classifiers -and $config -and $config.RiskScoring.ClassifierRulesetPath) {
         $configPath = $config.RiskScoring.ClassifierRulesetPath
-        if (-not (Test-Path $configPath)) {
-            Write-Host "  WARNING: Classifier path from config not found: $configPath" -ForegroundColor Yellow
-            Write-Host "           Falling back to universal classifiers." -ForegroundColor Yellow
-        } else {
+        if (Test-Path $configPath) {
             Write-Host "  Loading classifiers: $configPath (from config)" -ForegroundColor Gray
             $classifiers = Get-Content -Path $configPath -Raw | ConvertFrom-Json
         }
     }
 
+    # Priority 4: Universal classifiers bundled with module
     if (-not $classifiers) {
-        # Fall back to universal classifiers bundled with module
         $modulePath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $universalPath = Join-Path $modulePath "UI" "backend" "src" "risk" "classifiers" "universal.json"
         if (Test-Path $universalPath) {
             Write-Host "  Loading universal classifiers: $universalPath" -ForegroundColor Gray
             $classifiers = Get-Content -Path $universalPath -Raw | ConvertFrom-Json
         } else {
-            throw "No classifier ruleset found. Run New-FGRiskClassifiers first or provide -ClassifierRulesetPath."
+            throw "No classifier ruleset found. Run New-FGRiskClassifiers first."
         }
     }
 
@@ -298,11 +307,19 @@ function Invoke-FGRiskScoring {
         $dataConnection.Dispose()
     }
 
+    Write-MemoryUsage "after data load"
+
     # ================================================================
     # Helpers
     # ================================================================
 
     function Test-DBNull($value) { $null -eq $value -or $value -is [DBNull] }
+
+    function Write-MemoryUsage($label) {
+        $memMB = [Math]::Round([System.GC]::GetTotalMemory($false) / 1MB, 1)
+        $color = if ($memMB -gt 300) { 'Yellow' } elseif ($memMB -gt 200) { 'Gray' } else { 'DarkGray' }
+        Write-Host "  Memory: $memMB MB ($label)" -ForegroundColor $color
+    }
 
     # ================================================================
     # Build Manager Hierarchy
@@ -414,6 +431,12 @@ function Invoke-FGRiskScoring {
     Write-Host "  Groups with members:  $($groupMembers.Count)" -ForegroundColor Gray
     Write-Host "  Groups with eligible: $($groupEligible.Count)" -ForegroundColor Gray
     Write-Host "  Groups with owners:   $($groupOwnerMap.Count)" -ForegroundColor Gray
+
+    # Free DataTables now that indexes are built — they are no longer needed
+    $assignments.Dispose(); $assignments = $null
+    if ($owners -is [System.Data.DataTable]) { $owners.Dispose(); $owners = $null }
+    [System.GC]::Collect()
+    Write-MemoryUsage "after index build"
 
     # ================================================================
     # Pattern Matching Helper
@@ -921,6 +944,8 @@ function Invoke-FGRiskScoring {
     # Write Scores to SQL
     # ================================================================
 
+    Write-MemoryUsage "after scoring"
+
     Write-Host ""
     Write-Host "--- Writing Scores to SQL ---" -ForegroundColor Cyan
 
@@ -1017,6 +1042,7 @@ WHERE id = @id
 
     # Collect memory
     [System.GC]::Collect()
+    Write-MemoryUsage "after SQL write"
 
     # ================================================================
     # Build Resource Clusters
@@ -1080,4 +1106,8 @@ WHERE id = @id
     Write-Host "  Scores are persisted on GraphUsers and GraphGroups tables." -ForegroundColor Gray
     Write-Host "  The UI Risk Scores tab reads these directly from SQL." -ForegroundColor Gray
     Write-Host ""
+
+    # Write sync log entry
+    $totalScored = $groupUpdates.Count + $userUpdates.Count
+    Write-FGSyncLog -SyncType "RiskScoring" -StartTime $startTime -RecordCount $totalScored -Status "Success" -TableName "GraphUsers,GraphGroups"
 }

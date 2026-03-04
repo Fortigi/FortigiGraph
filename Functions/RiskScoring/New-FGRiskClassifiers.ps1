@@ -17,9 +17,11 @@ function New-FGRiskClassifiers {
 
     .PARAMETER ProfilePath
         Path to the organizational risk profile JSON (output of New-FGRiskProfile).
+        Optional — if not provided, loads the profile from SQL (saved by New-FGRiskProfile).
 
     .PARAMETER OutputPath
-        Path to save the merged classifier ruleset. Defaults to same directory as the profile.
+        Path to save the merged classifier ruleset as a file. Optional — by default
+        classifiers are only saved to SQL. Use Export-FGRiskClassifiers for file export.
 
     .PARAMETER UniversalClassifiersPath
         Path to universal classifiers JSON. Defaults to the one bundled with FortigiGraph.
@@ -37,16 +39,16 @@ function New-FGRiskClassifiers {
         Optional FortigiGraph config file. Reads LLM settings from RiskScoring section.
 
     .EXAMPLE
-        New-FGRiskClassifiers -ProfilePath "./RiskScoring/portofrotterdam.com/risk-profile.json" -LLMProvider Anthropic -LLMApiKey $key
+        New-FGRiskClassifiers -ConfigFile .\Config\mycompany.json
 
     .EXAMPLE
-        New-FGRiskClassifiers -ProfilePath "./RiskScoring/rabobank.nl/risk-profile.json" -ConfigFile .\Config\rabobank.json
+        New-FGRiskClassifiers -ProfilePath "./export/risk-profile.json" -LLMProvider Anthropic -LLMApiKey $key
     #>
 
     [alias("New-RiskClassifiers")]
     [cmdletbinding()]
     Param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [System.String]$ProfilePath,
 
         [Parameter(Mandatory = $false)]
@@ -73,7 +75,7 @@ function New-FGRiskClassifiers {
     # Configuration
     # ================================================================
 
-    if (-not (Test-Path $ProfilePath)) {
+    if ($ProfilePath -and -not (Test-Path $ProfilePath)) {
         throw "Risk profile not found: $ProfilePath. Run New-FGRiskProfile first."
     }
 
@@ -106,23 +108,31 @@ function New-FGRiskClassifiers {
         }
     }
 
-    # Set default paths
-    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-        $OutputPath = Join-Path (Split-Path $ProfilePath -Parent) "classifier-ruleset.json"
-    }
-
+    # Set default universal classifiers path
     if ([string]::IsNullOrWhiteSpace($UniversalClassifiersPath)) {
-        # Look for universal classifiers bundled with the module
         $modulePath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $UniversalClassifiersPath = Join-Path $modulePath "UI" "backend" "src" "risk" "classifiers" "universal.json"
         if (-not (Test-Path $UniversalClassifiersPath)) {
-            # Fallback: try in the RiskScoring directory
             $UniversalClassifiersPath = Join-Path $modulePath "RiskScoring" "classifiers" "universal.json"
         }
     }
 
-    # Load profile
-    $profileRaw = Get-Content -Path $ProfilePath -Raw | ConvertFrom-Json
+    # Load profile: file path → SQL → error
+    $profileRaw = $null
+    if ($ProfilePath -and (Test-Path $ProfilePath)) {
+        Write-Host "  Loading risk profile from file: $ProfilePath" -ForegroundColor Gray
+        $profileRaw = Get-Content -Path $ProfilePath -Raw | ConvertFrom-Json
+    } else {
+        # Try SQL
+        $sqlId = if ($config -and $config.RiskScoring.CustomerDomain) { $config.RiskScoring.CustomerDomain } else { $null }
+        $profileRaw = Get-FGRiskProfile -Id $sqlId
+        if ($profileRaw) {
+            $src = if ($sqlId) { "SQL (id=$sqlId)" } else { "SQL (latest)" }
+            Write-Host "  Loading risk profile from $src" -ForegroundColor Gray
+        } else {
+            throw "No risk profile found. Run New-FGRiskProfile first, or provide -ProfilePath."
+        }
+    }
     $customerProfile = $profileRaw.customer_profile
 
     # Load universal classifiers
@@ -297,17 +307,35 @@ plus organization-specific classifiers based on their known systems and critical
         version       = "1.0"
         customer      = $customerProfile.domain
         generated_at  = (Get-Date -Format "o")
-        profile_ref   = $ProfilePath
+        profile_ref   = if ($ProfilePath) { $ProfilePath } else { "sql" }
         llm_provider  = $LLMProvider
         groups        = $dedupedGroups
         users         = $dedupedUsers
     }
 
-    $rulesetJson = $ruleset | ConvertTo-Json -Depth 100
-    $rulesetJson | Set-Content -Path $OutputPath -Encoding UTF8
+    # Save to SQL (primary storage)
+    if ($global:FGSQLConnectionString) {
+        try {
+            Save-FGRiskClassifiers -ClassifierRuleset ([PSCustomObject]$ruleset)
+        } catch {
+            Write-Host "  WARNING: Could not save to SQL: $_" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  WARNING: Not connected to SQL. Classifiers not persisted." -ForegroundColor Yellow
+        Write-Host "  Connect to SQL first or use -OutputPath to save to file." -ForegroundColor Yellow
+    }
 
-    Write-Host ""
-    Write-Host "  Classifier ruleset saved to: $OutputPath" -ForegroundColor Green
+    # Save to file (only if explicitly requested)
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        $outputDir = Split-Path $OutputPath -Parent
+        if ($outputDir -and -not (Test-Path $outputDir)) {
+            New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+        }
+        $rulesetJson = $ruleset | ConvertTo-Json -Depth 100
+        $rulesetJson | Set-Content -Path $OutputPath -Encoding UTF8
+        Write-Host "  Classifier ruleset also saved to: $OutputPath" -ForegroundColor Gray
+    }
+
     Write-Host ""
 
     # ================================================================

@@ -72,19 +72,9 @@ function Avatar({ name, tier }) {
   );
 }
 
-function StatCard({ label, value, detail }) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
-      <div className="text-2xl font-semibold text-gray-900">{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-      {detail && <div className="text-[10px] text-gray-400 mt-0.5">{detail}</div>}
-    </div>
-  );
-}
-
 // ─── Department box (the clickable card in the flowchart) ────────────────────
 
-function DeptBox({ node, isSelected, isMatch, onClick, onDetails }) {
+function DeptBox({ node, isMatch, onClick, onDetails }) {
   const s = TIER_STYLES[node.risk.maxTier] || TIER_STYLES.None;
   const direct = node.directCount || node.risk.totalPeople;
   const indirect = node.indirectCount || 0;
@@ -94,15 +84,11 @@ function DeptBox({ node, isSelected, isMatch, onClick, onDetails }) {
       <button
         onClick={onClick}
         className={`w-full border-2 rounded-lg px-4 py-3 transition-all cursor-pointer text-center ${
-          isSelected
-            ? 'shadow-lg ring-2 ring-blue-500 border-blue-400'
-            : isMatch
-              ? 'ring-2 ring-blue-400'
-              : ''
+          isMatch ? 'ring-2 ring-blue-400' : ''
         }`}
         style={{
-          backgroundColor: isSelected ? '#dbeafe' : s.box,
-          borderColor: isSelected ? undefined : s.boxBorder,
+          backgroundColor: s.box,
+          borderColor: s.boxBorder,
         }}
       >
         <div className="font-semibold text-sm text-gray-900 leading-tight">
@@ -137,7 +123,7 @@ function DeptBox({ node, isSelected, isMatch, onClick, onDetails }) {
 // Depth 0 (root): horizontal flowchart with connector lines
 // Depth 1+: vertical indented tree (prevents horizontal overflow)
 
-function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, toggleExpand, matchNodeIds }) {
+function OrgNode({ node, depth, onDetails, expandedMap, toggleExpand, matchNodeIds }) {
   const isExpanded = expandedMap[node.id] ?? false;
   const hasChildren = node.children.length > 0;
   const useVertical = depth >= 1;
@@ -148,12 +134,8 @@ function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, to
       <div>
         <DeptBox
           node={node}
-          isSelected={selectedId === node.id}
           isMatch={matchNodeIds && matchNodeIds.has(node.id)}
-          onClick={() => {
-            onSelect(selectedId === node.id ? null : node.id);
-            if (hasChildren) toggleExpand(node.id);
-          }}
+          onClick={() => { if (hasChildren) toggleExpand(node.id); }}
           onDetails={onDetails}
         />
 
@@ -167,23 +149,31 @@ function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, to
         )}
 
         {hasChildren && isExpanded && (
-          <div className="ml-8 border-l-2 border-gray-200 mt-2 space-y-2">
-            {node.children.map(child => (
-              <div key={child.id} className="relative pl-6">
-                {/* Horizontal connector from vertical border to box */}
-                <div className="absolute left-0 top-5 w-6 border-t-2 border-gray-200" />
-                <OrgNode
-                  node={child}
-                  depth={depth + 1}
-                  selectedId={selectedId}
-                  onSelect={onSelect}
-                  onDetails={onDetails}
-                  expandedMap={expandedMap}
-                  toggleExpand={toggleExpand}
-                  matchNodeIds={matchNodeIds}
-                />
-              </div>
-            ))}
+          <div className="ml-8 mt-2 space-y-0">
+            {node.children.map((child, i) => {
+              const isLast = i === node.children.length - 1;
+              return (
+                <div key={child.id} className="relative pl-6">
+                  {/* Vertical line running down from top; stops at connector for last child */}
+                  <div
+                    className="absolute left-0 top-0 w-0 border-l-2 border-gray-300"
+                    style={{ height: isLast ? '20px' : '100%' }}
+                  />
+                  {/* Horizontal connector from vertical line to box */}
+                  <div className="absolute left-0 top-5 w-6 border-t-2 border-gray-300" />
+                  <div className="pb-2">
+                    <OrgNode
+                      node={child}
+                      depth={depth + 1}
+                      onDetails={onDetails}
+                      expandedMap={expandedMap}
+                      toggleExpand={toggleExpand}
+                      matchNodeIds={matchNodeIds}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -195,12 +185,8 @@ function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, to
     <div className="flex flex-col items-center">
       <DeptBox
         node={node}
-        isSelected={selectedId === node.id}
         isMatch={matchNodeIds && matchNodeIds.has(node.id)}
-        onClick={() => {
-          onSelect(selectedId === node.id ? null : node.id);
-          if (hasChildren) toggleExpand(node.id);
-        }}
+        onClick={() => { if (hasChildren) toggleExpand(node.id); }}
         onDetails={onDetails}
       />
 
@@ -219,32 +205,32 @@ function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, to
           <div className="w-0.5 h-6 bg-gray-300" />
 
           {/* Children row */}
-          <div className="flex flex-wrap justify-center">
+          <div className="flex justify-center">
             {node.children.map((child, i) => {
               const isFirst = i === 0;
               const isLast = i === node.children.length - 1;
               const isSingle = node.children.length === 1;
 
               return (
-                <div key={child.id} className="flex flex-col items-center px-3">
-                  {/* Connector: horizontal bar segment + vertical stem */}
+                <div key={child.id} className="flex flex-col items-center shrink-0">
+                  {/* Connector: horizontal bar edge-to-edge (no padding so adjacent segments connect) */}
                   <div className="flex w-full h-5">
                     <div className={`flex-1 ${!isFirst && !isSingle ? 'border-t-2 border-gray-300' : ''}`} />
                     <div className="w-0.5 bg-gray-300" />
                     <div className={`flex-1 ${!isLast && !isSingle ? 'border-t-2 border-gray-300' : ''}`} />
                   </div>
 
-                  {/* Recurse */}
-                  <OrgNode
-                    node={child}
-                    depth={depth + 1}
-                    selectedId={selectedId}
-                    onSelect={onSelect}
-                    onDetails={onDetails}
-                    expandedMap={expandedMap}
-                    toggleExpand={toggleExpand}
-                    matchNodeIds={matchNodeIds}
-                  />
+                  {/* Recurse — padding here so boxes have spacing but connectors touch */}
+                  <div className="px-3">
+                    <OrgNode
+                      node={child}
+                      depth={depth + 1}
+                      onDetails={onDetails}
+                      expandedMap={expandedMap}
+                      toggleExpand={toggleExpand}
+                      matchNodeIds={matchNodeIds}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -255,143 +241,9 @@ function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, to
   );
 }
 
-// ─── Collect all members from a node's subtree ──────────────────────────────
-
-function collectAllMembers(node) {
-  let all = [];
-  for (const member of node.members) {
-    all.push({ ...member, _dept: node.department });
-  }
-  for (const child of node.children) {
-    all.push(...collectAllMembers(child));
-  }
-  return all;
-}
-
-// ─── Detail panel (shown when a department is selected) ──────────────────────
-
-function DeptDetail({ node, onOpenDetail, onClose }) {
-  const [tab, setTab] = useState('direct');
-
-  const directMembers = node.members;
-  const allMembers = useMemo(() => collectAllMembers(node), [node]);
-  const indirectMembers = useMemo(
-    () => allMembers.filter(m => !node.members.some(dm => dm.id === m.id)),
-    [allMembers, node.members]
-  );
-  const allRisk = useMemo(() => computeDeptRisk(allMembers), [allMembers]);
-  const indirectRisk = useMemo(() => computeDeptRisk(indirectMembers), [indirectMembers]);
-
-  const displayMembers = tab === 'direct' ? directMembers : tab === 'indirect' ? indirectMembers : allMembers;
-  const displayRisk = tab === 'direct' ? node.risk : tab === 'indirect' ? indirectRisk : allRisk;
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50">
-        <div>
-          <h3 className="text-base font-semibold text-gray-900">{node.department}</h3>
-          <div className="text-xs text-gray-500 mt-0.5">
-            {node.directCount || node.risk.totalPeople} direct
-            {(node.indirectCount || 0) > 0 && (
-              <span className="text-gray-400"> | {node.indirectCount} indirect</span>
-            )}
-            <span className="mx-1.5 text-gray-300">|</span>
-            Avg. score: {displayRisk.avgScore}
-            {node.children.length > 0 && (
-              <>
-                <span className="mx-1.5 text-gray-300">|</span>
-                {node.children.length} sub-department{node.children.length !== 1 ? 's' : ''}
-              </>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <TierBadge tier={displayRisk.maxTier} showAll />
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-            title="Close"
-          >
-            &times;
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-100 px-5">
-        {[
-          { key: 'direct', label: 'Direct', count: directMembers.length },
-          ...(indirectMembers.length > 0
-            ? [{ key: 'indirect', label: 'Indirect', count: indirectMembers.length }]
-            : []),
-          ...(indirectMembers.length > 0
-            ? [{ key: 'all', label: 'All', count: allMembers.length }]
-            : []),
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-              tab === t.key
-                ? 'border-blue-500 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t.label} ({t.count})
-          </button>
-        ))}
-      </div>
-
-      {/* Risk distribution */}
-      {TIER_DISPLAY.some(t => displayRisk.tierCounts[t] > 0) && (
-        <div className="flex gap-2 px-5 py-2 border-b border-gray-100">
-          {TIER_DISPLAY.filter(t => displayRisk.tierCounts[t] > 0).map(t => {
-            const s = TIER_STYLES[t];
-            return (
-              <span key={t} className={`${s.bg} ${s.text} text-xs px-2.5 py-0.5 rounded-full border ${s.border}`}>
-                {displayRisk.tierCounts[t]} {t}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Members */}
-      <div className="px-5 py-3 max-h-[400px] overflow-y-auto">
-        <div className="space-y-1">
-          {displayMembers.map(user => (
-            <div key={`${user.id}-${user._dept || ''}`} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-gray-50">
-              <Avatar name={user.displayName} tier={user.riskTier} />
-              <div className="min-w-0 flex-1">
-                <button
-                  onClick={() => onOpenDetail('user', user.id, user.displayName)}
-                  className="text-sm text-blue-700 hover:text-blue-900 hover:underline truncate text-left block"
-                >
-                  {user.displayName}
-                </button>
-                <div className="text-xs text-gray-400 truncate">
-                  {user.jobTitle || '\u2014'}
-                  {tab !== 'direct' && user._dept && (
-                    <span className="ml-1.5 text-gray-300">({user._dept})</span>
-                  )}
-                </div>
-              </div>
-              <TierBadge tier={user.riskTier} />
-              {user.riskScore != null && (
-                <span className="text-xs font-mono text-gray-400 w-6 text-right shrink-0">{user.riskScore}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export default function OrgChartPage({ onOpenDetail }) {
+export default function OrgChartPage({ onOpenDetail, onCacheData }) {
   const { authFetch } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -399,9 +251,7 @@ export default function OrgChartPage({ onOpenDetail }) {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [expandedMap, setExpandedMap] = useState({});
-  const [selectedId, setSelectedId] = useState(null);
   const initialExpandDone = useRef(false);
-  const detailRef = useRef(null);
 
   // ─── Fetch data ──────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -433,7 +283,7 @@ export default function OrgChartPage({ onOpenDetail }) {
   }, [search]);
 
   // ─── Build department tree ──────────────────────────────────────
-  const { rootNode, nodeMap, totalUsers, totalDepts } = useMemo(() => {
+  const { rootNode, nodeMap } = useMemo(() => {
     if (!data || data.available === false) {
       return { rootNode: null, nodeMap: new Map(), totalUsers: 0, totalDepts: 0 };
     }
@@ -609,19 +459,11 @@ export default function OrgChartPage({ onOpenDetail }) {
     };
   }, [data]);
 
-  // ─── Initial expand: first 3 levels ────────────────────────────
+  // ─── Initial expand: only root ─────────────────────────────────
   useEffect(() => {
     if (rootNode && !initialExpandDone.current) {
       initialExpandDone.current = true;
-      const initial = {};
-      function walkExpand(node, depth) {
-        if (depth < 3) {
-          initial[node.id] = true;
-          for (const child of node.children) walkExpand(child, depth + 1);
-        }
-      }
-      walkExpand(rootNode, 0);
-      setExpandedMap(initial);
+      setExpandedMap({ [rootNode.id]: true });
     }
   }, [rootNode]);
 
@@ -679,28 +521,16 @@ export default function OrgChartPage({ onOpenDetail }) {
     setExpandedMap({ [rootNode.id]: true });
   }, [rootNode]);
 
-  // ─── Open detail panel (always opens, scrolls into view) ───────
-  const openDetails = useCallback((id) => {
-    setSelectedId(id);
-    // Scroll to detail panel after render
-    setTimeout(() => {
-      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 50);
-  }, []);
-
-  // ─── Selected node for detail panel ────────────────────────────
-  const selectedNode = selectedId ? nodeMap.get(selectedId) : null;
-
-  // ─── Overall risk stats ────────────────────────────────────────
-  const overallTierCounts = useMemo(() => {
-    if (!data || data.available === false) return null;
-    const counts = {};
-    for (const u of (data.users || [])) {
-      const tier = u.riskTier || 'None';
-      counts[tier] = (counts[tier] || 0) + 1;
+  // ─── Open department detail as tab ─────────────────────────────
+  const openDeptDetail = useCallback((nodeId) => {
+    const node = nodeMap.get(nodeId);
+    if (!node) return;
+    // Cache the node data so DepartmentDetailPage can use it
+    if (onCacheData) {
+      onCacheData(node.department, 'department', { node });
     }
-    return counts;
-  }, [data]);
+    onOpenDetail('department', node.department, node.department);
+  }, [nodeMap, onCacheData, onOpenDetail]);
 
   // ─── Render ───────────────────────────────────────────────────
 
@@ -743,31 +573,6 @@ export default function OrgChartPage({ onOpenDetail }) {
 
   return (
     <div>
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-4">
-        <StatCard label="Users in org tree" value={totalUsers} />
-        <StatCard label="Departments" value={totalDepts} />
-        <StatCard
-          label="Highest risk"
-          value={
-            overallTierCounts
-              ? TIER_DISPLAY.find(t => overallTierCounts[t] > 0)
-                ? `${overallTierCounts[TIER_DISPLAY.find(t => overallTierCounts[t] > 0)]} ${TIER_DISPLAY.find(t => overallTierCounts[t] > 0)}`
-                : 'None'
-              : '\u2014'
-          }
-        />
-        <StatCard
-          label="Risk overview"
-          value={
-            overallTierCounts
-              ? TIER_DISPLAY.filter(t => overallTierCounts[t] > 0).map(t => `${overallTierCounts[t]} ${t[0]}`).join(', ') || 'No data'
-              : '\u2014'
-          }
-          detail={overallTierCounts ? TIER_DISPLAY.filter(t => overallTierCounts[t] > 0).map(t => t).join(', ') : ''}
-        />
-      </div>
-
       {/* Toolbar */}
       <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 flex items-center gap-4 flex-wrap">
         <div className="flex-1 min-w-[200px] max-w-sm">
@@ -801,26 +606,13 @@ export default function OrgChartPage({ onOpenDetail }) {
           <OrgNode
             node={rootNode}
             depth={0}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onDetails={openDetails}
+            onDetails={openDeptDetail}
             expandedMap={expandedMap}
             toggleExpand={toggleExpand}
             matchNodeIds={matchNodeIds}
           />
         </div>
       </div>
-
-      {/* Detail panel */}
-      {selectedNode && (
-        <div className="mt-4" ref={detailRef}>
-          <DeptDetail
-            node={selectedNode}
-            onOpenDetail={onOpenDetail}
-            onClose={() => setSelectedId(null)}
-          />
-        </div>
-      )}
     </div>
   );
 }

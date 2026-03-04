@@ -110,14 +110,12 @@ function New-FGRiskProfile {
         }
     }
 
-    # Set default output path
-    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-        $OutputPath = Join-Path "." "RiskScoring" $Domain "risk-profile.json"
-    }
-
-    $outputDir = Split-Path $OutputPath -Parent
-    if (-not (Test-Path $outputDir)) {
-        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    # Create output directory if file output was requested
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        $outputDir = Split-Path $OutputPath -Parent
+        if ($outputDir -and -not (Test-Path $outputDir)) {
+            New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+        }
     }
 
     # ================================================================
@@ -432,14 +430,25 @@ $(($profile | ConvertTo-Json -Depth 100))
     $profile.customer_profile | Add-Member -NotePropertyName "generated_by" -NotePropertyValue "New-FGRiskProfile" -Force
     $profile.customer_profile | Add-Member -NotePropertyName "llm_provider" -NotePropertyValue $LLMProvider -Force
 
-    $profileJson = $profile | ConvertTo-Json -Depth 100
-    $profileJson | Set-Content -Path $OutputPath -Encoding UTF8
+    # Save to SQL (primary storage)
+    if ($global:FGSQLConnectionString) {
+        try {
+            Save-FGRiskProfile -RiskProfile $profile
+        } catch {
+            Write-Host "  WARNING: Could not save to SQL: $_" -ForegroundColor Yellow
+        }
+    }
+
+    # Save to file (if output path was explicitly provided)
+    if ($OutputPath) {
+        $profileJson = $profile | ConvertTo-Json -Depth 100
+        $profileJson | Set-Content -Path $OutputPath -Encoding UTF8
+        Write-Host "  Risk profile also saved to: $OutputPath" -ForegroundColor Gray
+    }
 
     Write-Host ""
-    Write-Host "  Risk profile saved to: $OutputPath" -ForegroundColor Green
-    Write-Host ""
     Write-Host "  Next step: Generate classifiers from this profile:" -ForegroundColor Gray
-    Write-Host "    New-FGRiskClassifiers -ProfilePath '$OutputPath' -LLMProvider $LLMProvider -LLMApiKey `$apiKey" -ForegroundColor White
+    Write-Host "    New-FGRiskClassifiers -ConfigFile `$configFile" -ForegroundColor White
     Write-Host ""
 
     return $profile

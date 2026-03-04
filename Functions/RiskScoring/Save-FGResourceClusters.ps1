@@ -104,9 +104,10 @@ function Save-FGResourceClusters {
         $clusterId = "cls-$cId"
         $classifier = $classifierLookup[$cId]
 
-        # Build display name from classifier ID (concrete system name, not abstract rationale)
-        # e.g., "por-hamis-access" → "HaMIS Access", "univ-sap" → "SAP"
-        $displayName = $cId -replace '^(univ|por|cust)[-_]', ''   # strip prefix
+        # Build display name from classifier ID (concrete system name)
+        # e.g., "por-hamis-access" → "Hamis", "univ-domain-admins" → "Domain Admins"
+        $displayName = $cId -replace '^(univ|por|cust)[-_]', ''   # strip tenant/scope prefix
+        $displayName = $displayName -replace '[-_](access|administrator|admin|management|system|role|group|membership|users|members|resources|permissions|rights|security|service|services)$', ''  # strip purpose suffix
         $displayName = $displayName -replace '[-_]', ' '          # dashes/underscores to spaces
         $displayName = (Get-Culture).TextInfo.ToTitleCase($displayName)
         $description = if ($classifier) { $classifier.rationale } else { "" }

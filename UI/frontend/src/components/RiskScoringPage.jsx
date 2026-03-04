@@ -408,7 +408,20 @@ function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
 
 // ─── Cluster Table ──────────────────────────────────────────────────
 
-function ClusterTable({ clusters, onSelect }) {
+function ClusterTable({ clusters, onSelect, sortKey, sortDir, onSort }) {
+  const SortHeader = ({ label, field, className = '' }) => {
+    const active = sortKey === field;
+    return (
+      <th
+        className={`text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700 ${className}`}
+        onClick={() => onSort(field)}
+      >
+        {label}
+        {active && <span className="ml-1 text-gray-400">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+      </th>
+    );
+  };
+
   if (!clusters || clusters.length === 0) {
     return <div className="py-8 text-center text-gray-400">No clusters match the current filters</div>;
   }
@@ -418,13 +431,13 @@ function ClusterTable({ clusters, onSelect }) {
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200">
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Type</th>
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Members</th>
+            <SortHeader label="Name" field="name" />
+            <SortHeader label="Type" field="type" className="w-20" />
+            <SortHeader label="Members" field="members" className="w-20" />
             <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-24">Prod / Non</th>
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Score</th>
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-24">Tier</th>
-            <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Owner</th>
+            <SortHeader label="Score" field="score" className="w-20" />
+            <SortHeader label="Tier" field="tier" className="w-24" />
+            <SortHeader label="Owner" field="owner" />
           </tr>
         </thead>
         <tbody>
@@ -745,7 +758,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState('groups');
+  const [view, setView] = useState('clusters');
   const [tierFilter, setTierFilter] = useState('');
   const [search, setSearch] = useState('');
   const [overridesOnly, setOverridesOnly] = useState(false);
@@ -757,6 +770,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
   const [clusterLoading, setClusterLoading] = useState(false);
   const [clusterSummary, setClusterSummary] = useState(null);
   const [selectedCluster, setSelectedCluster] = useState(null);
+  const [clusterSort, setClusterSort] = useState({ key: 'score', dir: 'desc' });
   const PAGE_SIZE = 25;
 
   // Fetch summary
@@ -809,6 +823,13 @@ export default function RiskScoringPage({ onOpenDetail }) {
       });
       if (tierFilter) params.set('tier', tierFilter);
       if (search) params.set('search', search);
+      // Build sort param: "score" (default desc) or "score-asc"
+      const sortParam = clusterSort.dir === 'asc' && !['name', 'type', 'owner'].includes(clusterSort.key)
+        ? `${clusterSort.key}-asc`
+        : clusterSort.dir === 'desc' && ['name', 'type', 'owner'].includes(clusterSort.key)
+        ? `${clusterSort.key}-desc`
+        : clusterSort.key;
+      params.set('sort', sortParam);
       const res = await authFetch(`/api/risk-scores/clusters?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -819,7 +840,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
     } finally {
       setClusterLoading(false);
     }
-  }, [authFetch, page, tierFilter, search]);
+  }, [authFetch, page, tierFilter, search, clusterSort]);
 
   // Fetch cluster summary
   const fetchClusterSummary = useCallback(async () => {
@@ -839,6 +860,20 @@ export default function RiskScoringPage({ onOpenDetail }) {
     fetchSummary();
     setSelectedEntity(null);
   }, [fetchEntities, fetchSummary]);
+
+  // Toggle cluster sort column
+  const handleClusterSort = useCallback((field) => {
+    setClusterSort(prev => {
+      // Default direction: asc for text fields, desc for numeric fields
+      const textFields = ['name', 'type', 'owner'];
+      const defaultDir = textFields.includes(field) ? 'asc' : 'desc';
+      if (prev.key === field) {
+        return { key: field, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key: field, dir: defaultDir };
+    });
+    setPage(0);
+  }, []);
 
   // Refresh clusters list after owner change
   const handleClusterRefresh = useCallback(() => {
@@ -1007,6 +1042,20 @@ export default function RiskScoringPage({ onOpenDetail }) {
         <div className="border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setView('clusters')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                view === 'clusters' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              Clusters
+              {clusterSummary?.available && clusterSummary.total > 0 && (
+                <span className="ml-1.5 text-[10px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
+                  {clusterSummary.total}
+                </span>
+              )}
+            </button>
+            <span className="w-px h-5 bg-gray-200" />
+            <button
               onClick={() => setView('groups')}
               className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
                 view === 'groups' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
@@ -1021,20 +1070,6 @@ export default function RiskScoringPage({ onOpenDetail }) {
               }`}
             >
               Users
-            </button>
-            <span className="w-px h-5 bg-gray-200" />
-            <button
-              onClick={() => setView('clusters')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                view === 'clusters' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              Clusters
-              {clusterSummary?.available && clusterSummary.total > 0 && (
-                <span className="ml-1.5 text-[10px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
-                  {clusterSummary.total}
-                </span>
-              )}
             </button>
           </div>
 
@@ -1074,7 +1109,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
           clusterLoading ? (
             <div className="py-8 text-center text-gray-400">Loading clusters...</div>
           ) : (
-            <ClusterTable clusters={clusterData.data} onSelect={setSelectedCluster} />
+            <ClusterTable clusters={clusterData.data} onSelect={setSelectedCluster} sortKey={clusterSort.key} sortDir={clusterSort.dir} onSort={handleClusterSort} />
           )
         ) : (
           entityLoading ? (

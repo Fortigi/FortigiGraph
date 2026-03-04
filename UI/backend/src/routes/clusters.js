@@ -54,9 +54,21 @@ router.get('/risk-scores/clusters', async (req, res) => {
       inputs.search = `%${search}%`;
     }
 
-    let orderBy = 'ORDER BY aggregateRiskScore DESC';
-    if (sort === 'name') orderBy = 'ORDER BY displayName ASC';
-    else if (sort === 'members') orderBy = 'ORDER BY memberCount DESC';
+    const sortOptions = {
+      name: 'displayName ASC',
+      'name-desc': 'displayName DESC',
+      type: 'clusterType ASC',
+      'type-desc': 'clusterType DESC',
+      members: 'memberCount DESC',
+      'members-asc': 'memberCount ASC',
+      score: 'aggregateRiskScore DESC',
+      'score-asc': 'aggregateRiskScore ASC',
+      tier: 'aggregateRiskScore DESC',
+      'tier-asc': 'aggregateRiskScore ASC',
+      owner: 'ownerDisplayName ASC',
+      'owner-desc': 'ownerDisplayName DESC',
+    };
+    let orderBy = `ORDER BY ${sortOptions[sort] || 'aggregateRiskScore DESC'}`;
 
     // Count total
     const countReq = timedRequest(p, 'cluster-count', res);
