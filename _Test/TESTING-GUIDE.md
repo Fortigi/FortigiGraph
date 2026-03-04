@@ -15,6 +15,7 @@
 9. [Phase 7: Azure Automation Tests](#9-phase-7-azure-automation-tests)
 10. [Phase 8: Cleanup](#10-phase-8-cleanup)
 11. [Test Script Reference](#11-test-script-reference)
+12. [CI/CD: Nightly Automated Runs](#12-cicd-nightly-automated-runs)
 
 ---
 
@@ -688,3 +689,123 @@ All test scripts write transcripts to `_Test/logs/`. Check these for detailed ou
 | "Module not found" | Run from the repo root: `Import-Module .\FortigiGraph.psd1 -Force` |
 | Risk scoring returns 0 scores | Ensure sync has run first — scoring reads from SQL tables |
 | UI returns 500 errors | Check App Service logs: `az webapp log tail --name <app-name> -g <rg>` |
+
+---
+
+## 12. CI/CD: Nightly Automated Runs
+
+Both GitHub Actions and Azure DevOps pipelines are provided. They run the full test suite on a schedule (02:00 UTC nightly) and can be triggered manually.
+
+### Option A: GitHub Actions
+
+**File:** `.github/workflows/nightly-tests.yml`
+
+**Setup:**
+
+1. Go to **Settings → Secrets and variables → Actions** and add these secrets:
+
+   | Secret | Required | Value |
+   |--------|----------|-------|
+   | `AZURE_CREDENTIALS` | Yes | Service principal JSON (see below) |
+   | `TEST_CONFIG` | Yes | Full contents of your `config.test.json` |
+   | `SQL_ADMIN_PASSWORD` | Yes | SQL Server admin password |
+   | `GRAPH_CLIENT_SECRET` | Yes | Graph API client secret |
+   | `LLM_API_KEY` | No | Anthropic or OpenAI API key |
+   | `LLM_PROVIDER` | No | `Anthropic` or `OpenAI` (default: Anthropic) |
+   | `UI_BASE_URL` | No | Deployed UI URL |
+   | `UI_BEARER_TOKEN` | No | Bearer token for authenticated UI |
+
+2. Create the Azure service principal:
+
+   ```bash
+   az ad sp create-for-rbac --name "FortigiGraph-CI" \
+     --role contributor \
+     --scopes /subscriptions/YOUR-SUBSCRIPTION-ID \
+     --sdk-auth
+   ```
+
+   Copy the entire JSON output into the `AZURE_CREDENTIALS` secret.
+
+3. The pipeline runs automatically at 02:00 UTC. To trigger manually: **Actions → Nightly Tests → Run workflow**.
+
+**Pipeline structure:**
+
+```
+unit-tests ──┬──→ integration-tests (Phase 2-4)
+             ├──→ ui-backend-tests  (Phase 5a, if UI_BASE_URL set)
+             └──→ e2e-tests         (Phase 5b, Playwright)
+                          └──→ summary
+```
+
+Unit tests run first. If they pass, the remaining jobs run **in parallel** to minimize total time.
+
+**Artifacts:** Test logs, Playwright reports, and failure screenshots are uploaded as pipeline artifacts (retained 30 days).
+
+### Option B: Azure DevOps
+
+**File:** `azure-pipelines.yml` (repo root)
+
+**Setup:**
+
+1. Create a **Variable Group** named `FortigiGraph-Test` in **Pipelines → Library**:
+
+   | Variable | Required | Secret? | Value |
+   |----------|----------|---------|-------|
+   | `TEST_CONFIG` | Yes | Yes | Full contents of `config.test.json` |
+   | `SQL_ADMIN_PASSWORD` | Yes | Yes | SQL Server admin password |
+   | `GRAPH_CLIENT_SECRET` | Yes | Yes | Graph API client secret |
+   | `GRAPH_TENANT_ID` | Yes | No | Azure AD tenant ID |
+   | `AZURE_SUBSCRIPTION_ID` | Yes | No | Azure subscription ID |
+   | `LLM_API_KEY` | No | Yes | Anthropic or OpenAI API key |
+   | `LLM_PROVIDER` | No | No | `Anthropic` or `OpenAI` |
+   | `UI_BASE_URL` | No | No | Deployed UI URL |
+   | `UI_BEARER_TOKEN` | No | Yes | Bearer token for authenticated UI |
+
+2. Create an **Azure service connection** named `FortigiGraph-Azure`:
+   - Go to **Project Settings → Service connections → New → Azure Resource Manager**
+   - Use service principal authentication
+   - Scope to your subscription
+
+3. Create a new pipeline pointing to `azure-pipelines.yml` in the repo root.
+
+4. The pipeline runs at 02:00 UTC on `main` and `dev` branches. To trigger manually: **Pipelines → Run pipeline** (with optional parameter overrides).
+
+**Pipeline structure:**
+
+```
+UnitTests ──┬──→ IntegrationTests (Phase 2-4)
+            ├──→ UIBackendTests   (Phase 5a, if UI_BASE_URL set)
+            └──→ E2ETests         (Phase 5b, Playwright)
+```
+
+Stages run in parallel after unit tests pass.
+
+### What Runs Where
+
+| Phase | Azure Needed | Secrets Needed | Runs In |
+|-------|-------------|----------------|---------|
+| 1. Unit Tests | No | None | Always |
+| 2a. Diagnostics | Yes | `AZURE_CREDENTIALS`, `TEST_CONFIG` | If secrets configured |
+| 2b. Graph API | Yes | `TEST_CONFIG`, `GRAPH_CLIENT_SECRET` | If secrets configured |
+| 3. Integration | Yes | All Azure + Graph secrets | If not skipped |
+| 4. Risk Scoring | Yes | All above + `LLM_API_KEY` | If LLM key configured |
+| 5a. UI Backend | No | `UI_BASE_URL` | If URL configured |
+| 5b. Playwright E2E | No | None | Always (unless skipped) |
+
+### Cost Considerations
+
+- **GitHub Actions:** Free for public repos. Private repos: 2,000 min/month free, then ~$0.008/min
+- **Azure DevOps:** First 1,800 min/month free (self-hosted unlimited), then ~$40/agent/month
+- **Azure resources during tests:** ~$0.10-0.50 per test run (SQL Basic + compute time)
+- **LLM API:** ~$0.05-0.20 per risk scoring test (2-3 API calls)
+
+### Skipping Phases in CI
+
+Both pipelines support skipping phases via manual trigger parameters:
+
+```
+Skip integration tests:  ✓  (saves ~15 min and Azure costs)
+Skip risk scoring:       ✓  (saves ~5 min and LLM costs)
+Skip E2E tests:          ✓  (saves ~2 min)
+First run:               ✓  (creates SQL Server from scratch)
+```

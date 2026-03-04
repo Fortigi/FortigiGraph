@@ -1,0 +1,245 @@
+# ─── FortigiGraph Nightly Test Suite — Azure DevOps ─────────────────────
+#
+# Runs the full test suite on a schedule and on-demand.
+#
+# Setup:
+#   1. Create a Variable Group named "FortigiGraph-Test" in Pipelines → Library
+#      with these variables (mark sensitive ones as secret):
+#
+#      TEST_CONFIG            - Full contents of config.test.json (secret)
+#      SQL_ADMIN_PASSWORD     - SQL Server admin password (secret)
+#      GRAPH_CLIENT_SECRET    - Graph API client secret (secret)
+#      GRAPH_TENANT_ID        - Azure AD tenant ID
+#      AZURE_SUBSCRIPTION_ID  - Azure subscription ID
+#
+#      Optional:
+#      LLM_API_KEY            - Anthropic or OpenAI API key (secret)
+#      LLM_PROVIDER           - "Anthropic" or "OpenAI" (default: Anthropic)
+#      UI_BASE_URL            - Deployed UI URL
+#      UI_BEARER_TOKEN        - Bearer token for authenticated UI (secret)
+#
+#   2. Create an Azure service connection named "FortigiGraph-Azure"
+#      (Project Settings → Service connections → Azure Resource Manager)
+#
+#   3. Point this pipeline at the repo root azure-pipelines.yml
+# ─────────────────────────────────────────────────────────────────────────
+
+trigger: none  # No CI trigger — nightly schedule only
+
+schedules:
+  - cron: '0 2 * * *'    # 02:00 UTC every night
+    displayName: 'Nightly Full Test Suite'
+    branches:
+      include:
+        - main
+        - dev
+    always: true           # Run even if no code changes
+
+parameters:
+  - name: skipIntegration
+    displayName: 'Skip integration tests'
+    type: boolean
+    default: false
+  - name: skipRiskScoring
+    displayName: 'Skip risk scoring tests'
+    type: boolean
+    default: false
+  - name: skipE2E
+    displayName: 'Skip Playwright E2E tests'
+    type: boolean
+    default: false
+  - name: firstRun
+    displayName: 'First run (create SQL Server from scratch)'
+    type: boolean
+    default: false
+
+variables:
+  - group: FortigiGraph-Test
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  # ─── Phase 1: Unit Tests (no Azure, no secrets) ────────────────────
+  - stage: UnitTests
+    displayName: 'Phase 1: Unit Tests'
+    jobs:
+      - job: UnitTests
+        displayName: 'Module structure & code quality'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Run unit tests'
+            inputs:
+              filePath: '_Test/Test-Unit.ps1'
+              pwsh: true
+
+          - publish: _Test/logs/
+            artifact: unit-test-logs
+            condition: always()
+            displayName: 'Publish unit test logs'
+
+  # ─── Phase 2-4: Integration Tests (Azure + Graph + SQL) ────────────
+  - stage: IntegrationTests
+    displayName: 'Phase 2-4: Integration Tests'
+    dependsOn: UnitTests
+    condition: and(succeeded(), eq('${{ parameters.skipIntegration }}', false))
+    jobs:
+      - job: Integration
+        displayName: 'Azure + Graph + SQL + Sync'
+        timeoutInMinutes: 45
+        steps:
+          - checkout: self
+
+          - task: AzurePowerShell@5
+            displayName: 'Install Az modules & write config'
+            inputs:
+              azureSubscription: 'FortigiGraph-Azure'
+              ScriptType: 'InlineScript'
+              Inline: |
+                # Write config from variable group
+                $config = '$(TEST_CONFIG)'
+                if ([string]::IsNullOrWhiteSpace($config)) {
+                  Write-Host "##vso[task.logissue type=error]TEST_CONFIG variable is not set"
+                  exit 1
+                }
+
+                $configObj = $config | ConvertFrom-Json
+
+                # Inject secrets
+                if ('$(SQL_ADMIN_PASSWORD)') {
+                  $configObj.Azure.AdminUserPassword = '$(SQL_ADMIN_PASSWORD)'
+                }
+                if ('$(GRAPH_CLIENT_SECRET)') {
+                  $configObj.Graph.ClientSecret = '$(GRAPH_CLIENT_SECRET)'
+                }
+
+                $configObj | ConvertTo-Json -Depth 10 | Set-Content -Path _Test/config.ci.json
+                Write-Host "Config written to _Test/config.ci.json"
+              azurePowerShellVersion: 'LatestVersion'
+              pwsh: true
+
+          - task: PowerShell@2
+            displayName: 'Phase 2a: Simple Diagnostics'
+            inputs:
+              filePath: '_Test/Test-Simple.ps1'
+              arguments: '-ConfigFile _Test/config.ci.json'
+              pwsh: true
+
+          - task: PowerShell@2
+            displayName: 'Phase 2b: Graph API Tests'
+            inputs:
+              filePath: '_Test/Test-GraphAPI.ps1'
+              arguments: '-ConfigFile _Test/config.ci.json'
+              pwsh: true
+
+          - task: PowerShell@2
+            displayName: 'Phase 3: Integration Tests'
+            inputs:
+              targetType: 'inline'
+              script: |
+                if ('${{ parameters.firstRun }}' -eq 'True') {
+                  pwsh -File _Test/Test-Integration.ps1 -ConfigFile _Test/config.ci.json -SkipCleanup
+                } else {
+                  pwsh -File _Test/Test-Integration-Fast.ps1 -ConfigFile _Test/config.ci.json
+                }
+              pwsh: true
+
+          - task: PowerShell@2
+            displayName: 'Phase 4: Risk Scoring Tests'
+            condition: and(succeeded(), eq('${{ parameters.skipRiskScoring }}', false), ne(variables['LLM_API_KEY'], ''))
+            inputs:
+              targetType: 'inline'
+              script: |
+                $provider = if ('$(LLM_PROVIDER)') { '$(LLM_PROVIDER)' } else { 'Anthropic' }
+                pwsh -File _Test/Test-RiskScoring.ps1 `
+                  -ConfigFile _Test/config.ci.json `
+                  -LLMProvider $provider `
+                  -LLMApiKey '$(LLM_API_KEY)'
+              pwsh: true
+
+          - task: PowerShell@2
+            displayName: 'Clean up config'
+            condition: always()
+            inputs:
+              targetType: 'inline'
+              script: Remove-Item _Test/config.ci.json -ErrorAction SilentlyContinue
+              pwsh: true
+
+          - publish: _Test/logs/
+            artifact: integration-test-logs
+            condition: always()
+            displayName: 'Publish integration test logs'
+
+  # ─── Phase 5a: UI Backend API Tests ────────────────────────────────
+  - stage: UIBackendTests
+    displayName: 'Phase 5a: UI Backend API Tests'
+    dependsOn: UnitTests
+    condition: and(succeeded(), ne(variables['UI_BASE_URL'], ''))
+    jobs:
+      - job: UIBackend
+        displayName: 'REST API endpoint validation'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Run backend API tests'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $args = @("-BaseUrl", "$(UI_BASE_URL)")
+                if ('$(UI_BEARER_TOKEN)') {
+                  $args += @("-BearerToken", "$(UI_BEARER_TOKEN)")
+                }
+                pwsh -File _Test/Test-UIBackend.ps1 @args
+              pwsh: true
+
+          - publish: _Test/logs/
+            artifact: ui-backend-test-logs
+            condition: always()
+            displayName: 'Publish UI backend test logs'
+
+  # ─── Phase 5b: Playwright E2E Tests ────────────────────────────────
+  - stage: E2ETests
+    displayName: 'Phase 5b: UI E2E Browser Tests'
+    dependsOn: UnitTests
+    condition: and(succeeded(), eq('${{ parameters.skipE2E }}', false))
+    jobs:
+      - job: E2E
+        displayName: 'Playwright browser tests'
+        steps:
+          - checkout: self
+
+          - task: UseNode@1
+            displayName: 'Use Node.js 20'
+            inputs:
+              version: '20.x'
+
+          - script: npm ci
+            displayName: 'Install backend dependencies'
+            workingDirectory: UI/backend
+
+          - script: npm ci
+            displayName: 'Install frontend dependencies'
+            workingDirectory: UI/frontend
+
+          - script: npx playwright install chromium --with-deps
+            displayName: 'Install Playwright browsers'
+            workingDirectory: UI/frontend
+
+          - script: npx playwright test
+            displayName: 'Run E2E tests'
+            workingDirectory: UI/frontend
+            env:
+              CI: true
+
+          - publish: UI/frontend/playwright-report/
+            artifact: playwright-report
+            condition: always()
+            displayName: 'Publish Playwright report'
+
+          - publish: UI/frontend/test-results/
+            artifact: playwright-screenshots
+            condition: failed()
+            displayName: 'Publish failure screenshots'
