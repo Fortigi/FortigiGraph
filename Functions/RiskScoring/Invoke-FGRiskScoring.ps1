@@ -60,20 +60,33 @@ function Invoke-FGRiskScoring {
         }
         $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
 
-        # Connect to SQL if not already connected
-        if (-not $global:FGSQLConnectionString) {
-            Connect-FGSQLServer -ConfigFile $ConfigFile
-        }
-
         # Read classifier path from config if not specified
         if ([string]::IsNullOrWhiteSpace($ClassifierRulesetPath) -and $config.RiskScoring.ClassifierRulesetPath) {
             $ClassifierRulesetPath = $config.RiskScoring.ClassifierRulesetPath
         }
     }
 
-    # Verify SQL connection
-    if (-not $global:FGSQLConnectionString) {
-        throw "Not connected to SQL Server. Run Connect-FGSQLServer first or provide -ConfigFile."
+    # Validate SQL connection — reconnect if stale or missing
+    $sqlReady = $false
+    if ($global:FGSQLConnectionString) {
+        try {
+            $testConn = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
+            $testConn.Open()
+            $testConn.Close()
+            $testConn.Dispose()
+            $sqlReady = $true
+        } catch {
+            Write-Host "  Existing SQL connection is stale, reconnecting..." -ForegroundColor Yellow
+            $global:FGSQLConnectionString = $null
+        }
+    }
+
+    if (-not $sqlReady) {
+        if ($ConfigFile) {
+            Connect-FGSQLServer -ConfigFile $ConfigFile
+        } else {
+            throw "Not connected to SQL Server. Run Connect-FGSQLServer first or provide -ConfigFile."
+        }
     }
 
     # ================================================================
@@ -1004,6 +1017,25 @@ WHERE id = @id
 
     # Collect memory
     [System.GC]::Collect()
+
+    # ================================================================
+    # Build Resource Clusters
+    # ================================================================
+
+    Write-Host ""
+    Write-Host "--- Building Resource Clusters ---" -ForegroundColor Cyan
+
+    try {
+        Save-FGResourceClusters `
+            -Groups $groups `
+            -GroupScores $groupScores `
+            -GroupUpdates $groupUpdates `
+            -GroupClassifiers $groupClassifiers `
+            -NonProdPatterns $nonProdPatterns
+    } catch {
+        Write-Host "  WARNING: Resource clustering failed: $_" -ForegroundColor Yellow
+        Write-Host "  Risk scores were saved successfully. Clustering can be retried." -ForegroundColor Yellow
+    }
 
     # ================================================================
     # Summary

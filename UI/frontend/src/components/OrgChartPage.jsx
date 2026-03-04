@@ -84,38 +84,52 @@ function StatCard({ label, value, detail }) {
 
 // ─── Department box (the clickable card in the flowchart) ────────────────────
 
-function DeptBox({ node, isSelected, isMatch, onClick }) {
+function DeptBox({ node, isSelected, isMatch, onClick, onDetails }) {
   const s = TIER_STYLES[node.risk.maxTier] || TIER_STYLES.None;
+  const direct = node.directCount || node.risk.totalPeople;
+  const indirect = node.indirectCount || 0;
 
   return (
-    <button
-      onClick={onClick}
-      className={`relative border-2 rounded-lg px-4 py-3 min-w-[150px] max-w-[220px] transition-all cursor-pointer text-center ${
-        isSelected
-          ? 'shadow-lg ring-2 ring-blue-500 border-blue-400'
-          : isMatch
-            ? 'ring-2 ring-blue-400'
-            : ''
-      }`}
-      style={{
-        backgroundColor: isSelected ? '#dbeafe' : s.box,
-        borderColor: isSelected ? undefined : s.boxBorder,
-      }}
-    >
-      <div className="font-semibold text-sm text-gray-900 leading-tight">
-        {node.department}
-      </div>
-      <div className="text-[10px] text-gray-500 mt-1">
-        {node.risk.totalPeople} member{node.risk.totalPeople !== 1 ? 's' : ''}
-      </div>
-
-      {/* Risk badge top-right */}
-      {node.risk.maxTier && node.risk.maxTier !== 'None' && (
-        <div className="absolute -top-2.5 -right-2">
-          <TierBadge tier={node.risk.maxTier} showAll />
+    <div className="relative min-w-[150px] max-w-[220px]">
+      <button
+        onClick={onClick}
+        className={`w-full border-2 rounded-lg px-4 py-3 transition-all cursor-pointer text-center ${
+          isSelected
+            ? 'shadow-lg ring-2 ring-blue-500 border-blue-400'
+            : isMatch
+              ? 'ring-2 ring-blue-400'
+              : ''
+        }`}
+        style={{
+          backgroundColor: isSelected ? '#dbeafe' : s.box,
+          borderColor: isSelected ? undefined : s.boxBorder,
+        }}
+      >
+        <div className="font-semibold text-sm text-gray-900 leading-tight">
+          {node.department}
         </div>
-      )}
-    </button>
+        <div className="text-[10px] text-gray-500 mt-1">
+          {direct} direct{indirect > 0 && <span className="text-gray-400"> | {indirect} indirect</span>}
+        </div>
+
+        {/* Risk badge top-right */}
+        {node.risk.maxTier && node.risk.maxTier !== 'None' && (
+          <div className="absolute -top-2.5 -right-2">
+            <TierBadge tier={node.risk.maxTier} showAll />
+          </div>
+        )}
+      </button>
+
+      {/* Details link below the box */}
+      <div className="text-center mt-0.5">
+        <button
+          onClick={(e) => { e.stopPropagation(); onDetails(node.id); }}
+          className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline"
+        >
+          details
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -123,7 +137,7 @@ function DeptBox({ node, isSelected, isMatch, onClick }) {
 // Depth 0 (root): horizontal flowchart with connector lines
 // Depth 1+: vertical indented tree (prevents horizontal overflow)
 
-function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand, matchNodeIds }) {
+function OrgNode({ node, depth, selectedId, onSelect, onDetails, expandedMap, toggleExpand, matchNodeIds }) {
   const isExpanded = expandedMap[node.id] ?? false;
   const hasChildren = node.children.length > 0;
   const useVertical = depth >= 1;
@@ -140,6 +154,7 @@ function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand,
             onSelect(selectedId === node.id ? null : node.id);
             if (hasChildren) toggleExpand(node.id);
           }}
+          onDetails={onDetails}
         />
 
         {hasChildren && !isExpanded && (
@@ -162,6 +177,7 @@ function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand,
                   depth={depth + 1}
                   selectedId={selectedId}
                   onSelect={onSelect}
+                  onDetails={onDetails}
                   expandedMap={expandedMap}
                   toggleExpand={toggleExpand}
                   matchNodeIds={matchNodeIds}
@@ -185,6 +201,7 @@ function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand,
           onSelect(selectedId === node.id ? null : node.id);
           if (hasChildren) toggleExpand(node.id);
         }}
+        onDetails={onDetails}
       />
 
       {hasChildren && !isExpanded && (
@@ -223,6 +240,7 @@ function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand,
                     depth={depth + 1}
                     selectedId={selectedId}
                     onSelect={onSelect}
+                    onDetails={onDetails}
                     expandedMap={expandedMap}
                     toggleExpand={toggleExpand}
                     matchNodeIds={matchNodeIds}
@@ -237,9 +255,36 @@ function OrgNode({ node, depth, selectedId, onSelect, expandedMap, toggleExpand,
   );
 }
 
+// ─── Collect all members from a node's subtree ──────────────────────────────
+
+function collectAllMembers(node) {
+  let all = [];
+  for (const member of node.members) {
+    all.push({ ...member, _dept: node.department });
+  }
+  for (const child of node.children) {
+    all.push(...collectAllMembers(child));
+  }
+  return all;
+}
+
 // ─── Detail panel (shown when a department is selected) ──────────────────────
 
 function DeptDetail({ node, onOpenDetail, onClose }) {
+  const [tab, setTab] = useState('direct');
+
+  const directMembers = node.members;
+  const allMembers = useMemo(() => collectAllMembers(node), [node]);
+  const indirectMembers = useMemo(
+    () => allMembers.filter(m => !node.members.some(dm => dm.id === m.id)),
+    [allMembers, node.members]
+  );
+  const allRisk = useMemo(() => computeDeptRisk(allMembers), [allMembers]);
+  const indirectRisk = useMemo(() => computeDeptRisk(indirectMembers), [indirectMembers]);
+
+  const displayMembers = tab === 'direct' ? directMembers : tab === 'indirect' ? indirectMembers : allMembers;
+  const displayRisk = tab === 'direct' ? node.risk : tab === 'indirect' ? indirectRisk : allRisk;
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
       {/* Header */}
@@ -247,9 +292,12 @@ function DeptDetail({ node, onOpenDetail, onClose }) {
         <div>
           <h3 className="text-base font-semibold text-gray-900">{node.department}</h3>
           <div className="text-xs text-gray-500 mt-0.5">
-            {node.risk.totalPeople} member{node.risk.totalPeople !== 1 ? 's' : ''}
+            {node.directCount || node.risk.totalPeople} direct
+            {(node.indirectCount || 0) > 0 && (
+              <span className="text-gray-400"> | {node.indirectCount} indirect</span>
+            )}
             <span className="mx-1.5 text-gray-300">|</span>
-            Avg. score: {node.risk.avgScore}
+            Avg. score: {displayRisk.avgScore}
             {node.children.length > 0 && (
               <>
                 <span className="mx-1.5 text-gray-300">|</span>
@@ -259,7 +307,7 @@ function DeptDetail({ node, onOpenDetail, onClose }) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <TierBadge tier={node.risk.maxTier} showAll />
+          <TierBadge tier={displayRisk.maxTier} showAll />
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 text-lg leading-none"
@@ -270,14 +318,39 @@ function DeptDetail({ node, onOpenDetail, onClose }) {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex border-b border-gray-100 px-5">
+        {[
+          { key: 'direct', label: 'Direct', count: directMembers.length },
+          ...(indirectMembers.length > 0
+            ? [{ key: 'indirect', label: 'Indirect', count: indirectMembers.length }]
+            : []),
+          ...(indirectMembers.length > 0
+            ? [{ key: 'all', label: 'All', count: allMembers.length }]
+            : []),
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+              tab === t.key
+                ? 'border-blue-500 text-blue-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label} ({t.count})
+          </button>
+        ))}
+      </div>
+
       {/* Risk distribution */}
-      {TIER_DISPLAY.some(t => node.risk.tierCounts[t] > 0) && (
+      {TIER_DISPLAY.some(t => displayRisk.tierCounts[t] > 0) && (
         <div className="flex gap-2 px-5 py-2 border-b border-gray-100">
-          {TIER_DISPLAY.filter(t => node.risk.tierCounts[t] > 0).map(t => {
+          {TIER_DISPLAY.filter(t => displayRisk.tierCounts[t] > 0).map(t => {
             const s = TIER_STYLES[t];
             return (
               <span key={t} className={`${s.bg} ${s.text} text-xs px-2.5 py-0.5 rounded-full border ${s.border}`}>
-                {node.risk.tierCounts[t]} {t}
+                {displayRisk.tierCounts[t]} {t}
               </span>
             );
           })}
@@ -285,10 +358,10 @@ function DeptDetail({ node, onOpenDetail, onClose }) {
       )}
 
       {/* Members */}
-      <div className="px-5 py-3 max-h-[300px] overflow-y-auto">
+      <div className="px-5 py-3 max-h-[400px] overflow-y-auto">
         <div className="space-y-1">
-          {node.members.map(user => (
-            <div key={user.id} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-gray-50">
+          {displayMembers.map(user => (
+            <div key={`${user.id}-${user._dept || ''}`} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-gray-50">
               <Avatar name={user.displayName} tier={user.riskTier} />
               <div className="min-w-0 flex-1">
                 <button
@@ -297,7 +370,12 @@ function DeptDetail({ node, onOpenDetail, onClose }) {
                 >
                   {user.displayName}
                 </button>
-                <div className="text-xs text-gray-400 truncate">{user.jobTitle || '\u2014'}</div>
+                <div className="text-xs text-gray-400 truncate">
+                  {user.jobTitle || '\u2014'}
+                  {tab !== 'direct' && user._dept && (
+                    <span className="ml-1.5 text-gray-300">({user._dept})</span>
+                  )}
+                </div>
               </div>
               <TierBadge tier={user.riskTier} />
               {user.riskScore != null && (
@@ -323,6 +401,7 @@ export default function OrgChartPage({ onOpenDetail }) {
   const [expandedMap, setExpandedMap] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const initialExpandDone = useRef(false);
+  const detailRef = useRef(null);
 
   // ─── Fetch data ──────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -463,6 +542,52 @@ export default function OrgChartPage({ onOpenDetail }) {
     const rootDeptName = bestRoot.department || '(No department)';
     const rootResult = buildChildren([bestRoot], rootDeptName);
     const rootMembers = [bestRoot, ...rootResult.mergedMembers];
+
+    // Count all people in a subtree (members + all descendants) and store on node
+    function countSubtreePeople(node) {
+      let indirect = 0;
+      for (const child of node.children) indirect += countSubtreePeople(child);
+      node.directCount = node.members.length;
+      node.indirectCount = indirect;
+      node.subtreeCount = node.members.length + indirect;
+      return node.subtreeCount;
+    }
+
+    // Sort root children by total subtree size (largest left)
+    for (const child of rootResult.nodes) {
+      countSubtreePeople(child);
+    }
+    rootResult.nodes.sort((a, b) => b.subtreeCount - a.subtreeCount);
+
+    // Cap at MAX_TOP_DEPTS, merge rest into "Other"
+    const MAX_TOP_DEPTS = 8;
+    let topChildren = rootResult.nodes;
+
+    if (topChildren.length > MAX_TOP_DEPTS) {
+      const top = topChildren.slice(0, MAX_TOP_DEPTS);
+      const rest = topChildren.slice(MAX_TOP_DEPTS);
+
+      function collectAllPeople(node) {
+        let all = [...node.members];
+        for (const child of node.children) all.push(...collectAllPeople(child));
+        return all;
+      }
+      const allOtherPeople = [];
+      for (const r of rest) allOtherPeople.push(...collectAllPeople(r));
+
+      const otherId = `dept-other`;
+      deptCount++;
+      const otherNode = {
+        id: otherId,
+        department: `Other (${rest.length} depts)`,
+        members: [],
+        children: rest,
+        risk: computeDeptRisk(allOtherPeople),
+      };
+      nMap.set(otherId, otherNode);
+      topChildren = [...top, otherNode];
+    }
+
     const rootId = `dept-root`;
     deptCount++;
 
@@ -470,9 +595,10 @@ export default function OrgChartPage({ onOpenDetail }) {
       id: rootId,
       department: rootDeptName,
       members: rootMembers,
-      children: rootResult.nodes,
+      children: topChildren,
       risk: computeDeptRisk(rootMembers),
     };
+    countSubtreePeople(root);
     nMap.set(rootId, root);
 
     return {
@@ -483,13 +609,13 @@ export default function OrgChartPage({ onOpenDetail }) {
     };
   }, [data]);
 
-  // ─── Initial expand: first 4 levels ────────────────────────────
+  // ─── Initial expand: first 3 levels ────────────────────────────
   useEffect(() => {
     if (rootNode && !initialExpandDone.current) {
       initialExpandDone.current = true;
       const initial = {};
       function walkExpand(node, depth) {
-        if (depth < 4) {
+        if (depth < 3) {
           initial[node.id] = true;
           for (const child of node.children) walkExpand(child, depth + 1);
         }
@@ -552,6 +678,15 @@ export default function OrgChartPage({ onOpenDetail }) {
     if (!rootNode) return;
     setExpandedMap({ [rootNode.id]: true });
   }, [rootNode]);
+
+  // ─── Open detail panel (always opens, scrolls into view) ───────
+  const openDetails = useCallback((id) => {
+    setSelectedId(id);
+    // Scroll to detail panel after render
+    setTimeout(() => {
+      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }, []);
 
   // ─── Selected node for detail panel ────────────────────────────
   const selectedNode = selectedId ? nodeMap.get(selectedId) : null;
@@ -668,6 +803,7 @@ export default function OrgChartPage({ onOpenDetail }) {
             depth={0}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onDetails={openDetails}
             expandedMap={expandedMap}
             toggleExpand={toggleExpand}
             matchNodeIds={matchNodeIds}
@@ -677,7 +813,7 @@ export default function OrgChartPage({ onOpenDetail }) {
 
       {/* Detail panel */}
       {selectedNode && (
-        <div className="mt-4">
+        <div className="mt-4" ref={detailRef}>
           <DeptDetail
             node={selectedNode}
             onOpenDetail={onOpenDetail}
