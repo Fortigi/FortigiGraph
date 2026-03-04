@@ -1,0 +1,648 @@
+{
+  "version": "1.0",
+  "customer": "portofrotterdam.com",
+  "generated_at": "2026-03-02T15:51:37.4264064+01:00",
+  "profile_ref": ".\\RiskScoring\\portofrotterdam.com\\risk-profile.json",
+  "llm_provider": "Anthropic",
+  "groups": [
+    {
+      "id": "univ-domain-admins",
+      "category": "privilege-tier0",
+      "name_patterns": [
+        "domain.?admin",
+        "domein.?beheer",
+        "DA[-_\\s]",
+        "tier.?0"
+      ],
+      "description_patterns": [
+        "domain.?admin",
+        "full.?control.?directory"
+      ],
+      "base_score": 95,
+      "rationale": "Direct domain administration — Tier 0 asset"
+    },
+    {
+      "id": "univ-global-admins",
+      "category": "privilege-tier0",
+      "name_patterns": [
+        "global.?admin",
+        "GA[-_\\s]",
+        "tenant.?admin",
+        "GlobalAdmin"
+      ],
+      "base_score": 95,
+      "rationale": "Entra ID Global Administrator equivalent"
+    },
+    {
+      "id": "univ-privileged-access",
+      "category": "privilege",
+      "name_patterns": [
+        "privileged",
+        "PAM",
+        "PIM",
+        "break.?glass",
+        "emergency.?access",
+        "noodtoegang",
+        "PAG[-_]"
+      ],
+      "base_score": 90,
+      "rationale": "Privileged or emergency access groups"
+    },
+    {
+      "id": "univ-vpn-remote",
+      "category": "network-access",
+      "name_patterns": [
+        "VPN",
+        "remote.?access",
+        "always.?on",
+        "directaccess",
+        "SSLVPN",
+        "ZTNA"
+      ],
+      "base_score": 70,
+      "rationale": "Remote network access — perimeter boundary"
+    },
+    {
+      "id": "univ-firewall-network",
+      "category": "network-infrastructure",
+      "name_patterns": [
+        "firewall",
+        "network.?admin",
+        "switch.?admin",
+        "router.?admin",
+        "VLAN.?admin"
+      ],
+      "base_score": 80,
+      "rationale": "Network infrastructure management"
+    },
+    {
+      "id": "univ-sap",
+      "category": "erp",
+      "name_patterns": [
+        "SAP",
+        "S4.?HANA",
+        "SAP.?basis",
+        "SAP.?admin"
+      ],
+      "description_patterns": [
+        "SAP",
+        "enterprise.?resource"
+      ],
+      "base_score": 75,
+      "rationale": "ERP system access — typically financial/operational data"
+    },
+    {
+      "id": "univ-exchange-mail",
+      "category": "communication",
+      "name_patterns": [
+        "exchange.?admin",
+        "mail.?admin",
+        "transport.?rule",
+        "journaling"
+      ],
+      "base_score": 65,
+      "rationale": "Email infrastructure administration"
+    },
+    {
+      "id": "univ-backup-recovery",
+      "category": "data-protection",
+      "name_patterns": [
+        "backup",
+        "disaster.?recovery",
+        "DR[-_\\s]",
+        "veeam",
+        "commvault",
+        "recovery"
+      ],
+      "base_score": 75,
+      "rationale": "Backup systems — compromise enables ransomware impact"
+    },
+    {
+      "id": "univ-security-ops",
+      "category": "security",
+      "name_patterns": [
+        "SOC",
+        "SIEM",
+        "sentinel",
+        "security.?operations",
+        "incident.?response",
+        "SecurityReader"
+      ],
+      "base_score": 80,
+      "rationale": "Security operations — visibility and response capability"
+    },
+    {
+      "id": "univ-certificate-pki",
+      "category": "trust-infrastructure",
+      "name_patterns": [
+        "PKI",
+        "certificate",
+        "CA[-_\\s]admin",
+        "cert.?auth"
+      ],
+      "base_score": 85,
+      "rationale": "PKI/certificate infrastructure — trust anchor"
+    },
+    {
+      "id": "univ-helpdesk",
+      "category": "privilege",
+      "name_patterns": [
+        "helpdesk.?admin",
+        "HelpdeskAdmin",
+        "servicedesk.?admin",
+        "password.?reset"
+      ],
+      "base_score": 55,
+      "rationale": "Helpdesk administration — can reset passwords and unlock accounts"
+    },
+    {
+      "id": "univ-user-admin",
+      "category": "privilege",
+      "name_patterns": [
+        "user.?admin",
+        "UserAdmin",
+        "account.?admin",
+        "identity.?admin"
+      ],
+      "base_score": 75,
+      "rationale": "User account administration — can create/modify user accounts"
+    },
+    {
+      "id": "univ-conditional-access",
+      "category": "security",
+      "name_patterns": [
+        "conditional.?access",
+        "CA[-_]exclu",
+        "MFA.?exclu",
+        "MFA.?bypass"
+      ],
+      "base_score": 85,
+      "rationale": "Conditional Access exclusion groups — bypass security controls"
+    },
+    {
+      "id": "univ-azure-subscription",
+      "category": "cloud-infrastructure",
+      "name_patterns": [
+        "subscription.?owner",
+        "subscription.?contrib",
+        "azure.?admin",
+        "cloud.?admin"
+      ],
+      "base_score": 80,
+      "rationale": "Azure subscription-level access — cloud infrastructure control"
+    },
+    {
+      "id": "port-vessel-traffic-control",
+      "category": "operational-technology",
+      "name_patterns": [
+        ".*vessel.*traffic.*control.*",
+        ".*vtm.*",
+        ".*vts.*",
+        ".*scheepvaart.*verkeer.*",
+        ".*maritime.*traffic.*",
+        ".*navigation.*control.*"
+      ],
+      "description_patterns": [
+        ".*vessel.*movement.*",
+        ".*navigation.*safety.*",
+        ".*traffic.*management.*",
+        ".*scheepvaart.*beheer.*"
+      ],
+      "base_score": 95,
+      "rationale": "Controls critical vessel movements and maritime safety systems"
+    },
+    {
+      "id": "port-terminal-operations",
+      "category": "operational-technology",
+      "name_patterns": [
+        ".*terminal.*operations.*",
+        ".*cargo.*handling.*",
+        ".*container.*operations.*",
+        ".*terminal.*beheer.*",
+        ".*lading.*behandeling.*",
+        ".*stevedoring.*"
+      ],
+      "description_patterns": [
+        ".*container.*management.*",
+        ".*cargo.*operations.*",
+        ".*terminal.*access.*",
+        ".*haven.*operaties.*"
+      ],
+      "base_score": 90,
+      "rationale": "Manages critical cargo handling and terminal operations"
+    },
+    {
+      "id": "port-security-isps",
+      "category": "physical-security",
+      "name_patterns": [
+        ".*port.*security.*",
+        ".*isps.*",
+        ".*facility.*security.*",
+        ".*haven.*beveiliging.*",
+        ".*maritime.*security.*",
+        ".*port.*facility.*protection.*"
+      ],
+      "description_patterns": [
+        ".*isps.*compliance.*",
+        ".*port.*access.*control.*",
+        ".*security.*screening.*",
+        ".*beveiligings.*protocol.*"
+      ],
+      "base_score": 92,
+      "rationale": "Responsible for ISPS compliance and critical infrastructure security"
+    },
+    {
+      "id": "port-community-systems",
+      "category": "information-systems",
+      "name_patterns": [
+        ".*port.*community.*system.*",
+        ".*pcs.*",
+        ".*logistics.*platform.*",
+        ".*haven.*gemeenschap.*",
+        ".*cargo.*information.*",
+        ".*trade.*facilitation.*"
+      ],
+      "description_patterns": [
+        ".*stakeholder.*integration.*",
+        ".*logistics.*coordination.*",
+        ".*cargo.*tracking.*",
+        ".*handel.*facilitatie.*"
+      ],
+      "base_score": 88,
+      "rationale": "Access to critical port community systems and logistics data"
+    },
+    {
+      "id": "port-environmental-compliance",
+      "category": "environmental-safety",
+      "name_patterns": [
+        ".*environmental.*compliance.*",
+        ".*marpol.*",
+        ".*seveso.*",
+        ".*milieu.*compliance.*",
+        ".*pollution.*prevention.*",
+        ".*hazmat.*management.*"
+      ],
+      "description_patterns": [
+        ".*environmental.*monitoring.*",
+        ".*hazardous.*materials.*",
+        ".*pollution.*control.*",
+        ".*milieu.*toezicht.*"
+      ],
+      "base_score": 85,
+      "rationale": "Manages environmental compliance and hazardous materials oversight"
+    },
+    {
+      "id": "port-emergency-response",
+      "category": "physical-security",
+      "name_patterns": [
+        ".*emergency.*response.*",
+        ".*crisis.*management.*",
+        ".*incident.*response.*",
+        ".*noodrespons.*",
+        ".*crisis.*team.*",
+        ".*emergency.*operations.*"
+      ],
+      "description_patterns": [
+        ".*emergency.*procedures.*",
+        ".*crisis.*coordination.*",
+        ".*incident.*management.*",
+        ".*nood.*procedures.*"
+      ],
+      "base_score": 90,
+      "rationale": "Critical emergency response and crisis management capabilities"
+    },
+    {
+      "id": "por-hamis-access",
+      "category": "operational-technology",
+      "name_patterns": [
+        ".*hamis.*",
+        ".*harbor.*management.*information.*",
+        ".*haven.*management.*systeem.*"
+      ],
+      "description_patterns": [
+        ".*berth.*allocation.*",
+        ".*vessel.*planning.*",
+        ".*ligplaats.*toewijzing.*"
+      ],
+      "base_score": 95,
+      "rationale": "Access to Port of Rotterdam's critical harbor management system"
+    },
+    {
+      "id": "por-pronto-access",
+      "category": "operational-technology",
+      "name_patterns": [
+        ".*pronto.*",
+        ".*port.*reporting.*notification.*",
+        ".*vessel.*reporting.*"
+      ],
+      "description_patterns": [
+        ".*port.*call.*optimization.*",
+        ".*maritime.*logistics.*coordination.*",
+        ".*scheepvaart.*rapportage.*"
+      ],
+      "base_score": 92,
+      "rationale": "Access to critical vessel reporting and port call optimization system"
+    },
+    {
+      "id": "por-portbase-access",
+      "category": "information-systems",
+      "name_patterns": [
+        ".*portbase.*",
+        ".*port.*community.*platform.*"
+      ],
+      "description_patterns": [
+        ".*cargo.*information.*exchange.*",
+        ".*logistics.*stakeholder.*platform.*",
+        ".*haven.*gemeenschap.*platform.*"
+      ],
+      "base_score": 90,
+      "rationale": "Access to critical port community system connecting all stakeholders"
+    },
+    {
+      "id": "por-port-dues-management",
+      "category": "supply-chain",
+      "name_patterns": [
+        ".*port.*dues.*",
+        ".*tariff.*management.*",
+        ".*revenue.*collection.*",
+        ".*haven.*gelden.*",
+        ".*tarief.*beheer.*"
+      ],
+      "description_patterns": [
+        ".*billing.*system.*",
+        ".*port.*charges.*",
+        ".*revenue.*management.*",
+        ".*facturering.*systeem.*"
+      ],
+      "base_score": 88,
+      "rationale": "Access to critical port revenue and billing systems"
+    },
+    {
+      "id": "por-sap-erp-finance",
+      "category": "information-systems",
+      "name_patterns": [
+        ".*sap.*erp.*finance.*",
+        ".*sap.*financial.*",
+        ".*erp.*accounting.*"
+      ],
+      "description_patterns": [
+        ".*financial.*management.*",
+        ".*accounting.*system.*",
+        ".*procurement.*system.*"
+      ],
+      "base_score": 85,
+      "rationale": "Access to core financial management and ERP systems"
+    },
+    {
+      "id": "por-environmental-monitoring",
+      "category": "environmental-safety",
+      "name_patterns": [
+        ".*environmental.*monitoring.*",
+        ".*air.*quality.*system.*",
+        ".*water.*monitoring.*",
+        ".*milieu.*monitoring.*"
+      ],
+      "description_patterns": [
+        ".*pollution.*monitoring.*",
+        ".*environmental.*compliance.*",
+        ".*milieu.*compliance.*"
+      ],
+      "base_score": 82,
+      "rationale": "Access to environmental monitoring and compliance systems"
+    }
+  ],
+  "users": [
+    {
+      "id": "univ-c-suite",
+      "category": "high-value-target",
+      "title_patterns": [
+        "CEO",
+        "CFO",
+        "CTO",
+        "CISO",
+        "COO",
+        "CIO",
+        "CRO",
+        "chief.?executive",
+        "chief.?financial",
+        "chief.?technology",
+        "directeur",
+        "bestuurder",
+        "bestuursvoorzitter"
+      ],
+      "base_score": 85,
+      "rationale": "C-suite accounts are primary targets for BEC and account takeover"
+    },
+    {
+      "id": "univ-it-admin",
+      "category": "privilege",
+      "title_patterns": [
+        "system.?admin",
+        "systeembeheerder",
+        "IT.?manager",
+        "infrastructure.?engineer",
+        "platform.?engineer",
+        "Sysadmin"
+      ],
+      "base_score": 70,
+      "rationale": "IT administrators typically hold elevated privileges"
+    },
+    {
+      "id": "univ-service-account",
+      "category": "non-human",
+      "name_patterns": [
+        "^svc[-_]",
+        "^sa[-_]",
+        "service.?account",
+        "^app[-_]"
+      ],
+      "upn_patterns": [
+        "^svc",
+        "^sa[-_]",
+        "noreply"
+      ],
+      "base_score": 65,
+      "rationale": "Service accounts often have broad persistent access with weak controls"
+    },
+    {
+      "id": "univ-security-role",
+      "category": "security",
+      "title_patterns": [
+        "security.?engineer",
+        "security.?analyst",
+        "security.?architect",
+        "SOC.?analyst",
+        "CISO",
+        "DPO",
+        "data.?protection"
+      ],
+      "base_score": 60,
+      "rationale": "Security personnel with access to security tooling and sensitive data"
+    },
+    {
+      "id": "univ-finance-role",
+      "category": "financial",
+      "title_patterns": [
+        "controller",
+        "treasurer",
+        "financial.?analyst",
+        "accountant",
+        "finance.?manager",
+        "CFO"
+      ],
+      "base_score": 50,
+      "rationale": "Finance roles with access to financial systems and data"
+    },
+    {
+      "id": "univ-compliance-role",
+      "category": "compliance",
+      "title_patterns": [
+        "compliance.?officer",
+        "auditor",
+        "risk.?manager",
+        "legal.?counsel",
+        "DPO",
+        "privacy.?officer"
+      ],
+      "base_score": 45,
+      "rationale": "Compliance and legal roles with access to sensitive regulatory data"
+    },
+    {
+      "id": "port-master-role",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*havenmeester.*",
+        ".*port.*master.*",
+        ".*harbour.*master.*",
+        ".*harbor.*master.*"
+      ],
+      "base_score": 95,
+      "rationale": "Port Master with ultimate authority over vessel movements and port safety"
+    },
+    {
+      "id": "vessel-traffic-controller",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*verkeersleid.*",
+        ".*traffic.*control.*",
+        ".*vessel.*traffic.*",
+        ".*vts.*operator.*",
+        ".*navigation.*controller.*"
+      ],
+      "base_score": 92,
+      "rationale": "Controls critical vessel traffic management systems"
+    },
+    {
+      "id": "isps-security-officer",
+      "category": "physical-security",
+      "title_patterns": [
+        ".*isps.*officer.*",
+        ".*port.*security.*officer.*",
+        ".*facility.*security.*officer.*",
+        ".*beveiligings.*functionaris.*"
+      ],
+      "base_score": 90,
+      "rationale": "ISPS-designated security officer with critical security authority"
+    },
+    {
+      "id": "terminal-operations-manager",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*terminal.*manager.*",
+        ".*operations.*manager.*",
+        ".*cargo.*manager.*",
+        ".*terminal.*supervisor.*",
+        ".*operationeel.*manager.*"
+      ],
+      "base_score": 88,
+      "rationale": "Manages critical terminal operations and cargo handling"
+    },
+    {
+      "id": "marine-pilot",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*marine.*pilot.*",
+        ".*ship.*pilot.*",
+        ".*harbor.*pilot.*",
+        ".*loods.*",
+        ".*scheepvaart.*loods.*"
+      ],
+      "base_score": 85,
+      "rationale": "Licensed marine pilots with vessel navigation authority"
+    },
+    {
+      "id": "por-rotterdam-port-master",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*rotterdam.*havenmeester.*",
+        ".*rotterdam.*port.*master.*"
+      ],
+      "upn_patterns": [
+        ".*havenmeester.*@portofrotterdam\\.com",
+        ".*portmaster.*@portofrotterdam\\.com"
+      ],
+      "base_score": 98,
+      "rationale": "Port of Rotterdam Port Master with ultimate operational authority"
+    },
+    {
+      "id": "por-hamis-administrator",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*hamis.*admin.*",
+        ".*hamis.*beheerder.*",
+        ".*harbor.*management.*admin.*"
+      ],
+      "upn_patterns": [
+        ".*hamis.*admin.*@portofrotterdam\\.com"
+      ],
+      "base_score": 95,
+      "rationale": "Administrator of critical HaMIS harbor management system"
+    },
+    {
+      "id": "por-pronto-operator",
+      "category": "operational-technology",
+      "title_patterns": [
+        ".*pronto.*operator.*",
+        ".*vessel.*reporting.*operator.*",
+        ".*port.*call.*coordinator.*"
+      ],
+      "upn_patterns": [
+        ".*pronto.*@portofrotterdam\\.com",
+        ".*vessel.*reporting.*@portofrotterdam\\.com"
+      ],
+      "base_score": 90,
+      "rationale": "Operator of critical Pronto vessel reporting system"
+    },
+    {
+      "id": "por-treasury-manager",
+      "category": "information-systems",
+      "title_patterns": [
+        ".*treasury.*manager.*",
+        ".*financial.*risk.*manager.*",
+        ".*cash.*management.*"
+      ],
+      "upn_patterns": [
+        ".*treasury.*@portofrotterdam\\.com",
+        ".*finance.*manager.*@portofrotterdam\\.com"
+      ],
+      "base_score": 88,
+      "rationale": "Manager of treasury and financial risk management systems"
+    },
+    {
+      "id": "por-port-dues-administrator",
+      "category": "supply-chain",
+      "title_patterns": [
+        ".*port.*dues.*admin.*",
+        ".*tariff.*administrator.*",
+        ".*revenue.*administrator.*",
+        ".*haven.*gelden.*beheerder.*"
+      ],
+      "upn_patterns": [
+        ".*portdues.*@portofrotterdam\\.com",
+        ".*revenue.*@portofrotterdam\\.com"
+      ],
+      "base_score": 85,
+      "rationale": "Administrator of port dues and revenue collection systems"
+    }
+  ]
+}

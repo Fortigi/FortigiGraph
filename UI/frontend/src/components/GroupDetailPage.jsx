@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import RiskScoreSection, { RISK_FIELDS } from './RiskScoreSection';
 
 const HEADER_FIELDS = ['description', 'groupTypeCalculated'];
-const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
+const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, ...RISK_FIELDS, 'ValidFrom', 'ValidTo']);
 
 function formatDate(val) {
   if (!val) return '';
@@ -160,6 +161,9 @@ export default function GroupDetailPage({ groupId, cachedData, onCacheData, onCl
           </svg>
         </button>
       </div>
+
+      {/* Risk Assessment */}
+      <RiskScoreSection attributes={attributes} entityType="group" entityId={groupId} authFetch={authFetch} />
 
       {/* Attributes - single column table */}
       <Section title="Attributes" count={otherAttributes.length}>

@@ -1,0 +1,215 @@
+{
+  "customer_profile": {
+    "name": "Port of Rotterdam Authority",
+    "domain": "portofrotterdam.com",
+    "industry": "maritime-logistics",
+    "sub_industry": "port-operations",
+    "country": "NL",
+    "description": "The Port of Rotterdam Authority operates Europe's largest seaport, managing critical maritime infrastructure, cargo handling, and logistics operations. As a vital component of European supply chains, they oversee container terminals, petrochemical facilities, and digital port systems while maintaining security and environmental standards.",
+    "regulations": [
+      {
+        "id": "nis2",
+        "name": "Network and Information Systems Directive 2",
+        "relevance": "Critical infrastructure operator managing essential maritime transport services and digital port systems"
+      },
+      {
+        "id": "isps-code",
+        "name": "International Ship and Port Facility Security Code",
+        "relevance": "Mandatory international maritime security framework for port facilities"
+      },
+      {
+        "id": "gdpr",
+        "name": "General Data Protection Regulation",
+        "relevance": "Processing personal data of employees, visitors, and business partners"
+      },
+      {
+        "id": "seveso-iii",
+        "name": "Seveso III Directive",
+        "relevance": "Managing major accident hazards from dangerous substances in petrochemical facilities"
+      },
+      {
+        "id": "marpol",
+        "name": "International Convention for the Prevention of Pollution from Ships",
+        "relevance": "Environmental protection requirements for port operations and vessel management"
+      }
+    ],
+    "critical_business_processes": [
+      "Vessel traffic management and navigation control",
+      "Container terminal operations and cargo handling",
+      "Petrochemical facility management and safety",
+      "Port security and access control systems",
+      "Digital port community systems integration",
+      "Environmental monitoring and compliance",
+      "Critical infrastructure protection"
+    ],
+    "known_systems": [
+      {
+        "name": "PortBase",
+        "type": "Port Community System",
+        "criticality": "critical",
+        "description": "Digital platform connecting all port stakeholders for cargo and logistics information exchange"
+      },
+      {
+        "name": "Vessel Traffic Management System",
+        "type": "Maritime Traffic Control",
+        "criticality": "critical",
+        "description": "Controls vessel movements and navigation safety in port waters"
+      },
+      {
+        "name": "Terminal Operating Systems",
+        "type": "Cargo Management",
+        "criticality": "critical",
+        "description": "Manages container handling, storage, and logistics operations across terminals"
+      },
+      {
+        "name": "Port Security Management System",
+        "type": "Physical Security",
+        "criticality": "critical",
+        "description": "Controls access to restricted port areas and monitors security compliance"
+      },
+      {
+        "name": "Environmental Monitoring Systems",
+        "type": "Compliance Management",
+        "criticality": "high",
+        "description": "Monitors air quality, water pollution, and environmental compliance"
+      },
+      {
+        "name": "HaMIS",
+        "type": "Harbor Management Information System",
+        "criticality": "critical",
+        "description": "Port of Rotterdam's proprietary harbor management system for vessel planning, berth allocation, and port operations coordination"
+      },
+      {
+        "name": "Pronto",
+        "type": "Port Reporting and Notification System",
+        "criticality": "critical",
+        "description": "Digital platform for vessel reporting, port call optimization, and maritime logistics coordination"
+      },
+      {
+        "name": "Port Maps",
+        "type": "Digital Navigation Platform",
+        "criticality": "high",
+        "description": "Interactive digital mapping system providing real-time port information and navigation support"
+      },
+      {
+        "name": "SAP ERP",
+        "type": "Enterprise Resource Planning",
+        "criticality": "critical",
+        "description": "Core financial management system handling accounting, procurement, asset management, and financial reporting"
+      },
+      {
+        "name": "SAP SuccessFactors",
+        "type": "Human Capital Management",
+        "criticality": "high",
+        "description": "HR management system for employee lifecycle, payroll, and talent management"
+      },
+      {
+        "name": "SAP Concur",
+        "type": "Expense Management",
+        "criticality": "medium",
+        "description": "Travel and expense management system for financial compliance and reporting"
+      },
+      {
+        "name": "Treasury Management System",
+        "type": "Financial Management",
+        "criticality": "high",
+        "description": "Cash management, financial risk management, and treasury operations platform"
+      },
+      {
+        "name": "Port Dues Management System",
+        "type": "Revenue Management",
+        "criticality": "critical",
+        "description": "System managing port tariffs, billing, and revenue collection from port users"
+      }
+    ],
+    "critical_roles": [
+      {
+        "title_patterns": [
+          ".*havenmeester.*",
+          ".*port.*master.*",
+          ".*harbour.*master.*"
+        ],
+        "rationale": "Port Master role with authority over vessel movements and port safety operations"
+      },
+      {
+        "title_patterns": [
+          ".*verkeersleid.*",
+          ".*traffic.*control.*",
+          ".*vessel.*traffic.*"
+        ],
+        "rationale": "Vessel traffic controllers managing critical navigation and safety systems"
+      },
+      {
+        "title_patterns": [
+          ".*beveilig.*manager.*",
+          ".*security.*manager.*",
+          ".*isps.*officer.*"
+        ],
+        "rationale": "Security managers responsible for ISPS compliance and port security"
+      },
+      {
+        "title_patterns": [
+          ".*terminal.*manager.*",
+          ".*operations.*manager.*",
+          ".*operationeel.*manager.*"
+        ],
+        "rationale": "Terminal and operations managers controlling critical cargo handling processes"
+      },
+      {
+        "title_patterns": [
+          ".*it.*manager.*",
+          ".*ict.*manager.*",
+          ".*system.*admin.*",
+          ".*systeembeheer.*"
+        ],
+        "rationale": "IT personnel managing critical port community systems and digital infrastructure"
+      },
+      {
+        "title_patterns": [
+          ".*milieu.*manager.*",
+          ".*environmental.*manager.*",
+          ".*compliance.*officer.*"
+        ],
+        "rationale": "Environmental and compliance officers ensuring regulatory adherence"
+      },
+      {
+        "title_patterns": [
+          ".*crisis.*manager.*",
+          ".*emergency.*response.*",
+          ".*incident.*commander.*"
+        ],
+        "rationale": "Emergency response personnel managing critical incidents and business continuity"
+      }
+    ],
+    "risk_domains": [
+      {
+        "domain": "operational-technology",
+        "description": "Critical maritime and port operational systems including vessel traffic management and terminal operations",
+        "weight": 0.25
+      },
+      {
+        "domain": "physical-security",
+        "description": "Port facility security, access control, and ISPS compliance for critical infrastructure protection",
+        "weight": 0.2
+      },
+      {
+        "domain": "supply-chain",
+        "description": "Cargo handling, logistics coordination, and port community system integrations",
+        "weight": 0.2
+      },
+      {
+        "domain": "environmental-safety",
+        "description": "Environmental monitoring, hazardous materials management, and regulatory compliance",
+        "weight": 0.15
+      },
+      {
+        "domain": "information-systems",
+        "description": "Digital port systems, data exchange platforms, and IT infrastructure supporting port operations",
+        "weight": 0.2
+      }
+    ],
+    "generated_at": "2026-03-02T15:47:19.2259077+01:00",
+    "generated_by": "New-FGRiskProfile",
+    "llm_provider": "Anthropic"
+  }
+}

@@ -86,10 +86,26 @@ function Invoke-FGRiskScoring {
 
     $classifiers = $null
 
-    if ($ClassifierRulesetPath -and (Test-Path $ClassifierRulesetPath)) {
+    if ($ClassifierRulesetPath) {
+        # Explicit path provided — it MUST exist
+        if (-not (Test-Path $ClassifierRulesetPath)) {
+            throw "Classifier ruleset not found: $ClassifierRulesetPath`nVerify the path and try again."
+        }
         Write-Host "  Loading classifiers: $ClassifierRulesetPath" -ForegroundColor Gray
         $classifiers = Get-Content -Path $ClassifierRulesetPath -Raw | ConvertFrom-Json
-    } else {
+    } elseif ($config -and $config.RiskScoring.ClassifierRulesetPath) {
+        # Path came from config file — warn but fall back
+        $configPath = $config.RiskScoring.ClassifierRulesetPath
+        if (-not (Test-Path $configPath)) {
+            Write-Host "  WARNING: Classifier path from config not found: $configPath" -ForegroundColor Yellow
+            Write-Host "           Falling back to universal classifiers." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Loading classifiers: $configPath (from config)" -ForegroundColor Gray
+            $classifiers = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+        }
+    }
+
+    if (-not $classifiers) {
         # Fall back to universal classifiers bundled with module
         $modulePath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $universalPath = Join-Path $modulePath "UI" "backend" "src" "risk" "classifiers" "universal.json"
@@ -157,84 +173,180 @@ function Invoke-FGRiskScoring {
             Write-Host "  Adding $($missingCols.Count) risk score column(s) to $tableName..." -ForegroundColor Gray
             Add-FGSQLTableColumn -TableName $tableName -Columns $missingCols
         } else {
-            Write-Host "  $tableName: risk score columns already exist" -ForegroundColor Gray
+            Write-Host "  $($tableName): risk score columns already exist" -ForegroundColor Gray
         }
+    }
+
+    # Add hierarchy-specific columns (GraphUsers only — managers/reports don't apply to groups)
+    $hierarchyColumns = @{
+        'riskHierarchyDirectReports' = 'INT'
+        'riskHierarchyTotalReports'  = 'INT'
+    }
+    $existingUserCols = @()
+    try {
+        $existingUserCols = @(Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo'"
+            $reader = $cmd.ExecuteReader()
+            $cols = @()
+            while ($reader.Read()) { $cols += $reader.GetString(0) }
+            $reader.Close()
+            return $cols
+        })
+    } catch { }
+
+    $missingHierarchy = @{}
+    foreach ($colName in $hierarchyColumns.Keys) {
+        if ($colName -notin $existingUserCols) {
+            $missingHierarchy[$colName] = $hierarchyColumns[$colName]
+        }
+    }
+    if ($missingHierarchy.Count -gt 0) {
+        Write-Host "  Adding $($missingHierarchy.Count) hierarchy column(s) to GraphUsers..." -ForegroundColor Gray
+        Add-FGSQLTableColumn -TableName 'GraphUsers' -Columns $missingHierarchy
     }
 
     # ================================================================
     # Load Data from SQL
     # ================================================================
+    # Direct connection avoids Invoke-FGSQLCommand's pipeline which
+    # unrolls DataTables into DataRow arrays, breaking .Rows iteration.
 
     Write-Host ""
     Write-Host "--- Loading Data from SQL ---" -ForegroundColor Cyan
 
-    $users = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
-        $cmd.CommandTimeout = 300
-        $cmd.CommandText = "SELECT id, displayName, userPrincipalName, department, jobTitle, companyName, accountEnabled, userType, mail, lastSignInDateTime, createdDateTime FROM dbo.GraphUsers"
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $dt = New-Object System.Data.DataTable
-        $adapter.Fill($dt) | Out-Null
-        return $dt
-    }
-    Write-Host "  Users:       $($users.Rows.Count)" -ForegroundColor Gray
+    $dataConnection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
+    $dataConnection.Open()
 
-    $groups = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
+    try {
+        # Discover all NVARCHAR columns on GraphUsers for dynamic pattern matching
+        $cmd = $dataConnection.CreateCommand()
+        $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND DATA_TYPE LIKE 'nvarchar%'"
+        $reader = $cmd.ExecuteReader()
+        $userTextColumns = @()
+        while ($reader.Read()) { $userTextColumns += $reader.GetString(0) }
+        $reader.Close()
+
+        Write-Host "  Text columns: $($userTextColumns.Count) discovered" -ForegroundColor Gray
+
+        # Build dynamic column list: core non-text columns + all text columns
+        $coreNonTextCols = @('id', 'managerId', 'accountEnabled', 'lastSignInDateTime', 'createdDateTime')
+        $allUserCols = @($coreNonTextCols) + @($userTextColumns) | Select-Object -Unique
+        $userSelectSql = ($allUserCols | ForEach-Object { "[$_]" }) -join ', '
+
+        $cmd = $dataConnection.CreateCommand()
+        $cmd.CommandTimeout = 300
+        $cmd.CommandText = "SELECT $userSelectSql FROM dbo.GraphUsers"
+        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+        $users = New-Object System.Data.DataTable
+        $adapter.Fill($users) | Out-Null
+        Write-Host "  Users:       $($users.Rows.Count) (with $($allUserCols.Count) columns)" -ForegroundColor Gray
+
+        $cmd = $dataConnection.CreateCommand()
         $cmd.CommandTimeout = 300
         $cmd.CommandText = "SELECT id, displayName, description, mailEnabled, securityEnabled, isAssignableToRole, membershipRuleProcessingState, groupTypeCalculated, createdDateTime FROM dbo.GraphGroups"
         $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $dt = New-Object System.Data.DataTable
-        $adapter.Fill($dt) | Out-Null
-        return $dt
-    }
-    Write-Host "  Groups:      $($groups.Rows.Count)" -ForegroundColor Gray
+        $groups = New-Object System.Data.DataTable
+        $adapter.Fill($groups) | Out-Null
+        Write-Host "  Groups:      $($groups.Rows.Count)" -ForegroundColor Gray
 
-    # Load memberships — try materialized table first, fall back to view
-    $permSource = "vw_UserPermissionAssignments"
-    try {
-        $matCheck = Invoke-FGSQLCommand -ScriptBlock {
-            param($connection)
-            $cmd = $connection.CreateCommand()
-            $cmd.CommandText = "SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U')"
-            return $cmd.ExecuteScalar()
-        }
-        if ($matCheck -ne [DBNull]::Value -and $null -ne $matCheck) {
+        # Determine source: materialized table or view
+        $permSource = "vw_UserPermissionAssignments"
+        $cmd = $dataConnection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U')"
+        $matCheck = $cmd.ExecuteScalar()
+        if ($null -ne $matCheck -and $matCheck -ne [DBNull]::Value) {
             $permSource = "mat_UserPermissionAssignments"
         }
-    } catch { }
 
-    $assignments = Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
-        $cmd = $connection.CreateCommand()
+        $cmd = $dataConnection.CreateCommand()
         $cmd.CommandTimeout = 600
-        $cmd.CommandText = "SELECT groupId, memberId, membershipType FROM dbo.$permSource"
+        $cmd.CommandText = "SELECT groupId, memberId, membershipType FROM dbo.$permSource WHERE groupId IS NOT NULL AND memberId IS NOT NULL"
         $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $dt = New-Object System.Data.DataTable
-        $adapter.Fill($dt) | Out-Null
-        return $dt
-    }
-    Write-Host "  Assignments: $($assignments.Rows.Count) (from $permSource)" -ForegroundColor Gray
+        $assignments = New-Object System.Data.DataTable
+        $adapter.Fill($assignments) | Out-Null
+        Write-Host "  Assignments: $($assignments.Rows.Count) (from $permSource)" -ForegroundColor Gray
 
-    # Load group owners
-    $owners = @()
-    try {
-        $owners = Invoke-FGSQLCommand -ScriptBlock {
-            param($connection)
-            $cmd = $connection.CreateCommand()
+        # Load group owners
+        $owners = New-Object System.Data.DataTable
+        try {
+            $cmd = $dataConnection.CreateCommand()
             $cmd.CommandTimeout = 300
             $cmd.CommandText = "SELECT groupId, ownerId FROM dbo.GraphGroupOwners"
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-            $dt = New-Object System.Data.DataTable
-            $adapter.Fill($dt) | Out-Null
-            return $dt
+            $adapter.Fill($owners) | Out-Null
+            Write-Host "  Owners:      $($owners.Rows.Count)" -ForegroundColor Gray
+        } catch {
+            Write-Host "  Owners:      (table not available)" -ForegroundColor Yellow
         }
-        Write-Host "  Owners:      $($owners.Rows.Count)" -ForegroundColor Gray
-    } catch {
-        Write-Host "  Owners:      (table not available)" -ForegroundColor Yellow
+    } finally {
+        if ($dataConnection.State -eq 'Open') { $dataConnection.Close() }
+        $dataConnection.Dispose()
     }
+
+    # ================================================================
+    # Helpers
+    # ================================================================
+
+    function Test-DBNull($value) { $null -eq $value -or $value -is [DBNull] }
+
+    # ================================================================
+    # Build Manager Hierarchy
+    # ================================================================
+
+    Write-Host ""
+    Write-Host "--- Building Manager Hierarchy ---" -ForegroundColor Cyan
+
+    $directReportsMap = @{}   # managerId -> @(userId, userId, ...)
+    $managerOfMap = @{}       # userId -> managerId
+
+    foreach ($row in $users.Rows) {
+        $uId = "$($row['id'])"
+        if ([string]::IsNullOrEmpty($uId)) { continue }
+        $mgrId = if ((Test-DBNull $row['managerId'])) { $null } else { "$($row['managerId'])" }
+        if (-not [string]::IsNullOrEmpty($mgrId)) {
+            $managerOfMap[$uId] = $mgrId
+            if (-not $directReportsMap.ContainsKey($mgrId)) { $directReportsMap[$mgrId] = @() }
+            $directReportsMap[$mgrId] += $uId
+        }
+    }
+
+    # Compute total reports (recursive subtree size) with memoization + cycle detection
+    $totalReportsMap = @{}
+
+    function Get-TotalReportsCount([string]$userId, [int]$depth = 0) {
+        if ($depth -gt 50) { return 0 }  # Max depth guard
+        if ($totalReportsMap.ContainsKey($userId) -and $totalReportsMap[$userId] -ge 0) {
+            return $totalReportsMap[$userId]
+        }
+        if (-not $directReportsMap.ContainsKey($userId)) {
+            $totalReportsMap[$userId] = 0
+            return 0
+        }
+        # Mark in-progress to detect cycles
+        $totalReportsMap[$userId] = -1
+
+        $total = 0
+        foreach ($reportId in $directReportsMap[$userId]) {
+            $total++
+            $sub = Get-TotalReportsCount $reportId ($depth + 1)
+            if ($sub -gt 0) { $total += $sub }
+        }
+
+        $totalReportsMap[$userId] = $total
+        return $total
+    }
+
+    # Pre-compute for all managers
+    foreach ($mgrId in @($directReportsMap.Keys)) {
+        $null = Get-TotalReportsCount $mgrId
+    }
+
+    $managersWithReports = $directReportsMap.Count
+    $usersWithManager = $managerOfMap.Count
+    Write-Host "  Users with manager:    $usersWithManager" -ForegroundColor Gray
+    Write-Host "  Managers with reports: $managersWithReports" -ForegroundColor Gray
 
     # ================================================================
     # Build Membership Index
@@ -252,9 +364,10 @@ function Invoke-FGRiskScoring {
     $userOwnershipMap = @{}
 
     foreach ($row in $assignments.Rows) {
-        $gId = $row.groupId.ToString()
-        $mId = $row.memberId.ToString()
-        $type = $row.membershipType.ToString()
+        if ((Test-DBNull $row['groupId']) -or (Test-DBNull $row['memberId'])) { continue }
+        $gId = "$($row['groupId'])"
+        $mId = "$($row['memberId'])"
+        $type = if ((Test-DBNull $row['membershipType'])) { 'Direct' } else { "$($row['membershipType'])" }
 
         if ($type -eq 'Owner') {
             if (-not $groupOwnerMap.ContainsKey($gId)) { $groupOwnerMap[$gId] = @() }
@@ -277,8 +390,9 @@ function Invoke-FGRiskScoring {
     # Also index from owners table
     if ($owners -is [System.Data.DataTable]) {
         foreach ($row in $owners.Rows) {
-            $gId = $row.groupId.ToString()
-            $oId = $row.ownerId.ToString()
+            if ((Test-DBNull $row['groupId']) -or (Test-DBNull $row['ownerId'])) { continue }
+            $gId = "$($row['groupId'])"
+            $oId = "$($row['ownerId'])"
             if (-not $groupOwnerMap.ContainsKey($gId)) { $groupOwnerMap[$gId] = @() }
             if ($oId -notin $groupOwnerMap[$gId]) { $groupOwnerMap[$gId] += $oId }
         }
@@ -310,13 +424,24 @@ function Invoke-FGRiskScoring {
     Write-Host ""
     Write-Host "--- Layer 1: Direct Classifier Match ---" -ForegroundColor Cyan
 
+    # Non-production environment patterns (OTAP: Ontwikkeling/Test/Acceptatie/Productie)
+    $nonProdPatterns = @(
+        '[-_](ACC|TST|DEV|ONT|STG|SBX|UAT|QA)(?:[-_\s]|$)',   # Multi-letter codes: _ACC, _TST, _DEV, etc.
+        '[-_][ATDO][-_]',                                       # Single OTAP letter between delimiters: _A_, _T_
+        '[-_][ATDO]$',                                          # Single OTAP letter at end: VPN_A, APP_T
+        '\b(acceptat|develop|ontwikkel|staging|sandbox|non.?prod|pre.?prod)'  # Keywords
+    )
+    $nonProdDiscount = 0.75  # 75% score reduction for non-production groups
+
     $groupScores = @{}
     $groupMatchCount = 0
+    $nonProdCount = 0
 
     foreach ($row in $groups.Rows) {
-        $gId = $row.id.ToString()
-        $name = if ($row.displayName -is [DBNull]) { "" } else { $row.displayName.ToString() }
-        $desc = if ($row.description -is [DBNull]) { "" } else { $row.description.ToString() }
+        $gId = "$($row['id'])"
+        if ([string]::IsNullOrEmpty($gId)) { continue }
+        $name = if ((Test-DBNull $row['displayName'])) { "" } else { "$($row['displayName'])" }
+        $desc = if ((Test-DBNull $row['description'])) { "" } else { "$($row['description'])" }
 
         $bestScore = 0
         $matches = @()
@@ -332,6 +457,30 @@ function Invoke-FGRiskScoring {
                 if ($descMatch) { $matchedOn += "description" }
                 $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') ($($c.rationale)) [+$($c.base_score)]"
                 if ([int]$c.base_score -gt $bestScore) { $bestScore = [int]$c.base_score }
+            }
+        }
+
+        # Non-production environment discount: reduce score for ACC/DEV/TST/etc. groups
+        if ($bestScore -gt 0) {
+            $isNonProd = $false
+            $nonProdMatchedOn = ""
+            foreach ($pattern in $nonProdPatterns) {
+                if (Test-PatternMatch -Text $name -Patterns @($pattern)) {
+                    $isNonProd = $true
+                    $nonProdMatchedOn = "name"
+                    break
+                }
+                if (Test-PatternMatch -Text $desc -Patterns @($pattern)) {
+                    $isNonProd = $true
+                    $nonProdMatchedOn = "description"
+                    break
+                }
+            }
+            if ($isNonProd) {
+                $originalScore = $bestScore
+                $bestScore = [Math]::Max(5, [Math]::Round($bestScore * (1 - $nonProdDiscount)))
+                $directReasons += "Non-production environment detected in $nonProdMatchedOn — score reduced from $originalScore to $bestScore [-$([int]($nonProdDiscount * 100))%]"
+                $nonProdCount++
             }
         }
 
@@ -353,15 +502,20 @@ function Invoke-FGRiskScoring {
         }
     }
     Write-Host "  Groups matched: $groupMatchCount / $($groups.Rows.Count)" -ForegroundColor Gray
+    if ($nonProdCount -gt 0) {
+        Write-Host "  Non-production discount applied: $nonProdCount groups (-$([int]($nonProdDiscount * 100))%)" -ForegroundColor Yellow
+    }
 
     $userScores = @{}
     $userMatchCount = 0
 
     foreach ($row in $users.Rows) {
-        $uId = $row.id.ToString()
-        $name = if ($row.displayName -is [DBNull]) { "" } else { $row.displayName.ToString() }
-        $title = if ($row.jobTitle -is [DBNull]) { "" } else { $row.jobTitle.ToString() }
-        $upn = if ($row.userPrincipalName -is [DBNull]) { "" } else { $row.userPrincipalName.ToString() }
+        $uId = "$($row['id'])"
+        if ([string]::IsNullOrEmpty($uId)) { continue }
+        $name = if ((Test-DBNull $row['displayName'])) { "" } else { "$($row['displayName'])" }
+        $title = if ((Test-DBNull $row['jobTitle'])) { "" } else { "$($row['jobTitle'])" }
+        $upn = if ((Test-DBNull $row['userPrincipalName'])) { "" } else { "$($row['userPrincipalName'])" }
+        $dept = if ((Test-DBNull $row['department'])) { "" } else { "$($row['department'])" }
 
         $bestScore = 0
         $matches = @()
@@ -369,12 +523,14 @@ function Invoke-FGRiskScoring {
 
         foreach ($c in $userClassifiers) {
             $titleMatch = Test-PatternMatch -Text $title -Patterns $c.title_patterns
+            $deptMatch = Test-PatternMatch -Text $dept -Patterns $c.title_patterns
             $nameMatch = Test-PatternMatch -Text $name -Patterns $c.name_patterns
             $upnMatch = Test-PatternMatch -Text $upn -Patterns $c.upn_patterns
-            if ($titleMatch -or $nameMatch -or $upnMatch) {
+            if ($titleMatch -or $deptMatch -or $nameMatch -or $upnMatch) {
                 $matches += @{ id = $c.id; category = $c.category; score = [int]$c.base_score; rationale = $c.rationale }
                 $matchedOn = @()
                 if ($titleMatch) { $matchedOn += "job title" }
+                if ($deptMatch) { $matchedOn += "department" }
                 if ($nameMatch) { $matchedOn += "display name" }
                 if ($upnMatch) { $matchedOn += "UPN" }
                 $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') ($($c.rationale)) [+$($c.base_score)]"
@@ -414,7 +570,7 @@ function Invoke-FGRiskScoring {
         $reasons = @()
         $members = if ($groupMembers.ContainsKey($gId)) { $groupMembers[$gId] } else { @() }
         $eligible = if ($groupEligible.ContainsKey($gId)) { $groupEligible[$gId] } else { @() }
-        $ownrs = if ($groupOwnerMap.ContainsKey($gId)) { $groupOwnerMap[$gId] } else { @() }
+        $owners = if ($groupOwnerMap.ContainsKey($gId)) { $groupOwnerMap[$gId] } else { @() }
 
         # Small group = concentrated risk
         if ($members.Count -gt 0 -and $members.Count -le 5) {
@@ -427,7 +583,7 @@ function Invoke-FGRiskScoring {
             $reasons += "$($eligible.Count) PIM-eligible member(s) — indicates privileged access [+10]"
         }
         # No owner but has members
-        if ($ownrs.Count -eq 0 -and $members.Count -gt 0) {
+        if ($owners.Count -eq 0 -and $members.Count -gt 0) {
             $score += 5
             $reasons += "No owner assigned while having $($members.Count) member(s) — ungoverned group [+5]"
         }
@@ -464,7 +620,7 @@ function Invoke-FGRiskScoring {
                 $highRiskCount++
                 # Resolve group name for explanation
                 $gRow = $groups.Select("id = '$gId'")
-                if ($gRow.Count -gt 0) { $highRiskNames += $gRow[0].displayName.ToString() }
+                if ($gRow.Count -gt 0) { $highRiskNames += "$($gRow[0]['displayName'])" }
             }
         }
         if ($highRiskCount -gt 0) {
@@ -486,6 +642,37 @@ function Invoke-FGRiskScoring {
             $reasons += "Owner of $($ownerships.Count) groups — high administrative responsibility [+5]"
         }
 
+        # Hierarchy: span of control (direct reports)
+        $directCount = if ($directReportsMap.ContainsKey($uId)) { $directReportsMap[$uId].Count } else { 0 }
+        if ($directCount -ge 5) {
+            $spanPoints = [Math]::Min(15, 3 + [Math]::Floor(($directCount - 5) / 3) * 3)
+            $score += $spanPoints
+            $reasons += "$directCount direct reports — wide span of control increases blast radius [+$spanPoints]"
+        }
+
+        # Hierarchy: total org size (recursive reports)
+        $totalCount = if ($totalReportsMap.ContainsKey($uId)) { $totalReportsMap[$uId] } else { 0 }
+        if ($totalCount -ge 10) {
+            $orgPoints = if ($totalCount -ge 100) { 15 } elseif ($totalCount -ge 50) { 12 } elseif ($totalCount -ge 25) { 10 } else { 5 }
+            $score += $orgPoints
+            $reasons += "$totalCount total reports in org subtree — executive pattern, high-value target [+$orgPoints]"
+        }
+
+        # Hierarchy: manager of high-risk direct reports
+        if ($directCount -gt 0) {
+            $highRiskReportCount = 0
+            foreach ($reportId in $directReportsMap[$uId]) {
+                if ($userScores.ContainsKey($reportId) -and $userScores[$reportId].directScore -gt 70) {
+                    $highRiskReportCount++
+                }
+            }
+            if ($highRiskReportCount -gt 0) {
+                $mgrRiskPoints = [Math]::Min(15, $highRiskReportCount * 5)
+                $score += $mgrRiskPoints
+                $reasons += "Manager of $highRiskReportCount high-risk direct report(s) — inherited risk from managing sensitive roles [+$mgrRiskPoints]"
+            }
+        }
+
         if ($reasons.Count -eq 0) { $reasons += "No membership-based risk signals detected" }
         $userScores[$uId].membershipScore = [Math]::Min($score, 40)
         $userScores[$uId].explanation.membership = @{ score = [Math]::Min($score, 40); reasons = $reasons }
@@ -501,30 +688,32 @@ function Invoke-FGRiskScoring {
     Write-Host "--- Layer 3: Structural Signals ---" -ForegroundColor Cyan
 
     foreach ($row in $groups.Rows) {
-        $gId = $row.id.ToString()
+        $gId = "$($row['id'])"
+        if ([string]::IsNullOrEmpty($gId)) { continue }
         $score = 0
         $reasons = @()
 
         # No description
-        if ($row.description -is [DBNull] -or [string]::IsNullOrWhiteSpace($row.description.ToString())) {
+        $descVal = "$($row['description'])"
+        if ([string]::IsNullOrWhiteSpace($descVal)) {
             $score += 3
             $reasons += "No description set — poor documentation hygiene [+3]"
         }
         # Mail-enabled security group
-        $mailEnabled = if ($row.mailEnabled -is [DBNull]) { $false } else { [bool]$row.mailEnabled }
-        $secEnabled = if ($row.securityEnabled -is [DBNull]) { $false } else { [bool]$row.securityEnabled }
+        $mailEnabled = if ((Test-DBNull $row['mailEnabled'])) { $false } else { [bool]$row['mailEnabled'] }
+        $secEnabled = if ((Test-DBNull $row['securityEnabled'])) { $false } else { [bool]$row['securityEnabled'] }
         if ($mailEnabled -and $secEnabled) {
             $score += 3
             $reasons += "Mail-enabled security group — dual-purpose increases attack surface [+3]"
         }
         # Role-assignable
-        $roleAssignable = if ($row.isAssignableToRole -is [DBNull]) { $false } else { [bool]$row.isAssignableToRole }
+        $roleAssignable = if ((Test-DBNull $row['isAssignableToRole'])) { $false } else { [bool]$row['isAssignableToRole'] }
         if ($roleAssignable) {
             $score += 15
             $reasons += "Role-assignable group — can be assigned Entra ID directory roles [+15]"
         }
         # Dynamic membership
-        $membershipRule = if ($row.membershipRuleProcessingState -is [DBNull]) { "" } else { $row.membershipRuleProcessingState.ToString() }
+        $membershipRule = if ((Test-DBNull $row['membershipRuleProcessingState'])) { "" } else { "$($row['membershipRuleProcessingState'])" }
         if ($membershipRule -eq 'On') {
             $score += 3
             $reasons += "Dynamic membership rule active — membership changes automatically [+3]"
@@ -536,20 +725,21 @@ function Invoke-FGRiskScoring {
     }
 
     foreach ($row in $users.Rows) {
-        $uId = $row.id.ToString()
+        $uId = "$($row['id'])"
+        if ([string]::IsNullOrEmpty($uId)) { continue }
         $score = 0
         $reasons = @()
 
         # Account disabled
-        $enabled = if ($row.accountEnabled -is [DBNull]) { $true } else { [bool]$row.accountEnabled }
+        $enabled = if ((Test-DBNull $row['accountEnabled'])) { $true } else { [bool]$row['accountEnabled'] }
         if (-not $enabled) {
             $score += 5
             $reasons += "Account is disabled but still has group memberships [+5]"
         }
 
         # Stale sign-in (90+ days)
-        if (-not ($row.lastSignInDateTime -is [DBNull])) {
-            $lastSignIn = [DateTime]$row.lastSignInDateTime
+        if ($null -ne $row['lastSignInDateTime'] -and $row['lastSignInDateTime'] -isnot [DBNull]) {
+            $lastSignIn = [DateTime]$row['lastSignInDateTime']
             $daysSince = ([DateTime]::UtcNow - $lastSignIn).Days
             if ($daysSince -gt 90) {
                 $score += 10
@@ -558,7 +748,7 @@ function Invoke-FGRiskScoring {
         }
 
         # Guest user
-        $userType = if ($row.userType -is [DBNull]) { "" } else { $row.userType.ToString() }
+        $userType = if ((Test-DBNull $row['userType'])) { "" } else { "$($row['userType'])" }
         if ($userType -eq 'Guest') {
             $score += 5
             $reasons += "External guest account — higher risk for data exfiltration [+5]"
@@ -610,7 +800,7 @@ function Invoke-FGRiskScoring {
         $propReasons = @()
         if ($propScore -gt 0 -and $maxGroupId) {
             $gRow = $groups.Select("id = '$maxGroupId'")
-            $gName = if ($gRow.Count -gt 0) { $gRow[0].displayName.ToString() } else { $maxGroupId }
+            $gName = if ($gRow.Count -gt 0) { "$($gRow[0]['displayName'])" } else { $maxGroupId }
             $propReasons += "Inherits 30% of riskiest group '$gName' (score $maxGroupScore) = $propScore [+$propScore]"
         }
         if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from group memberships" }
@@ -633,7 +823,7 @@ function Invoke-FGRiskScoring {
         $propReasons = @()
         if ($propScore -gt 0 -and $maxUserId) {
             $uRow = $users.Select("id = '$maxUserId'")
-            $uName = if ($uRow.Count -gt 0) { $uRow[0].displayName.ToString() } else { $maxUserId }
+            $uName = if ($uRow.Count -gt 0) { "$($uRow[0]['displayName'])" } else { $maxUserId }
             $propReasons += "Inherits 25% of riskiest member '$uName' (score $maxUserScore) = $propScore [+$propScore]"
         }
         if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from group members" }
@@ -709,6 +899,8 @@ function Invoke-FGRiskScoring {
             riskPropagatedScore = $us.propagatedScore
             riskClassifierMatches = $matchJson
             riskExplanation = $explainJson
+            riskHierarchyDirectReports = if ($directReportsMap.ContainsKey($uId)) { $directReportsMap[$uId].Count } else { 0 }
+            riskHierarchyTotalReports = if ($totalReportsMap.ContainsKey($uId)) { [Math]::Max(0, $totalReportsMap[$uId]) } else { 0 }
         }
     }
 
@@ -784,7 +976,9 @@ UPDATE dbo.GraphUsers SET
     riskPropagatedScore = @riskPropagatedScore,
     riskClassifierMatches = @riskClassifierMatches,
     riskExplanation = @riskExplanation,
-    riskScoredAt = @riskScoredAt
+    riskScoredAt = @riskScoredAt,
+    riskHierarchyDirectReports = @riskHierarchyDirectReports,
+    riskHierarchyTotalReports = @riskHierarchyTotalReports
 WHERE id = @id
 "@
                 $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
@@ -797,6 +991,8 @@ WHERE id = @id
                 $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
                 $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskHierarchyDirectReports", $item.riskHierarchyDirectReports) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskHierarchyTotalReports", $item.riskHierarchyTotalReports) | Out-Null
                 $cmd.ExecuteNonQuery() | Out-Null
             }
         }

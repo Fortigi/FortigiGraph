@@ -13,6 +13,7 @@ const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
 const AccessPackageDetailPage = lazy(() => import('./components/AccessPackageDetailPage'));
 const PerfPage = lazy(() => import('./components/PerfPage'));
 const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
+const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -81,6 +82,7 @@ const NAV_TABS = [
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
   { key: 'risk-scores',      label: 'Risk Scores' },
+  { key: 'org-chart',        label: 'Org Chart' },
   { key: 'performance',      label: 'Performance' },
 ];
 
@@ -201,7 +203,7 @@ export default function App() {
     if (page.startsWith('user:')) {
       const id = page.substring(5);
       const cacheKey = `user:${id}`;
-      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} />;
+      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
     }
     if (page.startsWith('group:')) {
       const id = page.substring(6);
@@ -307,6 +309,8 @@ export default function App() {
             <AccessPackagesPage onOpenDetail={openDetailTab} />
           ) : page === 'risk-scores' ? (
             <RiskScoringPage onOpenDetail={openDetailTab} />
+          ) : page === 'org-chart' ? (
+            <OrgChartPage onOpenDetail={openDetailTab} />
           ) : page === 'performance' ? (
             <PerfPage />
           ) : loading ? (
