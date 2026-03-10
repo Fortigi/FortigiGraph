@@ -1,5 +1,6 @@
 function Get-FGGroupTransitiveMemberAllToFile {
     [alias("Get-GroupTransitiveMemberAllToFile")]
+    [cmdletbinding()]
     Param
     (
         [Parameter(Mandatory = $true)]

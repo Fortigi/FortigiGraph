@@ -8,19 +8,19 @@ function Confirm-FGAccessPackageResource {
         [Parameter(Mandatory = $true)]
         $Group,
         [Parameter(Mandatory = $true)]
-        $CatalogeGroup
+        $CatalogGroup
     )
 
     $GroupDisplayName = $Group.displayName
     $AccessPackageName = $AccessPackage.displayName
 
-    $AccessPackageResourceRoles = Get-FGAccessPackagesResource -AccessPackageID $AccessPackage.id 
+    $AccessPackageResourceRoles = Get-FGAccessPackagesResource -AccessPackageID $AccessPackage.id
     If ($AccessPackageResourceRoles.accessPackageResourceRoleScopes.accessPackageResourceScope.originId -eq $Group.id) {
         Write-Host "Confirmed AccessPackageResource Group: $GroupDisplayName is linked to $AccessPackageName" -ForegroundColor Green
     }
     Else {
         Write-Host "Adding AccessPackageResource Group: $GroupDisplayName to Access Package: $AccessPackageName" -ForegroundColor Yellow
-        AddFGGroupToAccessPackage -AccessPackageID $AccessPackage.id -GroupId $Group.id -CatalogeGroupID $CatalogeGroup.id
+        Add-FGGroupToAccessPackage -AccessPackageID $AccessPackage.id -GroupId $Group.id -CatalogGroupId $CatalogGroup.id
     }
 
     $Result = Get-FGAccessPackagesResource -AccessPackageID $AccessPackage.id

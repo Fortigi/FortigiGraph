@@ -20,7 +20,7 @@ function Add-FGGroupToCatalog {
         }
     }
 
-    #It takes a little time before a group can be added to a cataloge.. so sleep..
+    #It takes a little time before a group can be added to a catalog.. so sleep..
     Start-sleep -s 45
     
     $URI = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageResourceRequests"

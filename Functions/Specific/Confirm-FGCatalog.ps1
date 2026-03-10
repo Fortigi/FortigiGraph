@@ -21,7 +21,7 @@ function Confirm-FGCatalog {
     }
     else {
         Write-Host "Adding catalog: $CatalogName" -ForegroundColor Yellow
-        New-FGCatalog -CatalogeName $CatalogName -Description $Description -IsExternallyVisible $IsExternallyVisible
+        New-FGCatalog -CatalogName $CatalogName -Description $Description -IsExternallyVisible $IsExternallyVisible
     }
 
     [array]$Catalogs = Get-FGCatalog
