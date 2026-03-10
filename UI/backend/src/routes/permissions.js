@@ -477,6 +477,8 @@ router.get('/sync-log', async (req, res) => {
       { type: 'AccessPackageAssignmentPolicies', table: 'GraphAccessPackageAssignmentPolicies', records: 71 },
       { type: 'AccessPackageAssignmentRequests', table: 'GraphAccessPackageAssignmentRequests', records: 2103 },
       { type: 'AccessPackageAccessReviews', table: 'GraphAccessPackageAccessReviews', records: 45 },
+      { type: 'MaterializedViews', table: 'mat_UserPermissionAssignments', records: 0 },
+      { type: 'RiskScoring', table: 'GraphUsers,GraphGroups', records: 1636 },
     ];
     const mockLogs = [];
     let id = 1;

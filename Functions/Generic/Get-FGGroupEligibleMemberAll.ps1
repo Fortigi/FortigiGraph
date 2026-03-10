@@ -1,6 +1,6 @@
 function Get-FGGroupEligibleMemberAll {
     [alias("Get-GroupEligibleMemberAll")]
-
+    [cmdletbinding()]
     # Query all groups and check each for PIM eligibility schedules
     # Note: isAssignableToRole and PIM-enabled are INDEPENDENT properties since January 2023
     # Any group (except dynamic/on-prem synced) can be PIM-enabled, not just role-assignable groups

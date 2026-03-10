@@ -10,7 +10,11 @@ function Get-FGGroup {
         [Alias("ObjectId")]
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
-        [string]$Id
+        [string]$Id,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 999)]
+        [int]$Top
     )
 
     If ($DisplayName) {
@@ -21,6 +25,15 @@ function Get-FGGroup {
     }
     Else {
         $URI = 'https://graph.microsoft.com/beta/groups'
+    }
+
+    If ($Top) {
+        if ($URI.Contains("?")) {
+            $URI = $URI + "&`$top=$Top"
+        }
+        else {
+            $URI = $URI + "?`$top=$Top"
+        }
     }
 
     $ReturnValue = Invoke-FGGetRequest -URi $URI

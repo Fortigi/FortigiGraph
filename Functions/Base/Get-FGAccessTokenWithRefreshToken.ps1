@@ -1,6 +1,6 @@
 function Get-FGAccessTokenWithRefreshToken {
     [alias("Get-AccessTokenWithRefreshToken")]
-    
+    [cmdletbinding()]
     Param(
         [Parameter(Mandatory = $true)]
         [System.String]$ClientId,       

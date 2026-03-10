@@ -7,10 +7,11 @@ $generic    = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\generic
 $specific   = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\specific') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $SQL        = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\SQL') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $sync       = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\Sync') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
-$automation = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\Automation') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$automation    = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\Automation') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
+$riskScoring   = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'functions\RiskScoring') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 
 # Dot source all function files
-foreach ($import in @($base + $generic + $specific + $SQL + $sync + $automation)) {
+foreach ($import in @($base + $generic + $specific + $SQL + $sync + $automation + $riskScoring)) {
     try {
         . $import.fullname
     }

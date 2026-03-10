@@ -1,5 +1,6 @@
 function Invoke-FGGetRequest {
     [alias("Invoke-GetRequest")]
+    [cmdletbinding()]
     Param
     (
         [Parameter(Mandatory = $true)]
@@ -94,7 +95,7 @@ function Invoke-FGGetRequest {
         $ReturnValue = $Result.value
     }
     else {
-        $ReturnValue += $Result
+        $ReturnValue = $Result
     }
 
     # Show progress if there are multiple pages (nextLink exists)

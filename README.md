@@ -90,6 +90,21 @@ This deploys a web application to Azure App Service that visualizes your synced 
 
 See the [Role Mining UI](#role-mining-ui) section below for full details on the UI features.
 
+### Step 7: Run Identity Risk Scoring (Optional)
+
+```powershell
+# Generate an organizational risk profile (LLM-assisted, uses public domain info only)
+New-FGRiskProfile -Domain "yourcompany.com" -LLMProvider Anthropic -LLMApiKey $apiKey -ConfigFile '.\Config\mycompany.json'
+
+# Generate industry-specific risk classifiers from the profile
+New-FGRiskClassifiers -ConfigFile '.\Config\mycompany.json'
+
+# Score all users and groups (batch process, reads synced data)
+Invoke-FGRiskScoring -ConfigFile '.\Config\mycompany.json'
+```
+
+This adds risk scores (0-100) and tier classifications (Critical/High/Medium/Low/Minimal/None) to all synced users and groups. Scores are visible in the UI's Risk Scoring page and Org Chart. See [Identity Risk Scoring](#identity-risk-scoring) for details.
+
 ### Verify Your Data
 
 ```powershell
@@ -144,7 +159,7 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 ### Pages
 
-The UI has five pages accessible via tab navigation:
+The UI has eight pages accessible via tab navigation:
 
 #### Matrix View (default)
 
@@ -203,6 +218,35 @@ Unlike tags (which allow multiple per entity), each access package can have only
 #### Sync Log
 
 View the last 50 sync operations from `GraphSyncLog`, showing timestamps, entity types, row counts, and durations.
+
+#### Risk Scoring
+
+Visualize identity risk scores across all users and groups (requires running `Invoke-FGRiskScoring` first).
+
+- **Score Visualization**: 0-100 risk score bars with tier badges (Critical/High/Medium/Low/Minimal/None)
+- **Per-Layer Breakdown**: Direct classifier match, membership analysis, structural hygiene, and cross-entity propagation scores
+- **Analyst Overrides**: Manually adjust risk scores (-50 to +50) with required justification
+- **Classifier Matches**: See exactly which risk patterns triggered for each entity
+- **Filtering**: Filter by tier, search by name, view overrides only
+
+#### Org Chart
+
+Manager hierarchy visualization with risk propagation.
+
+- **Tree Layout**: Hybrid layout — horizontal flowchart at root level, vertical indented tree for deeper levels
+- **Risk Coloring**: Department boxes color-coded by maximum risk tier in the subtree
+- **Report Counts**: Direct and indirect report counts per manager
+- **Department Drill-Down**: Click a department to open a detail page showing all members with risk scores
+- **Search**: Filter by department name
+
+#### Performance
+
+Opt-in backend performance monitoring (enable with `-PerformanceMetrics` on `New-FGUI` or `Update-FGUI`).
+
+- **Endpoint Summaries**: P50/P95/P99 response times per API route
+- **Recent & Slowest Requests**: Drill into individual requests with per-SQL-query breakdowns
+- **Server-Timing Headers**: Appear in browser DevTools for real-time performance visibility
+- **Export**: Download JSON for offline analysis
 
 ### Tagging System
 
@@ -551,11 +595,75 @@ FortigiGraph creates SQL views automatically for instant insights:
 - `vw_PendingRequestTimeline` - Aging pending requests
 - `vw_RequestResponseMetrics` - Aggregate approval statistics
 
+### Identity Risk Scoring
+- **LLM-Assisted Profiling**: `New-FGRiskProfile` discovers organizational context from public domain info (no sensitive data sent to LLM)
+- **Industry-Specific Classifiers**: `New-FGRiskClassifiers` generates regex-based detection patterns for group/user names
+- **4-Layer Scoring Engine**: Direct classifier match, membership analysis, structural hygiene, cross-entity propagation
+- **Batch Processing**: `Invoke-FGRiskScoring` scores all users and groups, writing results back to SQL
+- **Resource Clustering**: Automatically groups related resources into logical clusters with owner assignment
+- **Analyst Overrides**: Human-in-the-loop score adjustments with required justification
+
 ### Production Ready
 - **Azure Automation**: One-command setup with `New-FGAzureAutomationAccount`
 - **Config-Driven**: All settings in one JSON file
 - **Secure Credentials**: Encrypted credential storage using Windows DPAPI
 - **Comprehensive Logging**: Sync statistics logged to `GraphSyncLog` table
+
+---
+
+## Identity Risk Scoring
+
+FortigiGraph includes an identity risk scoring engine that assigns risk scores (0-100) to all synced users and groups. Scores are computed entirely on your own infrastructure — no sensitive identity data is sent to external services.
+
+### How It Works
+
+The scoring system has three phases:
+
+**Phase 1: Organizational Context** (one-time setup, LLM-assisted)
+```powershell
+# Discover organizational profile from public domain info
+New-FGRiskProfile -Domain "yourcompany.com" -LLMProvider Anthropic -LLMApiKey $key -ConfigFile '.\Config\mycompany.json'
+
+# Generate industry + organization-specific classifiers
+New-FGRiskClassifiers -ConfigFile '.\Config\mycompany.json'
+```
+
+**Phase 2: Batch Scoring** (run after each sync)
+```powershell
+# Score all users and groups using 4-layer analysis
+Invoke-FGRiskScoring -ConfigFile '.\Config\mycompany.json'
+```
+
+**Phase 3: Analysis** (via UI or SQL)
+- View scores in the Risk Scoring and Org Chart UI pages
+- Query risk data directly: `SELECT displayName, riskScore, riskTier FROM GraphUsers ORDER BY riskScore DESC`
+
+### Scoring Layers
+
+| Layer | Signal | Weight |
+|-------|--------|--------|
+| **1. Direct Match** | Regex classifiers against entity names/descriptions | Primary |
+| **2. Membership** | PIM eligible, high-risk group membership, outlier detection | Secondary |
+| **3. Structural** | Missing description, no owner, stale accounts, hygiene signals | Tertiary |
+| **4. Propagation** | Cross-entity risk: group→user (30%), user→group (25%) | Derived |
+
+### Risk Tiers
+
+| Tier | Score Range | Meaning |
+|------|-------------|---------|
+| Critical | 80-100 | Requires immediate attention |
+| High | 60-79 | Should be reviewed soon |
+| Medium | 40-59 | Monitor regularly |
+| Low | 20-39 | Low concern |
+| Minimal | 1-19 | Negligible risk |
+| None | 0 | No risk signals detected |
+
+### Data Privacy
+
+- **Phase 1 only** sends data to an LLM (Anthropic Claude or OpenAI) — and only public organizational context (domain, industry, known systems)
+- **No identity data** (user names, group memberships, emails) is ever sent to external services
+- All scoring happens locally against your SQL database
+- Supports both Anthropic and OpenAI as LLM providers
 
 ---
 
@@ -666,7 +774,6 @@ Sync-FGGroup
 
 # Memberships
 Sync-FGGroupMember              # Direct memberships
-Sync-FGGroupTransitiveMember    # Transitive (includes nested)
 Sync-FGGroupEligibleMember      # PIM eligible memberships
 Sync-FGGroupOwner               # Group owners
 
@@ -788,12 +895,13 @@ Works with HR provisioning (Workday, SuccessFactors), Azure AD Connect Cloud Syn
 ```
 FortigiGraph/
 ├── Functions/              # All PowerShell functions
-│   ├── Base/               # Authentication & HTTP operations (20 functions)
+│   ├── Base/               # Authentication & HTTP operations (21 functions)
 │   ├── Generic/            # Graph API wrappers (49 functions)
 │   ├── Specific/           # Business logic helpers (9 functions)
 │   ├── SQL/                # Azure SQL operations (24 functions)
-│   ├── Sync/               # Data synchronization (14 functions)
-│   └── Automation/         # Azure Automation management (4 functions)
+│   ├── Sync/               # Data synchronization (16 functions)
+│   ├── Automation/         # Azure Automation & UI management (8 functions)
+│   └── RiskScoring/        # Identity risk scoring engine (13 functions)
 ├── UI/                     # Role Mining Web Application
 │   ├── backend/            # Node.js + Express API server
 │   └── frontend/           # React + Vite + Tailwind
@@ -806,7 +914,7 @@ FortigiGraph/
 └── README.md
 ```
 
-**Total: 120 functions**
+**Total: 140 functions**
 
 ---
 

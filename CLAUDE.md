@@ -16,7 +16,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
-- **Current Version:** 2.1.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
+- **Current Version:** 2.2.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
 
 ## Major Features
 
@@ -55,7 +55,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Six pages — Matrix, Users, Groups, Access Packages, Sync Log, Performance — plus dynamic detail tabs
+- **Tab Navigation**: Eight pages — Matrix, Users, Groups, Access Packages, Sync Log, Risk Scoring, Org Chart, Performance — plus dynamic detail tabs
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E); multi-type cells show all badges side by side
@@ -72,6 +72,17 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Performance Monitoring**: Opt-in via `PERF_METRICS_ENABLED=true`. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance page shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
 - **Scaling**: `Set-FGUI -Scaling Tiny|Basic|Optimum|Fast` queries database row counts to determine environment size (Small/Medium/Large), then selects matched App Service + SQL tiers accordingly. Shows estimated monthly costs. `New-FGUI` presents an interactive scaling selection menu with cost estimates and a recommendation based on user count (unless `-Scaling` is explicitly provided). Tiny is the cheapest option for very small setups (< 500 users). Tiny is hidden from menus when it resolves to the same SKUs as Basic (e.g., Small environments); passing `-Scaling Tiny` in that case silently uses Basic.
 - **Deployment**: `New-FGUI` / `Update-FGUI` / `Set-FGUI` / `Remove-FGUI` PowerShell cmdlets
+
+### 7. Identity Risk Scoring
+- **LLM-Assisted Profiling**: `New-FGRiskProfile` discovers organizational context from public domain info (no sensitive identity data sent to LLM)
+- **Industry-Specific Classifiers**: `New-FGRiskClassifiers` generates regex-based detection patterns tuned to the organization
+- **4-Layer Scoring Engine**: `Invoke-FGRiskScoring` applies Direct match → Membership analysis → Structural hygiene → Cross-entity propagation
+- **Risk Tiers**: Critical (80-100), High (60-79), Medium (40-59), Low (20-39), Minimal (1-19), None (0)
+- **Resource Clustering**: `Save-FGResourceClusters` groups related resources by classifier or name-stem, with owner assignment
+- **Analyst Overrides**: Humans-in-the-loop score adjustments (-50 to +50) with required reasoning
+- **SQL Persistence**: All risk data stored in temporal tables for audit trail
+- **Data Privacy**: Only Phase 1 contacts LLM (public org context only); all identity scoring runs locally
+- **LLM Providers**: Supports Anthropic Claude (default: claude-sonnet-4-20250514) and OpenAI (default: gpt-4o)
 
 ## Repository Structure
 
@@ -96,7 +107,7 @@ FortigiGraph/
 │   │   ├── Add-FG*.ps1         # Add operations (members, resources)
 │   │   └── Remove-FG*.ps1      # Delete/remove operations
 │   │
-│   ├── Sync/                   # High-performance data sync operations (14)
+│   ├── Sync/                   # High-performance data sync operations (16)
 │   │   ├── Start-FGSync.ps1              # Orchestrates all sync operations
 │   │   ├── Sync-FGUser.ps1               # Sync users to SQL
 │   │   ├── Sync-FGGroup.ps1              # Sync groups to SQL
@@ -125,12 +136,30 @@ FortigiGraph/
 │   ├── Specific/               # Higher-level helper functions (9)
 │   │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation
 │   │
-│   └── Automation/             # Azure Automation & UI management (5)
-│       ├── New-FGAzureAutomationAccount.ps1
-│       ├── Get-FGAutomationRunbook.ps1
-│       ├── Start-FGAutomationRunbook.ps1
-│       ├── Get-FGAutomationJob.ps1
-│       └── Set-FGUI.ps1                 # Scale App Service + SQL together
+│   ├── Automation/             # Azure Automation & UI management (8)
+│   │   ├── New-FGAzureAutomationAccount.ps1
+│   │   ├── Get-FGAutomationRunbook.ps1
+│   │   ├── Start-FGAutomationRunbook.ps1
+│   │   ├── Get-FGAutomationJob.ps1
+│   │   ├── New-FGUI.ps1                 # Deploy Role Mining UI
+│   │   ├── Update-FGUI.ps1              # Redeploy UI code
+│   │   ├── Remove-FGUI.ps1              # Remove UI resources
+│   │   └── Set-FGUI.ps1                 # Scale App Service + SQL together
+│   │
+│   └── RiskScoring/            # Identity risk scoring engine (13)
+│       ├── New-FGRiskProfile.ps1         # LLM-assisted org context discovery
+│       ├── New-FGRiskClassifiers.ps1     # Generate risk detection classifiers
+│       ├── Invoke-FGRiskScoring.ps1      # 4-layer batch scoring engine
+│       ├── Save-FGResourceClusters.ps1   # Group related resources into clusters
+│       ├── Invoke-FGLLMRequest.ps1       # Shared LLM API helper (Anthropic/OpenAI)
+│       ├── Save-FGRiskProfile.ps1        # Persist profile to SQL
+│       ├── Save-FGRiskClassifiers.ps1    # Persist classifiers to SQL
+│       ├── Get-FGRiskProfile.ps1         # Read profile from SQL
+│       ├── Get-FGRiskClassifiers.ps1     # Read classifiers from SQL
+│       ├── Export-FGRiskProfile.ps1      # Export profile to JSON file
+│       ├── Export-FGRiskClassifiers.ps1  # Export classifiers to JSON file
+│       ├── Import-FGRiskProfile.ps1      # Import profile from JSON file
+│       └── Import-FGRiskClassifiers.ps1  # Import classifiers from JSON file
 │
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
@@ -141,7 +170,11 @@ FortigiGraph/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
 │   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
 │   │       ├── routes/details.js     # User/group detail endpoints with version history
-│   │       ├── routes/perf.js        # Performance metrics API (/api/perf, export, clear)
+│   │       ├── routes/riskScores.js  # Risk score reading + analyst override endpoints
+│   │       ├── routes/clusters.js   # Resource cluster management endpoints
+│   │       ├── routes/orgChart.js   # Manager hierarchy tree endpoints (cached 5 min)
+│   │       ├── routes/governance.js # Access review compliance monitoring
+│   │       ├── routes/perf.js       # Performance metrics API (/api/perf, export, clear)
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
 │   │       ├── middleware/perfMetrics.js  # Request timing + Server-Timing headers
 │   │       ├── perf/collector.js      # Ring buffer metrics collector with aggregation
@@ -164,6 +197,11 @@ FortigiGraph/
 │               ├── SyncLogPage.jsx    # Sync log viewer
 │               ├── UserDetailPage.jsx # User detail with attributes, memberships, history
 │               ├── GroupDetailPage.jsx # Group detail with attributes, members, history
+│               ├── RiskScoringPage.jsx # Risk score visualization with override controls
+│               ├── OrgChartPage.jsx  # Manager hierarchy tree with risk propagation
+│               ├── DepartmentDetailPage.jsx # Department risk profile deep dive
+│               ├── GovernancePage.jsx # AP review compliance dashboard (disabled)
+│               ├── RiskScoreSection.jsx # Shared risk score display component
 │               ├── PerfPage.jsx      # Performance metrics viewer (summary, recent, slowest, export)
 │               └── matrix/            # Matrix sub-components
 │                   ├── MatrixToolbar.jsx    # Filters, IST/SOLL, slider
@@ -189,11 +227,12 @@ FortigiGraph/
 |----------|-------|---------|
 | **Base** | 21 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
-| **Sync** | 15 | High-performance data sync (Start-FGSync + 12 entity syncs + 2 helpers) |
+| **Sync** | 16 | High-performance data sync (Start-FGSync + 13 entity syncs + 2 helpers) |
 | **SQL** | 24 | Azure SQL database operations (tables, views, indexes, bulk ops) |
-| **Automation** | 5 | Azure Automation Account & UI management |
+| **Automation** | 8 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
-| **Total** | **123 functions** | |
+| **RiskScoring** | 13 | LLM-assisted risk profiling, batch scoring, cluster analysis |
+| **Total** | **140 functions** | |
 
 ## Architecture & Design Patterns
 
@@ -380,6 +419,7 @@ function Get-FGSQLResource {
    - Azure SQL operation -> `Functions/SQL/`
    - Azure Automation operation -> `Functions/Automation/`
    - Data sync operation -> `Functions/Sync/`
+   - Risk scoring / LLM / clustering -> `Functions/RiskScoring/`
    - Combines multiple operations -> `Functions/Specific/`
    - Core HTTP/auth -> `Functions/Base/` (rarely needed)
 3. **Follow the pattern:** Look at similar existing functions
@@ -459,19 +499,29 @@ New-FGAzureAutomationAccount -ConfigFile '.\Config\mycompany.json'
 
 > **This section documents known technical debt, bugs, and improvement opportunities discovered during a comprehensive code review. Use this as a backlog for maintenance sprints.**
 
-### Critical Bugs (Must Fix)
+### ~~Critical Bugs (Must Fix)~~ RESOLVED (March 2026)
 
-| # | File | Line(s) | Issue |
-|---|------|---------|-------|
-| 1 | `Functions/Specific/Confirm-FGUser.ps1` | 17 | Checks `$Group.count` instead of `$User.count` — wrong variable |
-| 2 | `Functions/Specific/Confirm-FGAccessPackagePolicy.ps1` | 16 | Copy-paste bug: checks `$Policy.accessPackageId` instead of `$Policy.displayName` |
-| 3 | `Functions/Specific/Confirm-FGAccessPackage.ps1` | 37 | Uses undefined `$AccessPackageName` — parameter is `$DisplayName` |
-| 4 | `Functions/Generic/Get-FGAccessPackagesAssignments.ps1` | 16 | Uses undefined `$id` — parameter is `$AccessPackageID` |
-| 5 | `Functions/Generic/Remove-FGAccessPackage.ps1` | 25 | Singular/plural mismatch in loop variable (`$ActiveAccessPackageAssignments.id` vs `$ActiveAccessPackageAssignment.id`) |
-| 6 | `Functions/Generic/Get-FGUserMail.ps1` | 20 | Checks `$MailFolder` instead of `$MailFolderId` |
-| 7 | `Functions/Generic/Get-FGApplicationExtensionProperty.ps1` | 1-2 | Naming convention reversed: function is `Get-ApplicationExtensionProperty` with alias `Get-FGApplicationExtensionProperty` (should be opposite) |
-| ~~8~~ | ~~`Functions/Sync/Sync-FGGroupTransitiveMember.ps1`~~ | — | **RESOLVED:** Function removed (legacy, replaced by `vw_GraphGroupMembersRecursive` view) |
-| 9 | `Functions/Base/Use-FGExistingMSALToken.ps1` | 15 | Calls `Get-AccessTokenDetail` instead of `Get-FGAccessTokenDetail` |
+All critical bugs fixed in maintenance sprint:
+
+| # | File | Issue | Status |
+|---|------|-------|--------|
+| ~~1~~ | ~~`Confirm-FGUser.ps1`~~ | ~~`$Group.count` → `$User.count`~~ | **RESOLVED** |
+| ~~2~~ | ~~`Confirm-FGAccessPackagePolicy.ps1`~~ | ~~Copy-paste: checked `accessPackageId` instead of `displayName`~~ | **RESOLVED** |
+| ~~3~~ | ~~`Confirm-FGAccessPackage.ps1`~~ | ~~Undefined `$AccessPackageName` → `$DisplayName`~~ | **RESOLVED** |
+| ~~4~~ | ~~`Get-FGAccessPackagesAssignments.ps1`~~ | ~~Undefined `$id` → `$AccessPackageID`~~ | **RESOLVED** |
+| ~~5~~ | ~~`Remove-FGAccessPackage.ps1`~~ | ~~Plural/singular mismatch in loop~~ | **RESOLVED** |
+| ~~6~~ | ~~`Get-FGUserMail.ps1`~~ | ~~Checked `$MailFolder` instead of `$MailFolderId`~~ | **RESOLVED** |
+| ~~7~~ | ~~`Get-FGApplicationExtensionProperty.ps1`~~ | ~~Naming convention reversed~~ | **RESOLVED** |
+| ~~8~~ | ~~`Sync-FGGroupTransitiveMember.ps1`~~ | ~~Function removed (replaced by SQL view)~~ | **RESOLVED** |
+| ~~9~~ | ~~`Use-FGExistingMSALToken.ps1`~~ | ~~Called `Get-AccessTokenDetail` instead of `Get-FGAccessTokenDetail`~~ | **RESOLVED** |
+
+Also fixed in same sprint:
+- ~~`Invoke-FGPutRequest.ps1` debug output said "PatchRequest"~~ → **RESOLVED**
+- ~~`Invoke-FGPutRequest.ps1` used `$ReturnValue += $Result` on undefined~~ → **RESOLVED** (now uses `= $Result`)
+- ~~"cataloge" typo in 3 Confirm-FG* functions~~ → **RESOLVED** (fixed to "catalog")
+- ~~"More then one" in 8 Confirm-FG* functions~~ → **RESOLVED** (fixed to "More than one")
+- ~~Dutch comment in `Confirm-FGGroup.ps1`~~ → **RESOLVED** (translated to English)
+- ~~SQL injection in `riskScores.js` hasRiskColumns()~~ → **RESOLVED** (parameterized + whitelist)
 
 ### ~~High-Priority Refactoring: DRY Violations in Base HTTP Functions~~ RESOLVED
 
@@ -551,11 +601,7 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 
 ### Medium-Priority: Specific/Automation Cleanup
 
-**Typos** (appear throughout `Functions/Specific/`):
-- "cataloge" → "catalog" (in `Confirm-FGAccessPackage`, `Confirm-FGCatalog`, `Confirm-FGGroupInCatalog`)
-- "More then one" → "More than one" (in 6+ Confirm-FG* functions)
-
-**Dutch comment** in `Confirm-FGGroup.ps1` line 57 — violates English-only rule.
+~~**Typos**~~ → **RESOLVED** (March 2026): "cataloge" → "catalog", "More then one" → "More than one", Dutch comment translated.
 
 **Duplicate `Invoke-AzureRestApi` / `Invoke-GraphApi`** helpers defined inline in both `New-FGUI.ps1` and `Remove-FGUI.ps1`. Extract to shared helper in `Functions/Base/`.
 
@@ -620,7 +666,7 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 
 **Frontend API calls:** Several places silently swallow errors (`catch { /* ignore */ }` in UsersPage line 81, GroupsPage line 79). Should at minimum log to console.
 
-**`$ReturnValue += $Result`** in multiple Base HTTP functions uses `+=` on null, creating unexpected array types. Initialize `$ReturnValue = @()` or use explicit assignment.
+~~**`$ReturnValue += $Result`** in Base HTTP functions~~ → **RESOLVED** (March 2026): Changed to `$ReturnValue = $Result` in `Invoke-FGPutRequest`, `Invoke-FGPatchRequest`, `Invoke-FGPostRequest`, `Invoke-FGDeleteRequest`, and `Invoke-FGGetRequest` (first-assignment only; pagination `+=` in GetRequest is intentional).
 
 ### Minor Improvements
 
@@ -629,5 +675,5 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 - **Config property navigation:** Duplicated across `Get-FGSecureConfigValue`, `Clear-FGSecureConfigValue`, `Test-FGSecureConfigValue` — extract helper
 - **SecureString conversion:** 4 duplicates in `Get-FGSecureConfigValue.ps1` — extract `ConvertFrom-SecureStringToPlainText`
 - **Parameter naming inconsistency** in Generic functions: `$id` vs `$Id`, `$DisplayName` vs `$displayName`, `$ObjectId` vs `$objectId`. Standardize to PascalCase
-- **Invoke-FGPutRequest.ps1** debug output says "PatchRequest" instead of "PutRequest" (copy-paste error)
+- ~~**Invoke-FGPutRequest.ps1** debug output says "PatchRequest" instead of "PutRequest"~~ → **RESOLVED**
 - **Device code timeout** hardcoded to 300s in `Get-FGAccessTokenInteractive.ps1` — make parameter with default

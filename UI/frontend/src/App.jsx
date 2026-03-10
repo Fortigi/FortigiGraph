@@ -13,12 +13,15 @@ const UserDetailPage = lazy(() => import('./components/UserDetailPage'));
 const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
 const AccessPackageDetailPage = lazy(() => import('./components/AccessPackageDetailPage'));
 const PerfPage = lazy(() => import('./components/PerfPage'));
+const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
+const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
+const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
 
 function parseHash() {
-  const raw = window.location.hash.replace('#', '') || 'matrix';
+  const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'matrix');
   const qIndex = raw.indexOf('?');
   const page = qIndex >= 0 ? raw.substring(0, qIndex) : raw;
   const params = new URLSearchParams(qIndex >= 0 ? raw.substring(qIndex + 1) : '');
@@ -60,7 +63,7 @@ export function buildMatrixUrl(state) {
 
 function useHashRoute() {
   const getPage = () => {
-    const raw = window.location.hash.replace('#', '') || 'matrix';
+    const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'matrix');
     const qIndex = raw.indexOf('?');
     return qIndex >= 0 ? raw.substring(0, qIndex) : raw;
   };
@@ -80,6 +83,8 @@ const NAV_TABS = [
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
+  { key: 'risk-scores',      label: 'Risk Scores' },
+  { key: 'org-chart',        label: 'Org Chart' },
   { key: 'performance',      label: 'Performance' },
 ];
 
@@ -106,7 +111,7 @@ export default function App() {
   const [detailTabs, setDetailTabs] = useState(() => {
     // Restore detail tab from URL on load (e.g., bookmarked #user:abc)
     const { page: initPage } = parseHash();
-    if (initPage.startsWith('user:') || initPage.startsWith('group:') || initPage.startsWith('access-package:')) {
+    if (initPage.startsWith('user:') || initPage.startsWith('group:') || initPage.startsWith('access-package:') || initPage.startsWith('department:')) {
       const sepIdx = initPage.indexOf(':');
       const type = initPage.substring(0, sepIdx);
       const id = initPage.substring(sepIdx + 1);
@@ -137,12 +142,12 @@ export default function App() {
     const tabKey = `${type}:${id}`;
     setDetailTabs(prev => prev.filter(t => `${t.type}:${t.id}` !== tabKey));
     delete detailCacheRef.current[tabKey];
-    navigate('matrix');
+    navigate(type === 'department' ? 'org-chart' : 'matrix');
   }, [navigate]);
 
   // When navigating to a detail tab via URL that isn't tracked yet, add it
   useEffect(() => {
-    if (page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:')) {
+    if (page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:') || page.startsWith('department:')) {
       const sepIdx = page.indexOf(':');
       const type = page.substring(0, sepIdx);
       const id = page.substring(sepIdx + 1);
@@ -179,7 +184,7 @@ export default function App() {
   }), [userLimit, activeFilters, managedFilter, filterText]);
 
   // Check if current page is a detail tab
-  const isDetailPage = page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:');
+  const isDetailPage = page.startsWith('user:') || page.startsWith('group:') || page.startsWith('access-package:') || page.startsWith('department:');
 
   if (error) {
     return (
@@ -200,7 +205,7 @@ export default function App() {
     if (page.startsWith('user:')) {
       const id = page.substring(5);
       const cacheKey = `user:${id}`;
-      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} />;
+      return <UserDetailPage userId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('user', id)} onOpenDetail={openDetailTab} />;
     }
     if (page.startsWith('group:')) {
       const id = page.substring(6);
@@ -211,6 +216,11 @@ export default function App() {
       const id = page.substring(15);
       const cacheKey = `access-package:${id}`;
       return <AccessPackageDetailPage accessPackageId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('access-package', id)} />;
+    }
+    if (page.startsWith('department:')) {
+      const name = page.substring(11);
+      const cacheKey = `department:${name}`;
+      return <DepartmentDetailPage departmentName={name} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('department', name)} onOpenDetail={openDetailTab} />;
     }
     return null;
   };
@@ -263,8 +273,8 @@ export default function App() {
           {detailTabs.map(tab => {
             const tabKey = `${tab.type}:${tab.id}`;
             const isActive = page === tabKey;
-            const icon = tab.type === 'user' ? 'U' : tab.type === 'group' ? 'G' : 'AP';
-            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : tab.type === 'group' ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700';
+            const icon = tab.type === 'user' ? 'U' : tab.type === 'group' ? 'G' : tab.type === 'department' ? 'D' : 'AP';
+            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : tab.type === 'group' ? 'bg-purple-100 text-purple-700' : tab.type === 'department' ? 'bg-green-100 text-green-700' : 'bg-indigo-100 text-indigo-700';
             return (
               <button
                 key={tabKey}
@@ -305,6 +315,10 @@ export default function App() {
             <GroupsPage onOpenDetail={openDetailTab} />
           ) : page === 'access-packages' ? (
             <AccessPackagesPage onOpenDetail={openDetailTab} />
+          ) : page === 'risk-scores' ? (
+            <RiskScoringPage onOpenDetail={openDetailTab} />
+          ) : page === 'org-chart' ? (
+            <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
           ) : page === 'performance' ? (
             <PerfPage />
           ) : loading ? (

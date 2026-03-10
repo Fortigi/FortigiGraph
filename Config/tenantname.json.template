@@ -119,6 +119,19 @@
     },
     "ParallelExecution": true
   },
+  "_RISKSCORING_NOTE": "RiskScoring section configures the identity risk scoring engine (New-FGRiskProfile / New-FGRiskClassifiers). Profiles and classifiers are stored in SQL by default. Use Export-FGRiskProfile / Export-FGRiskClassifiers to export to file for sharing.",
+  "RiskScoring": {
+    "LLMProvider": "Anthropic",
+    "LLMModel": "",
+    "LLMApiKey": "",
+    "_LLMApiKey_NOTE": "Set LLMApiKey here or use LLMApiKey_Encrypted for DPAPI encryption, or set ANTHROPIC_API_KEY / OPENAI_API_KEY env var",
+    "CustomerDomain": "yourtenant.onmicrosoft.com",
+    "Schedule": {
+      "Enabled": true,
+      "Time": "10:30",
+      "Frequency": "Daily"
+    }
+  },
   "_UI_NOTE": "UI section is created automatically by New-FGUI",
   "UI": {
     "WebAppName": "ui-12345",

@@ -13,6 +13,9 @@ import categoriesRouter from './routes/categories.js';
 import detailsRouter from './routes/details.js';
 // import governanceRouter from './routes/governance.js'; // temporarily disabled
 import perfRouter from './routes/perf.js';
+import riskRouter from './routes/riskScores.js';
+import orgChartRouter from './routes/orgChart.js';
+import clusterRouter from './routes/clusters.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -108,6 +111,9 @@ app.use('/api', authMiddleware, permissionsRouter);
 app.use('/api', authMiddleware, tagsRouter);
 app.use('/api', authMiddleware, categoriesRouter);
 app.use('/api', authMiddleware, detailsRouter);
+app.use('/api', authMiddleware, riskRouter);
+app.use('/api', authMiddleware, orgChartRouter);
+app.use('/api', authMiddleware, clusterRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // In production, serve the frontend build output

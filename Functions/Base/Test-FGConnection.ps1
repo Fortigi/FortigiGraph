@@ -1,5 +1,6 @@
 function Test-FGConnection {
-    
+    [cmdletbinding()]
+    Param()
     If (!($Global:AccessToken)) {
         return $false
     }

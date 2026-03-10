@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import RiskScoreSection, { RISK_FIELDS } from './RiskScoreSection';
 
 const HEADER_FIELDS = ['userPrincipalName', 'department', 'jobTitle', 'companyName'];
-const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
+const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, ...RISK_FIELDS, 'ValidFrom', 'ValidTo']);
 
 function formatDate(val) {
   if (!val) return '';
@@ -42,7 +43,15 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
-export default function UserDetailPage({ userId, cachedData, onCacheData, onClose }) {
+const TIER_COLORS = {
+  Critical: 'bg-red-100 text-red-800',
+  High: 'bg-orange-100 text-orange-800',
+  Medium: 'bg-yellow-100 text-yellow-800',
+  Low: 'bg-blue-100 text-blue-800',
+  Minimal: 'bg-gray-100 text-gray-600',
+};
+
+export default function UserDetailPage({ userId, cachedData, onCacheData, onClose, onOpenDetail }) {
   const { authFetch } = useAuth();
 
   // Core data (fast — attributes, tags, counts)
@@ -54,6 +63,13 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Manager and direct reports
+  const [manager, setManager] = useState(null);
+  const [managerLoaded, setManagerLoaded] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [reports, setReports] = useState(null);
+  const [reportsLoading, setReportsLoading] = useState(false);
 
   // Fetch core data (attributes + tags + counts)
   useEffect(() => {
@@ -73,6 +89,35 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [userId, authFetch, cachedData?.core, onCacheData]);
+
+  // Fetch manager (lightweight — one record)
+  useEffect(() => {
+    let cancelled = false;
+    authFetch(`/api/org-chart/user/${encodeURIComponent(userId)}/manager`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d?.manager) setManager(d.manager); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setManagerLoaded(true); });
+    return () => { cancelled = true; };
+  }, [userId, authFetch]);
+
+  // Lazy-load direct reports
+  const loadReports = useCallback(() => {
+    if (reports) return;
+    setReportsLoading(true);
+    authFetch(`/api/org-chart/user/${encodeURIComponent(userId)}/reports`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setReports(d?.reports || []))
+      .catch(() => setReports([]))
+      .finally(() => setReportsLoading(false));
+  }, [userId, authFetch, reports]);
+
+  const toggleReports = useCallback(() => {
+    setReportsOpen(prev => {
+      if (!prev) loadReports();
+      return !prev;
+    });
+  }, [loadReports]);
 
   // Lazy-load history
   const loadHistory = useCallback(() => {
@@ -162,6 +207,83 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
           </svg>
         </button>
       </div>
+
+      {/* Risk Assessment */}
+      <RiskScoreSection attributes={attributes} entityType="user" entityId={userId} authFetch={authFetch} />
+
+      {/* Manager */}
+      {managerLoaded && manager && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 mt-4 mb-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Manager</h3>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shrink-0">
+              {(manager.displayName || '?')[0]}
+            </div>
+            <div className="min-w-0 flex-1">
+              <button
+                onClick={() => onOpenDetail?.('user', manager.id, manager.displayName)}
+                className="text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline text-left"
+              >
+                {manager.displayName}
+              </button>
+              <div className="text-xs text-gray-400">
+                {[manager.jobTitle, manager.department].filter(Boolean).join(' \u2022 ') || '\u2014'}
+              </div>
+            </div>
+            {manager.riskTier && manager.riskTier !== 'None' && manager.riskTier !== 'Minimal' && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIER_COLORS[manager.riskTier] || ''}`}>
+                {manager.riskTier}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Direct Reports */}
+      {managerLoaded && (
+        <div className="mb-4">
+          <CollapsibleSection
+            title="Direct Reports"
+            count={attributes.riskHierarchyDirectReports || null}
+            open={reportsOpen}
+            onToggle={toggleReports}
+            loading={reportsLoading}
+          >
+            {reports && reports.length === 0 ? (
+              <p className="text-sm text-gray-400 italic p-4">No direct reports</p>
+            ) : reports ? (
+              <div className="divide-y divide-gray-50">
+                {reports.map(r => (
+                  <div key={r.id} className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50">
+                    <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
+                      {(r.displayName || '?')[0]}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <button
+                        onClick={() => onOpenDetail?.('user', r.id, r.displayName)}
+                        className="text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline text-left"
+                      >
+                        {r.displayName}
+                      </button>
+                      <div className="text-xs text-gray-400">
+                        {[r.jobTitle, r.department].filter(Boolean).join(' \u2022 ') || '\u2014'}
+                      </div>
+                    </div>
+                    {r.riskTier && r.riskTier !== 'None' && r.riskTier !== 'Minimal' && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIER_COLORS[r.riskTier] || ''}`}>
+                        {r.riskTier}
+                      </span>
+                    )}
+                    {r.riskScore != null && (
+                      <span className="text-xs font-mono text-gray-400 w-6 text-right">{r.riskScore}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </CollapsibleSection>
+        </div>
+      )}
 
       {/* Attributes - single column table */}
       <Section title="Attributes" count={otherAttributes.length}>

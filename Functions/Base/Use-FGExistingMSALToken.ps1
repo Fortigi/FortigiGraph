@@ -1,5 +1,6 @@
 function Use-FGExistingMSALToken {
     [alias("Use-ExistingMSALToken")]
+    [cmdletbinding()]
     Param(
         [Parameter(Mandatory = $True)]
         $Token            

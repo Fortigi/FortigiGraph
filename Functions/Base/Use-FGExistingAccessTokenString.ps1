@@ -1,5 +1,6 @@
 function Use-FGExistingAccessTokenString {
     [alias("Use-ExistingAccessTokenString")]
+    [cmdletbinding()]
     Param(
         [Parameter(Mandatory = $True)]
         $AccessTokenString            

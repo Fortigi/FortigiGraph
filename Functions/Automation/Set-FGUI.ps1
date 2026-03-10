@@ -68,11 +68,11 @@ function Set-FGUI {
     # Costs based on West Europe / North Europe pricing (Feb 2026)
     $skuInfo = @{
         # SQL Database SKUs (DTU model)
-        'Basic' = @{ DTU = 5;   SqlCost = 4.99;   SqlLabel = 'Basic (5 DTU)' }
-        'S0'    = @{ DTU = 10;  SqlCost = 15.03;  SqlLabel = 'S0 (10 DTU)' }
-        'S1'    = @{ DTU = 20;  SqlCost = 30.05;  SqlLabel = 'S1 (20 DTU)' }
-        'S2'    = @{ DTU = 50;  SqlCost = 75.05;  SqlLabel = 'S2 (50 DTU)' }
-        'S3'    = @{ DTU = 100; SqlCost = 150.17; SqlLabel = 'S3 (100 DTU)' }
+        'Basic' = @{ DTU = 5;   SqlCost = 4.99;   SqlLabel = 'Basic (5 DTU)';  MaxSizeGB = 2 }
+        'S0'    = @{ DTU = 10;  SqlCost = 15.03;  SqlLabel = 'S0 (10 DTU)';   MaxSizeGB = 250 }
+        'S1'    = @{ DTU = 20;  SqlCost = 30.05;  SqlLabel = 'S1 (20 DTU)';   MaxSizeGB = 250 }
+        'S2'    = @{ DTU = 50;  SqlCost = 75.05;  SqlLabel = 'S2 (50 DTU)';   MaxSizeGB = 250 }
+        'S3'    = @{ DTU = 100; SqlCost = 150.17; SqlLabel = 'S3 (100 DTU)';  MaxSizeGB = 250 }
         # App Service SKUs (Linux)
         'B1'    = @{ AppCost = 13.14; AppLabel = 'B1 (1 core, 1.75 GB)';  AppTier = 'Basic' }
         'B2'    = @{ AppCost = 26.28; AppLabel = 'B2 (2 cores, 3.5 GB)';  AppTier = 'Basic' }
@@ -384,13 +384,15 @@ function Set-FGUI {
         Write-Host "  This may take a few minutes (Azure performs an online migration)..." -ForegroundColor Gray
 
         try {
+            $maxSizeBytes = [int64]($skuInfo[$targetSqlSku].MaxSizeGB) * 1073741824
             Set-AzSqlDatabase -ResourceGroupName $resourceGroupName `
                 -ServerName $sqlServerShort `
                 -DatabaseName $databaseName `
                 -RequestedServiceObjectiveName $targetSqlSku `
+                -MaxSizeBytes $maxSizeBytes `
                 -ErrorAction Stop | Out-Null
 
-            Write-Host "  SQL Database scaled to $($sqlInfo.SqlLabel)" -ForegroundColor Green
+            Write-Host "  SQL Database scaled to $($sqlInfo.SqlLabel) (max size: $($skuInfo[$targetSqlSku].MaxSizeGB) GB)" -ForegroundColor Green
         } catch {
             Write-Host "  Failed to scale SQL Database: $_" -ForegroundColor Red
             Write-Host "  You can scale manually:" -ForegroundColor Yellow

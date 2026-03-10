@@ -1,5 +1,6 @@
 function Confirm-FGAccessTokenValidity {
     [alias("Confirm-AccessTokenValidity")]
+    [cmdletbinding()]
     Param()
     
     If (!($Global:AccessToken)) {

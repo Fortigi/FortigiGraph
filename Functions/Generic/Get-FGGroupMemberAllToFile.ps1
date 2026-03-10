@@ -1,5 +1,6 @@
 function Get-FGGroupMemberAllToFile {
     [alias("Get-GroupMemberAllToFile")]
+    [cmdletbinding()]
     Param
     (
         [Parameter(Mandatory = $true)]

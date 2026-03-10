@@ -9,7 +9,7 @@ function Confirm-FGUser {
         [string]$userPrincipalName
     )
 
-    #Check if group exists only once
+    #Check if user exists only once
     [array]$User = Get-FGUser -UserPrincipalName $userPrincipalName
     if ($User.count -eq 1) {
         Write-Host "Confirmed User exists: $userPrincipalName" -ForegroundColor Green
