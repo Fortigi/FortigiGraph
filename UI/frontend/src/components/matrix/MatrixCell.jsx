@@ -1,11 +1,5 @@
 import { memo } from 'react';
-
-const TYPE_INDICATORS = {
-  Direct:   { letter: 'D', bg: '#166534', text: '#fff' },
-  Indirect: { letter: 'I', bg: '#1e40af', text: '#fff' },
-  Eligible: { letter: 'E', bg: '#854d0e', text: '#fff' },
-  Owner:    { letter: 'O', bg: '#9d174d', text: '#fff' },
-};
+import { TYPE_COLORS } from '../../utils/colors';
 
 function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames, provisioningGap }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
@@ -28,11 +22,11 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       title = types;
     }
     if (provisioningGap) {
-      title += '\n\u26a0 Provisioning gap: AP should grant Direct membership but user is not a direct member';
+      title += '\n\u26a0 Provisioning gap: user lacks the membership type specified by the access package';
     }
   } else if (provisioningGap) {
     // AP manages this cell but user has no membership at all
-    title = `\u26a0 Provisioning gap: AP should grant Direct membership but user has no membership`;
+    title = `\u26a0 Provisioning gap: user has no membership but access package expects one`;
     if (apNames && apNames.length > 0) {
       title += `\nManaged by: ${apNames.join(', ')}`;
     }
@@ -57,7 +51,7 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       {hasMembership && (
         <>
           {[...membershipTypes].map(type => {
-            const ind = TYPE_INDICATORS[type];
+            const ind = TYPE_COLORS[type];
             return ind ? (
               <span
                 key={type}

@@ -2,11 +2,7 @@ import { useMemo } from 'react';
 import { useAuth } from '../auth/AuthGate';
 import useEntityPage from '../hooks/useEntityPage';
 import FilterBar from './FilterBar';
-
-const TAG_COLORS = [
-  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
-];
+import { TAG_COLORS } from '../utils/colors';
 
 const FIELD_LABELS = {
   department: 'Department',

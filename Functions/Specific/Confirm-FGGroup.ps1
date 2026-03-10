@@ -54,7 +54,7 @@ function Confirm-FGGroup {
         New-FGGroup @Group
 
         #Get Group with all attributes.. including the object ID.
-        # Group creation may take a moment. Try fetching immediately; if not found, retry after 5 seconds up to 6 times.
+        # Group creation may take a moment. Try immediately, retry after 5 seconds up to 6 times.
         $GroupIsCreated = $False
         $Count = 0
 

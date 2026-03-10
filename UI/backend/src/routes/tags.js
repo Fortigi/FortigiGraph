@@ -84,7 +84,7 @@ router.get('/tags', async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error('GET /tags failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -114,7 +114,7 @@ router.post('/tags', async (req, res) => {
       return res.status(409).json({ error: 'A tag with this name already exists for this entity type' });
     }
     console.error('POST /tags failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -137,7 +137,7 @@ router.patch('/tags/:id', async (req, res) => {
     res.json(result.recordset[0] || null);
   } catch (err) {
     console.error('PATCH /tags failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -153,7 +153,7 @@ router.delete('/tags/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /tags failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -186,7 +186,7 @@ router.post('/tags/:id/assign', async (req, res) => {
     res.json({ ok: true, inserted: result.recordset[0]?.inserted || 0 });
   } catch (err) {
     console.error('POST /tags/:id/assign failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -216,7 +216,7 @@ router.post('/tags/:id/unassign', async (req, res) => {
     res.json({ ok: true, deleted: result.recordset[0]?.deleted || 0 });
   } catch (err) {
     console.error('POST /tags/:id/unassign failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -225,7 +225,7 @@ router.post('/tags/:id/unassign', async (req, res) => {
 router.post('/tags/:id/assign-by-filter', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
-    const { entityType, search, filters } = req.body;
+    const { entityType, search: rawSearch, filters } = req.body;
     if (!entityType) return res.status(400).json({ error: 'entityType required' });
 
     const p = await db.getPool();
@@ -233,6 +233,7 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
     const tagId = parseInt(req.params.id);
     const table = entityType === 'user' ? 'GraphUsers' : 'GraphGroups';
     const alias = 'e';
+    const search = (rawSearch || '').trim().slice(0, 200);
 
     const request = p.request().input('tagId', tagId);
     let where = '1=1';
@@ -266,7 +267,7 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
     res.json({ ok: true, inserted: result.recordset[0]?.inserted || 0 });
   } catch (err) {
     console.error('POST /tags/:id/assign-by-filter failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -344,7 +345,7 @@ router.get('/users', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0 });
 
-    const search = req.query.search || '';
+    const search = (req.query.search || '').trim().slice(0, 200);
     const tagId = req.query.tagId ? parseInt(req.query.tagId) : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
@@ -417,7 +418,7 @@ router.get('/users', async (req, res) => {
     res.json({ data, total: result.recordsets[1][0].total });
   } catch (err) {
     console.error('GET /users failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -426,7 +427,7 @@ router.get('/groups', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0 });
 
-    const search = req.query.search || '';
+    const search = (req.query.search || '').trim().slice(0, 200);
     const tagId = req.query.tagId ? parseInt(req.query.tagId) : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
@@ -498,7 +499,7 @@ router.get('/groups', async (req, res) => {
     res.json({ data, total: result.recordsets[1][0].total });
   } catch (err) {
     console.error('GET /groups failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

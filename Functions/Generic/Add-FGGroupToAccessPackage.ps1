@@ -8,7 +8,7 @@ function Add-FGGroupToAccessPackage {
         [Parameter(Mandatory = $true)]
         [string]$GroupID,
         [Parameter(Mandatory = $true)]
-        [string]$CatalogGroupId
+        [string]$CatalogGroupID
     )
 
     $Body = @{
@@ -17,7 +17,7 @@ function Add-FGGroupToAccessPackage {
             displayName           = "Member"
             originSystem          = "AadGroup"
             accessPackageResource = @{
-                id           = $CatalogGroupId
+                id           = $CatalogGroupID
                 resourceType = "O365 Group"
                 originId     = $GroupID
                 originSystem = "AadGroup"

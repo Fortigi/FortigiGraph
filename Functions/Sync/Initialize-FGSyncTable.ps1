@@ -96,7 +96,7 @@ function Initialize-FGSyncTable {
         }
 
         if ($CompositePrimaryKey) {
-            $initParams.CompositePrimaryKey = $CompositePrimaryKey
+            $initParams.PrimaryKey = $CompositePrimaryKey
         }
         else {
             $initParams.PrimaryKey = $PrimaryKey

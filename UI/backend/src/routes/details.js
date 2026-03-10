@@ -6,6 +6,7 @@ const router = Router();
 
 const useSql = process.env.USE_SQL === 'true';
 const SYSTEM_COLS = new Set(['SysStartTime', 'SysEndTime']);
+const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 function cleanRow(row) {
   const clean = {};
@@ -28,6 +29,7 @@ async function getPermissionTable(pool) {
 // GET /api/user/:id — Lightweight: attributes, tags, counts only
 // ────────────────────────────────────────────────────────────────
 router.get('/user/:id', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json({ attributes: {}, tags: [], membershipCount: 0, accessPackageCount: 0, hasHistory: false });
   try {
     const pool = await db.getPool();
@@ -104,6 +106,7 @@ router.get('/user/:id', async (req, res) => {
 // GET /api/user/:id/memberships — Lazy-loaded group memberships
 // ────────────────────────────────────────────────────────────────
 router.get('/user/:id/memberships', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -128,6 +131,7 @@ router.get('/user/:id/memberships', async (req, res) => {
 // GET /api/user/:id/access-packages — Lazy-loaded AP assignments
 // ────────────────────────────────────────────────────────────────
 router.get('/user/:id/access-packages', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -155,6 +159,7 @@ router.get('/user/:id/access-packages', async (req, res) => {
 // GET /api/user/:id/history — Lazy-loaded version history
 // ────────────────────────────────────────────────────────────────
 router.get('/user/:id/history', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -176,6 +181,7 @@ router.get('/user/:id/history', async (req, res) => {
 // GET /api/group/:id — Lightweight: attributes, tags, counts only
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json({ attributes: {}, tags: [], memberCount: 0, accessPackageCount: 0, hasHistory: false });
   try {
     const pool = await db.getPool();
@@ -254,6 +260,7 @@ router.get('/group/:id', async (req, res) => {
 // GET /api/group/:id/members — Lazy-loaded group members
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id/members', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -278,6 +285,7 @@ router.get('/group/:id/members', async (req, res) => {
 // GET /api/group/:id/access-packages — Lazy-loaded APs for group
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id/access-packages', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -305,6 +313,7 @@ router.get('/group/:id/access-packages', async (req, res) => {
 // GET /api/group/:id/history — Lazy-loaded version history
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id/history', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -325,6 +334,7 @@ router.get('/group/:id/history', async (req, res) => {
 // GET /api/access-package/:id — Lightweight: attributes, counts only
 // ────────────────────────────────────────────────────────────────
 router.get('/access-package/:id', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json({ attributes: {}, assignmentCount: 0, groupCount: 0, hasHistory: false });
   try {
     const pool = await db.getPool();
@@ -494,6 +504,7 @@ router.get('/access-package/:id', async (req, res) => {
 // GET /api/access-package/:id/reviews — Lazy-loaded access reviews
 // ────────────────────────────────────────────────────────────────
 router.get('/access-package/:id/reviews', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -521,6 +532,7 @@ router.get('/access-package/:id/reviews', async (req, res) => {
 // GET /api/access-package/:id/requests — Lazy-loaded assignment requests
 // ────────────────────────────────────────────────────────────────
 router.get('/access-package/:id/requests', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -547,6 +559,7 @@ router.get('/access-package/:id/requests', async (req, res) => {
 // GET /api/access-package/:id/history — Lazy-loaded version history
 // ────────────────────────────────────────────────────────────────
 router.get('/access-package/:id/history', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
@@ -567,6 +580,7 @@ router.get('/access-package/:id/history', async (req, res) => {
 // GET /api/access-package/:id/policies — Lazy-loaded assignment policies
 // ────────────────────────────────────────────────────────────────
 router.get('/access-package/:id/policies', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
