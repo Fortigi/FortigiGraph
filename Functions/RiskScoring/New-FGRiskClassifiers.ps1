@@ -85,13 +85,28 @@ function New-FGRiskClassifiers {
         }
         $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
 
-        if ($config.RiskScoring) {
-            if ($config.RiskScoring.LLMProvider) { $LLMProvider = $config.RiskScoring.LLMProvider }
-            if ($config.RiskScoring.LLMModel) { $LLMModel = $config.RiskScoring.LLMModel }
-            if ($config.RiskScoring.LLMApiKey) {
-                $LLMApiKey = $config.RiskScoring.LLMApiKey
-            } elseif ($config.RiskScoring.LLMApiKey_Encrypted) {
-                $LLMApiKey = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath "RiskScoring.LLMApiKey" -AllowEmpty
+        # Read LLM settings: prefer config.LLM section, fall back to config.RiskScoring for backward compatibility
+        $llmConfig = $null
+        if ($config.LLM) {
+            $llmConfig = $config.LLM
+            $llmConfigPath = "LLM"
+        } elseif ($config.RiskScoring -and ($config.RiskScoring.LLMProvider -or $config.RiskScoring.LLMApiKey -or $config.RiskScoring.LLMApiKey_Encrypted)) {
+            $llmConfig = $config.RiskScoring
+            $llmConfigPath = "RiskScoring"
+        }
+        if ($llmConfig) {
+            $providerProp = if ($llmConfig.PSObject.Properties['Provider']) { 'Provider' } else { 'LLMProvider' }
+            $modelProp    = if ($llmConfig.PSObject.Properties['Model']) { 'Model' } else { 'LLMModel' }
+            $keyProp      = if ($llmConfig.PSObject.Properties['ApiKey']) { 'ApiKey' } else { 'LLMApiKey' }
+            $keyEncProp   = if ($llmConfig.PSObject.Properties['ApiKey_Encrypted']) { 'ApiKey_Encrypted' } else { 'LLMApiKey_Encrypted' }
+
+            if ($llmConfig.$providerProp) { $LLMProvider = $llmConfig.$providerProp }
+            if ($llmConfig.$modelProp) { $LLMModel = $llmConfig.$modelProp }
+            if ($llmConfig.$keyProp) {
+                $LLMApiKey = $llmConfig.$keyProp
+            } elseif ($llmConfig.$keyEncProp) {
+                $keyPath = if ($llmConfigPath -eq 'LLM') { "LLM.ApiKey" } else { "RiskScoring.LLMApiKey" }
+                $LLMApiKey = Get-FGSecureConfigValue -ConfigPath $ConfigFile -PropertyPath $keyPath -AllowEmpty
             }
         }
     }

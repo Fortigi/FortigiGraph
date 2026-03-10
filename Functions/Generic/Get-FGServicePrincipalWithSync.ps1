@@ -71,24 +71,67 @@ function Get-FGServicePrincipalWithSync {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Discovering service principals with synchronization..." -ForegroundColor Cyan
 
-    # Get all service principals
-    $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags"
+    # Strategy: first try to get only provisioning-tagged SPs (fast), then fall back to
+    # well-known HR/sync app names. Avoids iterating over all 3000+ SPs in large tenants.
+    $AllServicePrincipals = @()
+
     if ($Filter) {
-        $URI += "&`$filter=$Filter"
+        # User-specified filter — use as-is
+        $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=$Filter"
+        $AllServicePrincipals = Invoke-FGGetRequest -URI $URI
+    } else {
+        # Query only SPs likely to have provisioning configured:
+        # 1. Known provisioning app IDs (Cloud Sync, Workday, SuccessFactors, etc.)
+        # 2. SPs with "WindowsAzureActiveDirectoryIntegratedApp" tag (gallery apps with provisioning)
+        $knownProvisioningAppIds = @(
+            "1a4721b3-e57f-4451-ae87-ef078703ec94"  # Azure AD Connect Cloud Sync
+            "2a1600fe-e5a8-42d0-835e-5f21f8ae2ec5"  # Workday to AAD User Provisioning
+            "6402503b-7adb-415d-91b2-cf8a9e7f9948"  # SuccessFactors to AAD User Provisioning
+        )
+
+        # Query by known appIds
+        foreach ($appId in $knownProvisioningAppIds) {
+            $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=appId eq '$appId'"
+            $result = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
+            if ($result) { $AllServicePrincipals += $result }
+        }
+
+        # Query by common HR provisioning display name patterns
+        $hrNamePatterns = @("Workday", "SuccessFactors", "SAP", "Oracle HCM", "BambooHR", "Ceridian")
+        foreach ($pattern in $hrNamePatterns) {
+            $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=startswith(displayName,'$pattern')"
+            $result = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
+            if ($result) { $AllServicePrincipals += $result }
+        }
+
+        # Query SPs tagged as provisioning-enabled gallery apps
+        $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=tags/any(t:t eq 'WindowsAzureActiveDirectoryGalleryApplicationNonPrimaryV1')"
+        $galleryApps = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
+        if ($galleryApps) { $AllServicePrincipals += $galleryApps }
+
+        # Also check SCIM-provisioned apps (custom SCIM apps often have this tag)
+        $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=tags/any(t:t eq 'WindowsAzureActiveDirectoryCustomSingleSignOnApplication')"
+        $customApps = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
+        if ($customApps) { $AllServicePrincipals += $customApps }
+
+        # Deduplicate by id
+        $seen = @{}
+        $AllServicePrincipals = @($AllServicePrincipals | Where-Object {
+            if ($seen[$_.id]) { $false } else { $seen[$_.id] = $true; $true }
+        })
     }
 
-    $AllServicePrincipals = Invoke-FGGetRequest -URI $URI
-    Write-Host "  Found $($AllServicePrincipals.Count) service principal(s) to check" -ForegroundColor Cyan
+    Write-Host "  Found $($AllServicePrincipals.Count) candidate service principal(s) to check" -ForegroundColor Cyan
 
     $Results = @()
     $Count = 0
     $TotalCount = $AllServicePrincipals.Count
 
-    # Check each service principal for synchronization jobs
+    # Check each candidate service principal for synchronization jobs
     foreach ($sp in $AllServicePrincipals) {
         $Count++
 
-        # Progress indicator
+        # Progress indicator (every 10 or at end)
         if ($Count % 10 -eq 0 -or $Count -eq $TotalCount) {
             Write-Host "  Progress: $Count/$TotalCount service principals checked" -ForegroundColor Cyan
         }

@@ -16,6 +16,7 @@ const PerfPage = lazy(() => import('./components/PerfPage'));
 const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
+const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -77,14 +78,15 @@ function useHashRoute() {
   return [page, navigate];
 }
 
-const NAV_TABS = [
+const ALL_NAV_TABS = [
   { key: 'matrix',           label: 'Matrix' },
   { key: 'users',            label: 'Users' },
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
-  { key: 'risk-scores',      label: 'Risk Scores' },
-  { key: 'org-chart',        label: 'Org Chart' },
+  { key: 'risk-scores',      label: 'Risk Scores',  feature: 'riskScoring' },
+  { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation' },
+  { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring' },
   { key: 'performance',      label: 'Performance' },
 ];
 
@@ -106,9 +108,16 @@ export default function App() {
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
   const [moduleVersion, setModuleVersion] = useState(null);
+  const [features, setFeatures] = useState({ riskScoring: true, accountCorrelation: true });
+
+  const navTabs = useMemo(() =>
+    ALL_NAV_TABS.filter(tab => !tab.feature || features[tab.feature]),
+    [features]
+  );
 
   useEffect(() => {
     fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
+    fetch('/api/features').then(r => r.json()).then(d => setFeatures(d)).catch(() => {});
   }, []);
 
   // ─── Dynamic detail tabs ──────────────────────────────────────
@@ -260,7 +269,7 @@ export default function App() {
 
         {/* Tab navigation */}
         <nav className="flex items-center gap-1 mt-3 -mb-4 border-b-0 overflow-x-auto">
-          {NAV_TABS.map(tab => (
+          {navTabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => navigate(tab.key)}
@@ -322,6 +331,8 @@ export default function App() {
             <AccessPackagesPage onOpenDetail={openDetailTab} />
           ) : page === 'risk-scores' ? (
             <RiskScoringPage onOpenDetail={openDetailTab} />
+          ) : page === 'identities' ? (
+            <IdentitiesPage onOpenDetail={openDetailTab} />
           ) : page === 'org-chart' ? (
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
           ) : page === 'performance' ? (
