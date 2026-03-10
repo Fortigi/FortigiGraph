@@ -24,7 +24,13 @@ export default function MatrixGroupRow({
   apIdToIndex,
   accessPackages = [],
   apGroupMap,
+  managedFilter,
   onOpenDetail,
+  // Nested group expansion props
+  groupsWithNested,
+  expandedGroups,
+  onToggleExpand,
+  loadingNested,
   // Optional DnD props (provided by SortableRow wrapper)
   sortableRef,
   sortableStyle,
@@ -32,22 +38,62 @@ export default function MatrixGroupRow({
   sortableListeners,
 }) {
   const memberCount = group.memberCount;
+  const isOwnerRow = !!group.realGroupId && !group.isNestedRow;
+
+  // Expand/collapse state for nested groups (up to 4 levels deep)
+  const realGidForExpand = group.realGroupId || group.id;
+  const canExpand = (group.nestLevel || 0) < 4 && groupsWithNested?.has(realGidForExpand);
+  const isExpanded = expandedGroups?.has(realGidForExpand);
+  const isLoadingNested = loadingNested?.has(realGidForExpand);
+
+  // When "Gaps" filter is active, check if this row has ANY provisioning gap cell.
+  // If not, hide the entire row.
+  if (managedFilter === 'gaps') {
+    const realGid = (group.realGroupId || group.id);
+    const lookupGid = realGid.toUpperCase();
+    const hasAnyGap = users.some(user => {
+      const cellKeyLower = `${realGid.toLowerCase()}|${user.id.toLowerCase()}`;
+      const allApIds = managedApMap?.get(cellKeyLower);
+      if (!allApIds || allApIds.length === 0) return false;
+      // Filter to APs relevant for this row type (Owner vs non-Owner)
+      const relevantApIds = allApIds.filter(apId => {
+        const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
+        const roleIsOwner = role.toLowerCase().includes('owner');
+        return isOwnerRow ? roleIsOwner : !roleIsOwner;
+      });
+      if (relevantApIds.length === 0) return false;
+      const cellKey = `${group.id}|${user.id}`;
+      const cellTypes = memberships.get(cellKey);
+      return relevantApIds.some(apId => {
+        const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
+        const lower = role.toLowerCase();
+        if (lower.includes('owner')) return !cellTypes || !cellTypes.has('Owner');
+        if (lower.includes('eligible')) return !cellTypes || !cellTypes.has('Eligible');
+        return !cellTypes || !cellTypes.has('Direct');
+      });
+    });
+    if (!hasAnyGap) return null;
+  }
+
+  const nestedBg = group.isNestedRow ? 'bg-gray-50/60' : 'bg-white';
 
   return (
-    <tr ref={sortableRef} style={sortableStyle || {}} className="hover:bg-gray-50/30">
+    <tr ref={sortableRef} style={sortableStyle || {}} className={`hover:bg-gray-50/30 ${group.isNestedRow ? 'bg-gray-50/40' : ''}`}>
       {/* Drag handle */}
       <td
-        className="sticky left-0 z-10 bg-white border-r border-b border-gray-200 px-1 py-0 text-center cursor-grab active:cursor-grabbing"
+        className={`sticky left-0 z-10 ${nestedBg} border-r border-b border-gray-200 px-1 py-0 text-center ${!group.isNestedRow ? 'cursor-grab active:cursor-grabbing' : ''}`}
         style={{ minWidth: '24px' }}
-        {...(sortableAttributes || {})}
-        {...(sortableListeners || {})}
+        {...(group.isNestedRow ? {} : (sortableAttributes || {}))}
+        {...(group.isNestedRow ? {} : (sortableListeners || {}))}
       >
-        <span className="text-gray-300 text-xs select-none">&#x2630;</span>
+        {!group.isNestedRow && (
+          <span className="text-gray-300 text-xs select-none">&#x2630;</span>
+        )}
       </td>
 
       {/* Tags column - sticky left */}
       <td
-        className="sticky bg-white border-r border-b border-gray-200 px-1 py-0.5"
+        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-1 py-0.5`}
         style={{ left: '24px', minWidth: '100px', maxWidth: '100px', zIndex: 10 }}
       >
         <div className="flex flex-wrap gap-0.5">
@@ -64,55 +110,91 @@ export default function MatrixGroupRow({
         </div>
       </td>
       <td
-        className="sticky bg-white border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium"
+        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium`}
         style={{ left: '124px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
         title={group.displayName}
       >
-        <div className="truncate cursor-pointer hover:text-blue-600"
-          onClick={() => onOpenDetail?.('group', group.realGroupId || group.id, group.displayName)}>
-          {group.displayName}
+        <div className="flex items-center gap-0.5" style={{ paddingLeft: (group.nestLevel || 0) * 16 }}>
+          {canExpand && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleExpand?.(realGidForExpand); }}
+              className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-700 rounded hover:bg-gray-200"
+              title={isExpanded ? 'Collapse nested groups' : 'Expand nested groups'}
+            >
+              {isLoadingNested ? (
+                <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <span className="text-[10px] leading-none">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+              )}
+            </button>
+          )}
+          {group.isNestedRow && (
+            <span className="text-gray-300 text-[10px] mr-0.5 flex-shrink-0">{'\u2514'}</span>
+          )}
+          <div className="truncate cursor-pointer hover:text-blue-600"
+            onClick={() => onOpenDetail?.('group', group.realGroupId || group.id, group.displayName)}>
+            {group.displayName}
+          </div>
         </div>
       </td>
 
       {/* Intersection cells */}
       {users.map(user => {
         const cellKey = `${group.id}|${user.id}`;
-        const isOwnerRow = !!group.realGroupId;
-        const managed = managedMap?.has(cellKey);
-        // Owner rows are never managed by APs (APs grant Direct membership, not Owner).
-        // Only look up AP details for non-owner rows.
+        const cellTypes = memberships.get(cellKey);
+
+        // Look up AP management using the real group ID (not synthetic __owner ID)
+        const realGid = group.realGroupId || group.id;
+        const cellKeyLower = `${realGid.toLowerCase()}|${user.id.toLowerCase()}`;
+        const allApIds = managedApMap?.get(cellKeyLower) || [];
+        const lookupGid = realGid.toUpperCase();
+
+        // Filter APs by role relevance for this row type:
+        // Owner rows only show APs with Owner role; regular rows show non-Owner APs.
+        const relevantApIds = allApIds.filter(apId => {
+          const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
+          const roleIsOwner = role.toLowerCase().includes('owner');
+          return isOwnerRow ? roleIsOwner : !roleIsOwner;
+        });
+
+        const managed = relevantApIds.length > 0;
         let apColor = null;
         let apCount = 0;
         let apNames = null;
-        let apIds = null;
-        if (!isOwnerRow && managed) {
-          const cellKeyLower = `${group.id.toLowerCase()}|${user.id.toLowerCase()}`;
-          apIds = managedApMap?.get(cellKeyLower) || null;
-          if (apIds && apIds.length > 0) {
-            apCount = apIds.length;
-            const firstIdx = apIdToIndex?.get(apIds[0]);
-            if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
-            apNames = apIds.map(id => {
-              const ap = accessPackages.find(a => a.id.toLowerCase() === id);
-              return ap ? ap.displayName : id;
-            });
-          }
-        }
-        // Provisioning gap: AP manages this cell but the user lacks the membership type the AP
-        // is supposed to grant. Check each AP's resource role: if it specifies "eligible" the user
-        // needs Eligible; otherwise (Member/default) the user needs Direct.
-        // Never applies to owner rows (APs don't manage ownership).
-        const cellTypes = memberships.get(cellKey);
-        let provisioningGap = false;
-        if (!isOwnerRow && managed && apIds && apIds.length > 0) {
-          const lookupGid = (group.realGroupId || group.id).toUpperCase();
-          provisioningGap = apIds.some(apId => {
-            const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
-            const expectsEligible = role.toLowerCase().includes('eligible');
-            if (expectsEligible) return !cellTypes || !cellTypes.has('Eligible');
-            return !cellTypes || !cellTypes.has('Direct');
+
+        if (managed) {
+          apCount = relevantApIds.length;
+          const firstIdx = apIdToIndex?.get(relevantApIds[0]);
+          if (firstIdx != null) apColor = getAccessPackageColor(firstIdx);
+          apNames = relevantApIds.map(id => {
+            const ap = accessPackages.find(a => a.id.toLowerCase() === id);
+            return ap ? ap.displayName : id;
           });
         }
+
+        // Provisioning gap: AP manages this cell but user lacks the expected membership type.
+        // Owner role → needs Owner; Eligible role → needs Eligible; Member/default → needs Direct.
+        let provisioningGap = false;
+        let gapExpected = null;
+        if (managed) {
+          for (const apId of relevantApIds) {
+            const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
+            const lower = role.toLowerCase();
+            let expected, hasIt;
+            if (lower.includes('owner'))        { expected = 'Owner';    hasIt = cellTypes?.has('Owner'); }
+            else if (lower.includes('eligible')) { expected = 'Eligible'; hasIt = cellTypes?.has('Eligible'); }
+            else                                 { expected = 'Direct';   hasIt = cellTypes?.has('Direct'); }
+            if (!hasIt) {
+              provisioningGap = true;
+              gapExpected = expected;
+              break;
+            }
+          }
+        }
+
         return (
           <MatrixCell
             key={cellKey}
@@ -123,6 +205,7 @@ export default function MatrixGroupRow({
             apCount={apCount}
             apNames={apNames}
             provisioningGap={provisioningGap}
+            gapExpected={gapExpected}
           />
         );
       })}
@@ -135,9 +218,9 @@ export default function MatrixGroupRow({
         const roleName = apGroupMap?.get(apKey);
         // Owner rows only show AP cells where the role is Owner;
         // regular rows only show non-Owner roles
-        const isOwnerRow = !!group.realGroupId;
+        const isOwnerForAp = !!group.realGroupId && !group.isNestedRow;
         const roleIsOwner = (roleName || '').toLowerCase().includes('owner');
-        const hasMapping = !!roleName && (isOwnerRow ? roleIsOwner : !roleIsOwner);
+        const hasMapping = !!roleName && (isOwnerForAp ? roleIsOwner : !roleIsOwner);
         const prevCat = idx > 0 ? (accessPackages[idx - 1].categoryName || null) : undefined;
         const curCat = ap.categoryName || null;
         const isCategoryBoundary = idx === 0 || prevCat !== curCat;

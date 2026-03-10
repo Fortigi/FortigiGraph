@@ -771,6 +771,13 @@ function New-FGUI {
     # Performance metrics (opt-in, default off)
     $settingsList += @{ name = "PERF_METRICS_ENABLED"; value = if ($PerformanceMetrics) { "true" } else { "false" } }
 
+    # Module version (for display in UI footer)
+    $psdPath = Join-Path $PSScriptRoot "..\..\FortigiGraph.psd1"
+    if (Test-Path $psdPath) {
+        $manifest = Import-PowerShellDataFile -Path $psdPath
+        $settingsList += @{ name = "MODULE_VERSION"; value = $manifest.ModuleVersion }
+    }
+
     $settingsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings"
 
     try {

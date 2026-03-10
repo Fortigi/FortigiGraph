@@ -105,6 +105,11 @@ export default function App() {
   const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupTagMap, loading, refreshing, error } = usePermissions(userLimit, activeFilters);
   const { account, logout } = useAuth();
   const [page, navigate] = useHashRoute();
+  const [moduleVersion, setModuleVersion] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
+  }, []);
 
   // ─── Dynamic detail tabs ──────────────────────────────────────
   // Each entry: { type: 'user'|'group', id, displayName }
@@ -348,6 +353,11 @@ export default function App() {
           )}
         </Suspense>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-200 bg-white px-6 py-2 text-xs text-gray-400 text-center">
+        FortigiGraph{moduleVersion ? ` v${moduleVersion}` : ''}
+      </footer>
     </div>
     </ErrorBoundary>
   );

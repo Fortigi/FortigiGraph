@@ -514,4 +514,81 @@ router.get('/sync-log', async (req, res) => {
   }
 });
 
+// GET /api/groups-with-nested - group IDs that are members of other groups
+// (i.e., groups whose members gain indirect access to parent groups)
+router.get('/groups-with-nested', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ groupIds: [] });
+    const p = await db.getPool();
+    const result = await timedRequest(p, 'groups-with-nested', res).query(`
+      BEGIN TRY
+        SELECT DISTINCT UPPER(memberId) AS groupId
+        FROM dbo.GraphGroupMembers
+        WHERE memberType = '#microsoft.graph.group'
+      END TRY
+      BEGIN CATCH
+        SELECT CAST(NULL AS NVARCHAR(36)) AS groupId WHERE 1 = 0
+      END CATCH
+    `);
+    return res.json({ groupIds: result.recordset.map(r => r.groupId) });
+  } catch (err) {
+    console.error('groups-with-nested query failed:', err.message);
+    return res.json({ groupIds: [] });
+  }
+});
+
+// GET /api/group/:groupId/nested-groups - parent groups this group is a member of,
+// plus user memberships for those parent groups (showing indirect access gained)
+router.get('/group/:groupId/nested-groups', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ groups: [], memberships: [] });
+    const p = await db.getPool();
+    const groupId = req.params.groupId;
+
+    const matCheck = await timedRequest(p, 'nested-mat-check', res).query(`
+      SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists
+    `);
+    const permSource = matCheck.recordset[0].matPermExists
+      ? 'mat_UserPermissionAssignments' : 'vw_UserPermissionAssignments';
+
+    const request = timedRequest(p, 'nested-groups-data', res);
+    request.input('childGroupId', groupId);
+
+    const result = await request.query(`
+      -- Groups that this group is a member of (parent groups)
+      SELECT
+        UPPER(gm.groupId) AS groupId,
+        g.displayName,
+        g.groupTypeCalculated,
+        g.description
+      FROM dbo.GraphGroupMembers gm
+      LEFT JOIN dbo.GraphGroups g ON UPPER(gm.groupId) = g.id
+      WHERE UPPER(gm.memberId) = UPPER(@childGroupId)
+        AND gm.memberType = '#microsoft.graph.group';
+
+      -- User memberships for those parent groups
+      SELECT
+        p.groupId,
+        p.memberId,
+        p.membershipType
+      FROM ${permSource} p
+      WHERE p.groupId IN (
+        SELECT UPPER(gm2.groupId)
+        FROM dbo.GraphGroupMembers gm2
+        WHERE UPPER(gm2.memberId) = UPPER(@childGroupId)
+          AND gm2.memberType = '#microsoft.graph.group'
+      )
+      AND p.memberType != '#microsoft.graph.group'
+    `);
+
+    return res.json({
+      groups: result.recordsets[0] || [],
+      memberships: result.recordsets[1] || [],
+    });
+  } catch (err) {
+    console.error('nested-groups query failed:', err.message);
+    return res.json({ groups: [], memberships: [] });
+  }
+});
+
 export default router;

@@ -19,6 +19,10 @@ export default function MatrixToolbar({
   onResetRowOrder,
   hasCustomRowOrder,
   stats,
+  hasExpandableGroups,
+  hasExpandedGroups,
+  onExpandAll,
+  onCollapseAll,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -96,6 +100,7 @@ export default function MatrixToolbar({
             { key: 'all',       label: 'All' },
             { key: 'unmanaged', label: 'Unmanaged' },
             { key: 'managed',   label: 'Managed' },
+            { key: 'gaps',      label: 'Gaps' },
           ].map(opt => (
             <button
               key={opt.key}
@@ -149,6 +154,28 @@ export default function MatrixToolbar({
             >
               Reset Rows
             </button>
+          </>
+        )}
+
+        {hasExpandableGroups && (
+          <>
+            <div className="border-l border-gray-300 h-5 mx-1" />
+            <button
+              onClick={onExpandAll}
+              className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
+              title="Expand all nested groups (up to 4 levels)"
+            >
+              Expand All
+            </button>
+            {hasExpandedGroups && (
+              <button
+                onClick={onCollapseAll}
+                className="px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100 border border-gray-200"
+                title="Collapse all nested groups"
+              >
+                Collapse All
+              </button>
+            )}
           </>
         )}
       </div>

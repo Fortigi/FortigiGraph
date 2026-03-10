@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { authMiddleware } from './middleware/auth.js';
@@ -23,6 +24,19 @@ const port = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
 const authEnabled = process.env.AUTH_ENABLED === 'true';
 const perfEnabled = process.env.PERF_METRICS_ENABLED === 'true';
+
+// Resolve module version: env var (set during deployment) → fallback to .psd1 manifest
+let moduleVersion = process.env.MODULE_VERSION || null;
+if (!moduleVersion) {
+  try {
+    const psdPath = join(__dirname, '../../../FortigiGraph.psd1');
+    const psdContent = readFileSync(psdPath, 'utf-8');
+    const match = psdContent.match(/ModuleVersion\s*=\s*'([^']+)'/);
+    if (match) moduleVersion = match[1];
+  } catch {
+    // .psd1 not available (deployed environment without env var)
+  }
+}
 
 // ─── Performance metrics (opt-in via PERF_METRICS_ENABLED=true) ─
 if (perfEnabled) {
@@ -87,6 +101,10 @@ const publicLimiter = rateLimit({
 // Unauthenticated endpoints (rate-limited)
 app.get('/api/health', publicLimiter, (req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/api/version', publicLimiter, (req, res) => {
+  res.json({ version: moduleVersion || null });
 });
 
 app.get('/api/auth-config', publicLimiter, (req, res) => {

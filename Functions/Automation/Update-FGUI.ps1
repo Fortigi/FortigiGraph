@@ -51,8 +51,16 @@ function Update-FGUI {
 
     $subId = (Get-AzContext).Subscription.Id
 
-    # ─── Update App Settings (if -PerformanceMetrics specified) ──────────
-    if ($null -ne $PerformanceMetrics) {
+    # ─── Update App Settings (module version + optional perf metrics) ────
+    # Always update MODULE_VERSION on redeploy; also update perf if specified
+    $psdPath = Join-Path $PSScriptRoot "..\..\FortigiGraph.psd1"
+    $moduleVersion = $null
+    if (Test-Path $psdPath) {
+        $manifest = Import-PowerShellDataFile -Path $psdPath
+        $moduleVersion = $manifest.ModuleVersion
+    }
+
+    if ($moduleVersion -or $null -ne $PerformanceMetrics) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updating app settings..." -ForegroundColor Cyan
 
         try {
@@ -69,14 +77,23 @@ function Update-FGUI {
             $properties[$prop.Name] = $prop.Value
         }
 
-        $properties["PERF_METRICS_ENABLED"] = if ($PerformanceMetrics) { "true" } else { "false" }
+        if ($null -ne $PerformanceMetrics) {
+            $properties["PERF_METRICS_ENABLED"] = if ($PerformanceMetrics) { "true" } else { "false" }
+        }
+
+        if ($moduleVersion) {
+            $properties["MODULE_VERSION"] = $moduleVersion
+            Write-Host "  Module version: $moduleVersion" -ForegroundColor Green
+        }
 
         $putUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/appsettings?api-version=2023-01-01"
         $body = @{ properties = $properties } | ConvertTo-Json -Depth 10
         Invoke-RestMethod -Uri $putUri -Method PUT -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body $body | Out-Null
 
-        $perfState = if ($PerformanceMetrics) { "Enabled" } else { "Disabled" }
-        Write-Host "  Performance metrics: $perfState" -ForegroundColor Green
+        if ($null -ne $PerformanceMetrics) {
+            $perfState = if ($PerformanceMetrics) { "Enabled" } else { "Disabled" }
+            Write-Host "  Performance metrics: $perfState" -ForegroundColor Green
+        }
     }
 
     # ─── Package Code ─────────────────────────────────────────────────────

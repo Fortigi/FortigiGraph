@@ -51,7 +51,13 @@ export default function SortableMatrixBody({
   apIdToIndex,
   accessPackages,
   apGroupMap,
+  managedFilter,
   onOpenDetail,
+  // Nested group expansion props
+  groupsWithNested,
+  expandedGroups,
+  onToggleExpand,
+  loadingNested,
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -88,16 +94,27 @@ export default function SortableMatrixBody({
     apIdToIndex,
     accessPackages,
     apGroupMap,
+    managedFilter,
     onOpenDetail,
+    groupsWithNested,
+    expandedGroups,
+    onToggleExpand,
+    loadingNested,
+  };
+
+  // Render a single row — nested rows are plain (not sortable), others are sortable
+  const renderRow = (group) => {
+    if (group.isNestedRow) {
+      return <MatrixGroupRow key={group.id} group={group} {...rowProps} />;
+    }
+    return <SortableRow key={group.id} group={group} {...rowProps} />;
   };
 
   // When dragging: render all rows (DnD needs full DOM for accurate positioning).
   // When not dragging: render only visible rows + overscan for performance.
   const renderRows = () => {
     if (dragging) {
-      return orderedGroups.map(group => (
-        <SortableRow key={group.id} group={group} {...rowProps} />
-      ));
+      return orderedGroups.map(renderRow);
     }
 
     const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
@@ -112,7 +129,7 @@ export default function SortableMatrixBody({
         )}
         {virtualRows.map(vRow => {
           const group = orderedGroups[vRow.index];
-          return <SortableRow key={group.id} group={group} {...rowProps} />;
+          return renderRow(group);
         })}
         {paddingBottom > 0 && (
           <tr aria-hidden="true"><td style={{ height: paddingBottom, padding: 0, border: 'none' }} /></tr>

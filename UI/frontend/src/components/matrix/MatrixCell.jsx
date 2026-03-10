@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { TYPE_COLORS } from '../../utils/colors';
 
-function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames, provisioningGap }) {
+function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNames, provisioningGap, gapExpected }) {
   const hasMembership = membershipTypes && membershipTypes.size > 0;
 
   // Background: AP color for managed cells only; unmanaged cells stay white
@@ -22,11 +22,13 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
       title = types;
     }
     if (provisioningGap) {
-      title += '\n\u26a0 Provisioning gap: user lacks the membership type specified by the access package';
+      const expectedLabel = gapExpected ? ` (expects ${gapExpected})` : '';
+      title += `\n\u26a0 Provisioning gap: user lacks the membership type specified by the access package${expectedLabel}`;
     }
   } else if (provisioningGap) {
     // AP manages this cell but user has no membership at all
-    title = `\u26a0 Provisioning gap: user has no membership but access package expects one`;
+    const expectedLabel = gapExpected ? ` ${gapExpected}` : '';
+    title = `\u26a0 Provisioning gap: access package expects${expectedLabel} membership but user has none`;
     if (apNames && apNames.length > 0) {
       title += `\nManaged by: ${apNames.join(', ')}`;
     }
@@ -93,6 +95,7 @@ export default memo(MatrixCell, (prev, next) => {
     prev.apColor === next.apColor &&
     prev.apCount === next.apCount &&
     prev.apNames === next.apNames &&
-    prev.provisioningGap === next.provisioningGap
+    prev.provisioningGap === next.provisioningGap &&
+    prev.gapExpected === next.gapExpected
   );
 });
