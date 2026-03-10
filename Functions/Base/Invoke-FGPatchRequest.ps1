@@ -44,7 +44,7 @@ function Invoke-FGPatchRequest {
         $ReturnValue = $Result.value
     }
     else {
-        $ReturnValue += $Result
+        $ReturnValue = $Result
     }
 
     return $ReturnValue

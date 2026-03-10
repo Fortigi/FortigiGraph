@@ -1,5 +1,6 @@
 function Get-FGAccessTokenDetail {
     [alias("Get-AccessTokenDetail")]
+    [cmdletbinding()]
     Param()
     
     <#
@@ -61,5 +62,5 @@ function Get-FGAccessTokenDetail {
     $tokenArray.psobject.properties | ForEach-Object { $tokenArrayAsHash[$_.Name] = $_.Value }
     $output = $headerAsHash + $tokenArrayAsHash
 
-    Write-Output $output
+    return $output
 }

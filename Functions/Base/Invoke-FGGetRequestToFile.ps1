@@ -1,4 +1,5 @@
 function Invoke-FGGetRequestToFile {
+    [cmdletbinding()]
     Param
     (
         [Parameter(Mandatory = $true)]

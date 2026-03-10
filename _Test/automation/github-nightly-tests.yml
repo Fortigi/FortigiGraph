@@ -1,0 +1,288 @@
+# ─── FortigiGraph Nightly Test Suite ────────────────────────────────────
+# Runs the full test suite on a schedule and on-demand.
+#
+# Required secrets (set in repo Settings → Secrets):
+#   AZURE_CREDENTIALS        - Service principal JSON for Azure login
+#                              (output of: az ad sp create-for-rbac --role contributor --scopes /subscriptions/{id})
+#   TEST_CONFIG              - Full contents of config.test.json
+#   SQL_ADMIN_PASSWORD       - SQL Server admin password
+#   GRAPH_CLIENT_SECRET      - Graph API client secret
+#
+# Optional secrets:
+#   LLM_API_KEY              - Anthropic or OpenAI API key (for risk scoring tests)
+#   LLM_PROVIDER             - "Anthropic" or "OpenAI" (default: Anthropic)
+#   UI_BASE_URL              - Deployed UI URL (for backend API tests)
+#   UI_BEARER_TOKEN          - Bearer token for authenticated UI
+# ─────────────────────────────────────────────────────────────────────────
+
+name: Nightly Tests
+
+on:
+  schedule:
+    # Run at 02:00 UTC every night
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      skip_integration:
+        description: 'Skip SQL + Sync integration tests'
+        required: false
+        type: boolean
+        default: false
+      skip_risk_scoring:
+        description: 'Skip risk scoring tests'
+        required: false
+        type: boolean
+        default: false
+      skip_e2e:
+        description: 'Skip Playwright E2E tests'
+        required: false
+        type: boolean
+        default: false
+      first_run:
+        description: 'First run (create SQL Server from scratch)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DOTNET_NOLOGO: true
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+
+jobs:
+  # ─── Phase 1: Unit Tests (no Azure, no secrets needed) ──────────────
+  unit-tests:
+    name: 'Phase 1: Unit Tests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          # No Azure modules needed for unit tests
+          Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+
+      - name: Run unit tests
+        shell: pwsh
+        run: pwsh -File _Test/Test-Unit.ps1
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-logs
+          path: _Test/logs/
+          retention-days: 30
+
+  # ─── Phase 2+3+4: Azure Integration Tests ──────────────────────────
+  integration-tests:
+    name: 'Phase 2-4: Integration Tests'
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: ${{ !inputs.skip_integration }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Az PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module Az.Accounts -Force -Scope CurrentUser -AllowClobber
+          Install-Module Az.Sql -Force -Scope CurrentUser -AllowClobber
+          Install-Module Az.Resources -Force -Scope CurrentUser -AllowClobber
+          Install-Module Az.Automation -Force -Scope CurrentUser -AllowClobber
+
+      - name: Write config file
+        shell: pwsh
+        run: |
+          $config = '${{ secrets.TEST_CONFIG }}'
+          if ([string]::IsNullOrWhiteSpace($config)) {
+            Write-Host "::error::TEST_CONFIG secret is not set"
+            exit 1
+          }
+          # Inject secrets into config
+          $configObj = $config | ConvertFrom-Json
+          if ('${{ secrets.SQL_ADMIN_PASSWORD }}') {
+            $configObj.Azure.AdminUserPassword = '${{ secrets.SQL_ADMIN_PASSWORD }}'
+          }
+          if ('${{ secrets.GRAPH_CLIENT_SECRET }}') {
+            $configObj.Graph.ClientSecret = '${{ secrets.GRAPH_CLIENT_SECRET }}'
+          }
+          $configObj | ConvertTo-Json -Depth 10 | Set-Content -Path _Test/config.ci.json
+          Write-Host "Config written to _Test/config.ci.json"
+
+      - name: 'Phase 2a: Simple Diagnostics'
+        shell: pwsh
+        run: pwsh -File _Test/Test-Simple.ps1 -ConfigFile _Test/config.ci.json
+
+      - name: 'Phase 2b: Graph API Tests'
+        shell: pwsh
+        run: pwsh -File _Test/Test-GraphAPI.ps1 -ConfigFile _Test/config.ci.json
+
+      - name: 'Phase 3: Integration Tests'
+        shell: pwsh
+        run: |
+          $script = if ('${{ inputs.first_run }}' -eq 'true') {
+            "_Test/Test-Integration.ps1"
+          } else {
+            "_Test/Test-Integration-Fast.ps1"
+          }
+          $args = @("-ConfigFile", "_Test/config.ci.json")
+          if ($script -match "Integration\.ps1$") {
+            $args += "-SkipCleanup"
+          }
+          pwsh -File $script @args
+
+      - name: 'Phase 4: Risk Scoring Tests'
+        if: ${{ !inputs.skip_risk_scoring && secrets.LLM_API_KEY != '' }}
+        shell: pwsh
+        run: |
+          $provider = if ('${{ secrets.LLM_PROVIDER }}') { '${{ secrets.LLM_PROVIDER }}' } else { 'Anthropic' }
+          pwsh -File _Test/Test-RiskScoring.ps1 `
+            -ConfigFile _Test/config.ci.json `
+            -LLMProvider $provider `
+            -LLMApiKey '${{ secrets.LLM_API_KEY }}'
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: _Test/logs/
+          retention-days: 30
+
+      - name: Clean up config
+        if: always()
+        shell: pwsh
+        run: Remove-Item _Test/config.ci.json -ErrorAction SilentlyContinue
+
+  # ─── Phase 5a: UI Backend API Tests ─────────────────────────────────
+  ui-backend-tests:
+    name: 'Phase 5a: UI Backend API Tests'
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: ${{ secrets.UI_BASE_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run backend API tests
+        shell: pwsh
+        run: |
+          $args = @("-BaseUrl", '${{ secrets.UI_BASE_URL }}')
+          if ('${{ secrets.UI_BEARER_TOKEN }}') {
+            $args += @("-BearerToken", '${{ secrets.UI_BEARER_TOKEN }}')
+          }
+          pwsh -File _Test/Test-UIBackend.ps1 @args
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-backend-test-logs
+          path: _Test/logs/
+          retention-days: 30
+
+  # ─── Phase 5b: Playwright E2E Tests ─────────────────────────────────
+  e2e-tests:
+    name: 'Phase 5b: UI E2E Browser Tests'
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: ${{ !inputs.skip_e2e }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            UI/frontend/package-lock.json
+            UI/backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: UI/backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: UI/frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: UI/frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        working-directory: UI/frontend
+        run: npx playwright test
+        env:
+          CI: true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: UI/frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-screenshots
+          path: UI/frontend/test-results/
+          retention-days: 30
+
+  # ─── Summary ────────────────────────────────────────────────────────
+  summary:
+    name: 'Test Summary'
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests, ui-backend-tests]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.unit-tests.result }}" == "success" ]; then
+            echo "- ✅ Phase 1: Unit Tests" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Phase 1: Unit Tests (${{ needs.unit-tests.result }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.integration-tests.result }}" == "success" ]; then
+            echo "- ✅ Phase 2-4: Integration Tests" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.integration-tests.result }}" == "skipped" ]; then
+            echo "- ⏭️ Phase 2-4: Integration Tests (skipped)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Phase 2-4: Integration Tests (${{ needs.integration-tests.result }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.ui-backend-tests.result }}" == "success" ]; then
+            echo "- ✅ Phase 5a: UI Backend API Tests" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.ui-backend-tests.result }}" == "skipped" ]; then
+            echo "- ⏭️ Phase 5a: UI Backend API Tests (skipped)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Phase 5a: UI Backend API Tests (${{ needs.ui-backend-tests.result }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "- ✅ Phase 5b: UI E2E Browser Tests" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.e2e-tests.result }}" == "skipped" ]; then
+            echo "- ⏭️ Phase 5b: UI E2E Browser Tests (skipped)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Phase 5b: UI E2E Browser Tests (${{ needs.e2e-tests.result }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if any required job failed
+        if: |
+          needs.unit-tests.result == 'failure' ||
+          needs.integration-tests.result == 'failure' ||
+          needs.e2e-tests.result == 'failure'
+        run: exit 1

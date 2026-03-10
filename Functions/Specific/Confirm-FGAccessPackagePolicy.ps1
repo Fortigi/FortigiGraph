@@ -13,7 +13,7 @@ function Confirm-FGAccessPackagePolicy {
     }
     
     $DisplayName = $Policy.displayName
-    if ($null -eq $Policy.accessPackageId) {
+    if ($null -eq $Policy.displayName) {
         throw "Policy doesn't contain displayName"
     }
 
@@ -27,7 +27,7 @@ function Confirm-FGAccessPackagePolicy {
         Set-AccessPackagePolicy -Policy $Policy -PolicyId $AccessPackagesPolicy.id
     }
     elseif ($AccessPackagesPolicy.count -gt 1) {
-        throw "More then one policy found with DisplayName: $DisplayName"
+        throw "More than one policy found with DisplayName: $DisplayName"
     }
     else {
         Write-Host "Creating AccessPackagePolicy: $DisplayName" -ForegroundColor Yellow

@@ -1,6 +1,6 @@
 function Get-FGGroupTransitiveMemberAll {
     [alias("Get-GroupTransitiveMemberAll")]
-
+    [cmdletbinding()]
     #Get Groups
     $GraphURI = 'https://graph.microsoft.com/beta'
     $URI = $GraphURI + '/groups?$select=id'

@@ -24,7 +24,11 @@ function Get-FGUser {
         
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
-        [bool]$IncludeExtensions
+        [bool]$IncludeExtensions,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 999)]
+        [int]$Top
     )
 
     $URI = 'https://graph.microsoft.com/beta/users'
@@ -68,6 +72,16 @@ function Get-FGUser {
             $URI = $URI + '?$expand=extensions'
         }
     }
+
+    If ($Top) {
+        if ($URI.Contains("?")) {
+            $URI = $URI + "&`$top=$Top"
+        }
+        else {
+            $URI = $URI + "?`$top=$Top"
+        }
+    }
+
     $ReturnValue = Invoke-FGGetRequest -URi $URI
     return $ReturnValue
 

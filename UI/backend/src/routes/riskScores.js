@@ -43,12 +43,17 @@ function parseJsonColumns(row) {
 }
 
 // Check if risk score columns exist
+const ALLOWED_RISK_TABLES = new Set(['GraphUsers', 'GraphGroups']);
+
 async function hasRiskColumns(pool, tableName, res) {
+  if (!ALLOWED_RISK_TABLES.has(tableName)) return false;
   try {
-    const result = await timedRequest(pool, `risk-col-check-${tableName}`, res).query(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = '${tableName}' AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
-    `);
+    const result = await timedRequest(pool, `risk-col-check-${tableName}`, res)
+      .input('tableName', tableName)
+      .query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
+      `);
     return result.recordset.length > 0;
   } catch {
     return false;

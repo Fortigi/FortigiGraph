@@ -1,6 +1,6 @@
 function Get-FGGroupMemberAll {
     [alias("Get-GroupMemberAll")]
-
+    [cmdletbinding()]
     #Get Groups
     
     $GraphURI = 'https://graph.microsoft.com/beta'

@@ -8,7 +8,7 @@ function Add-FGGroupToAccessPackage {
         [Parameter(Mandatory = $true)]
         [string]$GroupID,
         [Parameter(Mandatory = $true)]
-        [string]$CatalogeGroupID
+        [string]$CatalogGroupId
     )
 
     $Body = @{
@@ -17,7 +17,7 @@ function Add-FGGroupToAccessPackage {
             displayName           = "Member"
             originSystem          = "AadGroup"
             accessPackageResource = @{
-                id           = $CatalogeGroupID
+                id           = $CatalogGroupId
                 resourceType = "O365 Group"
                 originId     = $GroupID
                 originSystem = "AadGroup"
@@ -29,7 +29,7 @@ function Add-FGGroupToAccessPackage {
         }
     }
     
-    #It takes a little time before a group can be added to a cataloge.. so sleep..
+    #It takes a little time before a group can be added to a catalog.. so sleep..
     Start-sleep -s 45
     
     $URI = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages/$AccessPackageID/accessPackageResourceRoleScopes"

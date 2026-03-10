@@ -75,6 +75,7 @@ function Connect-FGSQLServer {
     Requires Az PowerShell module and being logged into Azure (Connect-AzAccount)
     #>
 
+    [alias("Connect-SQLServer")]
     [CmdletBinding(DefaultParameterSetName = 'Explicit')]
     Param(
         [Parameter(Mandatory = $true, ParameterSetName = 'Explicit')]

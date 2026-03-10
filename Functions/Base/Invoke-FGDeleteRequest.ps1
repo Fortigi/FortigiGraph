@@ -39,7 +39,7 @@ function Invoke-FGDeleteRequest {
         $ReturnValue = $Result.value
     }
     else {
-        $ReturnValue += $Result
+        $ReturnValue = $Result
     }
 
     return $ReturnValue

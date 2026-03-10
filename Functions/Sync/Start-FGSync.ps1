@@ -116,7 +116,7 @@ Command-line parameter overrides config file setting
     Company: Fortigi
 #>
 
-    [alias("Daily-Sync")]
+    [alias("Start-Sync", "Daily-Sync")]
     [CmdletBinding()]
     param(
     [Parameter(Mandatory = $true)]

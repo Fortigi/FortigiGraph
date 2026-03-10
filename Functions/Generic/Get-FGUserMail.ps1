@@ -17,7 +17,7 @@ function Get-FGUserMail {
         $MailFolders = Get-FGUserMailFolder -id $id
         $MailFolderId = ($MailFolders | Where-Object {$_.displayName -eq $MailFolder}).id
 
-        if ($MailFolder) {
+        if ($MailFolderId) {
             $URI = "https://graph.microsoft.com/beta/users/$id/mailFolders/$MailFolderId/messages"
         }
         else {
