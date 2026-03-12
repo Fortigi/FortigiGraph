@@ -45,12 +45,13 @@ param(
     [string]$BearerToken,
 
     # Phase control
-    [switch]$FirstRun,        # Use Test-Integration.ps1 instead of Fast
-    [switch]$SkipIntegration, # Skip SQL + sync tests
-    [switch]$SkipRiskScoring, # Skip risk scoring tests
-    [switch]$SkipE2E,         # Skip Playwright browser tests
-    [switch]$SkipUIBackend,   # Skip deployed UI backend tests
-    [switch]$StopOnFailure    # Abort entire run on first phase failure
+    [switch]$FirstRun,               # Use Test-Integration.ps1 instead of Fast
+    [switch]$SkipIntegration,        # Skip SQL + sync tests
+    [switch]$SkipRiskScoring,        # Skip risk scoring tests
+    [switch]$SkipAccountCorrelation, # Skip account correlation tests
+    [switch]$SkipE2E,                # Skip Playwright browser tests
+    [switch]$SkipUIBackend,          # Skip deployed UI backend tests
+    [switch]$StopOnFailure           # Abort entire run on first phase failure
 )
 
 $ErrorActionPreference = "Continue"
@@ -169,6 +170,7 @@ Write-Host "  Config:       $(if ($ConfigFile) { $ConfigFile } else { '(none —
 Write-Host "  LLM:          $(if ($LLMProvider) { $LLMProvider } else { '(skip risk scoring)' })" -ForegroundColor Gray
 Write-Host "  UI URL:       $(if ($UIBaseUrl) { $UIBaseUrl } else { '(skip backend API tests)' })" -ForegroundColor Gray
 Write-Host "  Integration:  $(if ($SkipIntegration) { 'SKIP' } elseif ($FirstRun) { 'Full (first run)' } else { 'Fast (reuse SQL)' })" -ForegroundColor Gray
+Write-Host "  Correlation:  $(if ($SkipAccountCorrelation) { 'SKIP' } elseif ($ConfigFile) { 'Account Correlation' } else { '(no config)' })" -ForegroundColor Gray
 Write-Host "  E2E:          $(if ($SkipE2E) { 'SKIP' } else { 'Playwright' })" -ForegroundColor Gray
 Write-Host "  Stop on fail: $(if ($StopOnFailure) { 'Yes' } else { 'No' })" -ForegroundColor Gray
 
@@ -233,7 +235,27 @@ if ($ConfigFile -and $LLMProvider -and $LLMApiKey -and -not $SkipRiskScoring) {
 }
 
 # ══════════════════════════════════════════════════════════════════════
-# PHASE 5a: UI Backend API Tests (against deployed app)
+# PHASE 5: Account Correlation Tests
+# ══════════════════════════════════════════════════════════════════════
+
+if ($ConfigFile -and -not $SkipAccountCorrelation) {
+    $corrArgs = @("-ConfigFile", $ConfigFile)
+    if ($LLMProvider -and $LLMApiKey) {
+        $corrArgs += @("-LLMProvider", $LLMProvider, "-LLMApiKey", $LLMApiKey)
+    } else {
+        $corrArgs += @("-SkipLLM")
+    }
+
+    Invoke-TestPhase -Phase "5. Account Correlation" `
+        -Script (Join-Path $testDir "Test-AccountCorrelation.ps1") `
+        -Arguments $corrArgs
+} else {
+    $reason = if (-not $ConfigFile) { "no -ConfigFile" } else { "-SkipAccountCorrelation" }
+    Write-Host "`n  ○ Phase 5: SKIPPED ($reason)" -ForegroundColor DarkYellow
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# PHASE 6a: UI Backend API Tests (against deployed app)
 # ══════════════════════════════════════════════════════════════════════
 
 if ($UIBaseUrl -and -not $SkipUIBackend) {
@@ -242,21 +264,21 @@ if ($UIBaseUrl -and -not $SkipUIBackend) {
         $apiArgs += @("-BearerToken", $BearerToken)
     }
 
-    Invoke-TestPhase -Phase "5a. UI Backend API" `
+    Invoke-TestPhase -Phase "6a. UI Backend API" `
         -Script (Join-Path $testDir "Test-UIBackend.ps1") `
         -Arguments $apiArgs
 } else {
     $reason = if ($SkipUIBackend) { "-SkipUIBackend" } else { "no -UIBaseUrl" }
-    Write-Host "`n  ○ Phase 5a: SKIPPED ($reason)" -ForegroundColor DarkYellow
+    Write-Host "`n  ○ Phase 6a: SKIPPED ($reason)" -ForegroundColor DarkYellow
 }
 
 # ══════════════════════════════════════════════════════════════════════
-# PHASE 5b: Playwright E2E Browser Tests (against mock backend)
+# PHASE 6b: Playwright E2E Browser Tests (against mock backend)
 # ══════════════════════════════════════════════════════════════════════
 
 if (-not $SkipE2E) {
     Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
-    Write-Host "  Phase: 5b. UI E2E Browser Tests" -ForegroundColor Yellow
+    Write-Host "  Phase: 6b. UI E2E Browser Tests" -ForegroundColor Yellow
     Write-Host "  Script: npx playwright test" -ForegroundColor Gray
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
 
@@ -267,7 +289,7 @@ if (-not $SkipE2E) {
     $nodeAvailable = $null -ne (Get-Command "node" -ErrorAction SilentlyContinue)
     if (-not $nodeAvailable) {
         Write-Host "  ✗ Node.js not found — install Node.js 20+ to run E2E tests" -ForegroundColor Red
-        Add-PhaseResult -Phase "5b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode 1 -Duration 0
+        Add-PhaseResult -Phase "6b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode 1 -Duration 0
     } else {
         # Ensure dependencies are installed
         Write-Host "  → Installing dependencies..." -ForegroundColor Cyan
@@ -288,14 +310,14 @@ if (-not $SkipE2E) {
             $e2eExitCode = $LASTEXITCODE
 
             $e2eDuration = ((Get-Date) - $e2eStart).TotalSeconds
-            $e2ePassed = Add-PhaseResult -Phase "5b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode $e2eExitCode -Duration $e2eDuration
+            $e2ePassed = Add-PhaseResult -Phase "6b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode $e2eExitCode -Duration $e2eDuration
 
             if (-not $e2ePassed) {
                 Write-Host "  → Report: $frontendDir/playwright-report/index.html" -ForegroundColor Yellow
             }
         } catch {
             $e2eDuration = ((Get-Date) - $e2eStart).TotalSeconds
-            Add-PhaseResult -Phase "5b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode 1 -Duration $e2eDuration
+            Add-PhaseResult -Phase "6b. UI E2E Browser Tests" -Script "npx playwright test" -ExitCode 1 -Duration $e2eDuration
             Write-Host "  ✗ E2E test error: $($_.Exception.Message)" -ForegroundColor Red
         } finally {
             Pop-Location
@@ -308,7 +330,7 @@ if (-not $SkipE2E) {
         exit 1
     }
 } else {
-    Write-Host "`n  ○ Phase 5b: SKIPPED (-SkipE2E)" -ForegroundColor DarkYellow
+    Write-Host "`n  ○ Phase 6b: SKIPPED (-SkipE2E)" -ForegroundColor DarkYellow
 }
 
 # ══════════════════════════════════════════════════════════════════════

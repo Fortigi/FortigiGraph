@@ -215,6 +215,34 @@ foreach ($func in $riskFunctions) {
     Add-TestResult -Category "Functions-RiskScoring" -TestName "$func exists" -Passed $exists -Message $(if (-not $exists) { "Function not found" })
 }
 
+Write-TestHeader "2h. Function Availability — Account Correlation (4 functions)"
+
+$correlationFunctions = @(
+    "Invoke-FGAccountCorrelation",
+    "New-FGCorrelationRuleset",
+    "Get-FGCorrelationRuleset",
+    "Save-FGCorrelationRuleset"
+)
+
+foreach ($func in $correlationFunctions) {
+    $exists = $null -ne (Get-Command $func -ErrorAction SilentlyContinue)
+    Add-TestResult -Category "Functions-Correlation" -TestName "$func exists" -Passed $exists -Message $(if (-not $exists) { "Function not found" })
+}
+
+# Verify correlation function aliases
+$correlationAliases = @(
+    @{ Function = "Invoke-FGAccountCorrelation"; Alias = "Invoke-AccountCorrelation" },
+    @{ Function = "New-FGCorrelationRuleset";    Alias = "New-CorrelationRuleset" },
+    @{ Function = "Get-FGCorrelationRuleset";    Alias = "Get-CorrelationRuleset" },
+    @{ Function = "Save-FGCorrelationRuleset";   Alias = "Save-CorrelationRuleset" }
+)
+
+foreach ($pair in $correlationAliases) {
+    $alias = Get-Alias $pair.Alias -ErrorAction SilentlyContinue
+    $correct = $alias -and ($alias.Definition -eq $pair.Function)
+    Add-TestResult -Category "Functions-Correlation" -TestName "Alias $($pair.Alias) → $($pair.Function)" -Passed $correct -Message $(if (-not $correct) { "Alias missing or points to wrong function" })
+}
+
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 3: Removed Function Verification
 # ══════════════════════════════════════════════════════════════════════

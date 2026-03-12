@@ -19,7 +19,7 @@ test.describe('App Navigation', () => {
 
   test('all main tabs are visible', async ({ page }) => {
     const tabs = ['Matrix', 'Users', 'Groups', 'Access Packages', 'Sync Log',
-                  'Risk Scores', 'Org Chart', 'Performance'];
+                  'Risk Scores', 'Identities', 'Org Chart', 'Performance'];
 
     for (const tab of tabs) {
       await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
@@ -50,6 +50,11 @@ test.describe('App Navigation', () => {
 
     await page.goto('/#sync-log');
     await expect(page.locator('h2')).toContainText('Sync Log');
+
+    await page.goto('/#identities');
+    await page.waitForTimeout(300);
+    // Identities page should load without crashing (content depends on data)
+    await expect(page.locator('nav')).toBeVisible();
   });
 
   test('no auth gate shown when AUTH_ENABLED=false', async ({ page }) => {
