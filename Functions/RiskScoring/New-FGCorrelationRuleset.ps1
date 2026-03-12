@@ -1,4 +1,4 @@
-function New-FGCorrelationRuleset {
+﻿function New-FGCorrelationRuleset {
     <#
     .SYNOPSIS
         Generates an account correlation ruleset for identifying accounts belonging to the same person.
@@ -47,7 +47,7 @@ function New-FGCorrelationRuleset {
         New-FGCorrelationRuleset -ConfigFile .\Config\fortigi.json
 
     .EXAMPLE
-        # No LLM — just universal defaults + database patterns
+        # No LLM  -  just universal defaults + database patterns
         New-FGCorrelationRuleset -ConfigFile .\Config\fortigi.json -NoLLM
 
     .EXAMPLE
@@ -78,7 +78,7 @@ function New-FGCorrelationRuleset {
     )
 
     # ================================================================
-    # Configuration — read LLM settings from config
+    # Configuration  -  read LLM settings from config
     # ================================================================
 
     if ($ConfigFile) {
@@ -118,7 +118,7 @@ function New-FGCorrelationRuleset {
                 }
             }
         } elseif (-not $NoLLM) {
-            # No LLM section in config — prompt to add it
+            # No LLM section in config  -  prompt to add it
             Write-Host ""
             Write-Host "  No LLM configuration found in config file." -ForegroundColor Yellow
             Write-Host "  LLM mode uses an AI to discover org-specific naming patterns." -ForegroundColor Gray
@@ -473,21 +473,265 @@ function New-FGCorrelationRuleset {
             Write-Host ""
         }
     } else {
-        Write-Host "  No SQL connection — skipping database pattern sampling." -ForegroundColor Gray
+        Write-Host "  No SQL connection  -  skipping database pattern sampling." -ForegroundColor Gray
         Write-Host ""
     }
 
     # ================================================================
-    # Step 1b: HR Source Discovery
+    # Step 1b: HR Source Configuration
     # ================================================================
-
-    Write-Host "--- Step 1b: HR Source Discovery ---" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "--- Step 1b: HR Source Configuration ---" -ForegroundColor Cyan
 
     $hrDiscovery = $null
     $hrSourceConfig = $null
+    $hrProvisioningApps = @()
+    $skipHrDiscovery = $false
 
-    # Sample HR indicator statistics from the database
-    if ($global:FGSQLConnectionString) {
+    # Ask the user first  -  most admins know their environment
+    Write-Host ""
+    Write-Host "  Account correlation works best when we can identify which accounts are" -ForegroundColor Gray
+    Write-Host "  managed by HR (e.g., provisioned from Workday, SuccessFactors, or on-prem AD)." -ForegroundColor Gray
+    Write-Host "  HR-managed accounts become identity anchors that other accounts correlate to." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [Y] Yes, we have HR sync and I know how to identify HR-managed accounts" -ForegroundColor White
+    Write-Host "  [D] Not sure  -  run discovery to analyze user attributes automatically" -ForegroundColor White
+    Write-Host "  [N] No HR sync  -  use symmetric matching (fuzzy name-based correlation only)" -ForegroundColor White
+    Write-Host ""
+    $hrChoice = Read-Host "  Do you have an HR sync to Entra ID? (Y/D/N, default: D)"
+
+    if ($hrChoice -match '^[Yy]') {
+        # ---- User knows their HR setup  -  guided attribute selection ----
+        Write-Host ""
+        Write-Host "  Let's identify HR-managed accounts step by step." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Is there a specific user attribute that reliably identifies HR-managed accounts?" -ForegroundColor Yellow
+        Write-Host "  This could be:" -ForegroundColor Gray
+        Write-Host "    - A boolean extension attribute (e.g., extension_abc123_sfFromHR = true)" -ForegroundColor Gray
+        Write-Host "    - An employeeType value (e.g., 'Employee' or 'Intern')" -ForegroundColor Gray
+        Write-Host "    - An employeeId being populated (HR-managed users always have one)" -ForegroundColor Gray
+        Write-Host "    - Any other attribute/value combination" -ForegroundColor Gray
+        Write-Host ""
+
+        # Step 1: Get the attribute name
+        Write-Host "  What is the attribute name?" -ForegroundColor Yellow
+        Write-Host "    [1] employeeId (populated = HR-managed)" -ForegroundColor White
+        Write-Host "    [2] employeeType" -ForegroundColor White
+        Write-Host "    [3] companyName" -ForegroundColor White
+        Write-Host "    [4] department" -ForegroundColor White
+        Write-Host "    [5] onPremisesSyncEnabled" -ForegroundColor White
+        Write-Host "    [6] Other (type the full attribute name)" -ForegroundColor White
+        Write-Host ""
+        $attrChoice = Read-Host "  Select (1-6)"
+
+        $hrAttrName = $null
+        $hrAttrCondition = $null
+        $hrAttrValue = $null
+
+        switch ($attrChoice) {
+            "1" {
+                $hrAttrName = "employeeId"
+                $hrAttrCondition = "isNotNull"
+                Write-Host "  Using: employeeId IS NOT NULL (populated = HR-managed)" -ForegroundColor Green
+            }
+            "2" { $hrAttrName = "employeeType" }
+            "3" { $hrAttrName = "companyName" }
+            "4" { $hrAttrName = "department" }
+            "5" {
+                $hrAttrName = "onPremisesSyncEnabled"
+                $hrAttrCondition = "equals"
+                $hrAttrValue = "True"
+                Write-Host "  Using: onPremisesSyncEnabled = 'True'" -ForegroundColor Green
+            }
+            "6" {
+                $customName = Read-Host "  Attribute name (e.g., extension_abc123_sfFromHR)"
+                $hrAttrName = $customName.Trim()
+            }
+            default {
+                $customName = Read-Host "  Attribute name (e.g., extension_abc123_sfFromHR)"
+                $hrAttrName = $customName.Trim()
+            }
+        }
+
+        # Step 2: Get the condition/value if not already set
+        if ($hrAttrName -and -not $hrAttrCondition) {
+            Write-Host ""
+            Write-Host "  How should we match on '$hrAttrName'?" -ForegroundColor Yellow
+            Write-Host "    [1] Equals a specific value (e.g., 'true', 'Employee')" -ForegroundColor White
+            Write-Host "    [2] Is not null/empty (attribute is populated = HR-managed)" -ForegroundColor White
+            Write-Host "    [3] Contains one of several values (e.g., 'Employee', 'Intern', 'Contractor')" -ForegroundColor White
+            Write-Host ""
+            $condChoice = Read-Host "  Select (1-3, default: 1)"
+
+            switch ($condChoice) {
+                "2" {
+                    $hrAttrCondition = "isNotNull"
+                    Write-Host "  Using: $hrAttrName IS NOT NULL" -ForegroundColor Green
+                }
+                "3" {
+                    $hrAttrCondition = "inValues"
+                    $valuesInput = Read-Host "  Enter values (comma-separated, e.g., Employee,Intern,Contractor)"
+                    $hrAttrValue = @($valuesInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    Write-Host "  Using: $hrAttrName IN ($($hrAttrValue -join ', '))" -ForegroundColor Green
+                }
+                default {
+                    $hrAttrCondition = "equals"
+                    $valueInput = Read-Host "  What value identifies HR-managed accounts? (e.g., true, Employee)"
+                    $hrAttrValue = $valueInput.Trim()
+                    Write-Host "  Using: $hrAttrName = '$hrAttrValue'" -ForegroundColor Green
+                }
+            }
+        }
+
+        # Step 3: Ask confidence level
+        if ($hrAttrName) {
+            Write-Host ""
+            Write-Host "  How confident are you that this attribute reliably identifies HR-managed accounts?" -ForegroundColor Yellow
+            Write-Host "    [1] 100% certain - this is authoritative (e.g., HR provisioning sets a boolean)" -ForegroundColor White
+            Write-Host "    [2] Very confident (90%) - some edge cases may exist" -ForegroundColor White
+            Write-Host "    [3] Fairly confident (75%) - mostly reliable but not perfect" -ForegroundColor White
+            Write-Host "    [4] Not very sure (50%) - let's also run discovery to find more signals" -ForegroundColor White
+            Write-Host ""
+            $confChoice = Read-Host "  Select (1-4, default: 2)"
+
+            $hrConfidence = switch ($confChoice) {
+                "1" { 100 }
+                "3" { 75 }
+                "4" { 50 }
+                default { 90 }
+            }
+
+            # Validate the attribute exists in the database and check coverage
+            $hrAttrCoverage = 0
+            if ($global:FGSQLConnectionString) {
+                try {
+                    $validationResult = Invoke-FGSQLCommand -ScriptBlock {
+                        param($connection)
+
+                        # Check if column exists
+                        $cmd = $connection.CreateCommand()
+                        $cmd.CommandTimeout = 30
+                        $cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = @ColName"
+                        $cmd.Parameters.AddWithValue("@ColName", $hrAttrName) | Out-Null
+                        $colExists = [int]$cmd.ExecuteScalar() -gt 0
+
+                        if (-not $colExists) {
+                            return @{ exists = $false; total = 0; matches = 0 }
+                        }
+
+                        # Count total users
+                        $cmd = $connection.CreateCommand()
+                        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers"
+                        $totalUsers = [int]$cmd.ExecuteScalar()
+
+                        # Count matching users
+                        $cmd = $connection.CreateCommand()
+                        if ($hrAttrCondition -eq 'isNotNull') {
+                            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE [$hrAttrName] IS NOT NULL AND CAST([$hrAttrName] AS NVARCHAR(MAX)) <> ''"
+                        } elseif ($hrAttrCondition -eq 'equals') {
+                            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE CAST([$hrAttrName] AS NVARCHAR(MAX)) = @Val"
+                            $cmd.Parameters.AddWithValue("@Val", $hrAttrValue) | Out-Null
+                        } elseif ($hrAttrCondition -eq 'inValues') {
+                            # Build parameterized IN clause
+                            $inParams = @()
+                            for ($i = 0; $i -lt $hrAttrValue.Count; $i++) {
+                                $paramName = "@V$i"
+                                $inParams += $paramName
+                                $cmd.Parameters.AddWithValue($paramName, $hrAttrValue[$i]) | Out-Null
+                            }
+                            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE CAST([$hrAttrName] AS NVARCHAR(MAX)) IN ($($inParams -join ','))"
+                        }
+                        $matchCount = [int]$cmd.ExecuteScalar()
+
+                        return @{ exists = $true; total = $totalUsers; matches = $matchCount }
+                    }
+
+                    if (-not $validationResult.exists) {
+                        Write-Host ""
+                        Write-Host "  WARNING: Column '$hrAttrName' does not exist in GraphUsers table." -ForegroundColor Red
+                        Write-Host "  Make sure this attribute is included in your user sync (AdditionalAttributes)." -ForegroundColor Yellow
+                        Write-Host "  The attribute will still be saved in the ruleset for future use." -ForegroundColor Gray
+                    } elseif ($validationResult.total -gt 0) {
+                        $hrAttrCoverage = [math]::Round($validationResult.matches / $validationResult.total * 100, 1)
+                        Write-Host ""
+                        Write-Host "  Validation: $($validationResult.matches) of $($validationResult.total) users match ($hrAttrCoverage%)" -ForegroundColor $(if ($hrAttrCoverage -gt 20) { 'Green' } elseif ($hrAttrCoverage -gt 5) { 'Yellow' } else { 'Red' })
+
+                        if ($hrAttrCoverage -lt 5) {
+                            Write-Host "  Very low coverage  -  are you sure this is the right attribute?" -ForegroundColor Yellow
+                        }
+                    }
+                } catch {
+                    Write-Host "  Could not validate attribute: $_" -ForegroundColor Yellow
+                }
+            }
+
+            # Build HR source config from user input
+            $hrIndicator = [ordered]@{
+                id          = "userDefinedHrAttribute"
+                attribute   = $hrAttrName
+                condition   = $hrAttrCondition
+                weight      = if ($hrConfidence -ge 90) { 5 } elseif ($hrConfidence -ge 75) { 3 } else { 2 }
+                confidence  = $hrConfidence
+                coverage    = $hrAttrCoverage
+            }
+            if ($hrAttrValue -and $hrAttrCondition -eq 'equals') {
+                $hrIndicator.value = $hrAttrValue
+            } elseif ($hrAttrValue -and $hrAttrCondition -eq 'inValues') {
+                $hrIndicator.values = $hrAttrValue
+            }
+
+            $hrSourceConfig = [ordered]@{
+                enabled          = $true
+                description      = "HR-authoritative account detection (user-defined: $hrAttrName)"
+                indicators       = @($hrIndicator)
+                minimumScore     = 1
+                provisioningApps = @()
+                orphanDetection  = [ordered]@{
+                    enabled                = $true
+                    stalenessThresholdDays = 90
+                }
+            }
+
+            Write-Host ""
+            Write-Host "  HR anchoring configured:" -ForegroundColor Green
+            $attrValueDisplay = if ($hrAttrValue) { " = $hrAttrValue" } else { "" }
+            Write-Host "    Attribute: $hrAttrName ($hrAttrCondition$attrValueDisplay)" -ForegroundColor White
+            Write-Host "    Confidence: $hrConfidence%" -ForegroundColor White
+            Write-Host "    Coverage: $hrAttrCoverage%" -ForegroundColor White
+
+            # If confidence is low, also run discovery for additional signals
+            if ($hrConfidence -le 50) {
+                Write-Host ""
+                Write-Host "  Since confidence is moderate, running additional discovery..." -ForegroundColor Yellow
+                $skipHrDiscovery = $false
+            } else {
+                $skipHrDiscovery = $true
+
+                # Ask about staleness threshold
+                Write-Host ""
+                $staleInput = Read-Host "  Orphan staleness threshold in days (default: 90)"
+                if ($staleInput.Trim() -and $staleInput.Trim() -match '^\d+$') {
+                    $hrSourceConfig.orphanDetection.stalenessThresholdDays = [int]$staleInput.Trim()
+                }
+            }
+        }
+
+    } elseif ($hrChoice -match '^[Nn]') {
+        # ---- No HR sync  -  skip everything ----
+        $skipHrDiscovery = $true
+        Write-Host ""
+        Write-Host "  No HR sync. Correlation will use symmetric matching (name-based only)." -ForegroundColor Gray
+        Write-Host ""
+    } else {
+        # ---- Discovery mode (default)  -  auto-detect HR indicators ----
+        $skipHrDiscovery = $false
+    }
+
+    # ---- Auto-discovery of HR indicators (if not skipped) ----
+    if (-not $skipHrDiscovery -and $global:FGSQLConnectionString) {
+        Write-Host ""
+        Write-Host "  Running HR indicator discovery..." -ForegroundColor Cyan
+
         try {
             $hrDiscovery = Invoke-FGSQLCommand -ScriptBlock {
                 param($connection)
@@ -518,19 +762,16 @@ function New-FGCorrelationRuleset {
                     $results.hasColumns[$col] = $col -in $existingCols
                 }
 
-                # Total users
                 $cmd = $connection.CreateCommand()
                 $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers"
                 $results.totalUsers = [int]$cmd.ExecuteScalar()
 
-                # employeeId coverage
                 if ($results.hasColumns['employeeId']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE employeeId IS NOT NULL AND employeeId <> ''"
                     $results.employeeIdCount = [int]$cmd.ExecuteScalar()
                 }
 
-                # employeeType distinct values
                 if ($results.hasColumns['employeeType']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT employeeType, COUNT(*) AS cnt FROM dbo.GraphUsers WHERE employeeType IS NOT NULL AND employeeType <> '' GROUP BY employeeType ORDER BY cnt DESC"
@@ -541,7 +782,6 @@ function New-FGCorrelationRuleset {
                     $reader.Close()
                 }
 
-                # onPremisesSyncEnabled
                 if ($results.hasColumns['onPremisesSyncEnabled']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE onPremisesSyncEnabled = 'True'"
@@ -551,7 +791,6 @@ function New-FGCorrelationRuleset {
                     $results.onPremNotSyncCount = [int]$cmd.ExecuteScalar()
                 }
 
-                # OU patterns from onPremisesDistinguishedName
                 if ($results.hasColumns['onPremisesDistinguishedName']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandTimeout = 60
@@ -577,28 +816,24 @@ function New-FGCorrelationRuleset {
                     $reader.Close()
                 }
 
-                # managerId coverage (uniqueidentifier column — avoid string comparison)
                 if ($results.hasColumns['managerId']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE managerId IS NOT NULL AND CAST(managerId AS NVARCHAR(36)) <> ''"
                     $results.managerIdCount = [int]$cmd.ExecuteScalar()
                 }
 
-                # companyName coverage
                 if ($results.hasColumns['companyName']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE companyName IS NOT NULL AND companyName <> ''"
                     $results.companyNameCount = [int]$cmd.ExecuteScalar()
                 }
 
-                # employeeHireDate coverage
                 if ($results.hasColumns['employeeHireDate']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE employeeHireDate IS NOT NULL"
                     $results.employeeHireDateCount = [int]$cmd.ExecuteScalar()
                 }
 
-                # Combo: employeeId AND managerId (strong HR signal)
                 if ($results.hasColumns['employeeId'] -and $results.hasColumns['managerId']) {
                     $cmd = $connection.CreateCommand()
                     $cmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphUsers WHERE employeeId IS NOT NULL AND employeeId <> '' AND managerId IS NOT NULL AND CAST(managerId AS NVARCHAR(36)) <> ''"
@@ -620,7 +855,7 @@ function New-FGCorrelationRuleset {
                 if ($hrDiscovery.employeeTypeValues.Count -gt 0) {
                     Write-Host "    employeeType values:" -ForegroundColor Gray
                     foreach ($et in $hrDiscovery.employeeTypeValues | Select-Object -First 5) {
-                        Write-Host "      '$($et.value)' — $($et.count) accounts" -ForegroundColor White
+                        Write-Host "      '$($et.value)'  -  $($et.count) accounts" -ForegroundColor White
                     }
                 }
                 if ($hrDiscovery.hasColumns['onPremisesSyncEnabled']) {
@@ -630,7 +865,7 @@ function New-FGCorrelationRuleset {
                 if ($hrDiscovery.ouPatterns.Count -gt 0) {
                     Write-Host "    OU patterns (top 5):" -ForegroundColor Gray
                     foreach ($ou in $hrDiscovery.ouPatterns | Select-Object -First 5) {
-                        Write-Host "      $($ou.path) — $($ou.count) accounts" -ForegroundColor White
+                        Write-Host "      $($ou.path)  -  $($ou.count) accounts" -ForegroundColor White
                     }
                 }
                 if ($hrDiscovery.hasColumns['managerId']) {
@@ -647,7 +882,7 @@ function New-FGCorrelationRuleset {
                 }
                 if ($hrDiscovery.managedByHrCombo -gt 0) {
                     $comboPct = [math]::Round($hrDiscovery.managedByHrCombo / $total * 100, 1)
-                    Write-Host "    employeeId + managerId:     $($hrDiscovery.managedByHrCombo) ($comboPct%) — strong HR signal" -ForegroundColor Green
+                    Write-Host "    employeeId + managerId:     $($hrDiscovery.managedByHrCombo) ($comboPct%)  -  strong HR signal" -ForegroundColor Green
                 }
                 Write-Host ""
             }
@@ -655,242 +890,98 @@ function New-FGCorrelationRuleset {
             Write-Host "  Could not sample HR indicators: $_" -ForegroundColor Yellow
             Write-Host ""
         }
-    }
 
-    # Discover HR provisioning apps via Graph API
-    $hrProvisioningApps = @()
-    if ($global:AccessToken) {
-        try {
-            Write-Host "  Checking for HR provisioning apps in Entra ID..." -ForegroundColor Gray
-            $syncApps = Get-FGServicePrincipalWithSync -IncludeJobs -ErrorAction SilentlyContinue
-            if ($syncApps) {
-                $hrProvisioningApps = @($syncApps | Where-Object { $_.AppType -like "HR Provisioning*" -or $_.AppType -eq "Cloud Sync / AD" -or $_.AppType -eq "Cloud Sync" })
-                if ($hrProvisioningApps.Count -gt 0) {
-                    Write-Host "  Discovered provisioning apps:" -ForegroundColor Green
-                    foreach ($app in $hrProvisioningApps) {
-                        $jobStatus = if ($app.Jobs) { ($app.Jobs | ForEach-Object { $_.schedule.state }) -join ', ' } else { 'unknown' }
-                        Write-Host "    $($app.DisplayName) ($($app.AppType)) — $($app.JobCount) job(s), status: $jobStatus" -ForegroundColor White
+        # Discover HR provisioning apps via Graph API
+        if ($global:AccessToken) {
+            try {
+                Write-Host "  Checking for HR provisioning apps in Entra ID..." -ForegroundColor Gray
+                $syncApps = Get-FGServicePrincipalWithSync -IncludeJobs -ErrorAction SilentlyContinue
+                if ($syncApps) {
+                    $hrProvisioningApps = @($syncApps | Where-Object { $_.AppType -like "HR Provisioning*" -or $_.AppType -eq "Cloud Sync / AD" -or $_.AppType -eq "Cloud Sync" })
+                    if ($hrProvisioningApps.Count -gt 0) {
+                        Write-Host "  Discovered provisioning apps:" -ForegroundColor Green
+                        foreach ($app in $hrProvisioningApps) {
+                            $jobStatus = if ($app.Jobs) { ($app.Jobs | ForEach-Object { $_.schedule.state }) -join ', ' } else { 'unknown' }
+                            Write-Host "    $($app.DisplayName) ($($app.AppType))  -  $($app.JobCount) job(s), status: $jobStatus" -ForegroundColor White
+                        }
+                    } else {
+                        Write-Host "  No HR provisioning or Cloud Sync apps found" -ForegroundColor Gray
                     }
-                } else {
-                    Write-Host "  No HR provisioning or Cloud Sync apps found" -ForegroundColor Gray
                 }
-            }
-            Write-Host ""
-        } catch {
-            Write-Host "  Could not discover provisioning apps: $_" -ForegroundColor Yellow
-            Write-Host ""
-        }
-    } else {
-        Write-Host "  No Graph access token — skipping provisioning app discovery." -ForegroundColor Gray
-        Write-Host ""
-    }
-
-    # Build HR source config based on discovery
-    if ($hrDiscovery -and $hrDiscovery.totalUsers -gt 0) {
-        $total = $hrDiscovery.totalUsers
-        $hrIndicators = @()
-
-        # employeeId — strongest HR signal
-        if ($hrDiscovery.hasColumns['employeeId'] -and $hrDiscovery.employeeIdCount -gt 0) {
-            $coverage = [math]::Round($hrDiscovery.employeeIdCount / $total * 100, 1)
-            if ($coverage -ge 10) {
-                $hrIndicators += [ordered]@{
-                    id          = "employeeId"
-                    attribute   = "employeeId"
-                    condition   = "isNotNull"
-                    weight      = 3
-                    confidence  = 95
-                    coverage    = $coverage
-                }
+                Write-Host ""
+            } catch {
+                Write-Host "  Could not discover provisioning apps: $_" -ForegroundColor Yellow
+                Write-Host ""
             }
         }
 
-        # employeeType values
-        if ($hrDiscovery.employeeTypeValues.Count -gt 0) {
-            $hrTypeValues = @($hrDiscovery.employeeTypeValues | Where-Object { $_.count -ge 10 } | ForEach-Object { $_.value })
-            if ($hrTypeValues.Count -gt 0) {
-                $typeCoverage = [math]::Round(($hrDiscovery.employeeTypeValues | Where-Object { $_.value -in $hrTypeValues } | Measure-Object -Property count -Sum).Sum / $total * 100, 1)
-                $hrIndicators += [ordered]@{
-                    id          = "employeeType"
-                    attribute   = "employeeType"
-                    condition   = "inValues"
-                    values      = $hrTypeValues
-                    weight      = 2
-                    confidence  = 85
-                    coverage    = $typeCoverage
-                }
-            }
-        }
+        # Build HR source config from discovered indicators (only if user didn't already define one)
+        if (-not $hrSourceConfig -and $hrDiscovery -and $hrDiscovery.totalUsers -gt 0) {
+            $total = $hrDiscovery.totalUsers
+            $hrIndicators = @()
 
-        # onPremisesSyncEnabled
-        if ($hrDiscovery.hasColumns['onPremisesSyncEnabled'] -and $hrDiscovery.onPremSyncCount -gt 0) {
-            $syncCoverage = [math]::Round($hrDiscovery.onPremSyncCount / $total * 100, 1)
-            if ($syncCoverage -ge 20) {
-                $hrIndicators += [ordered]@{
-                    id          = "onPremisesSync"
-                    attribute   = "onPremisesSyncEnabled"
-                    condition   = "equals"
-                    value       = "True"
-                    weight      = 1
-                    confidence  = 60
-                    coverage    = $syncCoverage
-                }
-            }
-        }
-
-        # OU patterns — identify likely HR OUs
-        if ($hrDiscovery.ouPatterns.Count -gt 0 -and $hrDiscovery.hasColumns['employeeId']) {
-            # The largest OUs are likely HR-managed (employees)
-            $topOUs = @($hrDiscovery.ouPatterns | Select-Object -First 5 | ForEach-Object { $_.path })
-            if ($topOUs.Count -gt 0) {
-                $ouCoverage = [math]::Round(($hrDiscovery.ouPatterns | Select-Object -First 5 | Measure-Object -Property count -Sum).Sum / $total * 100, 1)
-                $hrIndicators += [ordered]@{
-                    id          = "organizationalUnit"
-                    attribute   = "onPremisesDistinguishedName"
-                    condition   = "containsAny"
-                    values      = $topOUs
-                    weight      = 2
-                    confidence  = 75
-                    coverage    = $ouCoverage
-                }
-            }
-        }
-
-        # managerId
-        if ($hrDiscovery.hasColumns['managerId'] -and $hrDiscovery.managerIdCount -gt 0) {
-            $mgrCoverage = [math]::Round($hrDiscovery.managerIdCount / $total * 100, 1)
-            if ($mgrCoverage -ge 30) {
-                $hrIndicators += [ordered]@{
-                    id          = "hasManager"
-                    attribute   = "managerId"
-                    condition   = "isNotNull"
-                    weight      = 1
-                    confidence  = 40
-                    coverage    = $mgrCoverage
-                }
-            }
-        }
-
-        # Determine if we have enough signals for HR anchoring
-        $totalWeight = ($hrIndicators | Measure-Object -Property weight -Sum).Sum
-        $bestCoverage = if ($hrIndicators.Count -gt 0) { ($hrIndicators | Sort-Object coverage -Descending | Select-Object -First 1).coverage } else { 0 }
-
-        if ($hrIndicators.Count -gt 0 -and $totalWeight -ge 3) {
-            $hrSourceConfig = [ordered]@{
-                enabled          = $true
-                description      = "HR-authoritative account detection"
-                indicators       = $hrIndicators
-                minimumScore     = [math]::Min(3, $totalWeight)
-                provisioningApps = @($hrProvisioningApps | ForEach-Object { [ordered]@{ name = $_.DisplayName; type = $_.AppType; appId = $_.AppId } })
-                orphanDetection  = [ordered]@{
-                    enabled                = $true
-                    stalenessThresholdDays = 90
+            if ($hrDiscovery.hasColumns['employeeId'] -and $hrDiscovery.employeeIdCount -gt 0) {
+                $coverage = [math]::Round($hrDiscovery.employeeIdCount / $total * 100, 1)
+                if ($coverage -ge 10) {
+                    $hrIndicators += [ordered]@{ id = "employeeId"; attribute = "employeeId"; condition = "isNotNull"; weight = 3; confidence = 95; coverage = $coverage }
                 }
             }
 
-            Write-Host "  HR Source Configuration:" -ForegroundColor Green
-            Write-Host "    Indicators found:   $($hrIndicators.Count) (total weight: $totalWeight, min score: $($hrSourceConfig.minimumScore))" -ForegroundColor White
-            foreach ($ind in $hrIndicators) {
-                Write-Host "    $($ind.id): weight=$($ind.weight), coverage=$($ind.coverage)%" -ForegroundColor Gray
+            if ($hrDiscovery.employeeTypeValues.Count -gt 0) {
+                $hrTypeValues = @($hrDiscovery.employeeTypeValues | Where-Object { $_.count -ge 10 } | ForEach-Object { $_.value })
+                if ($hrTypeValues.Count -gt 0) {
+                    $typeCoverage = [math]::Round(($hrDiscovery.employeeTypeValues | Where-Object { $_.value -in $hrTypeValues } | Measure-Object -Property count -Sum).Sum / $total * 100, 1)
+                    $hrIndicators += [ordered]@{ id = "employeeType"; attribute = "employeeType"; condition = "inValues"; values = $hrTypeValues; weight = 2; confidence = 85; coverage = $typeCoverage }
+                }
             }
-            if ($hrProvisioningApps.Count -gt 0) {
-                Write-Host "    Provisioning apps:  $($hrProvisioningApps.Count) detected" -ForegroundColor White
-            }
-            Write-Host "    Orphan detection:   enabled (stale after 90 days)" -ForegroundColor White
-        } else {
-            Write-Host "  Insufficient HR indicators for anchored correlation (weight: $totalWeight, need >= 3)" -ForegroundColor Yellow
-            Write-Host "  Correlation will run without HR anchoring (symmetric matching only)" -ForegroundColor Gray
-        }
-        Write-Host ""
 
-        # Interactive HR configuration dialog
-        if ($useLLM -and $hrSourceConfig) {
-            Write-Host "  Do you want to enable HR-anchored correlation?" -ForegroundColor Yellow
-            Write-Host "  HR-authoritative accounts will become identity anchors." -ForegroundColor Gray
-            Write-Host "  Non-HR accounts will be matched to these anchors." -ForegroundColor Gray
-            Write-Host "  Unmatched accounts will be flagged as orphans." -ForegroundColor Gray
-            Write-Host ""
-            $hrConfirm = Read-Host "  Enable HR-anchored correlation? (Y/N, default: Y)"
-            if ($hrConfirm -match '^[Nn]') {
-                $hrSourceConfig.enabled = $false
-                Write-Host "  HR-anchored correlation disabled. Using symmetric matching." -ForegroundColor Yellow
+            if ($hrDiscovery.hasColumns['onPremisesSyncEnabled'] -and $hrDiscovery.onPremSyncCount -gt 0) {
+                $syncCoverage = [math]::Round($hrDiscovery.onPremSyncCount / $total * 100, 1)
+                if ($syncCoverage -ge 20) {
+                    $hrIndicators += [ordered]@{ id = "onPremisesSync"; attribute = "onPremisesSyncEnabled"; condition = "equals"; value = "True"; weight = 1; confidence = 60; coverage = $syncCoverage }
+                }
+            }
+
+            if ($hrDiscovery.hasColumns['managerId'] -and $hrDiscovery.managerIdCount -gt 0) {
+                $mgrCoverage = [math]::Round($hrDiscovery.managerIdCount / $total * 100, 1)
+                if ($mgrCoverage -ge 30) {
+                    $hrIndicators += [ordered]@{ id = "hasManager"; attribute = "managerId"; condition = "isNotNull"; weight = 1; confidence = 40; coverage = $mgrCoverage }
+                }
+            }
+
+            $totalWeight = ($hrIndicators | Measure-Object -Property weight -Sum).Sum
+
+            if ($hrIndicators.Count -gt 0 -and $totalWeight -ge 3) {
+                $hrSourceConfig = [ordered]@{
+                    enabled          = $true
+                    description      = "HR-authoritative account detection (auto-discovered)"
+                    indicators       = $hrIndicators
+                    minimumScore     = [math]::Min(3, $totalWeight)
+                    provisioningApps = @($hrProvisioningApps | ForEach-Object { [ordered]@{ name = $_.DisplayName; type = $_.AppType; appId = $_.AppId } })
+                    orphanDetection  = [ordered]@{ enabled = $true; stalenessThresholdDays = 90 }
+                }
+
+                Write-Host "  HR Source Configuration (auto-discovered):" -ForegroundColor Green
+                Write-Host "    Indicators: $($hrIndicators.Count) (total weight: $totalWeight)" -ForegroundColor White
+                foreach ($ind in $hrIndicators) {
+                    Write-Host "    $($ind.id): weight=$($ind.weight), confidence=$($ind.confidence)%, coverage=$($ind.coverage)%" -ForegroundColor Gray
+                }
             } else {
-                Write-Host "  HR-anchored correlation enabled." -ForegroundColor Green
+                Write-Host "  Insufficient HR indicators (weight: $totalWeight, need >= 3)" -ForegroundColor Yellow
+                Write-Host "  Correlation will use symmetric matching (name-based only)." -ForegroundColor Gray
+            }
+            Write-Host ""
 
-                # Ask about staleness threshold
-                $staleInput = Read-Host "  Orphan staleness threshold in days (default: 90)"
-                if ($staleInput.Trim() -and $staleInput.Trim() -match '^\d+$') {
-                    $hrSourceConfig.orphanDetection.stalenessThresholdDays = [int]$staleInput.Trim()
-                }
-
-                # Ask about OU patterns if we found any
-                if ($hrDiscovery.ouPatterns.Count -gt 0) {
-                    Write-Host ""
-                    Write-Host "  OU patterns found. Which OUs contain HR-managed accounts?" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt [math]::Min($hrDiscovery.ouPatterns.Count, 10); $i++) {
-                        $ou = $hrDiscovery.ouPatterns[$i]
-                        Write-Host "    [$($i+1)] $($ou.path) — $($ou.count) accounts" -ForegroundColor White
-                    }
-                    Write-Host "    [A] All of the above  [S] Skip OU-based detection" -ForegroundColor Gray
-                    $ouChoice = Read-Host "  Select (comma-separated numbers, A, or S, default: A)"
-                    if ($ouChoice -match '^[Ss]') {
-                        $hrSourceConfig.indicators = @($hrSourceConfig.indicators | Where-Object { $_.id -ne 'organizationalUnit' })
-                        Write-Host "  OU-based detection removed." -ForegroundColor Gray
-                    } elseif ($ouChoice -and $ouChoice -notmatch '^[Aa]?$') {
-                        $selectedOUs = @()
-                        foreach ($idx in ($ouChoice -split ',')) {
-                            $num = $idx.Trim() -as [int]
-                            if ($num -and $num -ge 1 -and $num -le $hrDiscovery.ouPatterns.Count) {
-                                $selectedOUs += $hrDiscovery.ouPatterns[$num - 1].path
-                            }
-                        }
-                        if ($selectedOUs.Count -gt 0) {
-                            $ouIndicator = $hrSourceConfig.indicators | Where-Object { $_.id -eq 'organizationalUnit' }
-                            if ($ouIndicator) { $ouIndicator.values = $selectedOUs }
-                            Write-Host "  Selected $($selectedOUs.Count) OU(s)." -ForegroundColor Green
-                        }
-                    }
-                }
-
-                # Ask if there's a specific attribute to identify HR-managed accounts
-                Write-Host ""
-                Write-Host "  Is there a specific attribute or property that identifies HR-managed accounts" -ForegroundColor Yellow
-                Write-Host "  in your environment? (e.g., a custom extension attribute, a specific employeeType" -ForegroundColor Gray
-                Write-Host "  value, a department name, or a companyName value)" -ForegroundColor Gray
-                Write-Host ""
-                $customAttrInput = Read-Host "  Custom HR identifier (press Enter to skip)"
-                if ($customAttrInput.Trim()) {
-                    Write-Host "  Which attribute contains this value?" -ForegroundColor Gray
-                    Write-Host "    [1] employeeType" -ForegroundColor White
-                    Write-Host "    [2] department" -ForegroundColor White
-                    Write-Host "    [3] companyName" -ForegroundColor White
-                    Write-Host "    [4] jobTitle" -ForegroundColor White
-                    Write-Host "    [5] Other (type attribute name)" -ForegroundColor White
-                    $attrChoice = Read-Host "  Select (default: 1)"
-                    $customAttr = switch ($attrChoice) {
-                        "2" { "department" }
-                        "3" { "companyName" }
-                        "4" { "jobTitle" }
-                        "5" {
-                            $custom = Read-Host "  Attribute name"
-                            $custom.Trim()
-                        }
-                        default { "employeeType" }
-                    }
-                    if ($customAttr) {
-                        $hrSourceConfig.indicators += [ordered]@{
-                            id          = "customHrAttribute"
-                            attribute   = $customAttr
-                            condition   = "equals"
-                            value       = $customAttrInput.Trim()
-                            weight      = 3
-                            confidence  = 90
-                            coverage    = 0
-                        }
-                        Write-Host "  Added custom HR indicator: $customAttr = '$($customAttrInput.Trim())' (weight: 3)" -ForegroundColor Green
-                    }
+        } elseif ($hrSourceConfig -and $hrDiscovery -and $hrDiscovery.totalUsers -gt 0) {
+            # User provided HR config with low confidence  -  add discovery signals
+            $total = $hrDiscovery.totalUsers
+            if ($hrDiscovery.hasColumns['employeeId'] -and $hrDiscovery.employeeIdCount -gt 0) {
+                $coverage = [math]::Round($hrDiscovery.employeeIdCount / $total * 100, 1)
+                if ($coverage -ge 10) {
+                    $hrSourceConfig.indicators += [ordered]@{ id = "employeeId"; attribute = "employeeId"; condition = "isNotNull"; weight = 2; confidence = 95; coverage = $coverage }
                 }
             }
+            Write-Host "  Added discovery signals to support user-defined HR attribute." -ForegroundColor Green
             Write-Host ""
         }
     }
@@ -901,7 +992,7 @@ function New-FGCorrelationRuleset {
     # ================================================================
 
     if ($useLLM) {
-        # ── Interactive mode: LLM discovery ──
+        # ---- Interactive mode: LLM discovery ----
         Write-Host "--- Step 2: LLM Pattern Discovery ---" -ForegroundColor Cyan
         Write-Host ""
         Write-Host "  The following ANONYMIZED data will be sent to ${LLMProvider}:" -ForegroundColor Yellow
@@ -917,31 +1008,31 @@ function New-FGCorrelationRuleset {
         # Build anonymized context for the LLM
         $patternContext = ""
         if ($sampledPatterns) {
-            $patternContext = "`n`nDATABASE PATTERN ANALYSIS (anonymized — only structural patterns, no actual names):`n"
+            $patternContext = "`n`nDATABASE PATTERN ANALYSIS (anonymized  -  only structural patterns, no actual names):`n"
             $patternContext += "Total accounts: $($sampledPatterns.totalUsers)`n"
 
             if ($sampledPatterns.upnPrefixPatterns.Count -gt 0) {
                 $patternContext += "`nUPN prefix patterns (prefix + separator, before the person's name):`n"
                 foreach ($p in $sampledPatterns.upnPrefixPatterns | Select-Object -First 15) {
-                    $patternContext += "  '$($p.pattern)' — $($p.count) accounts`n"
+                    $patternContext += "  '$($p.pattern)'  -  $($p.count) accounts`n"
                 }
             }
             if ($sampledPatterns.upnSuffixPatterns.Count -gt 0) {
                 $patternContext += "`nUPN suffix patterns (separator + suffix, after the person's name):`n"
                 foreach ($p in $sampledPatterns.upnSuffixPatterns | Select-Object -First 15) {
-                    $patternContext += "  '$($p.pattern)' — $($p.count) accounts`n"
+                    $patternContext += "  '$($p.pattern)'  -  $($p.count) accounts`n"
                 }
             }
             if ($sampledPatterns.samPrefixPatterns.Count -gt 0) {
                 $patternContext += "`nSAM account prefix patterns:`n"
                 foreach ($p in $sampledPatterns.samPrefixPatterns | Select-Object -First 15) {
-                    $patternContext += "  '$($p.pattern)' — $($p.count) accounts`n"
+                    $patternContext += "  '$($p.pattern)'  -  $($p.count) accounts`n"
                 }
             }
             if ($sampledPatterns.displayNameSuffixes.Count -gt 0) {
                 $patternContext += "`nDisplay name parenthetical suffixes:`n"
                 foreach ($p in $sampledPatterns.displayNameSuffixes | Select-Object -First 15) {
-                    $patternContext += "  '$($p.pattern)' — $($p.count) accounts`n"
+                    $patternContext += "  '$($p.pattern)'  -  $($p.count) accounts`n"
                 }
             }
             if ($sampledPatterns.domainParts.Count -gt 0) {
@@ -957,7 +1048,7 @@ You are an identity governance consultant specializing in account naming convent
 
 Your task is to analyze an organization's account naming patterns and generate correlation rules that identify which accounts likely belong to the same physical person.
 
-IMPORTANT: No actual user names or identities are shared — only structural naming patterns (prefixes, suffixes, separators).
+IMPORTANT: No actual user names or identities are shared  -  only structural naming patterns (prefixes, suffixes, separators).
 
 You must respond with ONLY a valid JSON object (no markdown fencing, no explanation). The JSON must follow this exact schema:
 
@@ -995,8 +1086,8 @@ You must respond with ONLY a valid JSON object (no markdown fencing, no explanat
 RULES:
 1. Prefixes MUST include the separator (e.g., "adm-" not "adm")
 2. Suffixes MUST include the separator (e.g., "-admin" not "admin")
-3. DisplayName patterns use PowerShell regex — escape special chars with \\
-4. Short prefixes like "a-" or "t-" are risky — flag in warnings
+3. DisplayName patterns use PowerShell regex  -  escape special chars with \\
+4. Short prefixes like "a-" or "t-" are risky  -  flag in warnings
 5. Consider BOTH observed database patterns AND industry-standard conventions
 6. Classify each discovered prefix/suffix into the most appropriate account type
 7. If patterns don't fit standard types, propose a new type (e.g., "Training", "Break-Glass")
@@ -1056,7 +1147,7 @@ RULES:
             Write-Host ""
         }
 
-        # ── Merge LLM patterns into universal rules ──
+        # ---- Merge LLM patterns into universal rules ----
         if ($llmDiscoveredRules -and $llmDiscoveredRules.account_type_rules) {
             Write-Host "--- Step 3: Merging LLM + Universal Patterns ---" -ForegroundColor Cyan
 
@@ -1103,7 +1194,7 @@ RULES:
             Write-Host ""
         }
     } else {
-        # ── NoLLM mode: merge database-discovered patterns into universal rules ──
+        # ---- NoLLM mode: merge database-discovered patterns into universal rules ----
         Write-Host "--- Step 2: Merging Database Patterns ---" -ForegroundColor Cyan
 
         if ($sampledPatterns) {
@@ -1119,7 +1210,7 @@ RULES:
                     }
                 }
                 if (-not $alreadyKnown -and $p.count -ge 3) {
-                    Write-Host "  New prefix discovered: '$pattern' ($($p.count) accounts) — review manually" -ForegroundColor Yellow
+                    Write-Host "  New prefix discovered: '$pattern' ($($p.count) accounts)  -  review manually" -ForegroundColor Yellow
                 }
             }
 
@@ -1150,7 +1241,7 @@ RULES:
                         Write-Host "  Added displayName pattern '$escapedPattern' to $($targetRule.type) ($($p.count) accounts)" -ForegroundColor Gray
                         $autoAdded++
                     } else {
-                        Write-Host "  Unclassified displayName suffix: '$suffix' ($($p.count) accounts) — review manually" -ForegroundColor Yellow
+                        Write-Host "  Unclassified displayName suffix: '$suffix' ($($p.count) accounts)  -  review manually" -ForegroundColor Yellow
                     }
                 }
             }
@@ -1161,7 +1252,7 @@ RULES:
                 Write-Host "  No new patterns to add (universal defaults cover all observed patterns)" -ForegroundColor Gray
             }
         } else {
-            Write-Host "  No database patterns available — using universal defaults only" -ForegroundColor Gray
+            Write-Host "  No database patterns available  -  using universal defaults only" -ForegroundColor Gray
         }
         Write-Host ""
     }
@@ -1174,7 +1265,7 @@ RULES:
         [ordered]@{
             id          = "employeeId"
             name        = "Employee ID Match"
-            description = "Exact match on employeeId attribute — strongest possible signal"
+            description = "Exact match on employeeId attribute  -  strongest possible signal"
             confidence  = 100
             boost       = 0
             enabled     = $true
@@ -1285,7 +1376,7 @@ RULES:
         Write-Host ""
         Write-Host "  Review the ruleset above. Enter instructions to refine, or press Enter to save." -ForegroundColor Gray
         Write-Host "  Refinement instructions are sent to the LLM along with the current ruleset structure." -ForegroundColor Gray
-        Write-Host "  No identity data is included — only rule definitions (patterns, signals, settings)." -ForegroundColor Gray
+        Write-Host "  No identity data is included  -  only rule definitions (patterns, signals, settings)." -ForegroundColor Gray
         Write-Host ""
         Write-Host "  Examples:" -ForegroundColor Gray
         Write-Host "    - 'Add x- as an admin prefix, we use that for external admins'" -ForegroundColor White
@@ -1316,7 +1407,7 @@ IMPORTANT:
 - Apply changes precisely, preserve everything that wasn't changed
 - Prefixes MUST include the separator (e.g., "adm-" not "adm")
 - Suffixes MUST include the separator (e.g., "-admin" not "admin")
-- DisplayName patterns use PowerShell regex — escape parentheses with \\
+- DisplayName patterns use PowerShell regex  -  escape parentheses with \\
 
 Current ruleset:
 $(($currentRuleset | ConvertTo-Json -Depth 100))
@@ -1422,7 +1513,7 @@ IMPORTANT:
 - Apply changes precisely, preserve everything that wasn't changed
 - Prefixes MUST include the separator (e.g., "adm-" not "adm")
 - Suffixes MUST include the separator (e.g., "-admin" not "admin")
-- DisplayName patterns use PowerShell regex — escape parentheses with \\
+- DisplayName patterns use PowerShell regex  -  escape parentheses with \\
 
 Current ruleset:
 $(($currentRuleset | ConvertTo-Json -Depth 100))
