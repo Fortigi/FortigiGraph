@@ -1,0 +1,43 @@
+version: "3.9"
+
+# ─── FortigiGraph Ingestion API - local dev compose ───────────────────────────
+#
+# Usage:
+#   cp .env.example .env        # fill in SQL_SERVER etc.
+#   docker compose up --build
+#
+# The ingestion API is deliberately isolated as its own service.
+# It shares no volumes or network namespaces with the UI backend.
+
+services:
+  ingestion-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: fortigigraph-ingestion-api:local
+    container_name: fortigigraph-ingestion-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    env_file:
+      - .env
+    environment:
+      # Override / supplement .env values here for local dev
+      NODE_ENV: development
+      SWAGGER_UI_ENABLED: "true"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"   # default: auth off for local dev
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-3001}/api/v1/ingestion/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Isolated network — not shared with UI backend
+    networks:
+      - ingestion-net
+
+networks:
+  ingestion-net:
+    driver: bridge
+    name: fortigigraph-ingestion-net

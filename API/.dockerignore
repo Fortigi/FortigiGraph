@@ -1,0 +1,33 @@
+# Dependencies (installed in build stage)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dev / local config
+.env
+.env.*
+!.env.example
+
+# Generated client modules (not needed in runtime image)
+generated/
+
+# Generators (not needed in runtime image)
+generators/
+
+# Test and CI artifacts
+tests/
+coverage/
+.nyc_output/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
