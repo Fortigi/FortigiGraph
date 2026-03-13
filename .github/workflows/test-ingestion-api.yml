@@ -1,0 +1,172 @@
+name: Test Ingestion API
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'API/**'
+  pull_request:
+    paths:
+      - 'API/**'
+  workflow_dispatch:
+
+concurrency:
+  group: test-ingestion-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Node.js API tests (Jest + supertest) ────────────────────────────────
+  test-nodejs:
+    name: Node.js API tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: API/package.json
+
+      - name: Install dependencies
+        working-directory: API
+        run: npm install
+
+      - name: Run unit tests
+        working-directory: API
+        run: npx jest tests/unit --coverage --coverageDirectory coverage/unit
+
+      - name: Run integration tests
+        working-directory: API
+        run: npx jest tests/integration --coverage --coverageDirectory coverage/integration
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-coverage
+          path: API/coverage/
+          retention-days: 14
+
+  # ─── Python generator + client tests (pytest) ────────────────────────────
+  test-python:
+    name: Python generator & client tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install pyyaml pydantic httpx pytest pytest-asyncio pytest-cov
+
+      - name: Run Python tests
+        working-directory: API/tests/python
+        run: |
+          pytest . -v \
+            --cov=../../generators \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload Python coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: API/tests/python/coverage.xml
+          retention-days: 14
+
+  # ─── PowerShell generator + module tests (Pester) ────────────────────────
+  test-powershell:
+    name: PowerShell generator & module tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v1
+        with:
+          powershell-version: '7.4'
+
+      - name: Install Pester and powershell-yaml
+        shell: pwsh
+        run: |
+          Install-Module Pester         -MinimumVersion 5.5 -Force -Scope CurrentUser
+          Install-Module powershell-yaml -Force -Scope CurrentUser
+
+      - name: Run Generator tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path           = 'API/tests/powershell/Generator.Tests.ps1'
+          $config.Output.Verbosity   = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'test-results-generator.xml'
+          $config.TestResult.OutputFormat = 'JUnitXml'
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Run Module tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path           = 'API/tests/powershell/Module.Tests.ps1'
+          $config.Output.Verbosity   = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'test-results-module.xml'
+          $config.TestResult.OutputFormat = 'JUnitXml'
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Upload Pester test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results
+          path: test-results-*.xml
+          retention-days: 14
+
+  # ─── Docker build smoke test ──────────────────────────────────────────────
+  test-docker:
+    name: Docker build smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        working-directory: API
+        run: docker build -t fortigigraph-ingestion-api:test .
+
+      - name: Run container health check
+        run: |
+          docker run -d \
+            --name test-api \
+            -e AUTH_ENABLED=false \
+            -e SWAGGER_UI_ENABLED=false \
+            -p 3001:3001 \
+            fortigigraph-ingestion-api:test
+
+          # Wait up to 30s for the container to be healthy
+          for i in $(seq 1 15); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' test-api 2>/dev/null || echo "starting")
+            echo "Health status: $STATUS (attempt $i)"
+            if [ "$STATUS" = "healthy" ]; then break; fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              docker logs test-api
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Verify /health endpoint
+          curl -sf http://localhost:3001/api/v1/ingestion/health | grep '"status":"ok"'
+
+      - name: Cleanup container
+        if: always()
+        run: docker rm -f test-api || true
