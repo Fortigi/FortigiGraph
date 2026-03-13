@@ -1,0 +1,2278 @@
+openapi: 3.0.3
+info:
+  title: FortigiGraph Ingestion API
+  description: |
+    REST API for ingesting Microsoft Graph identity and entitlement data into Azure SQL.
+    Supports CRUD operations for all entity types with temporal versioning.
+
+    ## Authentication
+    Authenticate using Azure AD service principals (client credentials flow).
+    Obtain a Bearer token from:
+    `https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token`
+
+    Required scope: `api://{clientId}/.default`
+
+    ## Versioning
+    API version is synchronized with the FortigiGraph PowerShell module version.
+
+    ## Batch Operations
+    Each entity supports a `/batch` endpoint for bulk upsert of up to 1000 records
+    per request, using the same MERGE logic as the PowerShell sync functions.
+  version: '2.3.20260313.0001'
+  contact:
+    name: Fortigi
+    url: https://github.com/Fortigi/FortigiGraph
+  license:
+    name: MIT
+
+servers:
+  - url: /api/v1/ingestion
+    description: Ingestion API v1
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Users
+    description: Azure AD / Entra ID users (GraphUsers table)
+  - name: Groups
+    description: Azure AD / Entra ID groups (GraphGroups table)
+  - name: Group Members
+    description: Direct group memberships (GraphGroupMembers table)
+  - name: Group Owners
+    description: Group ownership relationships (GraphGroupOwners table)
+  - name: Group Eligible Members
+    description: PIM eligible group memberships (GraphGroupEligibleMembers table)
+  - name: Catalogs
+    description: Entitlement Management catalogs (GraphCatalogs table)
+  - name: Access Packages
+    description: Entitlement Management access packages (GraphAccessPackages table)
+  - name: Access Package Assignments
+    description: Access package assignments to users (GraphAccessPackageAssignments table)
+  - name: Access Package Resource Role Scopes
+    description: Resources and roles within access packages (GraphAccessPackageResourceRoleScopes table)
+  - name: Access Package Assignment Policies
+    description: Assignment policies for access packages (GraphAccessPackageAssignmentPolicies table)
+  - name: Access Package Assignment Requests
+    description: Requests for access package assignments (GraphAccessPackageAssignmentRequests table)
+  - name: Access Package Access Reviews
+    description: Access review decisions (GraphAccessPackageAccessReviewDecisions table)
+  - name: Health
+    description: API health and version information
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Azure AD JWT token obtained via client credentials flow
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GroupIdPath:
+      name: groupId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PageParam:
+      name: $page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: $limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    FilterParam:
+      name: $filter
+      in: query
+      description: OData-style filter expression (e.g. `displayName eq 'Engineering'`)
+      schema:
+        type: string
+    SelectParam:
+      name: $select
+      in: query
+      description: Comma-separated list of fields to return
+      schema:
+        type: string
+    AsOfParam:
+      name: asOf
+      in: query
+      description: Point-in-time query (ISO 8601 datetime). Returns data as it existed at this moment.
+      schema:
+        type: string
+        format: date-time
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+    PagedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        hasMore:
+          type: boolean
+
+    BatchRequest:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          maxItems: 1000
+          items: {}
+        mode:
+          type: string
+          enum: [upsert, insert, replace]
+          default: upsert
+          description: |
+            - `upsert`: Insert new, update existing (default, MERGE semantics)
+            - `insert`: Insert only, skip existing
+            - `replace`: Delete all existing, insert new (full sync)
+
+    BatchResponse:
+      type: object
+      properties:
+        inserted:
+          type: integer
+        updated:
+          type: integer
+        deleted:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              record:
+                type: object
+              message:
+                type: string
+
+    User:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Azure AD object ID (primary key)
+        userPrincipalName:
+          type: string
+        displayName:
+          type: string
+        givenName:
+          type: string
+        surname:
+          type: string
+        mail:
+          type: string
+          format: email
+        employeeId:
+          type: string
+        onPremisesSamAccountName:
+          type: string
+        onPremisesDistinguishedName:
+          type: string
+        companyName:
+          type: string
+        department:
+          type: string
+        jobTitle:
+          type: string
+        accountEnabled:
+          type: boolean
+        userType:
+          type: string
+          enum: [Member, Guest]
+        onPremisesSyncEnabled:
+          type: boolean
+        createdDateTime:
+          type: string
+          format: date-time
+        lastPasswordChangeDateTime:
+          type: string
+          format: date-time
+        lastSignInDateTime:
+          type: string
+          format: date-time
+        employeeHireDate:
+          type: string
+          format: date-time
+        managerId:
+          type: string
+          format: uuid
+        officeLocation:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        country:
+          type: string
+        postalCode:
+          type: string
+        streetAddress:
+          type: string
+        usageLocation:
+          type: string
+        preferredLanguage:
+          type: string
+        ageGroup:
+          type: string
+        organizationalUnit:
+          type: string
+        administrativeUnits:
+          type: string
+          description: Comma-separated list of administrative unit memberships
+
+    UserBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/User'
+
+    Group:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Azure AD object ID (primary key)
+        displayName:
+          type: string
+        description:
+          type: string
+        mail:
+          type: string
+        mailNickname:
+          type: string
+        onPremisesDistinguishedName:
+          type: string
+        mailEnabled:
+          type: boolean
+        securityEnabled:
+          type: boolean
+        groupTypes:
+          type: string
+          description: JSON array of group types (e.g. '["Unified"]')
+        visibility:
+          type: string
+          enum: [Public, Private, HiddenMembership]
+        createdDateTime:
+          type: string
+          format: date-time
+        renewedDateTime:
+          type: string
+          format: date-time
+        expirationDateTime:
+          type: string
+          format: date-time
+        isAssignableToRole:
+          type: boolean
+        membershipRule:
+          type: string
+          description: Dynamic membership rule expression
+        membershipRuleProcessingState:
+          type: string
+          enum: [On, Paused]
+        resourceProvisioningOptions:
+          type: string
+        onPremisesSamAccountName:
+          type: string
+        onPremicesSyncEnabled:
+          type: boolean
+        onPremisesSecurityIdentifier:
+          type: string
+        onPremisesNetBiosName:
+          type: string
+        onPremisesDomainName:
+          type: string
+        groupTypeCalculated:
+          type: string
+          description: Computed field (Security Group, Distribution Group, Unified Group, etc.)
+        organizationalUnit:
+          type: string
+        administrativeUnits:
+          type: string
+
+    GroupBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/Group'
+
+    GroupMember:
+      type: object
+      required: [groupId, memberId]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        memberType:
+          type: string
+          description: OData type (e.g. '#microsoft.graph.user', '#microsoft.graph.group')
+
+    GroupMemberBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/GroupMember'
+
+    GroupOwner:
+      type: object
+      required: [groupId, ownerId]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+
+    GroupOwnerBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/GroupOwner'
+
+    GroupEligibleMember:
+      type: object
+      required: [groupId, memberId]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        memberType:
+          type: string
+          description: OData type (e.g. '#microsoft.graph.user')
+
+    GroupEligibleMemberBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/GroupEligibleMember'
+
+    Catalog:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        description:
+          type: string
+        catalogType:
+          type: string
+          enum: [userManaged, serviceDefault, serviceManaged]
+        isExternallyVisible:
+          type: boolean
+        catalogStatus:
+          type: string
+        createdDateTime:
+          type: string
+          format: date-time
+        modifiedDateTime:
+          type: string
+          format: date-time
+
+    CatalogBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/Catalog'
+
+    AccessPackage:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        description:
+          type: string
+        catalogId:
+          type: string
+          format: uuid
+        isHidden:
+          type: boolean
+        isRoleScopesVisible:
+          type: boolean
+        createdDateTime:
+          type: string
+          format: date-time
+        modifiedDateTime:
+          type: string
+          format: date-time
+
+    AccessPackageBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackage'
+
+    AccessPackageAssignment:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accessPackageId:
+          type: string
+          format: uuid
+        targetId:
+          type: string
+          format: uuid
+          description: Azure AD object ID of the user receiving access
+        assignmentStatus:
+          type: string
+        assignmentState:
+          type: string
+          enum: [Delivered, Delivering, Expired, Extending, PendingApproval, PendingApprovalEscalated, PendingCustomExtension, PendingExpiration, Rejected]
+        schedule:
+          type: string
+          description: JSON-serialized schedule with startDateTime and expiration
+        createdDateTime:
+          type: string
+          format: date-time
+        modifiedDateTime:
+          type: string
+          format: date-time
+        expiration:
+          type: string
+          format: date-time
+
+    AccessPackageAssignmentBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackageAssignment'
+
+    AccessPackageResourceRoleScope:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: Composite identifier (accessPackageId_roleId_scopeId)
+        accessPackageId:
+          type: string
+          format: uuid
+        roleId:
+          type: string
+        roleDisplayName:
+          type: string
+        roleDescription:
+          type: string
+        roleOriginSystem:
+          type: string
+        roleOriginId:
+          type: string
+        scopeId:
+          type: string
+        scopeDisplayName:
+          type: string
+        scopeOriginId:
+          type: string
+          format: uuid
+          description: Actual group / resource GUID
+        scopeOriginSystem:
+          type: string
+        scopeIsRootScope:
+          type: boolean
+        createdDateTime:
+          type: string
+          format: date-time
+        modifiedDateTime:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        modifiedBy:
+          type: string
+
+    AccessPackageResourceRoleScopeBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+
+    AccessPackageAssignmentPolicy:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        description:
+          type: string
+        accessPackageId:
+          type: string
+          format: uuid
+        createdDateTime:
+          type: string
+          format: date-time
+        modifiedDateTime:
+          type: string
+          format: date-time
+        hasAutoAddRule:
+          type: boolean
+        hasAutoRemoveRule:
+          type: boolean
+
+    AccessPackageAssignmentPolicyBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+
+    AccessPackageAssignmentRequest:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accessPackageId:
+          type: string
+          format: uuid
+        requestType:
+          type: string
+          enum: [UserAdd, UserRemove, AdminAdd, AdminRemove, AdminUpdate, SystemAdd, SystemRemove, SystemUpdate]
+        requestState:
+          type: string
+          enum: [Submitted, PendingApproval, PendingApprovalEscalated, Approved, Delivering, Delivered, Denied, Canceled, Failed, PartiallyDelivered]
+        targetId:
+          type: string
+          format: uuid
+        createdDateTime:
+          type: string
+          format: date-time
+        completedDateTime:
+          type: string
+          format: date-time
+        expirationDateTime:
+          type: string
+          format: date-time
+        requestedDateTime:
+          type: string
+          format: date-time
+
+    AccessPackageAssignmentRequestBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+
+    AccessPackageAccessReview:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accessReviewId:
+          type: string
+          format: uuid
+        accessPackageId:
+          type: string
+          format: uuid
+        assignmentId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [Approve, Deny, NotReviewed, DontKnow]
+        reviewedBy:
+          type: string
+          format: uuid
+          description: Azure AD object ID of the reviewer
+        reviewedDateTime:
+          type: string
+          format: date-time
+        createdDateTime:
+          type: string
+          format: date-time
+
+    AccessPackageAccessReviewBatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/BatchRequest'
+        - type: object
+          properties:
+            records:
+              type: array
+              maxItems: 1000
+              items:
+                $ref: '#/components/schemas/AccessPackageAccessReview'
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: API health check
+      security: []
+      operationId: getHealth
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: '2.2.20260302.1045'
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  # ─── USERS ─────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FilterParam'
+        - $ref: '#/components/parameters/SelectParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Users]
+      summary: Create or upsert a user
+      operationId: upsertUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: User upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /users/batch:
+    post:
+      tags: [Users]
+      summary: Batch upsert users (up to 1000)
+      operationId: batchUpsertUsers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      operationId: getUser
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: User record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Users]
+      summary: Update user (full replace)
+      operationId: updateUser
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Users]
+      summary: Delete user
+      operationId: deleteUser
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: User deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── GROUPS ────────────────────────────────────────────────────────
+  /groups:
+    get:
+      tags: [Groups]
+      summary: List groups
+      operationId: listGroups
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FilterParam'
+        - $ref: '#/components/parameters/SelectParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of groups
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Groups]
+      summary: Create or upsert a group
+      operationId: upsertGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Group'
+      responses:
+        '200':
+          description: Group upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /groups/batch:
+    post:
+      tags: [Groups]
+      summary: Batch upsert groups (up to 1000)
+      operationId: batchUpsertGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /groups/{id}:
+    get:
+      tags: [Groups]
+      summary: Get group by ID
+      operationId: getGroup
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Group record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Groups]
+      summary: Update group
+      operationId: updateGroup
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Group'
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Groups]
+      summary: Delete group
+      operationId: deleteGroup
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Group deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── GROUP MEMBERS ─────────────────────────────────────────────────
+  /group-members:
+    get:
+      tags: [Group Members]
+      summary: List group members
+      operationId: listGroupMembers
+      parameters:
+        - name: groupId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by group ID
+        - name: memberId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by member ID
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of group members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GroupMember'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Group Members]
+      summary: Add a group member
+      operationId: addGroupMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupMember'
+      responses:
+        '200':
+          description: Group member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMember'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-members/batch:
+    post:
+      tags: [Group Members]
+      summary: Batch upsert group members (up to 1000)
+      operationId: batchUpsertGroupMembers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupMemberBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-members/{groupId}/{memberId}:
+    delete:
+      tags: [Group Members]
+      summary: Remove a group member
+      operationId: removeGroupMember
+      parameters:
+        - $ref: '#/components/parameters/GroupIdPath'
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204': { description: Group member removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── GROUP OWNERS ──────────────────────────────────────────────────
+  /group-owners:
+    get:
+      tags: [Group Owners]
+      summary: List group owners
+      operationId: listGroupOwners
+      parameters:
+        - name: groupId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: ownerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of group owners
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GroupOwner'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Group Owners]
+      summary: Add a group owner
+      operationId: addGroupOwner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupOwner'
+      responses:
+        '200':
+          description: Group owner added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupOwner'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-owners/batch:
+    post:
+      tags: [Group Owners]
+      summary: Batch upsert group owners (up to 1000)
+      operationId: batchUpsertGroupOwners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupOwnerBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-owners/{groupId}/{ownerId}:
+    delete:
+      tags: [Group Owners]
+      summary: Remove a group owner
+      operationId: removeGroupOwner
+      parameters:
+        - $ref: '#/components/parameters/GroupIdPath'
+        - name: ownerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204': { description: Group owner removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── GROUP ELIGIBLE MEMBERS ────────────────────────────────────────
+  /group-eligible-members:
+    get:
+      tags: [Group Eligible Members]
+      summary: List PIM eligible group members
+      operationId: listGroupEligibleMembers
+      parameters:
+        - name: groupId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of eligible members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GroupEligibleMember'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Group Eligible Members]
+      summary: Add a PIM eligible group member
+      operationId: addGroupEligibleMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupEligibleMember'
+      responses:
+        '200':
+          description: Eligible member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupEligibleMember'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-eligible-members/batch:
+    post:
+      tags: [Group Eligible Members]
+      summary: Batch upsert eligible members (up to 1000)
+      operationId: batchUpsertGroupEligibleMembers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupEligibleMemberBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /group-eligible-members/{groupId}/{memberId}:
+    delete:
+      tags: [Group Eligible Members]
+      summary: Remove an eligible group member
+      operationId: removeGroupEligibleMember
+      parameters:
+        - $ref: '#/components/parameters/GroupIdPath'
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204': { description: Eligible member removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── CATALOGS ──────────────────────────────────────────────────────
+  /catalogs:
+    get:
+      tags: [Catalogs]
+      summary: List catalogs
+      operationId: listCatalogs
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FilterParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of catalogs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Catalog'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Catalogs]
+      summary: Create or upsert a catalog
+      operationId: upsertCatalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Catalog'
+      responses:
+        '200':
+          description: Catalog upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Catalog'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /catalogs/batch:
+    post:
+      tags: [Catalogs]
+      summary: Batch upsert catalogs (up to 1000)
+      operationId: batchUpsertCatalogs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /catalogs/{id}:
+    get:
+      tags: [Catalogs]
+      summary: Get catalog by ID
+      operationId: getCatalog
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Catalog record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Catalog'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Catalogs]
+      summary: Update catalog
+      operationId: updateCatalog
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Catalog'
+      responses:
+        '200':
+          description: Catalog updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Catalog'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Catalogs]
+      summary: Delete catalog
+      operationId: deleteCatalog
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Catalog deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGES ───────────────────────────────────────────────
+  /access-packages:
+    get:
+      tags: [Access Packages]
+      summary: List access packages
+      operationId: listAccessPackages
+      parameters:
+        - name: catalogId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by catalog ID
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FilterParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of access packages
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Packages]
+      summary: Create or upsert an access package
+      operationId: upsertAccessPackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackage'
+      responses:
+        '200':
+          description: Access package upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-packages/batch:
+    post:
+      tags: [Access Packages]
+      summary: Batch upsert access packages (up to 1000)
+      operationId: batchUpsertAccessPackages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-packages/{id}:
+    get:
+      tags: [Access Packages]
+      summary: Get access package by ID
+      operationId: getAccessPackage
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Access package record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Packages]
+      summary: Update access package
+      operationId: updateAccessPackage
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackage'
+      responses:
+        '200':
+          description: Access package updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Packages]
+      summary: Delete access package
+      operationId: deleteAccessPackage
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Access package deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGE ASSIGNMENTS ────────────────────────────────────
+  /access-package-assignments:
+    get:
+      tags: [Access Package Assignments]
+      summary: List access package assignments
+      operationId: listAccessPackageAssignments
+      parameters:
+        - name: accessPackageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: targetId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: assignmentState
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of assignments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackageAssignment'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Package Assignments]
+      summary: Create or upsert an access package assignment
+      operationId: upsertAccessPackageAssignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignment'
+      responses:
+        '200':
+          description: Assignment upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignments/batch:
+    post:
+      tags: [Access Package Assignments]
+      summary: Batch upsert assignments (up to 1000)
+      operationId: batchUpsertAccessPackageAssignments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignments/{id}:
+    get:
+      tags: [Access Package Assignments]
+      summary: Get assignment by ID
+      operationId: getAccessPackageAssignment
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Assignment record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignment'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Package Assignments]
+      summary: Update assignment
+      operationId: updateAccessPackageAssignment
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignment'
+      responses:
+        '200':
+          description: Assignment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Package Assignments]
+      summary: Delete assignment
+      operationId: deleteAccessPackageAssignment
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Assignment deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGE RESOURCE ROLE SCOPES ───────────────────────────
+  /access-package-resource-role-scopes:
+    get:
+      tags: [Access Package Resource Role Scopes]
+      summary: List access package resource role scopes
+      operationId: listAccessPackageResourceRoleScopes
+      parameters:
+        - name: accessPackageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of resource role scopes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Package Resource Role Scopes]
+      summary: Create or upsert a resource role scope
+      operationId: upsertAccessPackageResourceRoleScope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+      responses:
+        '200':
+          description: Resource role scope upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-resource-role-scopes/batch:
+    post:
+      tags: [Access Package Resource Role Scopes]
+      summary: Batch upsert resource role scopes (up to 1000)
+      operationId: batchUpsertAccessPackageResourceRoleScopes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageResourceRoleScopeBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-resource-role-scopes/{id}:
+    get:
+      tags: [Access Package Resource Role Scopes]
+      summary: Get resource role scope by ID
+      operationId: getAccessPackageResourceRoleScope
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Resource role scope record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Package Resource Role Scopes]
+      summary: Update resource role scope
+      operationId: updateAccessPackageResourceRoleScope
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+      responses:
+        '200':
+          description: Resource role scope updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageResourceRoleScope'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Package Resource Role Scopes]
+      summary: Delete resource role scope
+      operationId: deleteAccessPackageResourceRoleScope
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204': { description: Resource role scope deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGE ASSIGNMENT POLICIES ────────────────────────────
+  /access-package-assignment-policies:
+    get:
+      tags: [Access Package Assignment Policies]
+      summary: List assignment policies
+      operationId: listAccessPackageAssignmentPolicies
+      parameters:
+        - name: accessPackageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of assignment policies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Package Assignment Policies]
+      summary: Create or upsert an assignment policy
+      operationId: upsertAccessPackageAssignmentPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+      responses:
+        '200':
+          description: Assignment policy upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignment-policies/batch:
+    post:
+      tags: [Access Package Assignment Policies]
+      summary: Batch upsert assignment policies (up to 1000)
+      operationId: batchUpsertAccessPackageAssignmentPolicies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentPolicyBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignment-policies/{id}:
+    get:
+      tags: [Access Package Assignment Policies]
+      summary: Get assignment policy by ID
+      operationId: getAccessPackageAssignmentPolicy
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Assignment policy record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Package Assignment Policies]
+      summary: Update assignment policy
+      operationId: updateAccessPackageAssignmentPolicy
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+      responses:
+        '200':
+          description: Assignment policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentPolicy'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Package Assignment Policies]
+      summary: Delete assignment policy
+      operationId: deleteAccessPackageAssignmentPolicy
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Assignment policy deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGE ASSIGNMENT REQUESTS ────────────────────────────
+  /access-package-assignment-requests:
+    get:
+      tags: [Access Package Assignment Requests]
+      summary: List assignment requests
+      operationId: listAccessPackageAssignmentRequests
+      parameters:
+        - name: accessPackageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: targetId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: requestState
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of assignment requests
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Package Assignment Requests]
+      summary: Create or upsert an assignment request
+      operationId: upsertAccessPackageAssignmentRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+      responses:
+        '200':
+          description: Assignment request upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignment-requests/batch:
+    post:
+      tags: [Access Package Assignment Requests]
+      summary: Batch upsert assignment requests (up to 1000)
+      operationId: batchUpsertAccessPackageAssignmentRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentRequestBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-assignment-requests/{id}:
+    get:
+      tags: [Access Package Assignment Requests]
+      summary: Get assignment request by ID
+      operationId: getAccessPackageAssignmentRequest
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Assignment request record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Package Assignment Requests]
+      summary: Update assignment request
+      operationId: updateAccessPackageAssignmentRequest
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+      responses:
+        '200':
+          description: Assignment request updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAssignmentRequest'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Package Assignment Requests]
+      summary: Delete assignment request
+      operationId: deleteAccessPackageAssignmentRequest
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Assignment request deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ─── ACCESS PACKAGE ACCESS REVIEWS ─────────────────────────────────
+  /access-package-access-reviews:
+    get:
+      tags: [Access Package Access Reviews]
+      summary: List access review decisions
+      operationId: listAccessPackageAccessReviews
+      parameters:
+        - name: accessPackageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: accessReviewId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: decision
+          in: query
+          schema:
+            type: string
+            enum: [Approve, Deny, NotReviewed, DontKnow]
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Paginated list of access review decisions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccessPackageAccessReview'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [Access Package Access Reviews]
+      summary: Create or upsert an access review decision
+      operationId: upsertAccessPackageAccessReview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAccessReview'
+      responses:
+        '200':
+          description: Access review decision upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAccessReview'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-access-reviews/batch:
+    post:
+      tags: [Access Package Access Reviews]
+      summary: Batch upsert access review decisions (up to 1000)
+      operationId: batchUpsertAccessPackageAccessReviews
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAccessReviewBatchRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /access-package-access-reviews/{id}:
+    get:
+      tags: [Access Package Access Reviews]
+      summary: Get access review decision by ID
+      operationId: getAccessPackageAccessReview
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/AsOfParam'
+      responses:
+        '200':
+          description: Access review decision record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAccessReview'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    put:
+      tags: [Access Package Access Reviews]
+      summary: Update access review decision
+      operationId: updateAccessPackageAccessReview
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPackageAccessReview'
+      responses:
+        '200':
+          description: Access review decision updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessPackageAccessReview'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [Access Package Access Reviews]
+      summary: Delete access review decision
+      operationId: deleteAccessPackageAccessReview
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Access review decision deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # Shared response components
+  x-responses: &shared-responses
+    responses: {}
+
+components:
+  responses:
+    BadRequest:
+      description: Invalid request body or parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: BAD_REQUEST
+            message: 'id is required'
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: 'Bearer token is missing or invalid'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: 'Resource not found'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: 'An unexpected error occurred'

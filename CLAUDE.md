@@ -52,7 +52,37 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - Encrypted variables, runbooks, daily schedules, SQL firewall rules
 - Memory-safe batching mode for large datasets (400 MB Azure sandbox limit)
 
-### 6. Role Mining UI
+### 6. Ingestion API
+- **REST API**: Node.js + Express OpenAPI 3.0 compliant ingestion endpoint at `API/`
+- **Spec**: `API/spec/openapi.yaml` — single source of truth for all entities and operations
+- **Authentication**: Azure AD service principal (client credentials flow); validates JWT Bearer tokens
+- **Entities**: Full CRUD + batch upsert (up to 1000 records) for all 12 data model entities:
+  Users, Groups, GroupMembers, GroupOwners, GroupEligibleMembers, Catalogs,
+  AccessPackages, AccessPackageAssignments, AccessPackageResourceRoleScopes,
+  AccessPackageAssignmentPolicies, AccessPackageAssignmentRequests, AccessPackageAccessReviews
+- **Point-in-Time Reads**: All GET endpoints support `?asOf=<ISO8601>` for temporal table queries
+- **Swagger UI**: Auto-served at `/api-docs` (configurable via `SWAGGER_UI_ENABLED`)
+- **Rate Limiting**: 200 req/min per IP (configurable); helmet security headers; CORS whitelist
+- **Base URL**: `/api/v1/ingestion/<entity>`
+
+### 7. Client Module Generators
+- **PowerShell Generator**: `API/generators/generate-powershell.ps1`
+  - Reads `openapi.yaml`, generates `FortigiGraphIngestion` module
+  - One function per operation following `Verb-FGIngestionNoun` naming
+  - Includes `Get-FGIngestionToken` for client credentials auth
+  - Output: `API/generated/powershell/FortigiGraphIngestion/`
+- **Python Generator**: `API/generators/generate-python.py`
+  - Reads `openapi.yaml`, generates `fortigigraph_ingestion` async package
+  - Pydantic v2 models for all entities; `httpx` async HTTP client
+  - Auto-renews OAuth2 tokens; context manager support
+  - Output: `API/generated/python/`
+- **Version Sync**: Generated module versions always match `API/package.json` version,
+  which is kept in sync with `FortigiGraph.psd1`
+- **Pipeline**: `.github/workflows/generate-api-clients.yml` runs on every `openapi.yaml` change:
+  validates spec (Spectral), generates both modules, uploads artifacts, commits to repo,
+  optionally publishes to PSGallery / PyPI on git tags
+
+### 8. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
 - **Tab Navigation**: Six pages — Matrix, Users, Groups, Access Packages, Sync Log, Performance — plus dynamic detail tabs
@@ -171,6 +201,34 @@ FortigiGraph/
 │                   ├── MatrixGroupRow.jsx   # DnD-agnostic row (sortable props injected by SortableRow)
 │                   ├── SortableMatrixBody.jsx  # Lazy-loaded: DnD + virtual scrolling wrapper
 │                   └── MatrixColumnHeaders.jsx  # AP color palette (15 colors), column filters
+│
+├── API/                    # Ingestion REST API
+│   ├── spec/
+│   │   └── openapi.yaml              # OpenAPI 3.0 spec (source of truth)
+│   ├── src/
+│   │   ├── index.js                  # Server entry point (dotenv, graceful shutdown)
+│   │   ├── app.js                    # Express app (helmet, CORS, rate-limit, Swagger UI)
+│   │   ├── middleware/
+│   │   │   └── auth.js               # Azure AD JWT validation (v1+v2, role check)
+│   │   ├── routes/
+│   │   │   ├── index.js              # Mounts all entity routers
+│   │   │   ├── entityRouter.js       # Factory: single-PK CRUD router
+│   │   │   ├── composite-router.js   # Factory: composite-PK router (group members etc.)
+│   │   │   └── helpers.js            # pagedList, upsertRecord, batchUpsert, deleteRecord
+│   │   └── db/
+│   │       └── connection.js         # mssql connection pool
+│   ├── generators/
+│   │   ├── generate-powershell.ps1   # Generates FortigiGraphIngestion PS module
+│   │   └── generate-python.py        # Generates fortigigraph_ingestion Python package
+│   ├── generated/                    # Auto-generated (committed by CI)
+│   │   ├── powershell/FortigiGraphIngestion/
+│   │   └── python/
+│   ├── package.json                  # Node.js dependencies; version synced with module
+│   └── .env.example                  # Required environment variables
+│
+├── .github/
+│   └── workflows/
+│       └── generate-api-clients.yml  # CI: validate spec → generate PS+Python → publish
 │
 ├── _Build/                 # Build and publishing scripts
 │   └── CreatePSD.ps1       # Module manifest generation
@@ -372,7 +430,34 @@ function Get-FGSQLResource {
 - Don't modify temporal tables without disabling versioning first
 - Don't use `TRUNCATE` on temporal tables (use `DELETE` instead)
 
-### 4. When Extending the Module
+### 4. Ingestion API Conventions
+
+**All API changes must start from the OpenAPI spec** (`API/spec/openapi.yaml`):
+1. Update the spec first (add/modify paths, schemas, operationIds)
+2. Update the corresponding route in `API/src/routes/index.js`
+3. Run generators to regenerate client modules: `./API/generators/generate-powershell.ps1` and `python API/generators/generate-python.py`
+4. Bump `version` in `API/package.json` to match the new `ModuleVersion` in `FortigiGraph.psd1`
+
+**Adding a new entity:**
+1. Add the schema to `components/schemas` in `openapi.yaml`
+2. Add CRUD paths following the existing pattern
+3. Register the router in `API/src/routes/index.js`:
+   - Single PK → `createEntityRouter({ table, keyColumn, filterColumns })`
+   - Composite PK → `createCompositeRouter({ table, key1, key2, filterColumns })`
+4. Run generators and commit
+
+**Authentication for the API:**
+- Uses `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` environment variables
+- Callers obtain tokens via: `POST https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token`
+- Required scope: `api://{AZURE_CLIENT_ID}/.default`
+- Disable auth for local dev: `AUTH_ENABLED=false`
+
+**API versioning:**
+- URL path: `/api/v1/ingestion/...`
+- Increment minor version on breaking changes; bump `v1` → `v2` only for major breaking changes
+- `version` in `API/package.json` must always match `ModuleVersion` in `FortigiGraph.psd1`
+
+### 5. When Extending the Module
 
 1. **Check if function already exists:** Search `Functions/` folders first
 2. **Determine correct location:**

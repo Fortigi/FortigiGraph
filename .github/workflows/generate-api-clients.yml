@@ -1,0 +1,266 @@
+name: Generate API Client Modules
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'API/spec/openapi.yaml'
+      - 'API/package.json'
+      - 'API/generators/**'
+  pull_request:
+    paths:
+      - 'API/spec/openapi.yaml'
+      - 'API/generators/**'
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: 'Override module version (leave empty to use package.json)'
+        required: false
+        default: ''
+
+concurrency:
+  group: generate-clients-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Validate OpenAPI spec ────────────────────────────────────────────────
+  validate-spec:
+    name: Validate OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install spectral (OpenAPI linter)
+        run: npm install -g @stoplight/spectral-cli
+
+      - name: Validate OpenAPI spec
+        run: spectral lint API/spec/openapi.yaml --ruleset spectral:oas
+
+  # ─── Generate PowerShell module ──────────────────────────────────────────
+  generate-powershell:
+    name: Generate PowerShell module
+    runs-on: ubuntu-latest
+    needs: validate-spec
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v1
+        with:
+          powershell-version: '7.4'
+
+      - name: Install powershell-yaml
+        shell: pwsh
+        run: Install-Module powershell-yaml -Force -Scope CurrentUser
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $override = '${{ github.event.inputs.version_override }}'
+          if ($override) {
+            $version = $override
+          } else {
+            $version = (Get-Content API/package.json | ConvertFrom-Json).version
+          }
+          Write-Host "Using version: $version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Generate PowerShell module
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          & API/generators/generate-powershell.ps1 `
+            -SpecPath    API/spec/openapi.yaml `
+            -OutputPath  API/generated/powershell/FortigiGraphIngestion `
+            -ModuleVersion $version
+
+      - name: Verify generated module
+        shell: pwsh
+        run: |
+          $psd1 = Get-Item API/generated/powershell/FortigiGraphIngestion/FortigiGraphIngestion.psd1
+          Write-Host "Module manifest: $($psd1.FullName)"
+          $manifest = Import-PowerShellDataFile $psd1.FullName
+          Write-Host "Version: $($manifest.ModuleVersion)"
+          Write-Host "Exported functions: $($manifest.FunctionsToExport.Count)"
+
+      - name: Upload PowerShell module artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FortigiGraphIngestion-PowerShell-${{ steps.version.outputs.version }}
+          path: API/generated/powershell/FortigiGraphIngestion/
+          retention-days: 30
+
+  # ─── Generate Python package ──────────────────────────────────────────────
+  generate-python:
+    name: Generate Python package
+    runs-on: ubuntu-latest
+    needs: validate-spec
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install generator dependencies
+        run: pip install pyyaml
+
+      - name: Resolve version
+        id: version
+        run: |
+          OVERRIDE="${{ github.event.inputs.version_override }}"
+          if [ -n "$OVERRIDE" ]; then
+            VERSION="$OVERRIDE"
+          else
+            VERSION=$(python -c "import json; print(json.load(open('API/package.json'))['version'])")
+          fi
+          echo "Using version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate Python package
+        run: |
+          python API/generators/generate-python.py \
+            --spec    API/spec/openapi.yaml \
+            --output  API/generated/python/fortigigraph_ingestion \
+            --version ${{ steps.version.outputs.version }}
+
+      - name: Verify generated package
+        run: |
+          pip install pydantic httpx
+          pip install -e API/generated/python/ --quiet
+          python -c "import fortigigraph_ingestion; print('Version:', fortigigraph_ingestion.__version__)"
+
+      - name: Upload Python package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FortigiGraphIngestion-Python-${{ steps.version.outputs.version }}
+          path: API/generated/python/
+          retention-days: 30
+
+  # ─── Commit generated files (main branch only) ───────────────────────────
+  commit-generated:
+    name: Commit generated client modules
+    runs-on: ubuntu-latest
+    needs: [generate-powershell, generate-python]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('API/package.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download PowerShell artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FortigiGraphIngestion-PowerShell-${{ steps.version.outputs.version }}
+          path: API/generated/powershell/FortigiGraphIngestion/
+
+      - name: Download Python artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FortigiGraphIngestion-Python-${{ steps.version.outputs.version }}
+          path: API/generated/python/
+
+      - name: Commit generated modules
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add API/generated/
+          if git diff --staged --quiet; then
+            echo "No changes to generated modules."
+          else
+            git commit -m "chore: regenerate API client modules v${{ steps.version.outputs.version }}
+
+            Generated from API/spec/openapi.yaml by generate-api-clients workflow.
+            Includes PowerShell and Python client packages."
+            git push origin HEAD
+          fi
+
+  # ─── Publish to PowerShell Gallery (tag only) ────────────────────────────
+  publish-powershell:
+    name: Publish to PowerShell Gallery
+    runs-on: ubuntu-latest
+    needs: commit-generated
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: powershell-gallery
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('API/package.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download PowerShell artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FortigiGraphIngestion-PowerShell-${{ steps.version.outputs.version }}
+          path: /tmp/FortigiGraphIngestion/
+
+      - name: Publish to PSGallery
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          Publish-Module -Path /tmp/FortigiGraphIngestion -NuGetApiKey $env:PSGALLERY_API_KEY -Verbose
+
+  # ─── Publish to PyPI (tag only) ──────────────────────────────────────────
+  publish-python:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: commit-generated
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('API/package.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download Python artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FortigiGraphIngestion-Python-${{ steps.version.outputs.version }}
+          path: /tmp/python-package/
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build distribution
+        run: |
+          pip install build
+          cd /tmp/python-package && python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: /tmp/python-package/dist/
