@@ -198,6 +198,24 @@ router.get('/access-packages', async (req, res) => {
     }
     let showUncategorized = req.query.uncategorized === 'true';
 
+    // Server-side sorting
+    const SORT_COL_MAP = {
+      'displayName':      'ap.displayName',
+      'assignmentType':   'ISNULL(pol.autoAddCount, 0)',  // approximate: auto-add first
+      'complianceStatus': `CASE
+                             WHEN rev.complianceStatus = 'Overdue' THEN 1
+                             WHEN rev.complianceStatus = 'Reviewed Late' THEN 2
+                             WHEN rev.complianceStatus = 'In Progress' THEN 3
+                             WHEN rev.complianceStatus IS NULL AND ISNULL(pol.hasReviewConfigured, 0) = 1 THEN 4
+                             WHEN rev.complianceStatus = 'Compliant' THEN 5
+                             ELSE 6 END`,
+      'lastReviewDate':   'rev.lastReviewDate',
+      'lastReviewedBy':   'rev.lastReviewedBy',
+      'category':         'cat.name',
+    };
+    let sortExpr = SORT_COL_MAP[req.query.sortCol] || 'ap.displayName';
+    const sortDir = req.query.sortDir === 'desc' ? 'DESC' : 'ASC';
+
     const p = await db.getPool();
     await ensureCategoryTables(p);
 
@@ -217,34 +235,120 @@ router.get('/access-packages', async (req, res) => {
       where += ` AND ca.accessPackageId IS NULL`;
     }
 
+    // Check if the review decisions table exists (it may not if reviews haven't been synced)
+    let hasReviewTable = false;
+    try {
+      const check = await p.request().query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphAccessPackageAccessReviewDecisions'
+      `);
+      hasReviewTable = check.recordset.length > 0;
+    } catch { /* ignore */ }
+
+    // Check if hasAccessReview column exists (added after re-syncing policies)
+    let hasReviewCol = false;
+    try {
+      const check = await p.request().query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'GraphAccessPackageAssignmentPolicies' AND COLUMN_NAME = 'hasAccessReview'
+      `);
+      hasReviewCol = check.recordset.length > 0;
+    } catch { /* ignore */ }
+
+    // If no review table, fall back to displayName for review-based sort columns
+    const isReviewSort = ['complianceStatus', 'lastReviewDate', 'lastReviewedBy'].includes(req.query.sortCol);
+
+    // Build review CTE + JOIN (uses same compliance logic as governance.js)
+    let reviewCte = '';
+    let reviewJoin = '';
+    let reviewCols = ', NULL AS lastReviewDate, NULL AS lastReviewedBy, NULL AS complianceStatus, NULL AS reviewDeadline, 0 AS daysOverdue';
+    if (hasReviewTable) {
+      reviewCte = `,
+        _LatestInstance AS (
+          SELECT accessPackageId,
+                 MAX(reviewInstanceId) AS reviewInstanceId,
+                 MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime
+          FROM GraphAccessPackageAccessReviewDecisions
+          WHERE reviewInstanceEndDateTime = (
+            SELECT MAX(r2.reviewInstanceEndDateTime)
+            FROM GraphAccessPackageAccessReviewDecisions r2
+            WHERE r2.accessPackageId = GraphAccessPackageAccessReviewDecisions.accessPackageId
+          )
+          GROUP BY accessPackageId
+        ),
+        _LastReviewPerAP AS (
+          SELECT
+            li.accessPackageId,
+            li.reviewInstanceEndDateTime AS deadline,
+            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedDateTime END) AS lastReviewDate,
+            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedByDisplayName END) AS lastReviewedBy,
+            CASE
+              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
+               AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) = 0
+              THEN 'Compliant'
+              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+               AND CAST(li.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE)
+              THEN 'In Progress'
+              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+               AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
+              THEN 'Overdue'
+              ELSE 'Reviewed Late'
+            END AS complianceStatus,
+            CASE
+              WHEN CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
+              THEN DATEDIFF(DAY, CAST(li.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
+              ELSE 0
+            END AS daysOverdue
+          FROM _LatestInstance li
+            INNER JOIN GraphAccessPackageAccessReviewDecisions d
+              ON d.accessPackageId = li.accessPackageId
+              AND d.reviewInstanceId = li.reviewInstanceId
+          GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime
+        )`;
+      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.accessPackageId`;
+      reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue';
+    } else if (isReviewSort) {
+      // No review data — fall back to default sort
+      sortExpr = 'ap.displayName';
+    }
+
     const result = await request.query(`
+      WITH _assignmentCounts AS (
+        SELECT accessPackageId, COUNT(*) AS cnt
+        FROM dbo.GraphAccessPackageAssignments
+        WHERE assignmentState = 'delivered'
+        GROUP BY accessPackageId
+      ),
+      _policyCounts AS (
+        SELECT accessPackageId,
+               COUNT(*) AS policyCount,
+               SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddCount,
+               SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnlyCount${
+                 hasReviewCol
+                   ? `,\n               MAX(CAST(ISNULL(hasAccessReview, 0) AS INT)) AS hasReviewConfigured`
+                   : `,\n               0 AS hasReviewConfigured`
+               }
+        FROM dbo.GraphAccessPackageAssignmentPolicies
+        GROUP BY accessPackageId
+      )
+      ${reviewCte}
       SELECT ap.id, ap.displayName, ap.description,
              c.displayName AS catalogName, c.id AS catalogId,
              ISNULL(ac.cnt, 0) AS totalAssignments,
              cat.id AS categoryId, cat.name AS categoryName, cat.color AS categoryColor,
              ISNULL(pol.policyCount, 0) AS policyCount,
              ISNULL(pol.autoAddCount, 0) AS autoAddCount,
-             ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount
+             ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount,
+             ISNULL(pol.hasReviewConfigured, 0) AS hasReviewConfigured
+             ${reviewCols}
       FROM dbo.GraphAccessPackages ap
       INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
-      LEFT JOIN (
-        SELECT accessPackageId, COUNT(*) AS cnt
-        FROM dbo.GraphAccessPackageAssignments
-        WHERE assignmentState = 'delivered'
-        GROUP BY accessPackageId
-      ) ac ON ap.id = ac.accessPackageId
+      LEFT JOIN _assignmentCounts ac ON ap.id = ac.accessPackageId
       LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
       LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
-      LEFT JOIN (
-        SELECT accessPackageId,
-               COUNT(*) AS policyCount,
-               SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddCount,
-               SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnlyCount
-        FROM dbo.GraphAccessPackageAssignmentPolicies
-        GROUP BY accessPackageId
-      ) pol ON ap.id = pol.accessPackageId
+      LEFT JOIN _policyCounts pol ON ap.id = pol.accessPackageId
+      ${reviewJoin}
       WHERE ${where}
-      ORDER BY ap.displayName
+      ORDER BY ${sortExpr} ${sortDir}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
       SELECT COUNT(*) AS total
@@ -279,6 +383,12 @@ router.get('/access-packages', async (req, res) => {
         totalAssignments: r.totalAssignments,
         category: r.categoryId ? { id: r.categoryId, name: r.categoryName, color: r.categoryColor } : null,
         assignmentType,
+        lastReviewDate: r.lastReviewDate || null,
+        lastReviewedBy: r.lastReviewedBy || null,
+        complianceStatus: r.complianceStatus || null,
+        reviewDeadline: r.reviewDeadline || null,
+        daysOverdue: r.daysOverdue || 0,
+        hasReviewConfigured: !!r.hasReviewConfigured,
       };
     });
 

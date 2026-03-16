@@ -117,6 +117,12 @@ function Sync-FGAccessPackageAssignmentPolicy {
         # Policies with only this flag are "Request-based with auto-removal", not "Auto-assigned"
         'hasAutoRemoveRule'
 
+        # Access review settings (complex object from Graph, stored as JSON)
+        'reviewSettings'
+
+        # Derived: true when reviewSettings.isEnabled = true
+        'hasAccessReview'
+
         # Metadata
         'createdDateTime'
         'modifiedDateTime'
@@ -158,6 +164,8 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'automaticRequestSettings' = 'NVARCHAR(MAX)'
         'hasAutoAddRule' = 'BIT'
         'hasAutoRemoveRule' = 'BIT'
+        'reviewSettings' = 'NVARCHAR(MAX)'
+        'hasAccessReview' = 'BIT'
         'createdDateTime' = 'DATETIME2'
         'modifiedDateTime' = 'DATETIME2'
     }
@@ -187,7 +195,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
     # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
     # accessPackageId is derived from expanded accessPackage navigation property in v1.0
-    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'accessPackageId')
+    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'hasAccessReview', 'accessPackageId')
     $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
     $selectProperties = $graphAttributes -join ','
     # Use v1.0 endpoint — automaticRequestSettings only exists in v1.0, not beta
@@ -246,6 +254,17 @@ function Sync-FGAccessPackageAssignmentPolicy {
             if (-not $autoSettings) { return $false }
 
             $val = $autoSettings.removeAccessWhenTargetLeavesAllowedTargets
+            if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
+
+            return $false
+        }
+        'reviewSettings' = { param($obj) if ($obj.reviewSettings) { $obj.reviewSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
+        'hasAccessReview' = {
+            param($obj)
+            $reviewSettings = $obj.reviewSettings
+            if (-not $reviewSettings) { return $false }
+
+            $val = $reviewSettings.isEnabled
             if ($val -eq $true -or $val -eq 'true' -or $val -eq 'True') { return $true }
 
             return $false

@@ -53,6 +53,11 @@ function New-FGConfig {
         [switch]$Quick
     )
 
+    # Require PowerShell 7+ (cross-platform support, modern .NET APIs)
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        throw "New-FGConfig requires PowerShell 7 or later. You are running PowerShell $($PSVersionTable.PSVersion). Please install PowerShell 7+ from https://aka.ms/powershell"
+    }
+
     # Check if file already exists
     if (Test-Path $Path) {
         Write-Host ""
@@ -875,7 +880,7 @@ function New-FGRandomPassword {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a cryptographically random complex password.
-        Compatible with both PowerShell 5.1 (Windows PowerShell) and PowerShell 7+.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
@@ -889,7 +894,7 @@ function New-FGRandomPassword {
     $special = '!@#$%^&*'
     $all     = $upper + $lower + $digits + $special
 
-    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try {
         # Ensure at least one of each category
         $bytes = [byte[]]::new(4)
@@ -931,14 +936,14 @@ function New-FGRandomSqlName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique SQL Server name suggestion.
-        Compatible with both PowerShell 5.1 and PowerShell 7+.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try {
         $bytes = [byte[]]::new(5)
         $rng.GetBytes($bytes)
@@ -955,14 +960,14 @@ function New-FGRandomAutomationAccountName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique Automation Account name suggestion.
-        Compatible with both PowerShell 5.1 and PowerShell 7+.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try {
         $bytes = [byte[]]::new(5)
         $rng.GetBytes($bytes)
