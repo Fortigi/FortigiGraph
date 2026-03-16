@@ -46,48 +46,6 @@ export default function MatrixGroupRow({
   const isExpanded = expandedGroups?.has(realGidForExpand);
   const isLoadingNested = loadingNested?.has(realGidForExpand);
 
-  // When "Gaps" filter is active, show only rows where at least one cell shows a ! indicator
-  // (provisioning failure: AP assigns this user to this group but the expected membership is missing).
-  if (managedFilter === 'gaps') {
-    const realGid = (group.realGroupId || group.id);
-    const lookupGid = realGid.toUpperCase();
-
-    // Determine which APs manage this group (for the relevant row type — Owner vs Member/Eligible).
-    // apGroupMap keys use original-case AP IDs (matching ap.id from accessPackages).
-    const groupAps = accessPackages.filter(ap => {
-      const role = apGroupMap?.get(`${lookupGid}|${ap.id.toLowerCase()}`);
-      if (!role) return false;
-      const roleIsOwner = role.toLowerCase().includes('owner');
-      return isOwnerRow ? roleIsOwner : !roleIsOwner;
-    });
-
-    // If no AP manages this group for this row type, nothing to show as a gap
-    if (groupAps.length === 0) return null;
-
-    // managedApMap values are lowercase AP IDs, so use lowercase for that comparison
-    const groupApIdSetLower = new Set(groupAps.map(ap => ap.id.toLowerCase()));
-
-    const hasAnyGap = users.some(user => {
-      const cellKeyLower = `${realGid.toLowerCase()}|${user.id.toLowerCase()}`;
-      const userApIds = (managedApMap?.get(cellKeyLower) || []).filter(id => groupApIdSetLower.has(id));
-      if (userApIds.length === 0) return false;
-
-      const cellKey = `${group.id}|${user.id}`;
-      const cellTypes = memberships.get(cellKey);
-
-      // AP assigns this user to this group but the expected membership type is missing (shows !)
-      return userApIds.some(apId => {
-        const apObj = groupAps.find(a => a.id.toLowerCase() === apId);
-        const role = apObj ? (apGroupMap?.get(`${lookupGid}|${apObj.id.toLowerCase()}`) || 'Member') : 'Member';
-        const lower = role.toLowerCase();
-        if (lower.includes('owner')) return !cellTypes?.has('Owner');
-        if (lower.includes('eligible')) return !cellTypes?.has('Eligible');
-        return !cellTypes?.has('Direct');
-      });
-    });
-    if (!hasAnyGap) return null;
-  }
-
   const nestedBg = group.isNestedRow ? 'bg-gray-50/60' : 'bg-white';
 
   return (

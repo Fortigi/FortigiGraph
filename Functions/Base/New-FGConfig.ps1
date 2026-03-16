@@ -875,6 +875,7 @@ function New-FGRandomPassword {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a cryptographically random complex password.
+        Compatible with both PowerShell 5.1 (Windows PowerShell) and PowerShell 7+.
     #>
 
     [cmdletbinding()]
@@ -888,28 +889,40 @@ function New-FGRandomPassword {
     $special = '!@#$%^&*'
     $all     = $upper + $lower + $digits + $special
 
-    # Ensure at least one of each category
-    $bytes = [byte[]]::new(4)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $password = @(
-        $upper[$bytes[0] % $upper.Length]
-        $lower[$bytes[1] % $lower.Length]
-        $digits[$bytes[2] % $digits.Length]
-        $special[$bytes[3] % $special.Length]
-    )
+    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    try {
+        # Ensure at least one of each category
+        $bytes = [byte[]]::new(4)
+        $rng.GetBytes($bytes)
+        $password = @(
+            $upper[$bytes[0] % $upper.Length]
+            $lower[$bytes[1] % $lower.Length]
+            $digits[$bytes[2] % $digits.Length]
+            $special[$bytes[3] % $special.Length]
+        )
 
-    # Fill the rest randomly
-    $remaining = $Length - 4
-    $bytes = [byte[]]::new($remaining)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    for ($i = 0; $i -lt $remaining; $i++) {
-        $password += $all[$bytes[$i] % $all.Length]
+        # Fill the rest randomly
+        $remaining = $Length - 4
+        $bytes = [byte[]]::new($remaining)
+        $rng.GetBytes($bytes)
+        for ($i = 0; $i -lt $remaining; $i++) {
+            $password += $all[$bytes[$i] % $all.Length]
+        }
+
+        # Fisher-Yates shuffle so the guaranteed chars aren't always at the start
+        for ($i = $password.Count - 1; $i -gt 0; $i--) {
+            $swapBytes = [byte[]]::new(4)
+            $rng.GetBytes($swapBytes)
+            $j = [Math]::Abs([BitConverter]::ToInt32($swapBytes, 0)) % ($i + 1)
+            $temp = $password[$i]
+            $password[$i] = $password[$j]
+            $password[$j] = $temp
+        }
+        $password = $password -join ''
     }
-
-    # Shuffle the password so the guaranteed chars aren't always at the start
-    $shuffleBytes = [byte[]]::new($password.Count)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($shuffleBytes)
-    $password = ($password | Sort-Object { [System.Security.Cryptography.RandomNumberGenerator]::GetInt32([int]::MaxValue) }) -join ''
+    finally {
+        $rng.Dispose()
+    }
 
     return $password
 }
@@ -918,15 +931,22 @@ function New-FGRandomSqlName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique SQL Server name suggestion.
+        Compatible with both PowerShell 5.1 and PowerShell 7+.
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $bytes = [byte[]]::new(5)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    try {
+        $bytes = [byte[]]::new(5)
+        $rng.GetBytes($bytes)
+        $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    }
+    finally {
+        $rng.Dispose()
+    }
 
     return "sql-fortigraph-$suffix"
 }
@@ -935,15 +955,22 @@ function New-FGRandomAutomationAccountName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique Automation Account name suggestion.
+        Compatible with both PowerShell 5.1 and PowerShell 7+.
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $bytes = [byte[]]::new(5)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+    try {
+        $bytes = [byte[]]::new(5)
+        $rng.GetBytes($bytes)
+        $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    }
+    finally {
+        $rng.Dispose()
+    }
 
     return "aa-fortigraph-$suffix"
 }

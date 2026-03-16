@@ -101,7 +101,6 @@ function Sync-FGGroup {
         'description'
         'mail'
         'mailNickname'
-        'onPremisesDistinguishedName'
 
         # Type & Security
         'mailEnabled'
@@ -184,13 +183,12 @@ function Sync-FGGroup {
         'onPremisesSecurityIdentifier' = 'NVARCHAR(255)'
         'onPremisesNetBiosName' = 'NVARCHAR(255)'
         'onPremisesDomainName' = 'NVARCHAR(255)'
-        'onPremisesDistinguishedName' = 'NVARCHAR(1000)'
         'onPremisesProvisioningErrors' = 'NVARCHAR(MAX)'
         'proxyAddresses' = 'NVARCHAR(MAX)'
     }
 
     # Add calculated fields (not Graph attributes, computed during sync)
-    $calculatedFields = @('groupTypeCalculated', 'organizationalUnit', 'administrativeUnits')
+    $calculatedFields = @('groupTypeCalculated', 'administrativeUnits')
 
     # Build column definitions
     $columns = @{}
@@ -204,7 +202,6 @@ function Sync-FGGroup {
     }
     # Add calculated columns
     $columns['groupTypeCalculated'] = 'NVARCHAR(100)'
-    $columns['organizationalUnit'] = 'NVARCHAR(1000)'
     $columns['administrativeUnits'] = 'NVARCHAR(MAX)'
 
     # Check if table exists and handle schema
@@ -221,7 +218,7 @@ function Sync-FGGroup {
 
     # Ensure attributes needed for groupTypeCalculated are always fetched from Graph
     $graphAttributes = $Attributes
-    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions', 'membershipRule', 'onPremisesDistinguishedName')) {
+    foreach ($required in @('groupTypes', 'securityEnabled', 'mailEnabled', 'resourceProvisioningOptions', 'membershipRule')) {
         if ($graphAttributes -notcontains $required) {
             $graphAttributes += $required
         }
@@ -308,18 +305,6 @@ function Sync-FGGroup {
             else { $baseType = 'Mail Enabled Security Group' }
 
             if ($isDynamic) { "Dynamic $baseType" } else { $baseType }
-        }
-        'organizationalUnit' = {
-            param($obj)
-            $dn = $obj.onPremisesDistinguishedName
-            if (-not $dn) { return $null }
-            $parts = $dn -split '(?<!\\),'
-            $ouParts = @($parts | Where-Object { $_ -match '^OU=' } | ForEach-Object { $_ -replace '^OU=', '' })
-            if ($ouParts.Count -gt 0) {
-                [array]::Reverse($ouParts)
-                return ($ouParts -join '/')
-            }
-            return $null
         }
         'administrativeUnits' = {
             param($obj)
