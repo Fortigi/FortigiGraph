@@ -2,6 +2,25 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 
 // ─── Account type badge styles ──────────────────────────────────────────
+const RISK_TIER_STYLES = {
+  Critical: { bg: 'bg-red-100',    text: 'text-red-800',    dot: 'bg-red-500' },
+  High:     { bg: 'bg-orange-100', text: 'text-orange-800', dot: 'bg-orange-500' },
+  Medium:   { bg: 'bg-yellow-100', text: 'text-yellow-800', dot: 'bg-yellow-500' },
+  Low:      { bg: 'bg-blue-100',   text: 'text-blue-800',   dot: 'bg-blue-500' },
+  Minimal:  { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400' },
+};
+
+function RiskTierBadge({ tier }) {
+  if (!tier || tier === 'None') return null;
+  const s = RISK_TIER_STYLES[tier] || RISK_TIER_STYLES.Minimal;
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium ${s.bg} ${s.text}`} title={`Risk: ${tier}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {tier}
+    </span>
+  );
+}
+
 const TYPE_STYLES = {
   Regular:  { bg: 'bg-blue-100',   text: 'text-blue-800',   border: 'border-blue-200',   dot: 'bg-blue-500' },
   Admin:    { bg: 'bg-red-100',    text: 'text-red-800',    border: 'border-red-200',    dot: 'bg-red-500' },
@@ -43,6 +62,31 @@ function VerifiedBadge({ verified }) {
   );
 }
 
+// ─── Orphaned Accounts Notice ────────────────────────────────────────────
+
+function OrphanedAccountsNotice({ orphanCount, onShowOrphans }) {
+  if (!orphanCount || orphanCount === 0) return null;
+  return (
+    <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <svg className="w-5 h-5 text-orange-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
+        <div>
+          <span className="text-sm font-medium text-orange-800">{orphanCount} orphaned account group{orphanCount !== 1 ? 's' : ''} not shown</span>
+          <span className="text-xs text-orange-600 ml-2">— correlated accounts with no HR-authoritative anchor (not linked to a real identity)</span>
+        </div>
+      </div>
+      <button
+        onClick={onShowOrphans}
+        className="text-xs text-orange-700 border border-orange-300 bg-white hover:bg-orange-50 px-3 py-1 rounded whitespace-nowrap"
+      >
+        Show orphaned accounts
+      </button>
+    </div>
+  );
+}
+
 // ─── Summary Cards ──────────────────────────────────────────────────────
 
 function OrphanBadge({ status }) {
@@ -73,7 +117,16 @@ function HrBadge({ isHrAnchored }) {
 function SummaryCards({ summary, hasHrColumns }) {
   if (!summary) return null;
 
-  const cards = [
+  // When HR columns exist, lead with HR Anchored (= real identities), then supporting stats
+  const cards = hasHrColumns && summary.hrAnchoredCount != null ? [
+    { label: 'Identities', value: summary.hrAnchoredCount, color: 'text-emerald-700', primary: true },
+    { label: 'Multi-Account', value: summary.multiAccountIdentities, color: 'text-blue-600' },
+    { label: 'Single Account', value: summary.singleAccountIdentities, color: 'text-gray-500' },
+    { label: 'Verified', value: summary.verifiedCount, color: 'text-green-600' },
+    { label: 'Avg Confidence', value: summary.avgConfidence ? `${Math.round(summary.avgConfidence)}%` : '—', color: 'text-indigo-600' },
+    { label: 'Corr. Groups', value: summary.totalIdentities, color: 'text-gray-400', title: 'Total correlated groups including orphaned accounts' },
+    { label: 'Orphaned', value: summary.orphanCount || 0, color: summary.orphanCount > 0 ? 'text-orange-600' : 'text-gray-400' },
+  ] : [
     { label: 'Total Identities', value: summary.totalIdentities, color: 'text-gray-900' },
     { label: 'Multi-Account', value: summary.multiAccountIdentities, color: 'text-blue-600' },
     { label: 'Single Account', value: summary.singleAccountIdentities, color: 'text-gray-500' },
@@ -81,15 +134,10 @@ function SummaryCards({ summary, hasHrColumns }) {
     { label: 'Avg Confidence', value: summary.avgConfidence ? `${Math.round(summary.avgConfidence)}%` : '—', color: 'text-indigo-600' },
   ];
 
-  if (hasHrColumns && summary.hrAnchoredCount != null) {
-    cards.push({ label: 'HR Anchored', value: summary.hrAnchoredCount, color: 'text-emerald-600' });
-    cards.push({ label: 'Orphans', value: summary.orphanCount || 0, color: summary.orphanCount > 0 ? 'text-orange-600' : 'text-gray-400' });
-  }
-
   return (
-    <div className={`grid gap-3 mb-4 ${cards.length > 5 ? 'grid-cols-7' : 'grid-cols-5'}`}>
+    <div className={`grid gap-3 mb-4`} style={{ gridTemplateColumns: `repeat(${cards.length}, minmax(0, 1fr))` }}>
       {cards.map(c => (
-        <div key={c.label} className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+        <div key={c.label} title={c.title} className={`rounded-lg border px-4 py-3 ${c.primary ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
           <div className="text-xs text-gray-500 mb-1">{c.label}</div>
           <div className={`text-xl font-semibold ${c.color}`}>{c.value}</div>
         </div>
@@ -270,6 +318,7 @@ function IdentityDetail({ identityId, authFetch, onClose, onOpenDetail, onRefres
               <th className="pb-2 pr-3">Account</th>
               <th className="pb-2 pr-3">UPN</th>
               <th className="pb-2 pr-3">Type</th>
+              <th className="pb-2 pr-3">Risk</th>
               <th className="pb-2 pr-3">Status</th>
               <th className="pb-2 pr-3">Confidence</th>
               <th className="pb-2 pr-3">Groups</th>
@@ -284,7 +333,7 @@ function IdentityDetail({ identityId, authFetch, onClose, onOpenDetail, onRefres
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => onOpenDetail?.({ type: 'user', id: m.userId, label: m.displayName })}
+                      onClick={() => onOpenDetail?.('user', m.userId, m.displayName)}
                       className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
                     >
                       {m.displayName}
@@ -305,6 +354,7 @@ function IdentityDetail({ identityId, authFetch, onClose, onOpenDetail, onRefres
                     )}
                   </div>
                 </td>
+                <td className="py-2 pr-3"><RiskTierBadge tier={m.riskTier} /></td>
                 <td className="py-2 pr-3">
                   <span className={`inline-flex items-center gap-1 text-xs ${
                     m.accountEnabled === 'True' || m.userAccountEnabled === true
@@ -406,7 +456,7 @@ export default function IdentitiesPage({ onOpenDetail }) {
   const [minAccounts, setMinAccounts] = useState(2); // Default: show multi-account only
   const [accountTypeFilter, setAccountTypeFilter] = useState('');
   const [verifiedFilter, setVerifiedFilter] = useState('');
-  const [hrAnchoredFilter, setHrAnchoredFilter] = useState('');
+  const [hrAnchoredFilter, setHrAnchoredFilter] = useState('true'); // default: real identities only
   const [orphanFilter, setOrphanFilter] = useState('');
   const [sortBy, setSortBy] = useState('accountCount');
   const [offset, setOffset] = useState(0);
@@ -478,6 +528,14 @@ export default function IdentitiesPage({ onOpenDetail }) {
       <SummaryCards summary={summary} hasHrColumns={hasHrColumns} />
       <TypeDistribution distribution={summary?.accountTypeDistribution} />
 
+      {/* Orphaned accounts notice — only when viewing real identities */}
+      {hasHrColumns && hrAnchoredFilter === 'true' && (
+        <OrphanedAccountsNotice
+          orphanCount={summary?.orphanCount}
+          onShowOrphans={() => { setHrAnchoredFilter('false'); setOrphanFilter('any'); setMinAccounts(1); }}
+        />
+      )}
+
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input
@@ -533,33 +591,34 @@ export default function IdentitiesPage({ onOpenDetail }) {
         {hasHrColumns && (
           <>
             <label className="flex items-center gap-2 text-sm text-gray-600">
-              <span>HR:</span>
+              <span>View:</span>
               <select
                 value={hrAnchoredFilter}
-                onChange={(e) => setHrAnchoredFilter(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
+                onChange={(e) => { setHrAnchoredFilter(e.target.value); if (e.target.value !== 'false') setOrphanFilter(''); }}
+                className={`border rounded px-2 py-1 text-sm ${hrAnchoredFilter === 'true' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : hrAnchoredFilter === 'false' ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-gray-300'}`}
               >
-                <option value="">All</option>
-                <option value="true">HR Anchored</option>
-                <option value="false">No HR Anchor</option>
+                <option value="true">Identities (HR-anchored)</option>
+                <option value="false">Orphaned accounts</option>
+                <option value="">All correlated groups</option>
               </select>
             </label>
 
-            <label className="flex items-center gap-2 text-sm text-gray-600">
-              <span>Orphans:</span>
-              <select
-                value={orphanFilter}
-                onChange={(e) => setOrphanFilter(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              >
-                <option value="">All</option>
-                <option value="any">Orphans only</option>
-                <option value="none">Non-orphans</option>
-                <option value="no-hr-anchor">No HR Anchor</option>
-                <option value="disabled-no-anchor">Disabled</option>
-                <option value="no-regular-account">No Regular Account</option>
-              </select>
-            </label>
+            {hrAnchoredFilter === 'false' && (
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <span>Orphan type:</span>
+                <select
+                  value={orphanFilter}
+                  onChange={(e) => setOrphanFilter(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="">All orphans</option>
+                  <option value="any">Has orphan status</option>
+                  <option value="no-hr-anchor">No HR Anchor</option>
+                  <option value="disabled-no-anchor">Disabled</option>
+                  <option value="no-regular-account">No Regular Account</option>
+                </select>
+              </label>
+            )}
           </>
         )}
 
@@ -578,8 +637,8 @@ export default function IdentitiesPage({ onOpenDetail }) {
         </label>
 
         <span className="text-xs text-gray-400 ml-auto">
-          {total} identit{total === 1 ? 'y' : 'ies'}
-          {summary && ` of ${summary.totalIdentities} total`}
+          {total} {hasHrColumns && hrAnchoredFilter === 'true' ? `real identit${total === 1 ? 'y' : 'ies'}` : hrAnchoredFilter === 'false' ? `orphaned group${total === 1 ? '' : 's'}` : `correlated group${total === 1 ? '' : 's'}`}
+          {hasHrColumns && summary && hrAnchoredFilter !== 'true' && ` · ${summary.hrAnchoredCount ?? 0} real identities`}
         </span>
       </div>
 
@@ -587,7 +646,11 @@ export default function IdentitiesPage({ onOpenDetail }) {
       {loading && data.length === 0 ? (
         <div className="text-center py-12 text-gray-400">Loading identities...</div>
       ) : data.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No identities match your filters</div>
+        <div className="text-center py-12 text-gray-400">
+          {hasHrColumns && hrAnchoredFilter === 'true'
+            ? 'No HR-anchored identities found. Run Invoke-FGAccountCorrelation with a ruleset that has HR indicators configured.'
+            : 'No accounts match your filters'}
+        </div>
       ) : (
         <div className="space-y-2">
           {data.map(identity => (

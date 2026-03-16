@@ -206,6 +206,22 @@ router.get('/identities/:id', async (req, res) => {
         ORDER BY m.isPrimary DESC, m.accountType ASC
       `);
 
+    // Enrich members with risk scores (optional — GraphUsers may not have risk columns)
+    let memberRiskMap = {};
+    try {
+      const riskResult = await timedRequest(p, 'identity-member-risks', res)
+        .input('identityId', identityId)
+        .query(`
+          SELECT m.userId, u.riskScore, u.riskTier
+          FROM dbo.GraphIdentityMembers m
+          LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
+          WHERE m.identityId = @identityId
+        `);
+      for (const r of riskResult.recordset) {
+        memberRiskMap[r.userId] = { riskScore: r.riskScore, riskTier: r.riskTier };
+      }
+    } catch { /* risk columns may not exist yet */ }
+
     // Fetch group memberships per account for context
     let memberGroupCounts = [];
     try {
@@ -223,13 +239,17 @@ router.get('/identities/:id', async (req, res) => {
       // GraphGroupMembers may not exist
     }
 
-    // Enrich members with group counts
+    // Enrich members with group counts and risk scores
     const groupCountMap = {};
     for (const gc of memberGroupCounts) {
       groupCountMap[gc.userId] = gc.groupCount;
     }
     for (const member of membersResult.recordset) {
       member.groupCount = groupCountMap[member.userId] || 0;
+      if (memberRiskMap[member.userId]) {
+        member.riskScore = memberRiskMap[member.userId].riskScore;
+        member.riskTier = memberRiskMap[member.userId].riskTier;
+      }
     }
 
     res.json({
@@ -319,6 +339,76 @@ router.put('/identities/:id/members/:userId/override', async (req, res) => {
   } catch (err) {
     console.error('Error setting member override:', err);
     res.status(500).json({ error: 'Failed to set member override' });
+  }
+});
+
+// GET /api/identities/by-user/:userId — returns the identity a user belongs to (if any)
+router.get('/identities/by-user/:userId', async (req, res) => {
+  if (!useSql) return res.json({ identity: null, memberInfo: null });
+
+  const userId = req.params.userId;
+  if (!UUID_RE.test(userId)) return res.status(400).json({ error: 'Invalid user ID' });
+
+  try {
+    const p = await db.getPool();
+
+    if (!(await hasTable(p, 'GraphIdentities'))) {
+      return res.json({ identity: null, memberInfo: null });
+    }
+
+    // Find identity membership for this user
+    const memberResult = await timedRequest(p, 'identity-by-user-member', res)
+      .input('userId', userId)
+      .query(`
+        SELECT i.id AS identityId, i.displayName AS identityDisplayName, i.accountCount,
+          i.primaryAccountUpn, i.primaryAccountId, i.correlationConfidence, i.isHrAnchored,
+          m.accountType, m.isPrimary, m.isHrAuthoritative, m.hrScore, m.signalConfidence,
+          m.correlationSignals, m.analystOverride
+        FROM dbo.GraphIdentityMembers m
+        JOIN dbo.GraphIdentities i ON i.id = m.identityId
+        WHERE m.userId = @userId
+      `);
+
+    if (memberResult.recordset.length === 0) {
+      return res.json({ identity: null, memberInfo: null });
+    }
+
+    const row = memberResult.recordset[0];
+    const identity = {
+      id: row.identityId,
+      displayName: row.identityDisplayName,
+      accountCount: row.accountCount,
+      primaryAccountUpn: row.primaryAccountUpn,
+      primaryAccountId: row.primaryAccountId,
+      correlationConfidence: row.correlationConfidence,
+      isHrAnchored: row.isHrAnchored,
+    };
+    const memberInfo = {
+      accountType: row.accountType,
+      isPrimary: row.isPrimary,
+      isHrAuthoritative: row.isHrAuthoritative,
+      hrScore: row.hrScore,
+      signalConfidence: row.signalConfidence,
+      correlationSignals: row.correlationSignals,
+      analystOverride: row.analystOverride,
+    };
+
+    // Fetch other accounts in the same identity for context
+    const othersResult = await timedRequest(p, 'identity-by-user-others', res)
+      .input('identityId', row.identityId)
+      .input('userId', userId)
+      .query(`
+        SELECT userId, displayName, userPrincipalName, accountType, isPrimary,
+          isHrAuthoritative, accountEnabled
+        FROM dbo.GraphIdentityMembers
+        WHERE identityId = @identityId AND userId <> @userId
+        ORDER BY isPrimary DESC, accountType ASC
+      `);
+
+    res.json({ identity, memberInfo, otherMembers: othersResult.recordset });
+  } catch (err) {
+    console.error('Error fetching identity by user:', err);
+    res.status(500).json({ error: 'Failed to fetch identity' });
   }
 });
 

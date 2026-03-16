@@ -273,7 +273,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     const isOwnerRow = !!group.realGroupId;
     const lookupGid = group.realGroupId || group.id;
     for (let a = 0; a < apCount; a++) {
-      const apKey = `${lookupGid}|${accessPackages[a].id}`;
+      const apKey = `${lookupGid.toUpperCase()}|${accessPackages[a].id.toLowerCase()}`;
       const roleName = apGroupMap?.get(apKey);
       const apCell = ws.getCell(rowNum, apColStart + a);
 

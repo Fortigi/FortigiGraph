@@ -388,7 +388,7 @@ export default function MatrixView({
           categoryColor: row.categoryColor || null,
         });
       }
-      mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
+      mapping.set(`${gid}|${row.accessPackageId.toLowerCase()}`, row.roleName || 'Member');
     }
 
     // Filter to APs that have at least one visible user assignment
@@ -474,7 +474,7 @@ export default function MatrixView({
       const gidUpper = (g.realGroupId || g.id).toUpperCase(); // use realGroupId for owner rows
       const isOwnerRow = !!g.realGroupId;
       for (let i = 0; i < accessPackages.length; i++) {
-        const mapKey = `${gidUpper}|${accessPackages[i].id}`;
+        const mapKey = `${gidUpper}|${accessPackages[i].id.toLowerCase()}`;
         if (apGroupMap.has(mapKey)) {
           // Owner rows only match AP buckets where the role is Owner
           const role = apGroupMap.get(mapKey);

@@ -314,10 +314,20 @@ router.get('/user-columns-page', async (req, res) => {
 // ─── GET /api/group-columns ──────────────────────────────────────
 // Column discovery for the Groups page (distinct values from GraphGroups)
 router.get('/group-columns', async (req, res) => {
+  // ?schema=true — return column names only (no distinct values). Fast path.
+  const schemaOnly = req.query.schema === 'true';
+
   try {
     if (!useSql) return res.json([]);
     const p = await db.getPool();
-    const grouped = { ...await getGroupColumnValues(p) };
+
+    let grouped;
+    if (schemaOnly) {
+      const cols = await getGroupColumns(p);
+      grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+    } else {
+      grouped = { ...await getGroupColumnValues(p) };
+    }
 
     // Add virtual __groupTag column (tag names as values)
     try {
@@ -330,7 +340,7 @@ router.get('/group-columns', async (req, res) => {
         ORDER BY t.name
       `);
       const groupTags = tagResult.recordset.map(r => r.name);
-      if (groupTags.length > 0) grouped['__groupTag'] = groupTags;
+      grouped['__groupTag'] = schemaOnly ? [] : groupTags;
     } catch { /* tag tables may not exist yet */ }
 
     return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));

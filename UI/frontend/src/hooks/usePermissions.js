@@ -19,25 +19,37 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
   const [refreshing, setRefreshing] = useState(false); // true during refetch (filter/limit change)
   const [error, setError] = useState(null);
 
-  // Fetch user and group columns once on mount (for filter dropdowns + knowing which filters are server-side)
+  // Fetch user and group columns in two phases:
+  //   Phase 1 (?schema=true): column names only, returns in ~100ms — unblocks server-filter
+  //                           recognition so the first permissions fetch has the right filters.
+  //   Phase 2 (full):         column names + distinct values, returns in 15-20s — populates
+  //                           the filter dropdown options once the matrix is already showing.
   useEffect(() => {
     let cancelled = false;
+
+    // Phase 1: fast schema (names only)
+    Promise.all([
+      authFetch(`${API_BASE}/user-columns?schema=true`).then(r => r.ok ? r.json() : []).catch(() => []),
+      authFetch(`${API_BASE}/group-columns?schema=true`).then(r => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([userCols, groupCols]) => {
+      if (cancelled) return;
+      setUserColumns(userCols);
+      setGroupColumns(groupCols.map(c => ({ ...c, column: GROUP_COL_ALIASES[c.column] || c.column })));
+    });
+
+    // Phase 2: full values (slow — populates filter dropdowns in background)
     authFetch(`${API_BASE}/user-columns`)
       .then(res => res.ok ? res.json() : [])
       .then(cols => { if (!cancelled) setUserColumns(cols); })
-      .catch(() => { if (!cancelled) setUserColumns([]); });
+      .catch(() => {});
     authFetch(`${API_BASE}/group-columns`)
       .then(res => res.ok ? res.json() : [])
       .then(cols => {
         if (cancelled) return;
-        // Apply aliases so column names match the permission query field names
-        const aliased = cols.map(c => ({
-          ...c,
-          column: GROUP_COL_ALIASES[c.column] || c.column,
-        }));
+        const aliased = cols.map(c => ({ ...c, column: GROUP_COL_ALIASES[c.column] || c.column }));
         setGroupColumns(aliased);
       })
-      .catch(() => { if (!cancelled) setGroupColumns([]); });
+      .catch(() => {});
     authFetch(`${API_BASE}/entity-tags?entityType=group`)
       .then(res => res.ok ? res.json() : [])
       .then(rows => {
@@ -71,7 +83,9 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
   const serverFilters = useMemo(() => {
     const result = {};
     for (const f of activeFilters) {
-      if (userColumnNames.has(f.field) || groupColumnNames.has(f.field)) {
+      // Tag filters are always server-side — don't wait for column discovery
+      if (f.field === '__userTag' || f.field === '__groupTag' ||
+          userColumnNames.has(f.field) || groupColumnNames.has(f.field)) {
         result[f.field] = f.value;
       }
     }
