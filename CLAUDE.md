@@ -1,8 +1,9 @@
 # FortigiGraph - AI Assistant Development Guide
 
-> **IMPORTANT: After making ANY code changes, you MUST update the module version!**
-> 1. Update the `ModuleVersion` in `FortigiGraph.psd1` (format: `Major.Minor.yyyyMMdd.HHmm`)
+> **IMPORTANT: After making ANY code changes, you MUST update the module version AND CHANGES.md!**
+> 1. Update the `ModuleVersion` in `FortigiGraph.psd1` using the scheme for the **current branch** (see Branching & Versioning below)
 > 2. If running locally, run `_Build/CreatePSD.ps1` to regenerate `FortigiGraph.psd1`
+> 3. Add a bullet to `CHANGES.md` describing the functional change (user-facing language, not implementation details)
 > This ensures changes are properly tracked and the module can be re-imported.
 
 ## Project Overview
@@ -17,6 +18,66 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
 - **Current Version:** 2.4.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
+
+---
+
+## Branching & Versioning Strategy
+
+> **These are hard rules. Always follow them exactly.**
+
+### Branch Model
+
+| Branch | Purpose | PR required? | Approval required? |
+|--------|---------|-------------|-------------------|
+| `main` | Stable releases only. Never commit directly. | Yes | Yes (at least 1) |
+| `dev` | Release candidate. Merge completed features here first. Never commit directly. | Yes | No |
+| `feature/<name>` | All development work. Created from `dev`. Merged back to `dev` via PR. | Yes (to `dev`) | No |
+
+**Rules:**
+- `feature/` branches must be branched off `dev`, never off `main`.
+- All merges to `dev` and `main` go through a Pull Request — no direct pushes ever.
+- Feature branch names: `feature/<short-descriptive-name>` (lowercase, hyphens). Example: `feature/risk-score-export`.
+- When starting work, always create a new `feature/` branch. Never work directly on `dev` or `main`.
+
+### Version Number Scheme
+
+Version format (4 parts, PowerShell-compatible): `Major.Minor.yyyyMMdd.HHmm`
+
+| Branch | Version format | Example | When to increment |
+|--------|---------------|---------|------------------|
+| `main` | `Major.0.yyyyMMdd.HHmm` | `3.0.20260317.1430` | Increment `Major` each time `dev` is merged to `main`. `Minor` is always `0` on `main`. |
+| `dev` | `Major.Minor.yyyyMMdd.HHmm` | `2.5.20260317.1100` | Increment `Minor` each time a `feature/` branch is merged to `dev`. `Major` matches current `main`. |
+| `feature/*` | `Major.Minor.yyyyMMdd.HHmm` | `2.5.20260317.0915` | Update date/time stamp with every change. `Major` and `Minor` must match the current `dev` version. |
+
+**How to apply:**
+
+1. **Starting a feature branch**: Branch from `dev`. Set version to current `dev` `Major.Minor` + today's date/time.
+2. **After any code change on a feature branch**: Update `yyyyMMdd.HHmm` to current date/time. Keep `Major.Minor` unchanged.
+3. **When merging feature → dev via PR**: Increment `dev` Minor by 1 and update date/time. Example: `2.4.x.x` → `2.5.20260317.1430`.
+4. **When merging dev → main via PR**: Increment `main` Major by 1, set Minor to 0, update date/time. Example: `2.x.x.x` → `3.0.20260317.1500`.
+
+### CHANGES.md
+
+Every feature branch must maintain a `CHANGES.md` file at the repo root. This file:
+- Is **overwritten fresh** at the start of each feature branch (do not carry over old entries).
+- Contains a bullet list of **functional changes** made on this branch (what users/operators will notice), not implementation details.
+- Is used as the PR description when merging to `dev`.
+- After merging to `main`, its content is appended to `CHANGELOG.md` under a new version heading.
+
+**Format:**
+```markdown
+## Changes in this branch
+
+- <Functional description of change 1>
+- <Functional description of change 2>
+```
+
+**Rules for writing CHANGES.md entries:**
+- Write in user-facing language ("Added X", "Fixed Y", "Improved Z").
+- Do not describe internal refactors unless they affect observable behavior.
+- Add a bullet immediately after each meaningful change — don't batch them up at the end.
+
+---
 
 ## Major Features
 
@@ -466,16 +527,43 @@ function Get-FGSQLResource {
 
 ## Development Workflow
 
+### Starting New Work
+
+```bash
+git checkout dev && git pull
+git checkout -b feature/<name>   # e.g. feature/risk-score-export
+```
+
+Then immediately overwrite `CHANGES.md` with a fresh header (no old entries).
+
 ### Making Changes
 
 1. **Create/Edit Functions** in `Functions/<category>/`
 2. **Test locally**: `Import-Module .\FortigiGraph.psd1 -Force`
-3. **Update version** in `FortigiGraph.psd1` (format: `Major.Minor.yyyyMMdd.HHmm`)
-4. **Commit** with descriptive messages
+3. **Update version** in `FortigiGraph.psd1` — keep `Major.Minor` from `dev`, update `yyyyMMdd.HHmm` to now
+4. **Add a bullet to `CHANGES.md`** describing the functional change
+5. **Commit** with descriptive messages
+
+### Merging Feature → Dev (via PR)
+
+1. Open PR from `feature/<name>` into `dev`
+2. Use the content of `CHANGES.md` as the PR description
+3. No approval required — merge when CI passes
+4. After merge: increment `dev` Minor by 1 and update date/time in `FortigiGraph.psd1`
+
+### Merging Dev → Main (via PR, stable release)
+
+1. Open PR from `dev` into `main`
+2. Summarize all changes since last main release in the PR description
+3. Requires 1 approval
+4. After merge: increment Major by 1, set Minor to 0, update date/time in `FortigiGraph.psd1`
+5. Append the dev changes to `CHANGELOG.md` under a `## v{Major}.0 — {date}` heading
 
 ### Version Updates
 
-Version format: `Major.Minor.yyyyMMdd.HHmm` (e.g., `2.1.20260209.1935`)
+Version format: `Major.Minor.yyyyMMdd.HHmm` (e.g., `2.5.20260317.1430`)
+
+See the **Branching & Versioning Strategy** section above for the full scheme.
 
 This is critical because `New-FGAzureAutomationAccount` checks version numbers and only uploads the module if the local version is newer than the deployed version.
 
