@@ -157,6 +157,20 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 | **Deployment** | Azure App Service (Linux, Node 20, P0v3) | Oryx build-on-deploy |
 | **Data Sources** | `vw_UserPermissionAssignments`, `vw_UserPermissionAssignmentViaAccessPackage`, `GraphUsers`, `GraphGroups` | SQL views + tables created by `Start-FGSync` |
 
+### Security Hardening
+
+The UI backend includes multiple layers of security:
+
+- **Helmet** — sets security headers (CSP, HSTS, X-Frame-Options, Referrer-Policy)
+- **CORS** — configurable via `ALLOWED_ORIGINS` env var; production blocks cross-origin by default
+- **Rate limiting** — pre-auth endpoints limited to 30 req/min per IP
+- **Authentication** — Entra ID JWT validation with tenant ID enforcement and optional role-based access via `AUTH_REQUIRED_ROLES`
+- **Parameterized queries** — all SQL queries use parameterized inputs (no string interpolation)
+- **Input validation** — route params validated with `parseInt`/`isNaN`, UUIDs checked with regex, request body fields length-capped, array inputs capped at 500 items
+- **Column name validation** — schema-derived column names validated against `[a-zA-Z0-9_]` regex before use in queries
+- **Error sanitization** — error responses return generic messages; `console.error` logs only `err.message` (no stack traces or SQL schema details)
+- **Body size limit** — `express.json({ limit: '100kb' })` prevents oversized payloads
+
 ### Pages
 
 The UI has nine pages accessible via tab navigation. Four optional pages (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown:
