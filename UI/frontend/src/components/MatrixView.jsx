@@ -388,7 +388,7 @@ export default function MatrixView({
           categoryColor: row.categoryColor || null,
         });
       }
-      mapping.set(`${gid}|${row.accessPackageId}`, row.roleName || 'Member');
+      mapping.set(`${gid}|${row.accessPackageId.toLowerCase()}`, row.roleName || 'Member');
     }
 
     // Filter to APs that have at least one visible user assignment
@@ -474,7 +474,7 @@ export default function MatrixView({
       const gidUpper = (g.realGroupId || g.id).toUpperCase(); // use realGroupId for owner rows
       const isOwnerRow = !!g.realGroupId;
       for (let i = 0; i < accessPackages.length; i++) {
-        const mapKey = `${gidUpper}|${accessPackages[i].id}`;
+        const mapKey = `${gidUpper}|${accessPackages[i].id.toLowerCase()}`;
         if (apGroupMap.has(mapKey)) {
           // Owner rows only match AP buckets where the role is Owner
           const role = apGroupMap.get(mapKey);
@@ -642,6 +642,44 @@ export default function MatrixView({
     return merged;
   }, [memberships, nestedMemberships]);
 
+  // When "gaps" filter is active, pre-filter groups so the virtualizer gets the correct count.
+  // Previously this check lived inside MatrixGroupRow (returning null), which caused the
+  // virtualizer to reserve space for rows that rendered nothing.
+  const visibleGroups = useMemo(() => {
+    if (managedFilter !== 'gaps') return displayGroups;
+    return displayGroups.filter(group => {
+      const isOwnerRow = !!group.realGroupId && !group.isNestedRow;
+      const realGid = group.realGroupId || group.id;
+      const lookupGid = realGid.toUpperCase();
+
+      const groupAps = accessPackages.filter(ap => {
+        const role = apGroupMap?.get(`${lookupGid}|${ap.id.toLowerCase()}`);
+        if (!role) return false;
+        const roleIsOwner = role.toLowerCase().includes('owner');
+        return isOwnerRow ? roleIsOwner : !roleIsOwner;
+      });
+      if (groupAps.length === 0) return false;
+
+      const groupApIdSetLower = new Set(groupAps.map(ap => ap.id.toLowerCase()));
+      return users.some(user => {
+        const cellKeyLower = `${realGid.toLowerCase()}|${user.id.toLowerCase()}`;
+        const userApIds = (managedApMap?.get(cellKeyLower) || []).filter(id => groupApIdSetLower.has(id));
+        if (userApIds.length === 0) return false;
+
+        const cellKey = `${group.id}|${user.id}`;
+        const cellTypes = displayMemberships.get(cellKey);
+        return userApIds.some(apId => {
+          const apObj = groupAps.find(a => a.id.toLowerCase() === apId);
+          const role = apObj ? (apGroupMap?.get(`${lookupGid}|${apObj.id.toLowerCase()}`) || 'Member') : 'Member';
+          const lower = role.toLowerCase();
+          if (lower.includes('owner')) return !cellTypes?.has('Owner');
+          if (lower.includes('eligible')) return !cellTypes?.has('Eligible');
+          return !cellTypes?.has('Direct');
+        });
+      });
+    });
+  }, [displayGroups, managedFilter, accessPackages, apGroupMap, users, managedApMap, displayMemberships]);
+
   // Lazy-load SortableMatrixBody (contains @dnd-kit + @tanstack/react-virtual)
   const [SortableBody, setSortableBody] = useState(null);
   useEffect(() => {
@@ -769,7 +807,7 @@ export default function MatrixView({
           {SortableBody ? (
             <SortableBody
               scrollRef={scrollRef}
-              orderedGroups={displayGroups}
+              orderedGroups={visibleGroups}
               groupIds={groupIds}
               onDragEnd={handleRowDragEnd}
               columnHeaders={columnHeaders}
@@ -791,7 +829,7 @@ export default function MatrixView({
             <table className="border-collapse" style={{ tableLayout: 'fixed' }}>
               {columnHeaders}
               <tbody>
-                {displayGroups.map(group => (
+                {visibleGroups.map(group => (
                   <MatrixGroupRow
                     key={group.id}
                     group={group}

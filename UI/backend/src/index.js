@@ -17,6 +17,8 @@ import perfRouter from './routes/perf.js';
 import riskRouter from './routes/riskScores.js';
 import orgChartRouter from './routes/orgChart.js';
 import clusterRouter from './routes/clusters.js';
+import identitiesRouter from './routes/identities.js';
+import preferencesRouter from './routes/preferences.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -107,6 +109,13 @@ app.get('/api/version', publicLimiter, (req, res) => {
   res.json({ version: moduleVersion || null });
 });
 
+app.get('/api/features', publicLimiter, (req, res) => {
+  res.json({
+    riskScoring: process.env.FEATURE_RISK_SCORING !== 'false',
+    accountCorrelation: process.env.FEATURE_ACCOUNT_CORRELATION !== 'false',
+  });
+});
+
 app.get('/api/auth-config', publicLimiter, (req, res) => {
   // Only return client/tenant IDs when auth is enabled (needed by MSAL).
   // When auth is disabled, return enabled:true with empty IDs so the
@@ -132,6 +141,8 @@ app.use('/api', authMiddleware, detailsRouter);
 app.use('/api', authMiddleware, riskRouter);
 app.use('/api', authMiddleware, orgChartRouter);
 app.use('/api', authMiddleware, clusterRouter);
+app.use('/api', authMiddleware, identitiesRouter);
+app.use('/api', authMiddleware, preferencesRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // In production, serve the frontend build output

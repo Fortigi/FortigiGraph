@@ -54,12 +54,19 @@ export async function getGroupColumns(pool) {
 
 let userValuesCache = null;
 let userValuesCacheTime = 0;
+let userValuesInflight = null;
 let groupValuesCache = null;
 let groupValuesCacheTime = 0;
+let groupValuesInflight = null;
+
+// Validate SQL identifier to prevent injection via schema-derived names
+const SAFE_IDENT_RE = /^[a-zA-Z0-9_]+$/;
 
 async function discoverColumnValues(pool, table, columns) {
-  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type));
+  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type) && SAFE_IDENT_RE.test(c.name));
   if (filterableCols.length === 0) return {};
+
+  if (!SAFE_IDENT_RE.test(table)) throw new Error(`Invalid table name: ${table}`);
 
   const parts = filterableCols.map(c =>
     `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
@@ -87,10 +94,20 @@ export async function getUserColumnValues(pool) {
   if (userValuesCache && (now - userValuesCacheTime) < COLUMN_CACHE_TTL) {
     return userValuesCache;
   }
-  const cols = await getUserColumns(pool);
-  userValuesCache = await discoverColumnValues(pool, 'GraphUsers', cols);
-  userValuesCacheTime = now;
-  return userValuesCache;
+  // Deduplicate concurrent callers — only run one expensive query at a time
+  if (userValuesInflight) return userValuesInflight;
+  userValuesInflight = (async () => {
+    try {
+      const cols = await getUserColumns(pool);
+      const result = await discoverColumnValues(pool, 'GraphUsers', cols);
+      userValuesCache = result;
+      userValuesCacheTime = Date.now();
+      return result;
+    } finally {
+      userValuesInflight = null;
+    }
+  })();
+  return userValuesInflight;
 }
 
 /**
@@ -102,10 +119,20 @@ export async function getGroupColumnValues(pool) {
   if (groupValuesCache && (now - groupValuesCacheTime) < COLUMN_CACHE_TTL) {
     return groupValuesCache;
   }
-  const cols = await getGroupColumns(pool);
-  groupValuesCache = await discoverColumnValues(pool, 'GraphGroups', cols);
-  groupValuesCacheTime = now;
-  return groupValuesCache;
+  // Deduplicate concurrent callers — only run one expensive query at a time
+  if (groupValuesInflight) return groupValuesInflight;
+  groupValuesInflight = (async () => {
+    try {
+      const cols = await getGroupColumns(pool);
+      const result = await discoverColumnValues(pool, 'GraphGroups', cols);
+      groupValuesCache = result;
+      groupValuesCacheTime = Date.now();
+      return result;
+    } finally {
+      groupValuesInflight = null;
+    }
+  })();
+  return groupValuesInflight;
 }
 
 export { SYSTEM_COLS, FILTERABLE_TYPES };

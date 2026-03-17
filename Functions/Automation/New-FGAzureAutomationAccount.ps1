@@ -254,7 +254,6 @@ function New-FGAzureAutomationAccount {
             "Sync-FGAccessPackageAssignmentRequests" = "AccessPackageAssignmentRequests"
             "Sync-FGAccessPackageAccessReviews" = "AccessPackageAccessReviews"
             "Sync-FGMaterializedViews" = "MaterializedViews"
-            "Invoke-FGRiskScoring" = "RiskScoring"
         }
 
         foreach ($runbookName in $scheduleMapping.Keys) {
@@ -289,17 +288,112 @@ function New-FGAzureAutomationAccount {
             }
         }
 
-        # Check for risk scoring schedule in config
-        if ($config.RiskScoring -and $config.RiskScoring.Schedule -and $config.RiskScoring.Schedule.Enabled -eq $true) {
-            $scheduleConfig.Enabled = $true
-            $rsTime = if ($config.RiskScoring.Schedule.Time) { $config.RiskScoring.Schedule.Time } else { "10:30" }
-            $rsFreq = if ($config.RiskScoring.Schedule.Frequency) { $config.RiskScoring.Schedule.Frequency } else { "Daily" }
-            $scheduleConfig.Schedules += @{
-                RunbookName = "Invoke-FGRiskScoring"
-                ConfigKey   = "RiskScoring"
-                Time        = $rsTime
-                Frequency   = $rsFreq
+        # Check for risk scoring — respect Enabled flag
+        $riskScoringEnabled = -not ($config.RiskScoring -and $config.RiskScoring.PSObject.Properties['Enabled'] -and $config.RiskScoring.Enabled -eq $false)
+        if ($riskScoringEnabled) {
+            if ($config.RiskScoring -and $config.RiskScoring.Schedule -and $config.RiskScoring.Schedule.Enabled -eq $true) {
+                $scheduleConfig.Enabled = $true
+                $rsTime = if ($config.RiskScoring.Schedule.Time) { $config.RiskScoring.Schedule.Time } else { "10:30" }
+                $rsFreq = if ($config.RiskScoring.Schedule.Frequency) { $config.RiskScoring.Schedule.Frequency } else { "Daily" }
+                $scheduleConfig.Schedules += @{
+                    RunbookName = "Invoke-FGRiskScoring"
+                    ConfigKey   = "RiskScoring"
+                    Time        = $rsTime
+                    Frequency   = $rsFreq
+                }
             }
+            elseif (-not $config.RiskScoring -or -not $config.RiskScoring.Schedule -or $config.RiskScoring.Schedule.Enabled -ne $true) {
+                Write-Host ""
+                Write-Host "  Risk Scoring schedule is not configured." -ForegroundColor Yellow
+                Write-Host "  This runs daily identity risk scoring using classifiers stored in SQL." -ForegroundColor Gray
+                $addRiskScoring = Read-Host "  Would you like to add a daily Risk Scoring schedule? (Y/N)"
+
+                if ($addRiskScoring -match '^[Yy]') {
+                    $rsTimeInput = Read-Host "  Enter time for Risk Scoring (default: 10:30)"
+                    $rsTime = if ($rsTimeInput.Trim()) { $rsTimeInput.Trim() } else { "10:30" }
+
+                    $scheduleConfig.Enabled = $true
+                    $scheduleConfig.Schedules += @{
+                        RunbookName = "Invoke-FGRiskScoring"
+                        ConfigKey   = "RiskScoring"
+                        Time        = $rsTime
+                        Frequency   = "Daily"
+                    }
+
+                    # Add or update RiskScoring section in config
+                    try {
+                        $rsScheduleObj = [PSCustomObject]@{ Enabled = $true; Time = $rsTime; Frequency = "Daily" }
+                        if (-not $config.RiskScoring) {
+                            $config | Add-Member -NotePropertyName "RiskScoring" -NotePropertyValue ([PSCustomObject]@{
+                                Enabled = $true
+                                Schedule = $rsScheduleObj
+                            }) -Force
+                        } else {
+                            $config.RiskScoring | Add-Member -NotePropertyName "Schedule" -NotePropertyValue $rsScheduleObj -Force
+                        }
+                        $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
+                        Write-Host "  Risk Scoring schedule added to config (daily at $rsTime)" -ForegroundColor Green
+                    } catch {
+                        Write-Warning "  Failed to update config file: $_"
+                    }
+                }
+            }
+        } else {
+            Write-Host "  Risk Scoring is disabled in config — skipping schedule" -ForegroundColor Gray
+        }
+
+        # Check for account correlation — respect Enabled flag
+        $accountCorrelationEnabled = -not ($config.AccountCorrelation -and $config.AccountCorrelation.PSObject.Properties['Enabled'] -and $config.AccountCorrelation.Enabled -eq $false)
+        if ($accountCorrelationEnabled) {
+            if ($config.AccountCorrelation -and $config.AccountCorrelation.Schedule -and $config.AccountCorrelation.Schedule.Enabled -eq $true) {
+                $scheduleConfig.Enabled = $true
+                $acTime = if ($config.AccountCorrelation.Schedule.Time) { $config.AccountCorrelation.Schedule.Time } else { "11:00" }
+                $acFreq = if ($config.AccountCorrelation.Schedule.Frequency) { $config.AccountCorrelation.Schedule.Frequency } else { "Daily" }
+                $scheduleConfig.Schedules += @{
+                    RunbookName = "Invoke-FGAccountCorrelation"
+                    ConfigKey   = "AccountCorrelation"
+                    Time        = $acTime
+                    Frequency   = $acFreq
+                }
+            }
+            elseif (-not $config.AccountCorrelation -or -not $config.AccountCorrelation.Schedule -or $config.AccountCorrelation.Schedule.Enabled -ne $true) {
+                Write-Host ""
+                Write-Host "  Account Correlation schedule is not configured." -ForegroundColor Yellow
+                Write-Host "  This runs daily account correlation to group accounts into identities." -ForegroundColor Gray
+                $addCorrelation = Read-Host "  Would you like to add a daily Account Correlation schedule? (Y/N)"
+
+                if ($addCorrelation -match '^[Yy]') {
+                    $acTimeInput = Read-Host "  Enter time for Account Correlation (default: 11:00)"
+                    $acTime = if ($acTimeInput.Trim()) { $acTimeInput.Trim() } else { "11:00" }
+
+                    $scheduleConfig.Enabled = $true
+                    $scheduleConfig.Schedules += @{
+                        RunbookName = "Invoke-FGAccountCorrelation"
+                        ConfigKey   = "AccountCorrelation"
+                        Time        = $acTime
+                        Frequency   = "Daily"
+                    }
+
+                    # Add AccountCorrelation section to config
+                    try {
+                        $acScheduleObj = [PSCustomObject]@{ Enabled = $true; Time = $acTime; Frequency = "Daily" }
+                        if (-not $config.AccountCorrelation) {
+                            $config | Add-Member -NotePropertyName "AccountCorrelation" -NotePropertyValue ([PSCustomObject]@{
+                                Enabled = $true
+                                Schedule = $acScheduleObj
+                            }) -Force
+                        } else {
+                            $config.AccountCorrelation | Add-Member -NotePropertyName "Schedule" -NotePropertyValue $acScheduleObj -Force
+                        }
+                        $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
+                        Write-Host "  Account Correlation schedule added to config (daily at $acTime)" -ForegroundColor Green
+                    } catch {
+                        Write-Warning "  Failed to update config file: $_"
+                    }
+                }
+            }
+        } else {
+            Write-Host "  Account Correlation is disabled in config — skipping schedule" -ForegroundColor Gray
         }
 
         if ($scheduleConfig.Schedules.Count -gt 0) {
@@ -925,6 +1019,12 @@ function New-FGAzureAutomationAccount {
                     Description = "Runs identity risk scoring engine against synced data"
                     RiskScoring = $true
                 }
+                # Post-scoring: Account correlation (after risk scoring)
+                @{
+                    Name = "Invoke-FGAccountCorrelation"
+                    Description = "Correlates user accounts to identify multiple accounts belonging to the same person"
+                    AccountCorrelation = $true
+                }
             )
 
             foreach ($runbook in $runbooks) {
@@ -1036,6 +1136,53 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Azure S
 # Run risk scoring (classifiers loaded from SQL by Invoke-FGRiskScoring)
 Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running Invoke-FGRiskScoring..."
 Invoke-FGRiskScoring
+
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) completed successfully"
+"@
+                }
+                elseif ($runbook.AccountCorrelation) {
+                    # Account correlation runbook (SQL-only, reads ruleset from SQL)
+                    $runbookContent = @"
+<#
+.SYNOPSIS
+$($runbook.Description)
+
+.DESCRIPTION
+This runbook is automatically generated by New-FGAzureAutomationAccount.
+It reads SQL credentials from Automation Variables, then runs the account
+correlation engine against already-synced user data.
+
+Schedule this runbook AFTER Invoke-FGRiskScoring has completed.
+
+.NOTES
+Requires FortigiGraph module to be imported into the Automation Account.
+No Graph API credentials needed - correlation reads from SQL only.
+#>
+
+# Get SQL credentials
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting $($runbook.Name)..."
+
+`$sqlServerName = Get-AutomationVariable -Name 'SQLServerName'
+`$sqlDatabaseName = Get-AutomationVariable -Name 'SQLDatabaseName'
+`$sqlUsername = Get-AutomationVariable -Name 'SQLAdminUsername'
+`$sqlPassword = Get-AutomationVariable -Name 'SQLAdminPassword'
+
+Write-Output "  SQL Server: `$sqlServerName"
+
+# Import FortigiGraph module
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Importing FortigiGraph module..."
+Import-Module FortigiGraph -ErrorAction Stop
+
+# Connect to SQL Server
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Azure SQL..."
+`$connectionString = "Server=tcp:`$sqlServerName.database.windows.net,1433;Initial Catalog=`$sqlDatabaseName;User ID=`$sqlUsername;Password=`$sqlPassword;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+`$Global:FGSQLConnectionString = `$connectionString
+`$Global:FGSQLServerName = `$sqlServerName
+`$Global:FGSQLDatabaseName = `$sqlDatabaseName
+
+# Run account correlation (ruleset loaded from SQL by Invoke-FGAccountCorrelation)
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Running Invoke-FGAccountCorrelation..."
+Invoke-FGAccountCorrelation
 
 Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) completed successfully"
 "@
@@ -1191,6 +1338,10 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
         # Schedules are created if: (1) -CreateSchedules switch is used, OR (2) config file has Schedules.Enabled = true
         $shouldCreateSchedules = $CreateSchedules -or ($PSCmdlet.ParameterSetName -eq 'ConfigFile' -and $scheduleConfig.Enabled)
 
+        # Default feature flags to enabled when not using ConfigFile (no Enabled flag to check)
+        if (-not (Get-Variable -Name riskScoringEnabled -Scope Local -ErrorAction SilentlyContinue)) { $riskScoringEnabled = $true }
+        if (-not (Get-Variable -Name accountCorrelationEnabled -Scope Local -ErrorAction SilentlyContinue)) { $accountCorrelationEnabled = $true }
+
         if ($shouldCreateSchedules -and -not $SkipRunbooks) {
             Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking existing schedules..." -ForegroundColor Cyan
 
@@ -1267,6 +1418,8 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                     @{ RunbookName = "Sync-FGMaterializedViews"; ScheduleName = "Daily-MaterializedViews-1000"; Hour = 10; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
                     # Post-sync: Risk scoring (after materialized views)
                     @{ RunbookName = "Invoke-FGRiskScoring"; ScheduleName = "Daily-RiskScoring-1030"; Hour = 10; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    # Post-scoring: Account correlation (after risk scoring)
+                    @{ RunbookName = "Invoke-FGAccountCorrelation"; ScheduleName = "Daily-AccountCorrelation-1100"; Hour = 11; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
                 )
             }
 
@@ -1275,7 +1428,7 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             $newScheduleNames = $schedulesToCreate | ForEach-Object { $_.ScheduleName }
 
             # Find FortigiGraph-related schedules (Daily-* or Hourly-* patterns for our runbooks)
-            $fgSchedulePattern = '^(Daily|Hourly)-(Users|Groups|GroupMembers|GroupEligibleMembers|GroupOwners|Catalogs|AccessPackages|AccessPackageAssignments|AccessPackageResourceRoleScopes|AccessPackageAssignmentPolicies|AccessPackageAssignmentRequests|AccessPackageAccessReviews|MaterializedViews|RiskScoring)-'
+            $fgSchedulePattern = '^(Daily|Hourly)-(Users|Groups|GroupMembers|GroupEligibleMembers|GroupOwners|Catalogs|AccessPackages|AccessPackageAssignments|AccessPackageResourceRoleScopes|AccessPackageAssignmentPolicies|AccessPackageAssignmentRequests|AccessPackageAccessReviews|MaterializedViews|RiskScoring|AccountCorrelation)-'
 
             $orphanedSchedules = @()
             $additionalSchedules = @()
@@ -1295,16 +1448,45 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                 }
             }
 
-            # Warn about orphaned schedules (FortigiGraph schedules not in current config)
-            if ($orphanedSchedules.Count -gt 0) {
+            # Auto-remove schedules for explicitly disabled features
+            $disabledFeatureSchedules = @()
+            $generalOrphanedSchedules = @()
+            foreach ($orphan in $orphanedSchedules) {
+                if ((-not $riskScoringEnabled -and $orphan.Name -match 'RiskScoring') -or
+                    (-not $accountCorrelationEnabled -and $orphan.Name -match 'AccountCorrelation')) {
+                    $disabledFeatureSchedules += $orphan
+                } else {
+                    $generalOrphanedSchedules += $orphan
+                }
+            }
+
+            if ($disabledFeatureSchedules.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  Removing $($disabledFeatureSchedules.Count) schedule(s) for disabled features..." -ForegroundColor Yellow
+                foreach ($sched in $disabledFeatureSchedules) {
+                    try {
+                        Remove-AzAutomationSchedule `
+                            -ResourceGroupName $ResourceGroupName `
+                            -AutomationAccountName $AutomationAccountName `
+                            -Name $sched.Name `
+                            -Force -ErrorAction Stop
+                        Write-Host "    Removed: $($sched.Name)" -ForegroundColor Green
+                    } catch {
+                        Write-Warning "    Failed to remove schedule $($sched.Name): $_"
+                    }
+                }
+            }
+
+            # Warn about remaining orphaned schedules (from previous config changes)
+            if ($generalOrphanedSchedules.Count -gt 0) {
                 Write-Host ""
                 Write-Host "  ========================================" -ForegroundColor Yellow
-                Write-Host "  WARNING: Found $($orphanedSchedules.Count) orphaned schedule(s)" -ForegroundColor Yellow
+                Write-Host "  WARNING: Found $($generalOrphanedSchedules.Count) orphaned schedule(s)" -ForegroundColor Yellow
                 Write-Host "  ========================================" -ForegroundColor Yellow
                 Write-Host "  These schedules appear to be from previous configurations" -ForegroundColor Yellow
                 Write-Host "  and are NOT in your current config file:" -ForegroundColor Yellow
                 Write-Host ""
-                foreach ($orphan in $orphanedSchedules) {
+                foreach ($orphan in $generalOrphanedSchedules) {
                     $status = if ($orphan.IsEnabled) { "Enabled" } else { "Disabled" }
                     Write-Host "    - $($orphan.Name) ($status)" -ForegroundColor Yellow
                 }
@@ -1435,6 +1617,7 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
             Write-Host "                     Sync-FGAccessPackageAccessReviews" -ForegroundColor White
             Write-Host "  Post-Sync:         Sync-FGMaterializedViews (views + indexes for UI)" -ForegroundColor White
             Write-Host "  Risk Scoring:      Invoke-FGRiskScoring (classifiers from SQL)" -ForegroundColor White
+            Write-Host "  Correlation:       Invoke-FGAccountCorrelation (ruleset from SQL)" -ForegroundColor White
         }
 
         if ($shouldCreateSchedules -and -not $SkipRunbooks) {

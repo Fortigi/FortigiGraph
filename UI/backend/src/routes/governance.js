@@ -45,29 +45,29 @@ LastReviewPerAP AS (
     li.reviewInstanceStatus,
     COUNT(*) AS totalDecisions,
     SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime <= li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
-    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime > li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS reviewedLate,
+    SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) AS reviewedLate,
     SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed,
     MAX(d.reviewedDateTime) AS lastReviewedDate,
     MAX(d.reviewedByDisplayName) AS lastReviewedBy,
     CASE
-      -- All decisions completed on time
+      -- All decisions completed on time (same day or before deadline)
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
-       AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime > li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) = 0
+       AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) = 0
       THEN 'Compliant'
-      -- Some decisions still pending but deadline hasn't passed yet
+      -- Some decisions still pending but deadline day hasn't passed yet
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-       AND li.reviewInstanceEndDateTime >= GETUTCDATE()
+       AND CAST(li.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE)
       THEN 'In Progress'
-      -- Deadline passed with unreviewed decisions
+      -- Deadline day passed with unreviewed decisions
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-       AND li.reviewInstanceEndDateTime < GETUTCDATE()
+       AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
       THEN 'Overdue'
       -- All reviewed but some were late
       ELSE 'Reviewed Late'
     END AS complianceStatus,
     CASE
-      WHEN li.reviewInstanceEndDateTime < GETUTCDATE()
-      THEN DATEDIFF(DAY, li.reviewInstanceEndDateTime, GETUTCDATE())
+      WHEN CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
+      THEN DATEDIFF(DAY, CAST(li.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
       ELSE 0
     END AS daysOverdue
   FROM LatestInstance li

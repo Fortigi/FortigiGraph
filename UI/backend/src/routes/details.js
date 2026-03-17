@@ -87,8 +87,8 @@ router.get('/user/:id', async (req, res) => {
       const r = await timedRequest(pool, 'user-history-check', res)
         .input('id', userId)
         .query(`
-        SELECT TOP 1 1 AS found FROM GraphUsers FOR SYSTEM_TIME ALL
-        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
+        SELECT TOP 1 1 AS found FROM GraphUsers_History
+        WHERE id = @id
       `);
       hasHistory = r.recordset.length > 0;
     } catch {
@@ -241,8 +241,8 @@ router.get('/group/:id', async (req, res) => {
       const r = await timedRequest(pool, 'group-history-check', res)
         .input('id', groupId)
         .query(`
-        SELECT TOP 1 1 AS found FROM GraphGroups FOR SYSTEM_TIME ALL
-        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
+        SELECT TOP 1 1 AS found FROM GraphGroups_History
+        WHERE id = @id
       `);
       hasHistory = r.recordset.length > 0;
     } catch {
@@ -398,17 +398,9 @@ router.get('/access-package/:id', async (req, res) => {
       reviewCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    // 5. Pending request count
-    let pendingRequestCount = 0;
-    try {
-      const r = await timedRequest(pool, 'ap-pending-request-count', res)
-        .input('id', apId)
-        .query(`
-        SELECT COUNT(*) AS cnt FROM GraphAccessPackageAssignmentRequests
-        WHERE accessPackageId = @id AND requestState IN ('PendingApproval', 'Delivering', 'Accepted')
-      `);
-      pendingRequestCount = r.recordset[0].cnt;
-    } catch { /* table may not exist */ }
+    // 5. Pending request count — skipped (was 26-76s on large request tables).
+    // The Pending Requests section lazy-loads its own data when expanded.
+    const pendingRequestCount = null;
 
     // 5b. Last review date + reviewer
     let lastReviewDate = null;
@@ -485,8 +477,8 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-history-check', res)
         .input('id', apId)
         .query(`
-        SELECT TOP 1 1 AS found FROM GraphAccessPackages FOR SYSTEM_TIME ALL
-        WHERE id = @id AND ValidTo <> '9999-12-31 23:59:59.9999999'
+        SELECT TOP 1 1 AS found FROM GraphAccessPackages_History
+        WHERE id = @id
       `);
       hasHistory = r.recordset.length > 0;
     } catch {
@@ -497,6 +489,61 @@ router.get('/access-package/:id', async (req, res) => {
   } catch (err) {
     console.error('Error fetching access package detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch access package details' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/assignments — Lazy-loaded user assignments
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/assignments', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-assignments', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT
+        a.id, a.targetId, a.assignmentState, a.assignmentStatus,
+        u.displayName AS targetDisplayName,
+        u.userPrincipalName AS targetUPN,
+        a.ValidFrom AS assignedDate
+      FROM GraphAccessPackageAssignments a
+      LEFT JOIN GraphUsers u ON a.targetId = u.id
+      WHERE a.accessPackageId = @id
+        AND a.assignmentState = 'Delivered'
+      ORDER BY u.displayName
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/access-package/:id/resource-roles — Lazy-loaded resource role scopes
+// ────────────────────────────────────────────────────────────────
+router.get('/access-package/:id/resource-roles', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'ap-resource-roles', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT
+        rrs.id, rrs.roleDisplayName, rrs.roleOriginSystem,
+        rrs.scopeDisplayName, rrs.scopeOriginId, rrs.scopeOriginSystem,
+        rrs.createdDateTime,
+        g.displayName AS groupDisplayName
+      FROM GraphAccessPackageResourceRoleScopes rrs
+      LEFT JOIN GraphGroups g ON UPPER(rrs.scopeOriginId) = UPPER(g.id)
+      WHERE rrs.accessPackageId = @id
+      ORDER BY g.displayName, rrs.roleDisplayName
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    res.json([]);
   }
 });
 

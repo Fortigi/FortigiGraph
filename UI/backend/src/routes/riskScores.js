@@ -207,12 +207,14 @@ router.get('/risk-scores/groups', async (req, res) => {
       whereClause += ' AND riskOverride IS NOT NULL';
     }
 
+    request.input('offset', offset);
+    request.input('limit', limit);
     const result = await request.query(`
       SELECT ${GROUP_COLS}
       FROM dbo.GraphGroups
       ${whereClause}
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
-      OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
     const countReq = timedRequest(p, 'risk-groups-count', res);
@@ -264,12 +266,14 @@ router.get('/risk-scores/users', async (req, res) => {
       whereClause += ' AND riskOverride IS NOT NULL';
     }
 
+    request.input('offset', offset);
+    request.input('limit', limit);
     const result = await request.query(`
       SELECT ${USER_COLS}
       FROM dbo.GraphUsers
       ${whereClause}
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
-      OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
     const countReq = timedRequest(p, 'risk-users-count', res);

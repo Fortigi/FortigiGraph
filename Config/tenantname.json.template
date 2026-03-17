@@ -119,16 +119,29 @@
     },
     "ParallelExecution": true
   },
+  "_LLM_NOTE": "LLM section configures the AI provider used by New-FGRiskProfile, New-FGRiskClassifiers, and New-FGCorrelationRuleset. Only anonymized structural data is sent to the LLM — no user names, emails, or identity data.",
+  "LLM": {
+    "Provider": "",
+    "Model": "",
+    "ApiKey": "",
+    "_ApiKey_NOTE": "Set ApiKey here or use ApiKey_Encrypted for DPAPI encryption, or set ANTHROPIC_API_KEY / OPENAI_API_KEY env var"
+  },
   "_RISKSCORING_NOTE": "RiskScoring section configures the identity risk scoring engine (New-FGRiskProfile / New-FGRiskClassifiers). Profiles and classifiers are stored in SQL by default. Use Export-FGRiskProfile / Export-FGRiskClassifiers to export to file for sharing.",
   "RiskScoring": {
-    "LLMProvider": "Anthropic",
-    "LLMModel": "",
-    "LLMApiKey": "",
-    "_LLMApiKey_NOTE": "Set LLMApiKey here or use LLMApiKey_Encrypted for DPAPI encryption, or set ANTHROPIC_API_KEY / OPENAI_API_KEY env var",
+    "Enabled": true,
     "CustomerDomain": "yourtenant.onmicrosoft.com",
     "Schedule": {
       "Enabled": true,
       "Time": "10:30",
+      "Frequency": "Daily"
+    }
+  },
+  "_ACCOUNTCORRELATION_NOTE": "AccountCorrelation section configures the daily account correlation run (Invoke-FGAccountCorrelation). The correlation ruleset is generated once with New-FGCorrelationRuleset and stored in SQL. The daily run re-correlates accounts based on the stored ruleset.",
+  "AccountCorrelation": {
+    "Enabled": true,
+    "Schedule": {
+      "Enabled": true,
+      "Time": "11:00",
       "Frequency": "Daily"
     }
   },

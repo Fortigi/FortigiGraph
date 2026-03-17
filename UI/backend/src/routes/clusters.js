@@ -105,7 +105,7 @@ router.get('/risk-scores/clusters', async (req, res) => {
 
     res.json({ available: true, data, total });
   } catch (err) {
-    console.error('Error fetching clusters:', err);
+    console.error('Error fetching clusters:', err.message);
     res.status(500).json({ error: 'Failed to fetch clusters' });
   }
 });
@@ -148,7 +148,7 @@ router.get('/risk-scores/clusters/:id', async (req, res) => {
 
     res.json({ cluster, members });
   } catch (err) {
-    console.error('Error fetching cluster detail:', err);
+    console.error('Error fetching cluster detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch cluster detail' });
   }
 });
@@ -160,17 +160,20 @@ router.put('/risk-scores/clusters/:id/owner', async (req, res) => {
   try {
     const p = await db.getPool();
     const clusterId = req.params.id;
-    const { userId, displayName, assignedBy } = req.body;
+    const { userId, displayName } = req.body;
 
     if (!displayName) {
       return res.status(400).json({ error: 'displayName is required' });
     }
 
+    // Derive assignedBy from authenticated user, not request body
+    const assignedBy = req.user?.preferred_username || req.user?.name || 'Unknown';
+
     const result = await timedRequest(p, 'cluster-assign-owner', res)
       .input('id', clusterId)
       .input('ownerUserId', userId || null)
       .input('ownerDisplayName', displayName)
-      .input('ownerAssignedBy', assignedBy || 'Unknown')
+      .input('ownerAssignedBy', assignedBy)
       .query(`
         UPDATE dbo.GraphResourceClusters
         SET ownerUserId = @ownerUserId,
@@ -186,7 +189,7 @@ router.put('/risk-scores/clusters/:id/owner', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Error assigning cluster owner:', err);
+    console.error('Error assigning cluster owner:', err.message);
     res.status(500).json({ error: 'Failed to assign owner' });
   }
 });
@@ -216,7 +219,7 @@ router.delete('/risk-scores/clusters/:id/owner', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Error removing cluster owner:', err);
+    console.error('Error removing cluster owner:', err.message);
     res.status(500).json({ error: 'Failed to remove owner' });
   }
 });
@@ -257,7 +260,7 @@ router.get('/risk-scores/cluster-summary', async (req, res) => {
       byTier: Object.fromEntries(tiers.recordset.map(r => [r.riskTier, r.count])),
     });
   } catch (err) {
-    console.error('Error fetching cluster summary:', err);
+    console.error('Error fetching cluster summary:', err.message);
     res.status(500).json({ error: 'Failed to fetch cluster summary' });
   }
 });

@@ -42,6 +42,8 @@ export async function closePool() {
   }
 }
 
+// Note: prefer pool.request().input(...).query(...) for parameterized queries.
+// This helper is only for static SQL with no user input.
 export async function query(text) {
   const p = await getPool();
   return p.request().query(text);

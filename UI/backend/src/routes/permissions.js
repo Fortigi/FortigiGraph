@@ -25,9 +25,13 @@ const GROUP_ALIAS_TO_COL = { groupDisplayName: 'displayName', groupDescription: 
 // Values come from the FULL dataset (not limited by userLimit), so dropdowns
 // show all possible options regardless of which page of users is loaded.
 router.get('/user-columns', async (req, res) => {
+  // ?schema=true — return column names only (no distinct values). Fast path (~100ms).
+  // Used by the frontend to immediately recognise which filters are server-side,
+  // without waiting for the expensive UNION ALL distinct-values query.
+  const schemaOnly = req.query.schema === 'true';
+
   try {
     if (!useSql) {
-      // Mock: derive from mock data
       const mockCols = {};
       for (const row of permissionAssignments) {
         for (const [key, val] of Object.entries(row)) {
@@ -36,22 +40,29 @@ router.get('/user-columns', async (req, res) => {
                'membershipType', 'managedByAccessPackage'].includes(key)) continue;
           if (val == null || val === '') continue;
           if (!mockCols[key]) mockCols[key] = new Set();
-          mockCols[key].add(String(val));
+          if (!schemaOnly) mockCols[key].add(String(val));
         }
       }
       return res.json(
         Object.entries(mockCols)
-          .filter(([, vals]) => vals.size >= 1 && vals.size <= 500)
-          .map(([column, vals]) => ({ column, values: [...vals].sort() }))
+          .filter(([, vals]) => schemaOnly || (vals.size >= 1 && vals.size <= 500))
+          .map(([column, vals]) => ({ column, values: schemaOnly ? [] : [...vals].sort() }))
       );
     }
 
     const p = await db.getPool();
 
-    // Use cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
-    const grouped = { ...await getUserColumnValues(p) };
+    let grouped;
+    if (schemaOnly) {
+      // Fast: just schema names, no distinct value scan
+      const cols = await getUserColumns(p);
+      grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+    } else {
+      // Slow: cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
+      grouped = { ...await getUserColumnValues(p) };
+    }
 
-    // Add virtual __userTag column (ensure tag tables exist first)
+    // Add virtual __userTag column
     try {
       await ensureTagTables(p);
       const tagResult = await timedRequest(p, 'user-columns-tags', res).query(`
@@ -62,7 +73,7 @@ router.get('/user-columns', async (req, res) => {
         ORDER BY t.name
       `);
       const userTags = tagResult.recordset.map(r => r.name);
-      if (userTags.length > 0) grouped['__userTag'] = userTags;
+      grouped['__userTag'] = schemaOnly ? [] : userTags;
     } catch { /* tag tables may not exist yet — skip silently */ }
 
     return res.json(

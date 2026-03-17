@@ -28,6 +28,9 @@ function Initialize-FGGroupMembershipIndexes {
     .PARAMETER OwnersTable
     Name of the table containing group ownership relationships. Default: "GraphGroupOwners"
 
+    .PARAMETER RequestsTable
+    Name of the table containing access package assignment requests. Default: "GraphAccessPackageAssignmentRequests"
+
     .PARAMETER DropIfExists
     If specified, drops existing indexes before recreating them.
 
@@ -62,6 +65,9 @@ function Initialize-FGGroupMembershipIndexes {
         [string]$OwnersTable = "GraphGroupOwners",
 
         [Parameter(Mandatory = $false)]
+        [string]$RequestsTable = "GraphAccessPackageAssignmentRequests",
+
+        [Parameter(Mandatory = $false)]
         [switch]$DropIfExists
     )
 
@@ -81,13 +87,15 @@ function Initialize-FGGroupMembershipIndexes {
 SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$DirectMembersTable') THEN 1 ELSE 0 END AS DirectExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$EligibleMembersTable') THEN 1 ELSE 0 END AS EligibleExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists,
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$RequestsTable') THEN 1 ELSE 0 END AS RequestsExists
 "@
         $reader = $checkTablesCmd.ExecuteReader()
         $reader.Read()
         $directExists = $reader.GetInt32(0) -eq 1
         $eligibleExists = $reader.GetInt32(1) -eq 1
         $ownersExists = $reader.GetInt32(2) -eq 1
+        $requestsExists = $reader.GetInt32(3) -eq 1
         $reader.Close()
 
         if (-not $directExists) {
@@ -158,6 +166,17 @@ SELECT
                 Include = "groupId, memberId, memberType"
                 Where = "ValidTo = '9999-12-31 23:59:59.9999999'"
                 Description = "Filtered index for current eligible members only"
+            }
+        }
+
+        # Indexes for RequestsTable
+        if ($requestsExists) {
+            $indexes += @{
+                Table = $RequestsTable
+                Name = "IX_APRequests_PackageState"
+                Columns = "accessPackageId, requestState"
+                Include = $null
+                Description = "Optimizes pending request lookups by access package"
             }
         }
 

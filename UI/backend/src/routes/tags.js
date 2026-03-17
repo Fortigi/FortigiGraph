@@ -126,7 +126,9 @@ router.patch('/tags/:id', async (req, res) => {
     if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
     const p = await db.getPool();
     await ensureTagTables(p);
-    const request = p.request().input('id', parseInt(req.params.id));
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid tag ID' });
+    const request = p.request().input('id', id);
     const sets = [];
     if (name) { sets.push('name = @name'); request.input('name', name.trim()); }
     if (color) { sets.push('color = @color'); request.input('color', color); }
@@ -145,10 +147,12 @@ router.patch('/tags/:id', async (req, res) => {
 router.delete('/tags/:id', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid tag ID' });
     const p = await db.getPool();
     await ensureTagTables(p);
     await p.request()
-      .input('id', parseInt(req.params.id))
+      .input('id', id)
       .query('DELETE FROM dbo.GraphTags WHERE id = @id');
     res.json({ ok: true });
   } catch (err) {
@@ -165,9 +169,13 @@ router.post('/tags/:id/assign', async (req, res) => {
     if (!Array.isArray(entityIds) || entityIds.length === 0) {
       return res.status(400).json({ error: 'entityIds array required' });
     }
+    if (entityIds.length > 500) {
+      return res.status(400).json({ error: 'Maximum 500 entity IDs per request' });
+    }
     const p = await db.getPool();
     await ensureTagTables(p);
-    const tagId = parseInt(req.params.id);
+    const tagId = parseInt(req.params.id, 10);
+    if (isNaN(tagId)) return res.status(400).json({ error: 'Invalid tag ID' });
 
     // Batch insert all assignments in a single query (avoids N+1 round-trips)
     const request = p.request().input('tagId', tagId);
@@ -198,9 +206,13 @@ router.post('/tags/:id/unassign', async (req, res) => {
     if (!Array.isArray(entityIds) || entityIds.length === 0) {
       return res.status(400).json({ error: 'entityIds array required' });
     }
+    if (entityIds.length > 500) {
+      return res.status(400).json({ error: 'Maximum 500 entity IDs per request' });
+    }
     const p = await db.getPool();
     await ensureTagTables(p);
-    const tagId = parseInt(req.params.id);
+    const tagId = parseInt(req.params.id, 10);
+    if (isNaN(tagId)) return res.status(400).json({ error: 'Invalid tag ID' });
 
     // Batch delete all assignments in a single query (avoids N+1 round-trips)
     const request = p.request().input('tagId', tagId);
@@ -230,7 +242,8 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
 
     const p = await db.getPool();
     await ensureTagTables(p);
-    const tagId = parseInt(req.params.id);
+    const tagId = parseInt(req.params.id, 10);
+    if (isNaN(tagId)) return res.status(400).json({ error: 'Invalid tag ID' });
     const table = entityType === 'user' ? 'GraphUsers' : 'GraphGroups';
     const alias = 'e';
     const search = (rawSearch || '').trim().slice(0, 200);
@@ -314,10 +327,20 @@ router.get('/user-columns-page', async (req, res) => {
 // ─── GET /api/group-columns ──────────────────────────────────────
 // Column discovery for the Groups page (distinct values from GraphGroups)
 router.get('/group-columns', async (req, res) => {
+  // ?schema=true — return column names only (no distinct values). Fast path.
+  const schemaOnly = req.query.schema === 'true';
+
   try {
     if (!useSql) return res.json([]);
     const p = await db.getPool();
-    const grouped = { ...await getGroupColumnValues(p) };
+
+    let grouped;
+    if (schemaOnly) {
+      const cols = await getGroupColumns(p);
+      grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+    } else {
+      grouped = { ...await getGroupColumnValues(p) };
+    }
 
     // Add virtual __groupTag column (tag names as values)
     try {
@@ -330,7 +353,7 @@ router.get('/group-columns', async (req, res) => {
         ORDER BY t.name
       `);
       const groupTags = tagResult.recordset.map(r => r.name);
-      if (groupTags.length > 0) grouped['__groupTag'] = groupTags;
+      grouped['__groupTag'] = schemaOnly ? [] : groupTags;
     } catch { /* tag tables may not exist yet */ }
 
     return res.json(Object.entries(grouped).map(([column, values]) => ({ column, values })));

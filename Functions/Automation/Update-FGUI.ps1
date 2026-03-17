@@ -81,6 +81,14 @@ function Update-FGUI {
             $properties["PERF_METRICS_ENABLED"] = if ($PerformanceMetrics) { "true" } else { "false" }
         }
 
+        # Feature flags (read from config, default to enabled for backward compatibility)
+        if ($config.RiskScoring -and $config.RiskScoring.PSObject.Properties['Enabled']) {
+            $properties["FEATURE_RISK_SCORING"] = if ($config.RiskScoring.Enabled -eq $false) { "false" } else { "true" }
+        }
+        if ($config.AccountCorrelation -and $config.AccountCorrelation.PSObject.Properties['Enabled']) {
+            $properties["FEATURE_ACCOUNT_CORRELATION"] = if ($config.AccountCorrelation.Enabled -eq $false) { "false" } else { "true" }
+        }
+
         if ($moduleVersion) {
             $properties["MODULE_VERSION"] = $moduleVersion
             Write-Host "  Module version: $moduleVersion" -ForegroundColor Green

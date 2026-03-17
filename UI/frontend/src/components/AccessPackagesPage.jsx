@@ -4,11 +4,24 @@ import { TAG_COLORS } from '../utils/colors';
 
 const PAGE_SIZE = 100;
 
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 const ASSIGNMENT_TYPE_STYLES = {
   'Auto-assigned': 'bg-green-100 text-green-800 border-green-200',
   'Request-based': 'bg-blue-100 text-blue-800 border-blue-200',
   'Request-based with auto-removal': 'bg-orange-100 text-orange-800 border-orange-200',
   'Both': 'bg-purple-100 text-purple-800 border-purple-200',
+};
+
+const COMPLIANCE_STYLES = {
+  'Compliant': 'bg-green-100 text-green-800 border-green-200',
+  'In Progress': 'bg-blue-100 text-blue-800 border-blue-200',
+  'Overdue': 'bg-red-100 text-red-800 border-red-200',
+  'Reviewed Late': 'bg-amber-100 text-amber-800 border-amber-200',
 };
 
 const ASSIGNMENT_TYPES = ['Auto-assigned', 'Request-based', 'Request-based with auto-removal', 'Both'];
@@ -53,8 +66,8 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Reset page & selection when filters change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, categoryFilter, typeFilter]);
+  // Reset page & selection when filters or sort change
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [debouncedSearch, categoryFilter, typeFilter, sortCol, sortDir]);
 
   // Fetch categories
   const fetchCategories = useCallback(async () => {
@@ -80,6 +93,10 @@ export default function AccessPackagesPage({ onOpenDetail }) {
           params.set('categoryId', categoryFilter);
         }
       }
+      if (sortCol) {
+        params.set('sortCol', sortCol);
+        params.set('sortDir', sortDir);
+      }
       const res = await authFetch(`/api/access-packages?${params}`);
       if (res.ok && version === fetchVersion.current) {
         const json = await res.json();
@@ -88,7 +105,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
       }
     } catch (err) { console.error('Failed to fetch access packages:', err); }
     if (version === fetchVersion.current) setLoading(false);
-  }, [page, debouncedSearch, categoryFilter, authFetch]);
+  }, [page, debouncedSearch, categoryFilter, sortCol, sortDir, authFetch]);
 
   useEffect(() => { fetchPackages(); }, [fetchPackages]);
 
@@ -119,36 +136,11 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     }
   };
 
-  // Apply client-side type filter, then sort
-  const filteredPackages = useMemo(() => {
+  // Apply client-side type filter only (sorting is server-side)
+  const sortedPackages = useMemo(() => {
     if (!typeFilter) return packages;
     return packages.filter(p => p.assignmentType === typeFilter);
   }, [packages, typeFilter]);
-
-  const sortedPackages = useMemo(() => {
-    if (!sortCol) return filteredPackages;
-    return [...filteredPackages].sort((a, b) => {
-      let av, bv;
-      if (sortCol === 'totalAssignments') {
-        av = a.totalAssignments || 0;
-        bv = b.totalAssignments || 0;
-        const cmp = av - bv;
-        return sortDir === 'asc' ? cmp : -cmp;
-      }
-      if (sortCol === 'category') {
-        av = (a.category?.name ?? '').toLowerCase();
-        bv = (b.category?.name ?? '').toLowerCase();
-      } else if (sortCol === 'assignmentType') {
-        av = (a.assignmentType ?? '').toLowerCase();
-        bv = (b.assignmentType ?? '').toLowerCase();
-      } else {
-        av = (a[sortCol] ?? '').toString().toLowerCase();
-        bv = (b[sortCol] ?? '').toString().toLowerCase();
-      }
-      const cmp = av.localeCompare(bv);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-  }, [filteredPackages, sortCol, sortDir]);
 
   // Category operations
   const createCategory = async () => {
@@ -420,9 +412,10 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                 </th>
                 {[
                   { key: 'displayName',      label: 'Name' },
-                  { key: 'catalogName',      label: 'Catalog' },
-                  { key: 'totalAssignments', label: 'Assignments' },
                   { key: 'assignmentType',   label: 'Type' },
+                  { key: 'complianceStatus', label: 'Review Status' },
+                  { key: 'lastReviewDate',   label: 'Review Date' },
+                  { key: 'lastReviewedBy',   label: 'Reviewed By' },
                 ].map(col => (
                   <th
                     key={col.key}
@@ -452,7 +445,6 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                     )}
                   </span>
                 </th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Description</th>
               </tr>
             </thead>
             <tbody>
@@ -480,13 +472,64 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                       {ap.displayName}
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-gray-600">{ap.catalogName || ''}</td>
-                  <td className="px-3 py-2 text-gray-600">{ap.totalAssignments}</td>
                   <td className="px-3 py-2">
                     {ap.assignmentType && (
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${ASSIGNMENT_TYPE_STYLES[ap.assignmentType] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                         {ap.assignmentType}
                       </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                    {ap.complianceStatus ? (
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                        title={ap.complianceStatus === 'Overdue'
+                          ? `Overdue by ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} (due ${formatDate(ap.reviewDeadline)})`
+                          : ap.complianceStatus === 'Reviewed Late'
+                          ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
+                          : ap.complianceStatus === 'In Progress'
+                          ? `Due ${formatDate(ap.reviewDeadline)}`
+                          : ap.complianceStatus === 'Compliant'
+                          ? `Completed on time (due ${formatDate(ap.reviewDeadline)})`
+                          : ''}
+                      >
+                        {ap.complianceStatus}
+                        {ap.complianceStatus === 'Overdue' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d)`}
+                      </span>
+                    ) : ap.hasReviewConfigured ? (
+                      <span
+                        className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
+                        title="Access review is configured on the assignment policy but no review instance has been created yet"
+                      >
+                        Pending first review
+                      </span>
+                    ) : (
+                      <span
+                        className="text-gray-400 text-xs"
+                        title="No access review is configured on any assignment policy for this package"
+                      >
+                        Not required
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">
+                    {ap.lastReviewDate ? formatDate(ap.lastReviewDate) : <span className="text-gray-300">-</span>}
+                  </td>
+                  <td className="px-3 py-2 text-gray-500 text-xs">
+                    {ap.lastReviewedBy ? (
+                      /^AAD Access Review/i.test(ap.lastReviewedBy) ? (
+                        <span
+                          className="inline-flex items-center gap-1 text-orange-600"
+                          title="This review was auto-completed by the system (reviewer did not respond before the deadline)"
+                        >
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" /></svg>
+                          Auto
+                        </span>
+                      ) : (
+                        ap.lastReviewedBy
+                      )
+                    ) : (
+                      <span className="text-gray-300">-</span>
                     )}
                   </td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
@@ -506,9 +549,6 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                  </td>
-                  <td className="px-3 py-2 text-gray-500 text-xs truncate max-w-xs" title={ap.description || ''}>
-                    {ap.description || ''}
                   </td>
                 </tr>
               ))}

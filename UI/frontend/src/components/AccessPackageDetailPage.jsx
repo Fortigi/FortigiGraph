@@ -86,6 +86,14 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const [requests, setRequests] = useState(cachedData?.requests || null);
   const [requestsLoading, setRequestsLoading] = useState(false);
 
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [assignments, setAssignments] = useState(cachedData?.assignments || null);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+
+  const [resourceRolesOpen, setResourceRolesOpen] = useState(false);
+  const [resourceRoles, setResourceRoles] = useState(cachedData?.resourceRoles || null);
+  const [resourceRolesLoading, setResourceRolesLoading] = useState(false);
+
   const [policiesOpen, setPoliciesOpen] = useState(false);
   const [policies, setPolicies] = useState(cachedData?.policies || null);
   const [policiesLoading, setPoliciesLoading] = useState(false);
@@ -141,6 +149,34 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
       .finally(() => setRequestsLoading(false));
   }, [accessPackageId, authFetch, requests, onCacheData]);
 
+  // Lazy-load assignments
+  const loadAssignments = useCallback(() => {
+    if (assignments) return;
+    setAssignmentsLoading(true);
+    authFetch(`/api/access-package/${encodeURIComponent(accessPackageId)}/assignments`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setAssignments(d);
+        onCacheData?.(accessPackageId, 'access-package', { assignments: d });
+      })
+      .catch(() => setAssignments([]))
+      .finally(() => setAssignmentsLoading(false));
+  }, [accessPackageId, authFetch, assignments, onCacheData]);
+
+  // Lazy-load resource roles
+  const loadResourceRoles = useCallback(() => {
+    if (resourceRoles) return;
+    setResourceRolesLoading(true);
+    authFetch(`/api/access-package/${encodeURIComponent(accessPackageId)}/resource-roles`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        setResourceRoles(d);
+        onCacheData?.(accessPackageId, 'access-package', { resourceRoles: d });
+      })
+      .catch(() => setResourceRoles([]))
+      .finally(() => setResourceRolesLoading(false));
+  }, [accessPackageId, authFetch, resourceRoles, onCacheData]);
+
   // Lazy-load policies
   const loadPolicies = useCallback(() => {
     if (policies) return;
@@ -176,6 +212,14 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const toggleRequests = useCallback(() => {
     setRequestsOpen(prev => { if (!prev) loadRequests(); return !prev; });
   }, [loadRequests]);
+
+  const toggleAssignments = useCallback(() => {
+    setAssignmentsOpen(prev => { if (!prev) loadAssignments(); return !prev; });
+  }, [loadAssignments]);
+
+  const toggleResourceRoles = useCallback(() => {
+    setResourceRolesOpen(prev => { if (!prev) loadResourceRoles(); return !prev; });
+  }, [loadResourceRoles]);
 
   const togglePolicies = useCallback(() => {
     setPoliciesOpen(prev => { if (!prev) loadPolicies(); return !prev; });
@@ -254,10 +298,10 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
                 <span>{reviewCount} review{reviewCount !== 1 ? 's' : ''}</span>
               </>
             )}
-            {pendingRequestCount > 0 && (
+            {requests && requests.length > 0 && (
               <>
                 <span className="text-gray-400">|</span>
-                <span className="text-yellow-700 font-medium">{pendingRequestCount} pending request{pendingRequestCount !== 1 ? 's' : ''}</span>
+                <span className="text-yellow-700 font-medium">{requests.length} pending request{requests.length !== 1 ? 's' : ''}</span>
               </>
             )}
           </div>
@@ -298,6 +342,105 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
           </tbody>
         </table>
       </Section>
+
+      {/* Assignments (users assigned to this AP) */}
+      {assignmentCount > 0 && (
+        <div className="mt-6">
+          <CollapsibleSection
+            title="Assignments"
+            count={assignmentCount}
+            open={assignmentsOpen}
+            onToggle={toggleAssignments}
+            loading={assignmentsLoading}
+          >
+            {assignments && assignments.length === 0 ? (
+              <p className="text-sm text-gray-400 italic p-4">No assignments found</p>
+            ) : assignments && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                    <th className="px-4 py-2 font-medium">User</th>
+                    <th className="px-4 py-2 font-medium">State</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 font-medium">Assigned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignments.map(a => (
+                    <tr key={a.id} className="border-b border-gray-50">
+                      <td className="px-4 py-2">
+                        <div className="text-gray-900 font-medium">{a.targetDisplayName || '\u2014'}</div>
+                        {a.targetUPN && <div className="text-xs text-gray-400">{a.targetUPN}</div>}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                          a.assignmentState === 'Delivered' ? 'bg-green-100 text-green-800'
+                          : a.assignmentState === 'Delivering' ? 'bg-blue-100 text-blue-800'
+                          : a.assignmentState === 'Expired' ? 'bg-gray-100 text-gray-600'
+                          : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {a.assignmentState || '\u2014'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-500 text-xs">{a.assignmentStatus || '\u2014'}</td>
+                      <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{formatDate(a.assignedDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CollapsibleSection>
+        </div>
+      )}
+
+      {/* Resource Assignments (groups/resources in this AP) */}
+      {groupCount > 0 && (
+        <div className="mt-4">
+          <CollapsibleSection
+            title="Resource Assignments"
+            count={groupCount}
+            open={resourceRolesOpen}
+            onToggle={toggleResourceRoles}
+            loading={resourceRolesLoading}
+          >
+            {resourceRoles && resourceRoles.length === 0 ? (
+              <p className="text-sm text-gray-400 italic p-4">No resource assignments found</p>
+            ) : resourceRoles && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                    <th className="px-4 py-2 font-medium">Resource</th>
+                    <th className="px-4 py-2 font-medium">Role</th>
+                    <th className="px-4 py-2 font-medium">Type</th>
+                    <th className="px-4 py-2 font-medium">Added</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resourceRoles.map(rr => (
+                    <tr key={rr.id} className="border-b border-gray-50">
+                      <td className="px-4 py-2">
+                        <div className="text-gray-900 font-medium">{rr.groupDisplayName || rr.scopeDisplayName || '\u2014'}</div>
+                        {rr.scopeOriginSystem && <div className="text-xs text-gray-400">{rr.scopeOriginSystem}</div>}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                          rr.roleDisplayName === 'Owner' ? 'bg-purple-100 text-purple-800'
+                          : rr.roleDisplayName === 'Member' ? 'bg-blue-100 text-blue-800'
+                          : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {rr.roleDisplayName || '\u2014'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-500 text-xs">{rr.roleOriginSystem || '\u2014'}</td>
+                      <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{formatDate(rr.createdDateTime)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CollapsibleSection>
+        </div>
+      )}
 
       {/* Assignment Policies */}
       {policyCount > 0 && (
@@ -402,7 +545,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
       <div className="mt-4">
         <CollapsibleSection
           title="Pending Requests"
-          count={pendingRequestCount}
+          count={requests ? requests.length : null}
           open={requestsOpen}
           onToggle={toggleRequests}
           loading={requestsLoading}

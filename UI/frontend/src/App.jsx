@@ -16,6 +16,7 @@ const PerfPage = lazy(() => import('./components/PerfPage'));
 const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
+const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -77,15 +78,16 @@ function useHashRoute() {
   return [page, navigate];
 }
 
-const NAV_TABS = [
+const ALL_NAV_TABS = [
   { key: 'matrix',           label: 'Matrix' },
   { key: 'users',            label: 'Users' },
   { key: 'groups',           label: 'Groups' },
   { key: 'access-packages',  label: 'Access Packages' },
   { key: 'sync-log',         label: 'Sync Log' },
-  { key: 'risk-scores',      label: 'Risk Scores' },
-  { key: 'org-chart',        label: 'Org Chart' },
-  { key: 'performance',      label: 'Performance' },
+  { key: 'risk-scores',      label: 'Risk Scores',  feature: 'riskScoring',        optional: true },
+  { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },
+  { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring',        optional: true },
+  { key: 'performance',      label: 'Performance',                                  optional: true },
 ];
 
 export default function App() {
@@ -103,13 +105,68 @@ export default function App() {
   const [filterText, setFilterText] = useState(initial.search);
 
   const { data, totalUsers, accessPackageGroups, managedByPackages, userColumns, groupTagMap, loading, refreshing, error } = usePermissions(userLimit, activeFilters);
-  const { account, logout } = useAuth();
+  const { account, logout, authFetch } = useAuth();
   const [page, navigate] = useHashRoute();
   const [moduleVersion, setModuleVersion] = useState(null);
+  const [features, setFeatures] = useState({ riskScoring: true, accountCorrelation: true });
+  const [visibleTabs, setVisibleTabs] = useState(null); // null = loading, [] = loaded
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef(null);
+
+  const navTabs = useMemo(() =>
+    ALL_NAV_TABS.filter(tab => {
+      if (tab.feature && !features[tab.feature]) return false;
+      if (tab.optional && visibleTabs && !visibleTabs.includes(tab.key)) return false;
+      return true;
+    }),
+    [features, visibleTabs]
+  );
+
+  // Available optional tabs (respecting feature flags)
+  const optionalTabs = useMemo(() =>
+    ALL_NAV_TABS.filter(tab => tab.optional && (!tab.feature || features[tab.feature])),
+    [features]
+  );
 
   useEffect(() => {
     fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
+    fetch('/api/features').then(r => r.json()).then(d => setFeatures(d)).catch(() => {});
   }, []);
+
+  // Load user preferences
+  useEffect(() => {
+    authFetch('/api/preferences')
+      .then(r => r.json())
+      .then(d => setVisibleTabs(d.visibleTabs || []))
+      .catch(() => setVisibleTabs([]));
+  }, [authFetch]);
+
+  const toggleTab = useCallback((tabKey) => {
+    setVisibleTabs(prev => {
+      const next = prev.includes(tabKey)
+        ? prev.filter(k => k !== tabKey)
+        : [...prev, tabKey];
+      // Save to backend
+      authFetch('/api/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibleTabs: next }),
+      }).catch(() => {});
+      return next;
+    });
+  }, [authFetch]);
+
+  // Close settings dropdown on outside click
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handleClick = (e) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [settingsOpen]);
 
   // ─── Dynamic detail tabs ──────────────────────────────────────
   // Each entry: { type: 'user'|'group', id, displayName }
@@ -242,17 +299,61 @@ export default function App() {
               Analyze permission assignments to discover role patterns
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {account && (
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>{account.name || account.username}</span>
-                <button
-                  onClick={logout}
-                  className="text-gray-400 hover:text-gray-600"
-                  title="Sign out"
-                >
-                  Sign out
-                </button>
+          <div className="flex items-center gap-3 relative" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen(prev => !prev)}
+              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              title="Settings"
+            >
+              <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">
+                {(account?.name || account?.username || '?')[0].toUpperCase()}
+              </div>
+              <span className="hidden sm:inline">{account?.name || account?.username || 'User'}</span>
+              <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${settingsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {settingsOpen && (
+              <div className="absolute right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                {/* User info */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-sm font-medium text-gray-900">{account?.name || 'User'}</p>
+                  {account?.username && <p className="text-xs text-gray-500">{account.username}</p>}
+                </div>
+
+                {/* Tab visibility toggles */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Visible Tabs</p>
+                  {optionalTabs.map(tab => (
+                    <label key={tab.key} className="flex items-center justify-between py-1.5 cursor-pointer group">
+                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{tab.label}</span>
+                      <button
+                        onClick={() => toggleTab(tab.key)}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                          visibleTabs?.includes(tab.key) ? 'bg-blue-500' : 'bg-gray-300'
+                        }`}
+                      >
+                        <span
+                          className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform"
+                          style={{ transform: visibleTabs?.includes(tab.key) ? 'translateX(18px)' : 'translateX(2px)' }}
+                        />
+                      </button>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Sign out */}
+                {account && (
+                  <div className="px-4 py-2">
+                    <button
+                      onClick={() => { setSettingsOpen(false); logout(); }}
+                      className="text-sm text-gray-500 hover:text-gray-700 w-full text-left py-1"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -260,7 +361,7 @@ export default function App() {
 
         {/* Tab navigation */}
         <nav className="flex items-center gap-1 mt-3 -mb-4 border-b-0 overflow-x-auto">
-          {NAV_TABS.map(tab => (
+          {navTabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => navigate(tab.key)}
@@ -322,6 +423,8 @@ export default function App() {
             <AccessPackagesPage onOpenDetail={openDetailTab} />
           ) : page === 'risk-scores' ? (
             <RiskScoringPage onOpenDetail={openDetailTab} />
+          ) : page === 'identities' ? (
+            <IdentitiesPage onOpenDetail={openDetailTab} />
           ) : page === 'org-chart' ? (
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
           ) : page === 'performance' ? (

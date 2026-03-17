@@ -46,35 +46,6 @@ export default function MatrixGroupRow({
   const isExpanded = expandedGroups?.has(realGidForExpand);
   const isLoadingNested = loadingNested?.has(realGidForExpand);
 
-  // When "Gaps" filter is active, check if this row has ANY provisioning gap cell.
-  // If not, hide the entire row.
-  if (managedFilter === 'gaps') {
-    const realGid = (group.realGroupId || group.id);
-    const lookupGid = realGid.toUpperCase();
-    const hasAnyGap = users.some(user => {
-      const cellKeyLower = `${realGid.toLowerCase()}|${user.id.toLowerCase()}`;
-      const allApIds = managedApMap?.get(cellKeyLower);
-      if (!allApIds || allApIds.length === 0) return false;
-      // Filter to APs relevant for this row type (Owner vs non-Owner)
-      const relevantApIds = allApIds.filter(apId => {
-        const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
-        const roleIsOwner = role.toLowerCase().includes('owner');
-        return isOwnerRow ? roleIsOwner : !roleIsOwner;
-      });
-      if (relevantApIds.length === 0) return false;
-      const cellKey = `${group.id}|${user.id}`;
-      const cellTypes = memberships.get(cellKey);
-      return relevantApIds.some(apId => {
-        const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
-        const lower = role.toLowerCase();
-        if (lower.includes('owner')) return !cellTypes || !cellTypes.has('Owner');
-        if (lower.includes('eligible')) return !cellTypes || !cellTypes.has('Eligible');
-        return !cellTypes || !cellTypes.has('Direct');
-      });
-    });
-    if (!hasAnyGap) return null;
-  }
-
   const nestedBg = group.isNestedRow ? 'bg-gray-50/60' : 'bg-white';
 
   return (
@@ -214,7 +185,7 @@ export default function MatrixGroupRow({
       {accessPackages.map((ap, idx) => {
         // For owner rows, look up using realGroupId (AP data uses real group IDs)
         const lookupGid = (group.realGroupId || group.id).toUpperCase();
-        const apKey = `${lookupGid}|${ap.id}`;
+        const apKey = `${lookupGid}|${ap.id.toLowerCase()}`;
         const roleName = apGroupMap?.get(apKey);
         // Owner rows only show AP cells where the role is Owner;
         // regular rows only show non-Owner roles

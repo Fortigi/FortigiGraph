@@ -53,6 +53,11 @@ function New-FGConfig {
         [switch]$Quick
     )
 
+    # Require PowerShell 7+ (cross-platform support, modern .NET APIs)
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        throw "New-FGConfig requires PowerShell 7 or later. You are running PowerShell $($PSVersionTable.PSVersion). Please install PowerShell 7+ from https://aka.ms/powershell"
+    }
+
     # Check if file already exists
     if (Test-Path $Path) {
         Write-Host ""
@@ -631,6 +636,91 @@ function New-FGConfig {
     }
 
     # ============================================================
+    # Advanced Features: Risk Scoring & Account Correlation
+    # ============================================================
+    $enableRiskScoring = $false
+    $enableAccountCorrelation = $false
+    $llmProvider = ""
+    $llmModel = ""
+    $llmApiKey = ""
+    $riskScoringDomain = ""
+
+    if (-not $Quick) {
+        Write-Host "--- Advanced Features ---" -ForegroundColor Cyan
+        Write-Host "  FortigiGraph includes optional identity analytics features." -ForegroundColor Gray
+        Write-Host "  These require an LLM (AI) for initial setup but all identity" -ForegroundColor Gray
+        Write-Host "  scoring runs locally — no identity data is sent externally." -ForegroundColor Gray
+        Write-Host ""
+
+        $enableRiskScoring = (Read-FGConfigYesNo -Prompt "  Enable Risk Scoring (identity risk analysis)" -Default $false)
+
+        if ($enableRiskScoring) {
+            $domainInput = Read-Host "  Enter your organization's primary domain (e.g., contoso.com)"
+            $riskScoringDomain = if ($domainInput.Trim()) { $domainInput.Trim() } else { $tenantId }
+        }
+
+        $enableAccountCorrelation = (Read-FGConfigYesNo -Prompt "  Enable Account Correlation (group accounts into identities)" -Default $false)
+
+        # If either feature is enabled, prompt for LLM configuration
+        if ($enableRiskScoring -or $enableAccountCorrelation) {
+            Write-Host ""
+            Write-Host "  Both Risk Scoring and Account Correlation use an LLM (AI model)" -ForegroundColor Cyan
+            Write-Host "  for one-time setup tasks only:" -ForegroundColor Gray
+            Write-Host "    - Risk Scoring: Discovers organizational context from public domain info" -ForegroundColor Gray
+            Write-Host "    - Account Correlation: Analyzes naming patterns to build correlation rules" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "  No user names, emails, or identity data is sent to the LLM." -ForegroundColor Green
+            Write-Host "  Only anonymized structural data (prefix counts, domain names) is shared." -ForegroundColor Green
+            Write-Host ""
+            Write-Host "  Supported providers: Anthropic (Claude) or OpenAI (GPT)" -ForegroundColor Gray
+            Write-Host ""
+
+            $providerInput = Read-Host "  LLM Provider (anthropic/openai, or press Enter to skip)"
+            $llmProvider = $providerInput.Trim().ToLower()
+
+            if ($llmProvider -eq 'anthropic' -or $llmProvider -eq 'openai') {
+                if ($llmProvider -eq 'anthropic') {
+                    $defaultModel = "claude-sonnet-4-20250514"
+                } else {
+                    $defaultModel = "gpt-4o"
+                }
+                $modelInput = Read-Host "  Model name (default: $defaultModel)"
+                $llmModel = if ($modelInput.Trim()) { $modelInput.Trim() } else { $defaultModel }
+
+                $apiKeyInput = Read-Host "  API Key (will be DPAPI-encrypted in config)"
+                $llmApiKey = $apiKeyInput.Trim()
+
+                if ($llmApiKey) {
+                    Write-Host "  LLM configured: $llmProvider / $llmModel" -ForegroundColor Green
+                } else {
+                    Write-Host "  No API key provided. You can set it later in the config file" -ForegroundColor Yellow
+                    Write-Host "  or via ANTHROPIC_API_KEY / OPENAI_API_KEY environment variable." -ForegroundColor Yellow
+                }
+            } elseif ($llmProvider) {
+                Write-Host "  Unknown provider '$llmProvider'. Skipping LLM configuration." -ForegroundColor Yellow
+                Write-Host "  You can configure it later in the config file under the LLM section." -ForegroundColor Yellow
+                $llmProvider = ""
+            } else {
+                Write-Host "  LLM not configured. You can add it later in the config file." -ForegroundColor Yellow
+                Write-Host "  Risk Scoring and Account Correlation will use -NoLLM mode until configured." -ForegroundColor Yellow
+            }
+        }
+
+        Write-Host ""
+    }
+
+    # Encrypt LLM API key if provided
+    $llmApiKeyEncrypted = ""
+    if ($llmApiKey) {
+        try {
+            $secureApiKey = ConvertTo-SecureString -String $llmApiKey -AsPlainText -Force
+            $llmApiKeyEncrypted = $secureApiKey | ConvertFrom-SecureString
+        } catch {
+            Write-Warning "Failed to encrypt LLM API key: $_"
+        }
+    }
+
+    # ============================================================
     # Build the config object
     # ============================================================
     $config = [ordered]@{
@@ -709,6 +799,35 @@ function New-FGConfig {
         }
     }
 
+    # Add LLM section if provider was configured or if either feature is enabled
+    if ($llmProvider -or $enableRiskScoring -or $enableAccountCorrelation) {
+        $llmSection = [ordered]@{
+            Provider = $llmProvider
+            Model    = $llmModel
+        }
+        if ($llmApiKeyEncrypted) {
+            $llmSection.ApiKey_Encrypted = $llmApiKeyEncrypted
+        } else {
+            $llmSection.ApiKey = ""
+        }
+        $config.LLM = $llmSection
+    }
+
+    # Add RiskScoring section
+    if ($enableRiskScoring) {
+        $config.RiskScoring = [ordered]@{
+            Enabled        = $true
+            CustomerDomain = $riskScoringDomain
+        }
+    }
+
+    # Add AccountCorrelation section
+    if ($enableAccountCorrelation) {
+        $config.AccountCorrelation = [ordered]@{
+            Enabled = $true
+        }
+    }
+
     # ============================================================
     # Save the config file
     # ============================================================
@@ -761,6 +880,7 @@ function New-FGRandomPassword {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a cryptographically random complex password.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
@@ -774,28 +894,40 @@ function New-FGRandomPassword {
     $special = '!@#$%^&*'
     $all     = $upper + $lower + $digits + $special
 
-    # Ensure at least one of each category
-    $bytes = [byte[]]::new(4)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $password = @(
-        $upper[$bytes[0] % $upper.Length]
-        $lower[$bytes[1] % $lower.Length]
-        $digits[$bytes[2] % $digits.Length]
-        $special[$bytes[3] % $special.Length]
-    )
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        # Ensure at least one of each category
+        $bytes = [byte[]]::new(4)
+        $rng.GetBytes($bytes)
+        $password = @(
+            $upper[$bytes[0] % $upper.Length]
+            $lower[$bytes[1] % $lower.Length]
+            $digits[$bytes[2] % $digits.Length]
+            $special[$bytes[3] % $special.Length]
+        )
 
-    # Fill the rest randomly
-    $remaining = $Length - 4
-    $bytes = [byte[]]::new($remaining)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    for ($i = 0; $i -lt $remaining; $i++) {
-        $password += $all[$bytes[$i] % $all.Length]
+        # Fill the rest randomly
+        $remaining = $Length - 4
+        $bytes = [byte[]]::new($remaining)
+        $rng.GetBytes($bytes)
+        for ($i = 0; $i -lt $remaining; $i++) {
+            $password += $all[$bytes[$i] % $all.Length]
+        }
+
+        # Fisher-Yates shuffle so the guaranteed chars aren't always at the start
+        for ($i = $password.Count - 1; $i -gt 0; $i--) {
+            $swapBytes = [byte[]]::new(4)
+            $rng.GetBytes($swapBytes)
+            $j = [Math]::Abs([BitConverter]::ToInt32($swapBytes, 0)) % ($i + 1)
+            $temp = $password[$i]
+            $password[$i] = $password[$j]
+            $password[$j] = $temp
+        }
+        $password = $password -join ''
     }
-
-    # Shuffle the password so the guaranteed chars aren't always at the start
-    $shuffleBytes = [byte[]]::new($password.Count)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($shuffleBytes)
-    $password = ($password | Sort-Object { [System.Security.Cryptography.RandomNumberGenerator]::GetInt32([int]::MaxValue) }) -join ''
+    finally {
+        $rng.Dispose()
+    }
 
     return $password
 }
@@ -804,15 +936,22 @@ function New-FGRandomSqlName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique SQL Server name suggestion.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $bytes = [byte[]]::new(5)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $bytes = [byte[]]::new(5)
+        $rng.GetBytes($bytes)
+        $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    }
+    finally {
+        $rng.Dispose()
+    }
 
     return "sql-fortigraph-$suffix"
 }
@@ -821,15 +960,22 @@ function New-FGRandomAutomationAccountName {
     <#
     .SYNOPSIS
         Internal helper for New-FGConfig. Generates a unique Automation Account name suggestion.
+        Requires PowerShell 7+ (cross-platform: Windows, Linux, macOS).
     #>
 
     [cmdletbinding()]
     Param()
 
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    $bytes = [byte[]]::new(5)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $bytes = [byte[]]::new(5)
+        $rng.GetBytes($bytes)
+        $suffix = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    }
+    finally {
+        $rng.Dispose()
+    }
 
     return "aa-fortigraph-$suffix"
 }

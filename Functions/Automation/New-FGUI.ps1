@@ -771,6 +771,12 @@ function New-FGUI {
     # Performance metrics (opt-in, default off)
     $settingsList += @{ name = "PERF_METRICS_ENABLED"; value = if ($PerformanceMetrics) { "true" } else { "false" } }
 
+    # Feature flags (read from config, default to enabled for backward compatibility)
+    $featureRiskScoring = if ($config.RiskScoring -and $config.RiskScoring.PSObject.Properties['Enabled'] -and $config.RiskScoring.Enabled -eq $false) { "false" } else { "true" }
+    $featureAccountCorrelation = if ($config.AccountCorrelation -and $config.AccountCorrelation.PSObject.Properties['Enabled'] -and $config.AccountCorrelation.Enabled -eq $false) { "false" } else { "true" }
+    $settingsList += @{ name = "FEATURE_RISK_SCORING"; value = $featureRiskScoring }
+    $settingsList += @{ name = "FEATURE_ACCOUNT_CORRELATION"; value = $featureAccountCorrelation }
+
     # Module version (for display in UI footer)
     $psdPath = Join-Path $PSScriptRoot "..\..\FortigiGraph.psd1"
     if (Test-Path $psdPath) {
