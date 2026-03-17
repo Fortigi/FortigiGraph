@@ -149,6 +149,8 @@ router.get('/identities', async (req, res) => {
     // Paginated data
     const dataReq = timedRequest(p, 'identity-list', res);
     for (const [k, v] of Object.entries(inputs)) dataReq.input(k, v);
+    dataReq.input('pageOffset', pageOffset);
+    dataReq.input('pageLimit', pageLimit);
     const dataResult = await dataReq.query(`
       SELECT id, displayName, primaryAccountId, primaryAccountUpn, accountCount, accountTypes,
         correlationConfidence, correlationSignals, department, jobTitle, managerId, mail,
@@ -158,7 +160,7 @@ router.get('/identities', async (req, res) => {
       FROM dbo.GraphIdentities
       ${where}
       ORDER BY ${orderBy}
-      OFFSET ${pageOffset} ROWS FETCH NEXT ${pageLimit} ROWS ONLY
+      OFFSET @pageOffset ROWS FETCH NEXT @pageLimit ROWS ONLY
     `);
 
     res.json({
@@ -169,7 +171,7 @@ router.get('/identities', async (req, res) => {
       hasHrColumns: hasHrCols,
     });
   } catch (err) {
-    console.error('Error fetching identities:', err);
+    console.error('Error fetching identities:', err.message);
     res.status(500).json({ error: 'Failed to fetch identities' });
   }
 });
@@ -257,7 +259,7 @@ router.get('/identities/:id', async (req, res) => {
       members: membersResult.recordset,
     });
   } catch (err) {
-    console.error('Error fetching identity detail:', err);
+    console.error('Error fetching identity detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch identity detail' });
   }
 });
@@ -270,6 +272,9 @@ router.put('/identities/:id/verify', async (req, res) => {
   if (!UUID_RE.test(identityId)) return res.status(400).json({ error: 'Invalid identity ID' });
 
   const { notes } = req.body || {};
+  if (notes && notes.length > 2000) {
+    return res.status(400).json({ error: 'Notes must be 2000 characters or fewer' });
+  }
 
   try {
     const p = await db.getPool();
@@ -280,7 +285,7 @@ router.put('/identities/:id/verify', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Error verifying identity:', err);
+    console.error('Error verifying identity:', err.message);
     res.status(500).json({ error: 'Failed to verify identity' });
   }
 });
@@ -300,7 +305,7 @@ router.delete('/identities/:id/verify', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Error removing identity verification:', err);
+    console.error('Error removing identity verification:', err.message);
     res.status(500).json({ error: 'Failed to remove verification' });
   }
 });
@@ -321,6 +326,9 @@ router.put('/identities/:id/members/:userId/override', async (req, res) => {
   if (!reason || reason.trim().length < 3) {
     return res.status(400).json({ error: 'Reason is required (min 3 characters)' });
   }
+  if (reason.length > 500) {
+    return res.status(400).json({ error: 'Reason must be 500 characters or fewer' });
+  }
 
   try {
     const p = await db.getPool();
@@ -337,7 +345,7 @@ router.put('/identities/:id/members/:userId/override', async (req, res) => {
 
     res.json({ success: true, action, reason: reason.trim() });
   } catch (err) {
-    console.error('Error setting member override:', err);
+    console.error('Error setting member override:', err.message);
     res.status(500).json({ error: 'Failed to set member override' });
   }
 });
@@ -407,7 +415,7 @@ router.get('/identities/by-user/:userId', async (req, res) => {
 
     res.json({ identity, memberInfo, otherMembers: othersResult.recordset });
   } catch (err) {
-    console.error('Error fetching identity by user:', err);
+    console.error('Error fetching identity by user:', err.message);
     res.status(500).json({ error: 'Failed to fetch identity' });
   }
 });
@@ -434,7 +442,7 @@ router.delete('/identities/:id/members/:userId/override', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Error removing member override:', err);
+    console.error('Error removing member override:', err.message);
     res.status(500).json({ error: 'Failed to remove member override' });
   }
 });

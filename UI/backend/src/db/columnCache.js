@@ -59,9 +59,14 @@ let groupValuesCache = null;
 let groupValuesCacheTime = 0;
 let groupValuesInflight = null;
 
+// Validate SQL identifier to prevent injection via schema-derived names
+const SAFE_IDENT_RE = /^[a-zA-Z0-9_]+$/;
+
 async function discoverColumnValues(pool, table, columns) {
-  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type));
+  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type) && SAFE_IDENT_RE.test(c.name));
   if (filterableCols.length === 0) return {};
+
+  if (!SAFE_IDENT_RE.test(table)) throw new Error(`Invalid table name: ${table}`);
 
   const parts = filterableCols.map(c =>
     `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +

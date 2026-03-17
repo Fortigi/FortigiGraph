@@ -98,7 +98,9 @@ router.patch('/categories/:id', async (req, res) => {
     if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
     const p = await db.getPool();
     await ensureCategoryTables(p);
-    const request = p.request().input('id', parseInt(req.params.id));
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+    const request = p.request().input('id', id);
     const sets = [];
     if (name) { sets.push('name = @name'); request.input('name', name.trim()); }
     if (color) { sets.push('color = @color'); request.input('color', color); }
@@ -117,10 +119,12 @@ router.patch('/categories/:id', async (req, res) => {
 router.delete('/categories/:id', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
     const p = await db.getPool();
     await ensureCategoryTables(p);
     await p.request()
-      .input('id', parseInt(req.params.id))
+      .input('id', id)
       .query('DELETE FROM dbo.GraphCategories WHERE id = @id');
     res.json({ ok: true });
   } catch (err) {
@@ -140,7 +144,8 @@ router.post('/categories/:id/assign', async (req, res) => {
 
     const p = await db.getPool();
     await ensureCategoryTables(p);
-    const categoryId = parseInt(req.params.id);
+    const categoryId = parseInt(req.params.id, 10);
+    if (isNaN(categoryId)) return res.status(400).json({ error: 'Invalid category ID' });
 
     // MERGE: insert or replace the category for this AP (only one allowed)
     await p.request()

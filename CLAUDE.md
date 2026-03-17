@@ -619,10 +619,16 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 **Security (Critical):**
 - ~~`index.js` line 14: `app.use(cors())` allows ALL origins~~ → **RESOLVED:** CORS now configured with `ALLOWED_ORIGINS` env var; production blocks cross-origin by default
 - ~~No rate limiting on any endpoint~~ → **RESOLVED:** Added `express-rate-limit` on pre-auth endpoints (30 req/min per IP); `helmet` for security headers (CSP, HSTS, X-Frame-Options, Referrer-Policy); `express.json({ limit: '100kb' })` body size cap; startup warning when `AUTH_ENABLED` not set in production; `/api/auth-config` no longer confirms auth is disabled
-- Error responses leak SQL schema info (table names, column names) — sanitize error messages
+- ~~Error responses leak SQL schema info (table names, column names)~~ → **RESOLVED** (March 2026): All `console.error` calls now use `err.message` instead of full `err` objects; error responses return generic messages
 - No audit logging for mutations — log user identity + changes for compliance
 - ~~Auth middleware (`auth.js`) doesn't validate token scopes/roles~~ → **RESOLVED:** Added tenant ID validation and optional role-based access control via `AUTH_REQUIRED_ROLES` env var
 - ~~Bulk operations (`/tags/:id/assign-by-filter`) have no row limit~~ → **RESOLVED:** Added `TOP 50000` safety cap; hex color validation (`/^#[0-9a-fA-F]{6}$/`) on tag and category create/update endpoints
+- ~~SQL injection via string interpolation of offset/limit in `riskScores.js` and `identities.js`~~ → **RESOLVED** (March 2026): Parameterized with `@offset`/`@limit` inputs
+- ~~Missing `parseInt` validation across tag/category routes~~ → **RESOLVED** (March 2026): Added `isNaN()` checks with 400 responses; radix 10 on all `parseInt` calls
+- ~~Unbounded `entityIds` array in tag assign/unassign~~ → **RESOLVED** (March 2026): Capped at 500 IDs per request
+- ~~`assignedBy` in cluster owner derived from request body~~ → **RESOLVED** (March 2026): Now derived from `req.user` (authenticated identity)
+- ~~Missing input length limits on identity notes/reason fields~~ → **RESOLVED** (March 2026): Notes capped at 2000 chars, reason at 500 chars
+- ~~Column names in `columnCache.js` not validated against injection~~ → **RESOLVED** (March 2026): Added `SAFE_IDENT_RE` regex validation for column and table names
 
 **~~Performance (Critical):~~** **RESOLVED**
 - ~~`tags.js` lines 194-206: N+1 query in tag assignment loop — batch into single INSERT~~ → batched into single parameterized INSERT with NOT EXISTS
