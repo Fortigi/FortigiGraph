@@ -64,7 +64,8 @@ function Update-FGUI {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updating app settings..." -ForegroundColor Cyan
 
         try {
-            $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $rawToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $token = if ($rawToken -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $rawToken).Password } else { $rawToken }
         } catch {
             throw "Azure token expired or MFA required. Please run: Connect-AzAccount -AuthScope https://management.azure.com"
         }
@@ -150,7 +151,8 @@ function Update-FGUI {
         Write-Host "  This will take a few minutes (Azure rebuilds the app)..." -ForegroundColor Gray
 
         try {
-            $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $rawToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $token = if ($rawToken -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $rawToken).Password } else { $rawToken }
         } catch {
             throw "Azure token expired or MFA required. Please run: Connect-AzAccount -AuthScope https://management.azure.com"
         }

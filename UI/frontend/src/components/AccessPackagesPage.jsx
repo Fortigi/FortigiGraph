@@ -58,6 +58,9 @@ export default function AccessPackagesPage({ onOpenDetail }) {
   const [actionCategory, setActionCategory] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Export state
+  const [exportStatus, setExportStatus] = useState(null); // null | string message
+
   const fetchVersion = useRef(0);
 
   // Debounce search
@@ -225,6 +228,26 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     } finally { setBusy(false); }
   };
 
+  const handleExportExcel = useCallback(async () => {
+    setExportStatus('Fetching access packages...');
+    try {
+      const { exportAccessPackagesToExcel } = await import('../utils/exportAccessPackagesToExcel');
+      await exportAccessPackagesToExcel({
+        authFetch,
+        search: debouncedSearch,
+        categoryFilter,
+        sortCol,
+        sortDir,
+        typeFilter,
+        onProgress: setExportStatus,
+      });
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExportStatus(null);
+    }
+  }, [authFetch, debouncedSearch, categoryFilter, sortCol, sortDir, typeFilter]);
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = packages.length > 0 && selected.size === packages.length;
   const hasAnyFilter = categoryFilter !== null || typeFilter !== null || debouncedSearch;
@@ -235,6 +258,14 @@ export default function AccessPackagesPage({ onOpenDetail }) {
       <div className="flex items-center gap-4 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Access Packages</h2>
         <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
+        <button
+          onClick={handleExportExcel}
+          disabled={!!exportStatus}
+          className="ml-auto px-3 py-1 rounded text-xs text-white bg-green-600 hover:bg-green-700 border border-green-700 font-medium disabled:opacity-50"
+          title="Export access packages to Excel (.xlsx)"
+        >
+          {exportStatus ? exportStatus : 'Export Excel'}
+        </button>
       </div>
 
       {/* Category management bar */}
