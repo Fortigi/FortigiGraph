@@ -862,6 +862,67 @@ function New-FGConfig {
     $config | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Force
 
     Write-Host "Config file saved to: $Path" -ForegroundColor Green
+
+    # ============================================================
+    # Risk Scoring Initialization (if enabled and LLM configured)
+    # ============================================================
+    $riskScoringInitialized = $false
+
+    if ($enableRiskScoring -and $riskScoringDomain -and $llmApiKey) {
+        Write-Host ""
+        Write-Host "--- Risk Scoring Initialization ---" -ForegroundColor Cyan
+        Write-Host "  Risk Scoring is enabled. Before the scoring engine can run," -ForegroundColor Gray
+        Write-Host "  you need an organizational risk profile and classifiers." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  The LLM will research '$riskScoringDomain' from public information only." -ForegroundColor Gray
+        Write-Host "  No identity data is sent externally." -ForegroundColor Gray
+        Write-Host ""
+
+        $runRiskInit = Read-FGConfigYesNo -Prompt "  Generate risk profile and classifiers now" -Default $true
+
+        if ($runRiskInit) {
+            # Connect to SQL so profile and classifiers can be saved
+            Write-Host ""
+            Write-Host "  Connecting to SQL Server..." -ForegroundColor Cyan
+            $sqlConnected = $false
+            try {
+                Connect-FGSQLServer -ConfigFile $Path -ErrorAction Stop
+                $sqlConnected = $true
+                Write-Host "  SQL connected." -ForegroundColor Green
+            } catch {
+                Write-Host "  Could not connect to SQL: $_" -ForegroundColor Yellow
+                Write-Host "  Profile will be generated but cannot be saved. Connect to SQL first, then re-run." -ForegroundColor Yellow
+            }
+
+            if ($sqlConnected) {
+                Write-Host ""
+                try {
+                    $riskProfile = New-FGRiskProfile -Domain $riskScoringDomain -ConfigFile $Path
+                    if ($riskProfile) {
+                        Write-Host ""
+                        Write-Host "  Generating classifiers from profile..." -ForegroundColor Cyan
+                        try {
+                            New-FGRiskClassifiers -ConfigFile $Path
+                            $riskScoringInitialized = $true
+                        } catch {
+                            Write-Host "  Classifier generation failed: $_" -ForegroundColor Red
+                            Write-Host "  Run manually: New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor Yellow
+                        }
+                    }
+                } catch {
+                    Write-Host "  Risk Profile generation failed: $_" -ForegroundColor Red
+                    Write-Host "  Run manually: New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host ""
+            Write-Host "  To initialize later:" -ForegroundColor Gray
+            Write-Host "    Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor White
+            Write-Host "    New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor White
+            Write-Host "    New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor White
+        }
+    }
+
     Write-Host ""
     Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
     Write-Host ""
@@ -874,7 +935,15 @@ function New-FGConfig {
     Write-Host ""
     Write-Host "  Next steps:" -ForegroundColor White
     Write-Host "    1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor Cyan
-    Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+    if ($riskScoringInitialized) {
+        Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+    } else {
+        Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+        if ($enableRiskScoring -and -not $riskScoringInitialized) {
+            Write-Host "       Then: New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor DarkCyan
+            Write-Host "             New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor DarkCyan
+        }
+    }
     Write-Host "    3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    4. New-FGAzureAutomationAccount -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host ""

@@ -246,7 +246,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const catalogName = attributes.catalogName || null;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
-  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_ERM/AccessPackageBlade/objectId/${encodeURIComponent(accessPackageId)}`;
+  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_ERM/AccessPackageManagementMenuBlade/~/AccessPackageBladeOverview/accessPackageId/${encodeURIComponent(accessPackageId)}`;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
 

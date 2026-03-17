@@ -510,30 +510,44 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                  <td className="px-3 py-2 text-xs">
                     {ap.complianceStatus ? (
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
-                        title={ap.complianceStatus === 'Overdue'
-                          ? `Overdue by ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} (due ${formatDate(ap.reviewDeadline)})`
-                          : ap.complianceStatus === 'Reviewed Late'
-                          ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
-                          : ap.complianceStatus === 'In Progress'
-                          ? `Due ${formatDate(ap.reviewDeadline)}`
-                          : ap.complianceStatus === 'Compliant'
-                          ? `Completed on time (due ${formatDate(ap.reviewDeadline)})`
-                          : ''}
-                      >
-                        {ap.complianceStatus}
-                        {ap.complianceStatus === 'Overdue' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d)`}
-                      </span>
+                      <div>
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                          title={ap.complianceStatus === 'Overdue'
+                            ? `Overdue by ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} (due ${formatDate(ap.reviewDeadline)})`
+                            : ap.complianceStatus === 'Reviewed Late'
+                            ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
+                            : ap.complianceStatus === 'In Progress'
+                            ? `Due ${formatDate(ap.reviewDeadline)}`
+                            : ap.complianceStatus === 'Compliant'
+                            ? `Completed on time (due ${formatDate(ap.reviewDeadline)})`
+                            : ''}
+                        >
+                          {ap.complianceStatus}
+                          {ap.complianceStatus === 'Overdue' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d)`}
+                        </span>
+                        {ap.reviewerInfo && (ap.complianceStatus === 'Overdue' || ap.complianceStatus === 'In Progress') && (
+                          <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
+                            <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
+                          </div>
+                        )}
+                      </div>
                     ) : ap.hasReviewConfigured ? (
-                      <span
-                        className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
-                        title="Access review is configured on the assignment policy but no review instance has been created yet"
-                      >
-                        Pending first review
-                      </span>
+                      <div>
+                        <span
+                          className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
+                          title="Access review is configured on the assignment policy but no review instance has been created yet"
+                        >
+                          Pending first review
+                        </span>
+                        {ap.reviewerInfo && (
+                          <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
+                            <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <span
                         className="text-gray-400 text-xs"

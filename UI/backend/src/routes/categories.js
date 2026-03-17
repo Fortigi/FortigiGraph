@@ -259,6 +259,16 @@ router.get('/access-packages', async (req, res) => {
       hasReviewCol = check.recordset.length > 0;
     } catch { /* ignore */ }
 
+    // Check if reviewSettings column exists (for extracting reviewer names)
+    let hasReviewSettingsCol = false;
+    try {
+      const check = await p.request().query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'GraphAccessPackageAssignmentPolicies' AND COLUMN_NAME = 'reviewSettings'
+      `);
+      hasReviewSettingsCol = check.recordset.length > 0;
+    } catch { /* ignore */ }
+
     // If no review table, fall back to displayName for review-based sort columns
     const isReviewSort = ['complianceStatus', 'lastReviewDate', 'lastReviewedBy'].includes(req.query.sortCol);
 
@@ -280,34 +290,50 @@ router.get('/access-packages', async (req, res) => {
           )
           GROUP BY accessPackageId
         ),
-        _LastReviewPerAP AS (
+        _ReviewDecisionCounts AS (
           SELECT
             li.accessPackageId,
-            li.reviewInstanceEndDateTime AS deadline,
+            li.reviewInstanceEndDateTime,
+            -- Only count NotReviewed decisions for principals who still have an active assignment.
+            -- Principals whose access was already removed have nothing actionable for the reviewer.
+            SUM(CASE WHEN d.decision = 'NotReviewed'
+                          AND EXISTS (
+                            SELECT 1 FROM dbo.GraphAccessPackageAssignments a
+                            WHERE a.accessPackageId = li.accessPackageId
+                              AND a.principalId = d.principalId
+                              AND a.assignmentState = 'delivered'
+                          ) THEN 1 ELSE 0 END) AS pendingActiveCount,
+            SUM(CASE WHEN d.decision <> 'NotReviewed'
+                          AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE)
+                     THEN 1 ELSE 0 END) AS lateCount,
             MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedDateTime END) AS lastReviewDate,
-            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedByDisplayName END) AS lastReviewedBy,
-            CASE
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
-               AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) = 0
-              THEN 'Compliant'
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-               AND CAST(li.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE)
-              THEN 'In Progress'
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-               AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-              THEN 'Overdue'
-              ELSE 'Reviewed Late'
-            END AS complianceStatus,
-            CASE
-              WHEN CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-              THEN DATEDIFF(DAY, CAST(li.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
-              ELSE 0
-            END AS daysOverdue
+            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedByDisplayName END) AS lastReviewedBy
           FROM _LatestInstance li
             INNER JOIN GraphAccessPackageAccessReviewDecisions d
               ON d.accessPackageId = li.accessPackageId
               AND d.reviewInstanceId = li.reviewInstanceId
           GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime
+        ),
+        _LastReviewPerAP AS (
+          SELECT
+            rdc.accessPackageId,
+            rdc.reviewInstanceEndDateTime AS deadline,
+            rdc.lastReviewDate,
+            rdc.lastReviewedBy,
+            CASE
+              WHEN rdc.pendingActiveCount = 0 AND rdc.lateCount = 0 THEN 'Compliant'
+              WHEN rdc.pendingActiveCount > 0
+               AND CAST(rdc.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE) THEN 'In Progress'
+              WHEN rdc.pendingActiveCount > 0
+               AND CAST(rdc.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 'Overdue'
+              ELSE 'Reviewed Late'
+            END AS complianceStatus,
+            CASE
+              WHEN CAST(rdc.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
+              THEN DATEDIFF(DAY, CAST(rdc.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
+              ELSE 0
+            END AS daysOverdue
+          FROM _ReviewDecisionCounts rdc
         )`;
       reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.accessPackageId`;
       reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue';
@@ -334,7 +360,29 @@ router.get('/access-packages', async (req, res) => {
                }
         FROM dbo.GraphAccessPackageAssignmentPolicies
         GROUP BY accessPackageId
-      )
+      )${hasReviewSettingsCol ? `,
+      _reviewerInfo AS (
+        SELECT p.accessPackageId,
+               STRING_AGG(
+                 CASE rv.[odata_type]
+                   WHEN '#microsoft.graph.singleUser'      THEN ISNULL(rv.[description], rv.[userId])
+                   WHEN '#microsoft.graph.requestorManager' THEN 'Requestor''s manager'
+                   WHEN '#microsoft.graph.groupMembers'    THEN 'Group members'
+                   WHEN '#microsoft.graph.internalSponsors' THEN 'Internal sponsors'
+                   WHEN '#microsoft.graph.externalSponsors' THEN 'External sponsors'
+                   ELSE rv.[odata_type]
+                 END, ', '
+               ) AS reviewers
+        FROM dbo.GraphAccessPackageAssignmentPolicies p
+        CROSS APPLY OPENJSON(JSON_QUERY(p.reviewSettings, '$.primaryReviewers'))
+          WITH (
+            [odata_type]  NVARCHAR(100) '$."@odata.type"',
+            [userId]      NVARCHAR(255) '$.userId',
+            [description] NVARCHAR(255) '$.description'
+          ) rv
+        WHERE p.reviewSettings IS NOT NULL
+        GROUP BY p.accessPackageId
+      )` : ''}
       ${reviewCte}
       SELECT ap.id, ap.displayName, ap.description,
              c.displayName AS catalogName, c.id AS catalogId,
@@ -345,6 +393,7 @@ router.get('/access-packages', async (req, res) => {
              ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount,
              ISNULL(pol.hasReviewConfigured, 0) AS hasReviewConfigured
              ${reviewCols}
+             ${hasReviewSettingsCol ? ', ri.reviewers AS reviewerInfo' : ', NULL AS reviewerInfo'}
       FROM dbo.GraphAccessPackages ap
       INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
       LEFT JOIN _assignmentCounts ac ON ap.id = ac.accessPackageId
@@ -352,6 +401,7 @@ router.get('/access-packages', async (req, res) => {
       LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
       LEFT JOIN _policyCounts pol ON ap.id = pol.accessPackageId
       ${reviewJoin}
+      ${hasReviewSettingsCol ? 'LEFT JOIN _reviewerInfo ri ON ap.id = ri.accessPackageId' : ''}
       WHERE ${where}
       ORDER BY ${sortExpr} ${sortDir}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
@@ -394,6 +444,7 @@ router.get('/access-packages', async (req, res) => {
         reviewDeadline: r.reviewDeadline || null,
         daysOverdue: r.daysOverdue || 0,
         hasReviewConfigured: !!r.hasReviewConfigured,
+        reviewerInfo: r.reviewerInfo || null,
       };
     });
 

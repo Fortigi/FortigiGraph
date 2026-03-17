@@ -6,11 +6,11 @@ function formatDate(dateStr) {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function thinBorder() {
+function thinBorder(omitBottom = false, omitTop = false) {
   return {
-    top:    { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    top:    omitTop    ? undefined : { style: 'thin', color: { argb: 'FFD1D5DB' } },
     left:   { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    bottom: omitBottom ? undefined : { style: 'thin', color: { argb: 'FFD1D5DB' } },
     right:  { style: 'thin', color: { argb: 'FFD1D5DB' } },
   };
 }
@@ -40,17 +40,19 @@ async function fetchAllPackages(authFetch, { search, categoryFilter, sortCol, so
   return json.data;
 }
 
-// Fetch resource roles for a single AP, return comma-separated group names
-async function fetchResourceNames(authFetch, apId) {
+// Fetch resource roles for a single AP — returns array of "Group (Role)" strings
+async function fetchResourceRoles(authFetch, apId) {
   try {
     const res = await authFetch(`/api/access-package/${apId}/resource-roles`);
-    if (!res.ok) return '';
+    if (!res.ok) return [];
     const roles = await res.json();
-    const names = roles.map(r => r.groupDisplayName || r.scopeDisplayName || '').filter(Boolean);
-    // Deduplicate (a group can appear multiple times with different roles)
-    return [...new Set(names)].join(', ');
+    return roles.map(r => {
+      const name = r.groupDisplayName || r.scopeDisplayName || '';
+      const role = r.roleDisplayName || '';
+      return name ? (role ? `${name} (${role})` : name) : '';
+    }).filter(Boolean);
   } catch {
-    return '';
+    return [];
   }
 }
 
@@ -64,12 +66,12 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
 
   // 2. Fetch resource roles for all APs in parallel (batches of 10)
   onProgress?.('Fetching resource assignments...');
-  const resourceNames = new Array(packages.length).fill('');
+  const resourceRoles = new Array(packages.length).fill(null).map(() => []);
   const batchSize = 10;
   for (let i = 0; i < packages.length; i += batchSize) {
     const batch = packages.slice(i, i + batchSize);
-    const results = await Promise.all(batch.map(p => fetchResourceNames(authFetch, p.id)));
-    results.forEach((name, j) => { resourceNames[i + j] = name; });
+    const results = await Promise.all(batch.map(p => fetchResourceRoles(authFetch, p.id)));
+    results.forEach((roles, j) => { resourceRoles[i + j] = roles; });
     onProgress?.(`Fetching resource assignments... (${Math.min(i + batchSize, packages.length)}/${packages.length})`);
   }
 
@@ -82,16 +84,17 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
   const ws = wb.addWorksheet('Access Packages');
 
   const columns = [
-    { header: 'Name',                 key: 'displayName',      width: 40 },
-    { header: 'Catalog',              key: 'catalogName',      width: 25 },
-    { header: 'Category',             key: 'category',         width: 20 },
-    { header: 'Type',                 key: 'assignmentType',   width: 30 },
-    { header: 'Assignments',          key: 'totalAssignments', width: 14 },
-    { header: 'Review Status',        key: 'complianceStatus', width: 22 },
-    { header: 'Review Date',          key: 'lastReviewDate',   width: 16 },
-    { header: 'Reviewed By',          key: 'lastReviewedBy',   width: 25 },
-    { header: 'Description',          key: 'description',      width: 50 },
-    { header: 'Resource Assignments', key: 'resources',        width: 60 },
+    { header: 'Name',          width: 40 },
+    { header: 'Catalog',       width: 25 },
+    { header: 'Category',      width: 20 },
+    { header: 'Type',          width: 30 },
+    { header: 'Assignments',   width: 14 },
+    { header: 'Review Status', width: 22 },
+    { header: 'Review Date',   width: 16 },
+    { header: 'Reviewed By',   width: 25 },
+    { header: 'Description',   width: 50 },
+    { header: 'Group',         width: 45 },
+    { header: 'Role',          width: 15 },
   ];
 
   columns.forEach((col, i) => {
@@ -108,13 +111,17 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
   // Freeze header row
   ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }];
 
-  // Data rows
-  packages.forEach((pkg, idx) => {
-    const rowNum = idx + 2;
-    const row = ws.getRow(rowNum);
-    row.height = 18;
+  // AP detail columns (0-based indices 0..8)
+  const AP_COL_COUNT = 9;
 
-    const values = [
+  let rowNum = 2;
+
+  packages.forEach((pkg, idx) => {
+    const roles = resourceRoles[idx];
+    const rowCount = Math.max(roles.length, 1);
+    const startRow = rowNum;
+
+    const apValues = [
       pkg.displayName || '',
       pkg.catalogName || '',
       pkg.category?.name || '',
@@ -124,17 +131,69 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
       formatDate(pkg.lastReviewDate),
       pkg.lastReviewedBy || '',
       pkg.description || '',
-      resourceNames[idx],
     ];
 
-    values.forEach((val, i) => {
-      const cell = ws.getCell(rowNum, i + 1);
-      cell.value = val;
-      cell.font = { size: 11 };
-      cell.border = thinBorder();
-      // Right-align the assignments count
-      if (i === 4) cell.alignment = { horizontal: 'center' };
-    });
+    for (let r = 0; r < rowCount; r++) {
+      const currentRow = ws.getRow(rowNum);
+      currentRow.height = 18;
+
+      // AP detail columns — only write value on first row; all rows get border
+      apValues.forEach((val, c) => {
+        const cell = ws.getCell(rowNum, c + 1);
+        if (r === 0) cell.value = val;
+        cell.font = { size: 11 };
+        // Border: suppress bottom on non-last rows and top on non-first rows so merged block looks clean
+        cell.border = thinBorder(r < rowCount - 1, r > 0);
+        if (c === 4) cell.alignment = { horizontal: 'center', vertical: 'top' };
+        else cell.alignment = { vertical: 'top', wrapText: c === 8 };
+      });
+
+      // Group & Role columns
+      if (roles.length > 0) {
+        const entry = roles[r] || '';
+        // entry is "GroupName (Role)" — split into separate cells
+        const parenIdx = entry.lastIndexOf(' (');
+        let groupName = entry;
+        let roleName = '';
+        if (parenIdx !== -1 && entry.endsWith(')')) {
+          groupName = entry.slice(0, parenIdx);
+          roleName = entry.slice(parenIdx + 2, -1);
+        }
+
+        const groupCell = ws.getCell(rowNum, AP_COL_COUNT + 1);
+        groupCell.value = groupName;
+        groupCell.font = { size: 11 };
+        groupCell.border = thinBorder();
+
+        const roleCell = ws.getCell(rowNum, AP_COL_COUNT + 2);
+        roleCell.value = roleName;
+        roleCell.font = { size: 11 };
+        roleCell.border = thinBorder();
+        if (roleName === 'Owner') {
+          roleCell.font = { size: 11, color: { argb: 'FF6B21A8' } }; // purple
+        } else if (roleName === 'Member') {
+          roleCell.font = { size: 11, color: { argb: 'FF1D4ED8' } }; // blue
+        }
+      } else {
+        // No resources — empty cells with border
+        for (let c = AP_COL_COUNT; c < columns.length; c++) {
+          const cell = ws.getCell(rowNum, c + 1);
+          cell.border = thinBorder();
+        }
+      }
+
+      rowNum++;
+    }
+
+    // Merge AP detail columns vertically when there are multiple resource rows
+    if (rowCount > 1) {
+      for (let c = 0; c < AP_COL_COUNT; c++) {
+        ws.mergeCells(startRow, c + 1, startRow + rowCount - 1, c + 1);
+        // Re-apply alignment on the merged cell (merging resets it)
+        const cell = ws.getCell(startRow, c + 1);
+        cell.alignment = { vertical: 'top', wrapText: c === 8, horizontal: c === 4 ? 'center' : undefined };
+      }
+    }
   });
 
   // Auto-filter on header row
