@@ -16,11 +16,12 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
-- **Current Version:** 2.2.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
+- **Current Version:** 2.4.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
 
 ## Major Features
 
 ### 1. Guided Setup Wizard (`New-FGConfig`)
+- **Requires PowerShell 7+** (enforced at runtime with helpful error message)
 - Creates Azure resources (Resource Group, SQL Server, Database, Automation Account)
 - Creates App Registration with correct Graph API permissions
 - Configures sync settings interactively
@@ -41,7 +42,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **ConfigFile Support**: All SQL functions support config files
 
 ### 4. Identity Governance & Compliance Sync
-- **Complete Access Package Sync**: Catalogs, packages, assignments, policies, requests, reviews
+- **Complete Access Package Sync**: Catalogs, packages, assignments, policies (with `reviewSettings` and derived `hasAccessReview`/`hasAutoAddRule`/`hasAutoRemoveRule` flags), requests, reviews
 - **Group Membership Sync**: Direct, transitive, eligible (PIM), and owner relationships
 - **Orchestrated Sync**: `Start-FGSync` orchestrates all operations from config file
 - **Parallel Execution**: Up to 6 entity types concurrently via runspace pool
@@ -55,7 +56,8 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Eight pages — Matrix, Users, Groups, Access Packages, Sync Log, Risk Scoring, Org Chart, Performance — plus dynamic detail tabs
+- **Tab Navigation**: Nine pages — Matrix, Users, Groups, Access Packages, Sync Log, Risk Scoring, Identities, Org Chart, Performance — plus dynamic detail tabs. Optional tabs (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown.
+- **User Preferences**: Clicking the user avatar in the top-right opens a settings dropdown with toggle switches for optional tabs. Preferences are stored per-user in the `GraphUserPreferences` SQL table (auto-created). User identified by Entra ID `oid` claim; `anonymous` fallback for no-auth mode.
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
 - **Multi-Type Badges**: Cells show individually colored badges per membership type (D, I, E); multi-type cells show all badges side by side
@@ -68,7 +70,8 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Column Header Filters**: Type and Tags columns have filter dropdowns; Tags includes a "(Blank)" option (sentinel `BLANK_TAG`) to show groups without tags
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
-- **Entity Detail Pages**: Click any user or group name (in matrix, Users page, or Groups page) to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id`) supports bookmarking. Drill-through navigation between user and group details.
+- **Entity Detail Pages**: Click any user, group, or access package name to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id` / `#access-package:id`) supports bookmarking. Drill-through navigation between user and group details.
+- **Access Package Detail Page**: Lazy-loaded collapsible sections: Assignments (active users with UPN and assigned date), Resource Assignments (groups/resources with Member/Owner role badges), Assignment Policies (auto-assigned vs request-based with scope), Access Reviews (decisions with auto-review indicator for AAD Access Reviews), Pending Requests, Version History. Review status differentiates "Not required" (no review configured) from "Pending first review" (review configured but no instance yet).
 - **Performance Monitoring**: Opt-in via `PERF_METRICS_ENABLED=true`. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance page shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
 - **Scaling**: `Set-FGUI -Scaling Tiny|Basic|Optimum|Fast` queries database row counts to determine environment size (Small/Medium/Large), then selects matched App Service + SQL tiers accordingly. Shows estimated monthly costs. `New-FGUI` presents an interactive scaling selection menu with cost estimates and a recommendation based on user count (unless `-Scaling` is explicitly provided). Tiny is the cheapest option for very small setups (< 500 users). Tiny is hidden from menus when it resolves to the same SKUs as Basic (e.g., Small environments); passing `-Scaling Tiny` in that case silently uses Basic.
 - **Deployment**: `New-FGUI` / `Update-FGUI` / `Set-FGUI` / `Remove-FGUI` PowerShell cmdlets
@@ -174,6 +177,7 @@ FortigiGraph/
 │   │       ├── routes/clusters.js   # Resource cluster management endpoints
 │   │       ├── routes/orgChart.js   # Manager hierarchy tree endpoints (cached 5 min)
 │   │       ├── routes/governance.js # Access review compliance monitoring
+│   │       ├── routes/preferences.js # User preferences (tab visibility) with auto-created table
 │   │       ├── routes/perf.js       # Performance metrics API (/api/perf, export, clear)
 │   │       ├── middleware/auth.js     # Entra ID JWT validation (v1+v2 tokens)
 │   │       ├── middleware/perfMetrics.js  # Request timing + Server-Timing headers
@@ -200,6 +204,7 @@ FortigiGraph/
 │               ├── RiskScoringPage.jsx # Risk score visualization with override controls
 │               ├── OrgChartPage.jsx  # Manager hierarchy tree with risk propagation
 │               ├── DepartmentDetailPage.jsx # Department risk profile deep dive
+│               ├── AccessPackageDetailPage.jsx # AP detail with assignments, resources, policies, reviews, history
 │               ├── GovernancePage.jsx # AP review compliance dashboard (disabled)
 │               ├── RiskScoreSection.jsx # Shared risk score display component
 │               ├── PerfPage.jsx      # Performance metrics viewer (summary, recent, slowest, export)

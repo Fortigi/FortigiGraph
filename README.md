@@ -12,7 +12,7 @@ FortigiGraph provides a guided setup wizard that creates everything you need: Az
 
 ### Prerequisites
 
-- PowerShell 7+ (recommended) or PowerShell 5.1
+- PowerShell 7+ (required)
 - Azure subscription with Contributor access
 - Az PowerShell module: `Install-Module Az -Scope CurrentUser`
 
@@ -159,7 +159,7 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 
 ### Pages
 
-The UI has eight pages accessible via tab navigation:
+The UI has nine pages accessible via tab navigation. Four optional pages (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown:
 
 #### Matrix View (default)
 
@@ -219,7 +219,11 @@ Unlike tags (which allow multiple per entity), each access package can have only
 
 View the last 50 sync operations from `GraphSyncLog`, showing timestamps, entity types, row counts, and durations.
 
-#### Risk Scoring
+#### Identities (optional, hidden by default)
+
+Account correlation and identity matching across systems.
+
+#### Risk Scoring (optional, hidden by default)
 
 Visualize identity risk scores across all users and groups (requires running `Invoke-FGRiskScoring` first).
 
@@ -229,7 +233,7 @@ Visualize identity risk scores across all users and groups (requires running `In
 - **Classifier Matches**: See exactly which risk patterns triggered for each entity
 - **Filtering**: Filter by tier, search by name, view overrides only
 
-#### Org Chart
+#### Org Chart (optional, hidden by default)
 
 Manager hierarchy visualization with risk propagation.
 
@@ -239,7 +243,7 @@ Manager hierarchy visualization with risk propagation.
 - **Department Drill-Down**: Click a department to open a detail page showing all members with risk scores
 - **Search**: Filter by department name
 
-#### Performance
+#### Performance (optional, hidden by default)
 
 Opt-in backend performance monitoring (enable with `-PerformanceMetrics` on `New-FGUI` or `Update-FGUI`).
 
@@ -265,6 +269,31 @@ Categories are user-defined labels for access packages (e.g. "Identity", "Office
 2. **Matrix Column Ordering**: AP columns in the Matrix view are sorted by category name first, then by assignment count within each category. Uncategorized APs appear at the end.
 
 Categories are stored in the `GraphCategories` and `GraphCategoryAssignments` SQL tables (auto-created on first use). The `GraphCategoryAssignments` table has a primary key on `accessPackageId`, enforcing the single-category constraint.
+
+### User Preferences
+
+Each user can customize which optional tabs are visible via the settings dropdown (click the user avatar in the top-right corner). This keeps the interface clean by default while allowing power users to enable advanced features.
+
+**Optional tabs** (hidden by default):
+- **Risk Scores** — Identity risk scoring visualization
+- **Identities** — Account correlation and identity matching
+- **Org Chart** — Manager hierarchy with risk propagation
+- **Performance** — Backend performance monitoring
+
+Preferences are stored per-user in the `GraphUserPreferences` SQL table (auto-created on first access). When authentication is enabled, each user is identified by their Entra ID Object ID; in no-auth mode, a shared `anonymous` profile is used.
+
+### Access Package Details
+
+Clicking an access package name opens a detail tab with lazy-loaded collapsible sections:
+
+- **Assignments** — Active users assigned to this access package (with UPN and assigned date)
+- **Resource Assignments** — Groups and resources included in the package, with Member/Owner role badges
+- **Assignment Policies** — Policy type (Auto-assigned / Request-based / with auto-removal), scope, and creation date
+- **Access Reviews** — Review decisions with auto-review detection (lightning bolt icon for system-completed reviews)
+- **Pending Requests** — Outstanding assignment requests with requestor details
+- **Version History** — Temporal table diffs showing what changed and when
+
+The review status column on the Access Packages page distinguishes between "Not required" (no review configured on any policy) and "Pending first review" (review configured but no instance created yet).
 
 ### UI API Reference
 
@@ -413,6 +442,25 @@ Response:
 | `POST` | `/api/categories/:id/assign` | Assign category to an access package (replaces any existing category). Body: `{ accessPackageId }` |
 | `POST` | `/api/categories/unassign` | Remove the category from an access package. Body: `{ accessPackageId }` |
 | `GET` | `/api/category-assignments` | All category assignments as flat list (used by Matrix for column ordering). |
+
+#### User Preferences
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/preferences` | Get current user's tab visibility preferences. Returns `{ visibleTabs: ["risk-scores", ...] }` |
+| `PUT` | `/api/preferences` | Update tab visibility. Body: `{ visibleTabs: ["risk-scores", "performance"] }`. Only accepts known optional tab keys. |
+
+#### Access Package Detail
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/access-package/:id` | Core attributes, counts, assignment type, category, review info |
+| `GET` | `/api/access-package/:id/assignments` | Active user assignments (state = Delivered) with user names |
+| `GET` | `/api/access-package/:id/resource-roles` | Resource role scopes (groups/resources with Member/Owner roles) |
+| `GET` | `/api/access-package/:id/policies` | Assignment policies with auto-assignment flags |
+| `GET` | `/api/access-package/:id/reviews` | Access review decisions |
+| `GET` | `/api/access-package/:id/requests` | Pending assignment requests |
+| `GET` | `/api/access-package/:id/history` | Temporal version history |
 
 #### Access Packages Page
 
@@ -944,7 +992,7 @@ $Global:DebugMode = 'GP'    # Multiple categories
 
 ## Requirements
 
-- **PowerShell**: 5.1 or later (7+ recommended)
+- **PowerShell**: 7 or later (required)
 - **Azure**: Subscription with Contributor access
 - **Modules**: `Az` PowerShell module (`Install-Module Az -Scope CurrentUser`)
 - **Permissions**: See [Required Permissions](#required-permissions) table

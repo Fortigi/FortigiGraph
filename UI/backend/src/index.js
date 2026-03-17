@@ -18,6 +18,7 @@ import riskRouter from './routes/riskScores.js';
 import orgChartRouter from './routes/orgChart.js';
 import clusterRouter from './routes/clusters.js';
 import identitiesRouter from './routes/identities.js';
+import preferencesRouter from './routes/preferences.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -141,6 +142,7 @@ app.use('/api', authMiddleware, riskRouter);
 app.use('/api', authMiddleware, orgChartRouter);
 app.use('/api', authMiddleware, clusterRouter);
 app.use('/api', authMiddleware, identitiesRouter);
+app.use('/api', authMiddleware, preferencesRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // In production, serve the frontend build output
