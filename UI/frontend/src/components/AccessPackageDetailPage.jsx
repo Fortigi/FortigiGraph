@@ -19,6 +19,23 @@ function formatValue(val) {
   return String(val);
 }
 
+const SCOPE_LABELS = {
+  allMemberUsers:                          'All member users',
+  allDirectoryUsers:                       'All directory users',
+  specificDirectoryUsers:                  'Specific directory users',
+  allDirectoryServicePrincipals:           'All service principals',
+  specificDirectoryServicePrincipals:      'Specific service principals',
+  specificConnectedOrganizationUsers:      'Specific connected org users',
+  allConfiguredConnectedOrganizationUsers: 'All configured connected org users',
+  allExternalUsers:                        'All external users',
+  notSpecified:                            'Not specified',
+};
+
+function formatScope(val) {
+  if (!val) return '\u2014';
+  return SCOPE_LABELS[val] || val;
+}
+
 function computeHistoryDiffs(history) {
   if (!history || history.length <= 1) return [];
   const diffs = [];
@@ -244,9 +261,13 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
 
   const { attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, assignmentType, category } = data;
   const catalogName = attributes.catalogName || null;
+  const catalogId = attributes.catalogId || null;
+  const apDisplayName = attributes.displayName || '';
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
-  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_ERM/AccessPackageBlade/objectId/${encodeURIComponent(accessPackageId)}`;
+  const entraUrl = catalogId
+    ? `https://portal.azure.com/#view/Microsoft_Azure_ELMAdmin/EntitlementMenuBlade/~/overview/entitlementId/${accessPackageId.toLowerCase()}/catalogId/${catalogId}/catalogName/${encodeURIComponent(catalogName || '')}/entitlementName/${encodeURIComponent(apDisplayName)}`
+    : `https://entra.microsoft.com/#view/Microsoft_AAD_ERM/AccessPackageManagementMenuBlade/~/AccessPackageBladeOverview/accessPackageId/${encodeURIComponent(accessPackageId)}`;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
 
@@ -483,7 +504,12 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
                         </span>
                       </td>
                       <td className="px-4 py-2 text-gray-600 text-xs">
-                        {p.allowedTargetScope || '\u2014'}
+                        <div>{formatScope(p.allowedTargetScope)}</div>
+                        {p.autoAssignmentFilter && (
+                          <div className="mt-0.5 text-gray-400 font-mono text-[11px] leading-snug break-all" title="Auto-assignment filter rule">
+                            {p.autoAssignmentFilter}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">
                         {formatDate(p.createdDateTime)}

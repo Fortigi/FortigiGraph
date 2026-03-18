@@ -37,7 +37,7 @@ function New-FGConfig {
         Creates a config file asking only for essential credentials.
 
     .NOTES
-        - Requires Az PowerShell module (Install-Module Az)
+        - Requires Az modules: Az.Accounts, Az.Resources, Az.Sql, Az.Automation
         - Passwords are encrypted using Windows DPAPI (user-specific, machine-specific)
         - The config file can be further customized by editing the JSON directly
         - Use Get-FGSecureConfigValue to read encrypted values programmatically
@@ -56,6 +56,32 @@ function New-FGConfig {
     # Require PowerShell 7+ (cross-platform support, modern .NET APIs)
     if ($PSVersionTable.PSVersion.Major -lt 7) {
         throw "New-FGConfig requires PowerShell 7 or later. You are running PowerShell $($PSVersionTable.PSVersion). Please install PowerShell 7+ from https://aka.ms/powershell"
+    }
+
+    # Require Az sub-modules — install any that are missing
+    $requiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Sql', 'Az.Automation')
+    $missingModules = $requiredModules | Where-Object { -not (Get-Module -ListAvailable -Name $_) }
+    if ($missingModules.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  The following required PowerShell modules are not installed:" -ForegroundColor Yellow
+        $missingModules | ForEach-Object { Write-Host "    - $_" -ForegroundColor Yellow }
+        Write-Host ""
+        $install = Read-Host "  Install them now? (Y/n)"
+        if ($install -eq 'n' -or $install -eq 'N') {
+            Write-Host "  Cancelled." -ForegroundColor Gray
+            return
+        }
+        foreach ($mod in $missingModules) {
+            Write-Host "  Installing $mod..." -ForegroundColor Cyan
+            try {
+                Install-Module -Name $mod -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+                Write-Host "  $mod installed successfully." -ForegroundColor Green
+            } catch {
+                Write-Host "  Failed to install $mod`: $_" -ForegroundColor Red
+                return
+            }
+        }
+        Write-Host ""
     }
 
     # Check if file already exists
@@ -96,13 +122,15 @@ function New-FGConfig {
         Write-Host "  Tenant:       $($azContext.Tenant.Id)" -ForegroundColor Green
         $relogin = Read-Host "  Use this account? (Y/n)"
         if ($relogin -eq 'n' -or $relogin -eq 'N') {
-            Write-Host "  Opening Azure login..." -ForegroundColor Cyan
-            Connect-AzAccount | Out-Null
+            Write-Host "  Logging in via device code..." -ForegroundColor Cyan
+            Write-Host "  (Open the URL shown below and enter the code to authenticate)" -ForegroundColor Gray
+            Connect-AzAccount -UseDeviceAuthentication | Out-Null
             $azContext = Get-AzContext
         }
     } else {
-        Write-Host "  Not logged in. Opening Azure login..." -ForegroundColor Cyan
-        Connect-AzAccount | Out-Null
+        Write-Host "  Not logged in. Starting device code login..." -ForegroundColor Cyan
+        Write-Host "  (Open the URL shown below and enter the code to authenticate)" -ForegroundColor Gray
+        Connect-AzAccount -UseDeviceAuthentication | Out-Null
         $azContext = Get-AzContext
     }
 
@@ -834,6 +862,67 @@ function New-FGConfig {
     $config | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Force
 
     Write-Host "Config file saved to: $Path" -ForegroundColor Green
+
+    # ============================================================
+    # Risk Scoring Initialization (if enabled and LLM configured)
+    # ============================================================
+    $riskScoringInitialized = $false
+
+    if ($enableRiskScoring -and $riskScoringDomain -and $llmApiKey) {
+        Write-Host ""
+        Write-Host "--- Risk Scoring Initialization ---" -ForegroundColor Cyan
+        Write-Host "  Risk Scoring is enabled. Before the scoring engine can run," -ForegroundColor Gray
+        Write-Host "  you need an organizational risk profile and classifiers." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  The LLM will research '$riskScoringDomain' from public information only." -ForegroundColor Gray
+        Write-Host "  No identity data is sent externally." -ForegroundColor Gray
+        Write-Host ""
+
+        $runRiskInit = Read-FGConfigYesNo -Prompt "  Generate risk profile and classifiers now" -Default $true
+
+        if ($runRiskInit) {
+            # Connect to SQL so profile and classifiers can be saved
+            Write-Host ""
+            Write-Host "  Connecting to SQL Server..." -ForegroundColor Cyan
+            $sqlConnected = $false
+            try {
+                Connect-FGSQLServer -ConfigFile $Path -ErrorAction Stop
+                $sqlConnected = $true
+                Write-Host "  SQL connected." -ForegroundColor Green
+            } catch {
+                Write-Host "  Could not connect to SQL: $_" -ForegroundColor Yellow
+                Write-Host "  Profile will be generated but cannot be saved. Connect to SQL first, then re-run." -ForegroundColor Yellow
+            }
+
+            if ($sqlConnected) {
+                Write-Host ""
+                try {
+                    $riskProfile = New-FGRiskProfile -Domain $riskScoringDomain -ConfigFile $Path
+                    if ($riskProfile) {
+                        Write-Host ""
+                        Write-Host "  Generating classifiers from profile..." -ForegroundColor Cyan
+                        try {
+                            New-FGRiskClassifiers -ConfigFile $Path
+                            $riskScoringInitialized = $true
+                        } catch {
+                            Write-Host "  Classifier generation failed: $_" -ForegroundColor Red
+                            Write-Host "  Run manually: New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor Yellow
+                        }
+                    }
+                } catch {
+                    Write-Host "  Risk Profile generation failed: $_" -ForegroundColor Red
+                    Write-Host "  Run manually: New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host ""
+            Write-Host "  To initialize later:" -ForegroundColor Gray
+            Write-Host "    Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor White
+            Write-Host "    New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor White
+            Write-Host "    New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor White
+        }
+    }
+
     Write-Host ""
     Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
     Write-Host ""
@@ -846,7 +935,15 @@ function New-FGConfig {
     Write-Host ""
     Write-Host "  Next steps:" -ForegroundColor White
     Write-Host "    1. Get-FGAccessToken -ConfigFile '$Path'" -ForegroundColor Cyan
-    Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+    if ($riskScoringInitialized) {
+        Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+    } else {
+        Write-Host "    2. Connect-FGSQLServer -ConfigFile '$Path'" -ForegroundColor Cyan
+        if ($enableRiskScoring -and -not $riskScoringInitialized) {
+            Write-Host "       Then: New-FGRiskProfile -Domain '$riskScoringDomain' -ConfigFile '$Path'" -ForegroundColor DarkCyan
+            Write-Host "             New-FGRiskClassifiers -ConfigFile '$Path'" -ForegroundColor DarkCyan
+        }
+    }
     Write-Host "    3. Start-FGSync -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host "    4. New-FGAzureAutomationAccount -ConfigFile '$Path'" -ForegroundColor Cyan
     Write-Host ""

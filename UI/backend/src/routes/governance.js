@@ -61,7 +61,7 @@ LastReviewPerAP AS (
       -- Deadline day passed with unreviewed decisions
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
        AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-      THEN 'Overdue'
+      THEN 'Missed'
       -- All reviewed but some were late
       ELSE 'Reviewed Late'
     END AS complianceStatus,
@@ -90,7 +90,7 @@ router.get('/governance/summary', async (req, res) => {
       SELECT
         COUNT(*) AS totalAPs,
         SUM(CASE WHEN complianceStatus = 'Compliant' THEN 1 ELSE 0 END) AS compliant,
-        SUM(CASE WHEN complianceStatus = 'Overdue' THEN 1 ELSE 0 END) AS overdue,
+        SUM(CASE WHEN complianceStatus = 'Missed' THEN 1 ELSE 0 END) AS overdue,
         SUM(CASE WHEN complianceStatus = 'Reviewed Late' THEN 1 ELSE 0 END) AS reviewedLate,
         SUM(CASE WHEN complianceStatus = 'In Progress' THEN 1 ELSE 0 END) AS inProgress
       FROM LastReviewPerAP`);
@@ -124,7 +124,7 @@ router.get('/governance/review-compliance', async (req, res) => {
 
     let filterClause = '';
     if (filter === 'overdue') {
-      filterClause = "AND lr.complianceStatus = 'Overdue'";
+      filterClause = "AND lr.complianceStatus = 'Missed'";
     } else if (filter === 'reviewed-late') {
       filterClause = "AND lr.complianceStatus = 'Reviewed Late'";
     } else if (filter === 'compliant') {
@@ -170,7 +170,7 @@ router.get('/governance/review-compliance', async (req, res) => {
       WHERE 1=1 ${filterClause} ${categoryClause}
       ORDER BY
         CASE lr.complianceStatus
-          WHEN 'Overdue' THEN 1
+          WHEN 'Missed' THEN 1
           WHEN 'Reviewed Late' THEN 2
           WHEN 'In Progress' THEN 3
           WHEN 'Compliant' THEN 4

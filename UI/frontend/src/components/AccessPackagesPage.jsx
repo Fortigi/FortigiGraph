@@ -20,7 +20,7 @@ const ASSIGNMENT_TYPE_STYLES = {
 const COMPLIANCE_STYLES = {
   'Compliant': 'bg-green-100 text-green-800 border-green-200',
   'In Progress': 'bg-blue-100 text-blue-800 border-blue-200',
-  'Overdue': 'bg-red-100 text-red-800 border-red-200',
+  'Missed': 'bg-red-100 text-red-800 border-red-200',
   'Reviewed Late': 'bg-amber-100 text-amber-800 border-amber-200',
 };
 
@@ -57,6 +57,9 @@ export default function AccessPackagesPage({ onOpenDetail }) {
   // Action state
   const [actionCategory, setActionCategory] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Export state
+  const [exportStatus, setExportStatus] = useState(null); // null | string message
 
   const fetchVersion = useRef(0);
 
@@ -225,6 +228,26 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     } finally { setBusy(false); }
   };
 
+  const handleExportExcel = useCallback(async () => {
+    setExportStatus('Fetching access packages...');
+    try {
+      const { exportAccessPackagesToExcel } = await import('../utils/exportAccessPackagesToExcel');
+      await exportAccessPackagesToExcel({
+        authFetch,
+        search: debouncedSearch,
+        categoryFilter,
+        sortCol,
+        sortDir,
+        typeFilter,
+        onProgress: setExportStatus,
+      });
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExportStatus(null);
+    }
+  }, [authFetch, debouncedSearch, categoryFilter, sortCol, sortDir, typeFilter]);
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = packages.length > 0 && selected.size === packages.length;
   const hasAnyFilter = categoryFilter !== null || typeFilter !== null || debouncedSearch;
@@ -235,6 +258,14 @@ export default function AccessPackagesPage({ onOpenDetail }) {
       <div className="flex items-center gap-4 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Access Packages</h2>
         <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
+        <button
+          onClick={handleExportExcel}
+          disabled={!!exportStatus}
+          className="ml-auto px-3 py-1 rounded text-xs text-white bg-green-600 hover:bg-green-700 border border-green-700 font-medium disabled:opacity-50"
+          title="Export access packages to Excel (.xlsx)"
+        >
+          {exportStatus ? exportStatus : 'Export Excel'}
+        </button>
       </div>
 
       {/* Category management bar */}
@@ -479,30 +510,69 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                  <td className="px-3 py-2 text-xs">
                     {ap.complianceStatus ? (
+                      <div>
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                          title={ap.complianceStatus === 'Missed'
+                            ? `Review deadline passed ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} ago (was due ${formatDate(ap.reviewDeadline)}) — will reset at the next review cycle`
+                            : ap.complianceStatus === 'Reviewed Late'
+                            ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
+                            : ap.complianceStatus === 'In Progress'
+                            ? `Due ${formatDate(ap.reviewDeadline)}`
+                            : ap.complianceStatus === 'Compliant'
+                            ? `Completed on time (due ${formatDate(ap.reviewDeadline)})`
+                            : ''}
+                        >
+                          {ap.complianceStatus}
+                          {ap.complianceStatus === 'Missed' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d ago)`}
+                        </span>
+                        {ap.reviewerInfo && (ap.complianceStatus === 'Missed' || ap.complianceStatus === 'In Progress') && (
+                          <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
+                            <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
+                          </div>
+                        )}
+                        {ap.missedReviewsCount > 0 && (
+                          <div
+                            className="mt-0.5 text-orange-600 text-[11px] leading-tight font-medium"
+                            title={`${ap.missedReviewsCount} past review cycle${ap.missedReviewsCount !== 1 ? 's' : ''} where no reviewer completed any decisions`}
+                          >
+                            {ap.missedReviewsCount} review{ap.missedReviewsCount !== 1 ? 's' : ''} not done
+                          </div>
+                        )}
+                      </div>
+                    ) : ap.totalAssignments === 0 ? (
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
-                        title={ap.complianceStatus === 'Overdue'
-                          ? `Overdue by ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} (due ${formatDate(ap.reviewDeadline)})`
-                          : ap.complianceStatus === 'Reviewed Late'
-                          ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
-                          : ap.complianceStatus === 'In Progress'
-                          ? `Due ${formatDate(ap.reviewDeadline)}`
-                          : ap.complianceStatus === 'Compliant'
-                          ? `Completed on time (due ${formatDate(ap.reviewDeadline)})`
-                          : ''}
+                        className="text-gray-400 text-xs"
+                        title={ap.hasReviewConfigured
+                          ? 'Review is configured but there are no active assignments — nothing to review'
+                          : 'No active assignments'}
                       >
-                        {ap.complianceStatus}
-                        {ap.complianceStatus === 'Overdue' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d)`}
+                        No assignments
                       </span>
                     ) : ap.hasReviewConfigured ? (
-                      <span
-                        className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
-                        title="Access review is configured on the assignment policy but no review instance has been created yet"
-                      >
-                        Pending first review
-                      </span>
+                      <div>
+                        <span
+                          className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
+                          title="Access review is configured on the assignment policy but no review instance has been created yet"
+                        >
+                          Pending first review
+                        </span>
+                        {ap.reviewerInfo && (
+                          <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
+                            <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
+                          </div>
+                        )}
+                        {ap.missedReviewsCount > 0 && (
+                          <div
+                            className="mt-0.5 text-orange-600 text-[11px] leading-tight font-medium"
+                            title={`${ap.missedReviewsCount} past review cycle${ap.missedReviewsCount !== 1 ? 's' : ''} where no reviewer completed any decisions`}
+                          >
+                            {ap.missedReviewsCount} review{ap.missedReviewsCount !== 1 ? 's' : ''} not done
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <span
                         className="text-gray-400 text-xs"
