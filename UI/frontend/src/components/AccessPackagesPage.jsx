@@ -20,7 +20,7 @@ const ASSIGNMENT_TYPE_STYLES = {
 const COMPLIANCE_STYLES = {
   'Compliant': 'bg-green-100 text-green-800 border-green-200',
   'In Progress': 'bg-blue-100 text-blue-800 border-blue-200',
-  'Overdue': 'bg-red-100 text-red-800 border-red-200',
+  'Missed': 'bg-red-100 text-red-800 border-red-200',
   'Reviewed Late': 'bg-amber-100 text-amber-800 border-amber-200',
 };
 
@@ -515,8 +515,8 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                       <div>
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${COMPLIANCE_STYLES[ap.complianceStatus] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
-                          title={ap.complianceStatus === 'Overdue'
-                            ? `Overdue by ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} (due ${formatDate(ap.reviewDeadline)})`
+                          title={ap.complianceStatus === 'Missed'
+                            ? `Review deadline passed ${ap.daysOverdue} day${ap.daysOverdue !== 1 ? 's' : ''} ago (was due ${formatDate(ap.reviewDeadline)}) — will reset at the next review cycle`
                             : ap.complianceStatus === 'Reviewed Late'
                             ? `Reviewed after deadline (${formatDate(ap.reviewDeadline)})`
                             : ap.complianceStatus === 'In Progress'
@@ -526,14 +526,31 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                             : ''}
                         >
                           {ap.complianceStatus}
-                          {ap.complianceStatus === 'Overdue' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d)`}
+                          {ap.complianceStatus === 'Missed' && ap.daysOverdue > 0 && ` (${ap.daysOverdue}d ago)`}
                         </span>
-                        {ap.reviewerInfo && (ap.complianceStatus === 'Overdue' || ap.complianceStatus === 'In Progress') && (
+                        {ap.reviewerInfo && (ap.complianceStatus === 'Missed' || ap.complianceStatus === 'In Progress') && (
                           <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
                             <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
                           </div>
                         )}
+                        {ap.missedReviewsCount > 0 && (
+                          <div
+                            className="mt-0.5 text-orange-600 text-[11px] leading-tight font-medium"
+                            title={`${ap.missedReviewsCount} past review cycle${ap.missedReviewsCount !== 1 ? 's' : ''} where no reviewer completed any decisions`}
+                          >
+                            {ap.missedReviewsCount} review{ap.missedReviewsCount !== 1 ? 's' : ''} not done
+                          </div>
+                        )}
                       </div>
+                    ) : ap.totalAssignments === 0 ? (
+                      <span
+                        className="text-gray-400 text-xs"
+                        title={ap.hasReviewConfigured
+                          ? 'Review is configured but there are no active assignments — nothing to review'
+                          : 'No active assignments'}
+                      >
+                        No assignments
+                      </span>
                     ) : ap.hasReviewConfigured ? (
                       <div>
                         <span
@@ -545,6 +562,14 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                         {ap.reviewerInfo && (
                           <div className="mt-0.5 text-gray-500 text-[11px] leading-tight" title={`Reviewer: ${ap.reviewerInfo}`}>
                             <span className="text-gray-400">Reviewer: </span>{ap.reviewerInfo}
+                          </div>
+                        )}
+                        {ap.missedReviewsCount > 0 && (
+                          <div
+                            className="mt-0.5 text-orange-600 text-[11px] leading-tight font-medium"
+                            title={`${ap.missedReviewsCount} past review cycle${ap.missedReviewsCount !== 1 ? 's' : ''} where no reviewer completed any decisions`}
+                          >
+                            {ap.missedReviewsCount} review{ap.missedReviewsCount !== 1 ? 's' : ''} not done
                           </div>
                         )}
                       </div>
