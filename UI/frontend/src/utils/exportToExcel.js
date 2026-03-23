@@ -86,7 +86,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     }
     const cell = ws.getCell(1, startCol);
     cell.value = jts.title || '(no title)';
-    cell.font = { size: 8, bold: true };
+    cell.font = { size: 11, bold: true };
     cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     cell.fill = {
       type: 'pattern',
@@ -103,7 +103,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     }
     const apBanner = ws.getCell(1, apColStart);
     apBanner.value = 'Access Packages (SOLL)';
-    apBanner.font = { size: 8, bold: true, color: { argb: 'FF3730A3' } };
+    apBanner.font = { size: 11, bold: true, color: { argb: 'FF3730A3' } };
     apBanner.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     apBanner.fill = {
       type: 'pattern',
@@ -130,7 +130,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   for (let u = 0; u < userCount; u++) {
     const cell = ws.getCell(2, infoColCount + u + 1);
     cell.value = users[u].displayName;
-    cell.font = { size: 7, bold: false };
+    cell.font = { size: 11, bold: false };
     cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     cell.fill = {
       type: 'pattern',
@@ -138,19 +138,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       fgColor: { argb: 'FFF3F4F6' },
     };
     cell.border = thinBorder();
-
-    // Add user details as comment
-    const comment = [users[u].upn, users[u].jobTitle, users[u].department].filter(Boolean).join('\n');
-    if (comment) {
-      cell.note = comment;
-    }
   }
 
   // Row 2 access package name headers (each AP gets a distinct color)
   for (let a = 0; a < apCount; a++) {
     const cell = ws.getCell(2, apColStart + a);
     cell.value = accessPackages[a].displayName;
-    cell.font = { size: 7, bold: false };
+    cell.font = { size: 11, bold: false };
     cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     cell.fill = {
       type: 'pattern',
@@ -158,9 +152,6 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       fgColor: { argb: hexToArgb(getApColorHex(a)) },
     };
     cell.border = thinBorder();
-    if (accessPackages[a].catalogName) {
-      cell.note = `Catalog: ${accessPackages[a].catalogName}`;
-    }
   }
 
   // ===== ROW 3+: Group rows =====
@@ -173,17 +164,17 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     ws.getCell(rowNum, 1).border = thinBorder();
     const catCell = ws.getCell(rowNum, 2);
     catCell.value = group.category;
-    catCell.font = { size: 8 };
+    catCell.font = { size: 11 };
     catCell.border = thinBorder();
 
     const nameCell = ws.getCell(rowNum, 3);
     nameCell.value = group.displayName;
-    nameCell.font = { size: 8, bold: true };
+    nameCell.font = { size: 11 };
     nameCell.border = thinBorder();
 
     const guidCell = ws.getCell(rowNum, 4);
     guidCell.value = group.realGroupId || group.id;
-    guidCell.font = { size: 8, color: { argb: 'FF666666' } };
+    guidCell.font = { size: 11 };
     guidCell.border = thinBorder();
 
     // Intersection cells
@@ -201,13 +192,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
         if (types.length === 1 && TYPE_COLORS[types[0]]) {
           excelCell.value = types[0].charAt(0);
-          excelCell.font = { size: 7, bold: true, color: { argb: 'FF' + TYPE_COLORS[types[0]].text } };
+          excelCell.font = { size: 11, bold: true, color: { argb: 'FF' + TYPE_COLORS[types[0]].text } };
         } else {
           // Rich text: each letter gets its own type color
           excelCell.value = {
             richText: types.map(t => ({
               text: TYPE_COLORS[t] ? t.charAt(0) : '?',
-              font: { size: 7, bold: true, color: { argb: 'FF' + (TYPE_COLORS[t]?.bg || '374151') } },
+              font: { size: 11, bold: true, color: { argb: 'FF' + (TYPE_COLORS[t]?.bg || '374151') } },
             })),
           };
         }
@@ -239,13 +230,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
           if (expectsEligible) return !memberTypes || !memberTypes.has('Eligible');
           return !memberTypes || !memberTypes.has('Direct');
         });
-        if (apIds.length > 1 || isGap) {
-          const notes = [];
-          if (apIds.length > 1) notes.push(`Managed by: ${apIds.length} access packages`);
-          if (isGap) notes.push('\u26a0 Provisioning gap: user lacks the membership type specified by the access package');
-          excelCell.note = notes.join('\n');
         }
-      }
 
       excelCell.border = thinBorder();
     }
@@ -255,18 +240,18 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
     const countCell = ws.getCell(rowNum, metaColStart);
     countCell.value = memberCount;
-    countCell.font = { size: 8 };
+    countCell.font = { size: 11 };
     countCell.alignment = { horizontal: 'center' };
     countCell.border = thinBorder();
 
     const typeCell = ws.getCell(rowNum, metaColStart + 1);
     typeCell.value = group.groupType || '';
-    typeCell.font = { size: 8 };
+    typeCell.font = { size: 11 };
     typeCell.border = thinBorder();
 
     const descCell = ws.getCell(rowNum, metaColStart + 2);
     descCell.value = group.description;
-    descCell.font = { size: 8, color: { argb: 'FF666666' } };
+    descCell.font = { size: 11 };
     descCell.border = thinBorder();
 
     // Access package cells (each AP column uses its own color)
@@ -283,7 +268,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       if (showRole) {
         const lower = (roleName || '').toLowerCase();
         apCell.value = lower.includes('owner') ? 'O' : lower.includes('eligible') ? 'E' : 'D';
-        apCell.font = { size: 7, bold: true };
+        apCell.font = { size: 11, bold: true };
         apCell.alignment = { horizontal: 'center', vertical: 'middle' };
         apCell.fill = {
           type: 'pattern',
@@ -309,11 +294,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   Object.entries(TYPE_COLORS).forEach(([type, colors], idx) => {
     const r = idx + 2;
     legendWs.getCell(r, 1).value = type;
-    legendWs.getCell(r, 1).font = { size: 9 };
+    legendWs.getCell(r, 1).font = { size: 11 };
     legendWs.getCell(r, 1).border = thinBorder();
 
     legendWs.getCell(r, 2).value = type.charAt(0);
-    legendWs.getCell(r, 2).font = { size: 9, bold: true, color: { argb: 'FF' + colors.text } };
+    legendWs.getCell(r, 2).font = { size: 11, bold: true, color: { argb: 'FF' + colors.text } };
     legendWs.getCell(r, 2).fill = {
       type: 'pattern',
       pattern: 'solid',
@@ -323,7 +308,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     legendWs.getCell(r, 2).border = thinBorder();
 
     legendWs.getCell(r, 3).value = '#' + colors.bg;
-    legendWs.getCell(r, 3).font = { size: 9 };
+    legendWs.getCell(r, 3).font = { size: 11 };
     legendWs.getCell(r, 3).border = thinBorder();
   });
 
@@ -337,11 +322,11 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       const r = filterStart + idx + 1;
       const field = filterFields?.find(f => f.key === af.field);
       legendWs.getCell(r, 1).value = field?.label || af.field;
-      legendWs.getCell(r, 1).font = { size: 9, bold: true };
+      legendWs.getCell(r, 1).font = { size: 11, bold: true };
       legendWs.getCell(r, 1).border = thinBorder();
 
       legendWs.getCell(r, 2).value = af.value;
-      legendWs.getCell(r, 2).font = { size: 9 };
+      legendWs.getCell(r, 2).font = { size: 11 };
       legendWs.getCell(r, 2).border = thinBorder();
     });
   }
@@ -359,13 +344,13 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     const urlCell = legendWs.getCell(urlRow, 2);
     legendWs.mergeCells(urlRow, 2, urlRow, 3);
     urlCell.value = { text: shareUrl, hyperlink: shareUrl };
-    urlCell.font = { size: 9, color: { argb: 'FF2563EB' }, underline: true };
+    urlCell.font = { size: 11, color: { argb: 'FF2563EB' }, underline: true };
     urlCell.border = thinBorder();
 
     const noteCell = legendWs.getCell(urlRow + 1, 1);
     noteCell.value = 'Open this link to reproduce the exact same matrix view with all filters applied.';
     legendWs.mergeCells(urlRow + 1, 1, urlRow + 1, 3);
-    noteCell.font = { size: 8, italic: true, color: { argb: 'FF6B7280' } };
+    noteCell.font = { size: 11, italic: true, color: { argb: 'FF6B7280' } };
   }
 
   // ===== Generate & download =====
@@ -395,7 +380,7 @@ function thinBorder() {
 
 function setHeaderCell(cell, value, rotated = false) {
   cell.value = value;
-  cell.font = { size: 8, bold: true, color: { argb: 'FF374151' } };
+  cell.font = { size: 11, bold: true, color: { argb: 'FF374151' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',

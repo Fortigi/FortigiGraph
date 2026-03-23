@@ -208,7 +208,7 @@ router.get('/access-packages', async (req, res) => {
       'displayName':      'ap.displayName',
       'assignmentType':   'ISNULL(pol.autoAddCount, 0)',  // approximate: auto-add first
       'complianceStatus': `CASE
-                             WHEN rev.complianceStatus = 'Overdue' THEN 1
+                             WHEN rev.complianceStatus = 'Missed' THEN 1
                              WHEN rev.complianceStatus = 'Reviewed Late' THEN 2
                              WHEN rev.complianceStatus = 'In Progress' THEN 3
                              WHEN rev.complianceStatus IS NULL AND ISNULL(pol.hasReviewConfigured, 0) = 1 THEN 4
@@ -259,13 +259,23 @@ router.get('/access-packages', async (req, res) => {
       hasReviewCol = check.recordset.length > 0;
     } catch { /* ignore */ }
 
+    // Check if reviewSettings column exists (for extracting reviewer names)
+    let hasReviewSettingsCol = false;
+    try {
+      const check = await p.request().query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'GraphAccessPackageAssignmentPolicies' AND COLUMN_NAME = 'reviewSettings'
+      `);
+      hasReviewSettingsCol = check.recordset.length > 0;
+    } catch { /* ignore */ }
+
     // If no review table, fall back to displayName for review-based sort columns
     const isReviewSort = ['complianceStatus', 'lastReviewDate', 'lastReviewedBy'].includes(req.query.sortCol);
 
     // Build review CTE + JOIN (uses same compliance logic as governance.js)
     let reviewCte = '';
     let reviewJoin = '';
-    let reviewCols = ', NULL AS lastReviewDate, NULL AS lastReviewedBy, NULL AS complianceStatus, NULL AS reviewDeadline, 0 AS daysOverdue';
+    let reviewCols = ', NULL AS lastReviewDate, NULL AS lastReviewedBy, NULL AS complianceStatus, NULL AS reviewDeadline, 0 AS daysOverdue, 0 AS missedReviewsCount';
     if (hasReviewTable) {
       reviewCte = `,
         _LatestInstance AS (
@@ -295,7 +305,7 @@ router.get('/access-packages', async (req, res) => {
               THEN 'In Progress'
               WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
                AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-              THEN 'Overdue'
+              THEN 'Missed'
               ELSE 'Reviewed Late'
             END AS complianceStatus,
             CASE
@@ -308,9 +318,21 @@ router.get('/access-packages', async (req, res) => {
               ON d.accessPackageId = li.accessPackageId
               AND d.reviewInstanceId = li.reviewInstanceId
           GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime
+        ),
+        _MissedReviewCount AS (
+          SELECT accessPackageId, COUNT(*) AS missedCount
+          FROM (
+            SELECT accessPackageId, reviewInstanceId
+            FROM dbo.GraphAccessPackageAccessReviewDecisions
+            WHERE reviewInstanceEndDateTime < GETUTCDATE()
+            GROUP BY accessPackageId, reviewInstanceId
+            HAVING SUM(CASE WHEN decision <> 'NotReviewed' THEN 1 ELSE 0 END) = 0
+          ) x
+          GROUP BY accessPackageId
         )`;
-      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.accessPackageId`;
-      reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue';
+      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.accessPackageId
+        LEFT JOIN _MissedReviewCount mrc ON ap.id = mrc.accessPackageId`;
+      reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue, ISNULL(mrc.missedCount, 0) AS missedReviewsCount';
     } else if (isReviewSort) {
       // No review data — fall back to default sort
       sortExpr = 'ap.displayName';
@@ -334,7 +356,30 @@ router.get('/access-packages', async (req, res) => {
                }
         FROM dbo.GraphAccessPackageAssignmentPolicies
         GROUP BY accessPackageId
-      )
+      )${hasReviewSettingsCol ? `,
+      _reviewerInfo AS (
+        SELECT p.accessPackageId,
+               STRING_AGG(
+                 CASE rv.[odata_type]
+                   WHEN '#microsoft.graph.singleUser'       THEN ISNULL(rv.[description], rv.[userId])
+                   WHEN '#microsoft.graph.requestorManager' THEN 'Requestor''s manager'
+                   WHEN '#microsoft.graph.targetManager'    THEN 'User''s manager'
+                   WHEN '#microsoft.graph.groupMembers'     THEN 'Group members'
+                   WHEN '#microsoft.graph.internalSponsors' THEN 'Internal sponsors'
+                   WHEN '#microsoft.graph.externalSponsors' THEN 'External sponsors'
+                   ELSE rv.[odata_type]
+                 END, ', '
+               ) AS reviewers
+        FROM dbo.GraphAccessPackageAssignmentPolicies p
+        CROSS APPLY OPENJSON(JSON_QUERY(p.reviewSettings, '$.primaryReviewers'))
+          WITH (
+            [odata_type]  NVARCHAR(100) '$."@odata.type"',
+            [userId]      NVARCHAR(255) '$.userId',
+            [description] NVARCHAR(255) '$.description'
+          ) rv
+        WHERE p.reviewSettings IS NOT NULL
+        GROUP BY p.accessPackageId
+      )` : ''}
       ${reviewCte}
       SELECT ap.id, ap.displayName, ap.description,
              c.displayName AS catalogName, c.id AS catalogId,
@@ -345,6 +390,7 @@ router.get('/access-packages', async (req, res) => {
              ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount,
              ISNULL(pol.hasReviewConfigured, 0) AS hasReviewConfigured
              ${reviewCols}
+             ${hasReviewSettingsCol ? ', ri.reviewers AS reviewerInfo' : ', NULL AS reviewerInfo'}
       FROM dbo.GraphAccessPackages ap
       INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
       LEFT JOIN _assignmentCounts ac ON ap.id = ac.accessPackageId
@@ -352,6 +398,7 @@ router.get('/access-packages', async (req, res) => {
       LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
       LEFT JOIN _policyCounts pol ON ap.id = pol.accessPackageId
       ${reviewJoin}
+      ${hasReviewSettingsCol ? 'LEFT JOIN _reviewerInfo ri ON ap.id = ri.accessPackageId' : ''}
       WHERE ${where}
       ORDER BY ${sortExpr} ${sortDir}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
@@ -390,10 +437,16 @@ router.get('/access-packages', async (req, res) => {
         assignmentType,
         lastReviewDate: r.lastReviewDate || null,
         lastReviewedBy: r.lastReviewedBy || null,
-        complianceStatus: r.complianceStatus || null,
+        // Suppress Overdue/In Progress when there are no active assignments — the reviewer
+        // would see nothing pending, so showing overdue is misleading.
+        complianceStatus: (r.totalAssignments === 0 && (r.complianceStatus === 'Overdue' || r.complianceStatus === 'In Progress'))
+          ? null
+          : r.complianceStatus || null,
         reviewDeadline: r.reviewDeadline || null,
         daysOverdue: r.daysOverdue || 0,
         hasReviewConfigured: !!r.hasReviewConfigured,
+        reviewerInfo: r.reviewerInfo || null,
+        missedReviewsCount: r.missedReviewsCount || 0,
       };
     });
 

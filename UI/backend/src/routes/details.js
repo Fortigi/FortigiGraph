@@ -799,6 +799,7 @@ router.get('/access-package/:id/policies', async (req, res) => {
       SELECT id, displayName, description, allowedTargetScope,
              ISNULL(hasAutoAddRule, CAST(0 AS BIT)) AS hasAutoAddRule,
              ISNULL(hasAutoRemoveRule, CAST(0 AS BIT)) AS hasAutoRemoveRule,
+             JSON_VALUE(automaticRequestSettings, '$.filter.rule') AS autoAssignmentFilter,
              createdDateTime, modifiedDateTime
       FROM GraphAccessPackageAssignmentPolicies
       WHERE accessPackageId = @id
