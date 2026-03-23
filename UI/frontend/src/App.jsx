@@ -20,6 +20,7 @@ const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
 const OrgUnitDetailPage = lazy(() => import('./components/OrgUnitDetailPage'));
 const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
+const AdminPage = lazy(() => import('./components/AdminPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -92,6 +93,7 @@ const ALL_NAV_TABS = [
   { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },
   { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring',        optional: true },
   { key: 'performance',      label: 'Performance',                                  optional: true },
+  { key: 'admin',            label: 'Admin',                                        optional: true },
 ];
 
 export default function App() {
@@ -446,6 +448,8 @@ export default function App() {
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
           ) : page === 'performance' ? (
             <PerfPage />
+          ) : page === 'admin' ? (
+            <AdminPage />
           ) : loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-gray-500">Loading permission data...</div>

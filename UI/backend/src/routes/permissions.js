@@ -78,7 +78,7 @@ router.get('/user-columns', async (req, res) => {
         ORDER BY t.name
       `);
       const userTags = tagResult.recordset.map(r => r.name);
-      grouped['__userTag'] = schemaOnly ? [] : userTags;
+      grouped['__userTag'] = userTags; // always include values — tag query is fast
     } catch { /* tag tables may not exist yet — skip silently */ }
 
     return res.json(
@@ -666,12 +666,12 @@ router.get('/group/:groupId/nested-groups', async (req, res) => {
 
       -- User memberships for those parent groups
       SELECT
-        p.${COL_RES} AS resourceId,
-        p.${COL_RES} AS groupId,
-        p.${COL_PRINC} AS memberId,
+        p.${COL_RES_N} AS resourceId,
+        p.${COL_RES_N} AS groupId,
+        p.${COL_PRINC_N} AS memberId,
         p.membershipType
       FROM ${permSource} p
-      WHERE p.${COL_RES} IN (
+      WHERE p.${COL_RES_N} IN (
         SELECT UPPER(ra2.resourceId)
         FROM dbo.ResourceAssignments ra2
         WHERE UPPER(ra2.principalId) = UPPER(@childGroupId)

@@ -137,13 +137,12 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
       const currentRow = ws.getRow(rowNum);
       currentRow.height = 18;
 
-      // AP detail columns — only write value on first row; all rows get border
+      // AP detail columns — copy value into every row
       apValues.forEach((val, c) => {
         const cell = ws.getCell(rowNum, c + 1);
-        if (r === 0) cell.value = val;
+        cell.value = val;
         cell.font = { size: 11 };
-        // Border: suppress bottom on non-last rows and top on non-first rows so merged block looks clean
-        cell.border = thinBorder(r < rowCount - 1, r > 0);
+        cell.border = thinBorder();
         if (c === 4) cell.alignment = { horizontal: 'center', vertical: 'top' };
         else cell.alignment = { vertical: 'top', wrapText: c === 8 };
       });
@@ -185,15 +184,7 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
       rowNum++;
     }
 
-    // Merge AP detail columns vertically when there are multiple resource rows
-    if (rowCount > 1) {
-      for (let c = 0; c < AP_COL_COUNT; c++) {
-        ws.mergeCells(startRow, c + 1, startRow + rowCount - 1, c + 1);
-        // Re-apply alignment on the merged cell (merging resets it)
-        const cell = ws.getCell(startRow, c + 1);
-        cell.alignment = { vertical: 'top', wrapText: c === 8, horizontal: c === 4 ? 'center' : undefined };
-      }
-    }
+    // No merging — each row gets its own copy of the AP detail values
   });
 
   // Auto-filter on header row

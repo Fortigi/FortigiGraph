@@ -1,0 +1,701 @@
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../auth/AuthGate';
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+function fmt(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    return new Date(dateStr).toLocaleString();
+  } catch {
+    return dateStr;
+  }
+}
+
+function MetaBadge({ label, value }) {
+  if (!value) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
+      <span className="text-gray-400">{label}:</span>
+      <span className="font-medium">{value}</span>
+    </span>
+  );
+}
+
+function JsonViewer({ data }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+      >
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        {open ? 'Hide' : 'Show'} raw JSON
+      </button>
+      {open && (
+        <pre className="mt-2 p-3 bg-gray-900 text-gray-100 text-xs rounded-lg overflow-auto max-h-96 leading-relaxed">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, icon, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-lg">{icon}</span>
+          <span className="font-medium text-gray-900">{title}</span>
+        </div>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && <div className="px-5 pb-5 pt-0 border-t border-gray-100">{children}</div>}
+    </div>
+  );
+}
+
+function NotConfigured({ message }) {
+  return (
+    <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      {message}
+    </div>
+  );
+}
+
+// ── Risk Profile section ──────────────────────────────────────────
+
+function RiskProfileSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const { authFetch } = useAuth();
+
+  useEffect(() => {
+    authFetch('/api/admin/risk-profile')
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setData({ available: false }))
+      .finally(() => setLoading(false));
+  }, [authFetch]);
+
+  const content = () => {
+    if (loading) return <p className="mt-4 text-sm text-gray-400">Loading...</p>;
+    if (!data?.available) return <NotConfigured message="No risk profile saved yet. Run New-FGRiskProfile and Save-FGRiskProfile to generate one." />;
+
+    // Defaults mode — no LLM profile, show the hardcoded multipliers that were used
+    if (data.source === 'defaults') {
+      return (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            No LLM-generated profile saved. Risk scoring used hardcoded defaults. Run <code className="bg-amber-100 px-1 rounded mx-1">New-FGRiskProfile</code> + <code className="bg-amber-100 px-1 rounded">Save-FGRiskProfile</code> to get org-specific multipliers.
+          </div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Resource Type Multipliers (defaults used)</p>
+          <div className="overflow-x-auto rounded border border-gray-200">
+            <table className="w-full text-xs">
+              <thead><tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wide">
+                <th className="px-3 py-2 font-semibold">Resource Type</th>
+                <th className="px-3 py-2 font-semibold text-center">Multiplier</th>
+                <th className="px-3 py-2 font-semibold text-center">Propagation</th>
+              </tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {Object.entries(data.multipliers).sort((a, b) => b[1] - a[1]).map(([type, mult]) => (
+                  <tr key={type} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium text-gray-800">{type}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${mult >= 1.3 ? 'bg-red-100 text-red-700' : mult <= 0.8 ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-blue-700'}`}>
+                        {mult}×
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center text-gray-500">
+                      {data.propagation[type] ? `${Math.round(data.propagation[type] * 100)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    const cp = data.profile?.customer_profile || data.profile || {};
+    const sensitiveDepts = cp.sensitive_departments || [];
+    const privRoles = cp.privileged_roles || [];
+    const externalTrust = cp.external_trust_relationships || [];
+
+    return (
+      <div className="mt-4 space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <MetaBadge label="Domain" value={data.domain} />
+          <MetaBadge label="Industry" value={data.industry} />
+          <MetaBadge label="Country" value={data.country} />
+          <MetaBadge label="LLM" value={data.llmProvider} />
+          <MetaBadge label="Generated" value={fmt(data.generatedAt)} />
+        </div>
+
+        {cp.organization_description && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Organization Description</p>
+            <p className="text-sm text-gray-700 leading-relaxed">{cp.organization_description}</p>
+          </div>
+        )}
+
+        {sensitiveDepts.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Sensitive Departments ({sensitiveDepts.length})</p>
+            <div className="flex flex-wrap gap-1.5">
+              {sensitiveDepts.map((d, i) => (
+                <span key={i} className="px-2 py-0.5 bg-orange-50 text-orange-700 text-xs rounded-full border border-orange-200">{d}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {privRoles.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Privileged Roles ({privRoles.length})</p>
+            <div className="flex flex-wrap gap-1.5">
+              {privRoles.map((r, i) => (
+                <span key={i} className="px-2 py-0.5 bg-red-50 text-red-700 text-xs rounded-full border border-red-200">{r}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {externalTrust.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">External Trust Relationships ({externalTrust.length})</p>
+            <div className="flex flex-wrap gap-1.5">
+              {externalTrust.map((t, i) => (
+                <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">{t}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <JsonViewer data={data.profile} />
+      </div>
+    );
+  };
+
+  return <Section title="Risk Profile" icon="🏢" defaultOpen>{content()}</Section>;
+}
+
+// ── Classifiers section ───────────────────────────────────────────
+
+function ClassifierTable({ rules, emptyMsg }) {
+  if (!rules?.length) return <p className="text-xs text-gray-400 mt-2">{emptyMsg}</p>;
+  return (
+    <div className="mt-2 overflow-x-auto rounded border border-gray-200">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wide">
+            <th className="px-3 py-2 font-semibold">Name</th>
+            <th className="px-3 py-2 font-semibold">Pattern(s)</th>
+            <th className="px-3 py-2 font-semibold w-16">Score</th>
+            <th className="px-3 py-2 font-semibold">Category</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rules.map((rule, i) => {
+            // Support both SQL-saved format (pattern/weight) and universal format (name_patterns/base_score)
+            const patterns = rule.name_patterns
+              ? rule.name_patterns.join(', ')
+              : (rule.pattern || rule.regex || '—');
+            const score = rule.base_score ?? rule.weight;
+            return (
+              <tr key={i} className="hover:bg-gray-50">
+                <td className="px-3 py-2 font-medium text-gray-800">
+                  {rule.name || '—'}
+                  {rule.rationale && (
+                    <p className="text-gray-400 font-normal mt-0.5 leading-relaxed">{rule.rationale}</p>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-gray-600 font-mono">{patterns}</td>
+                <td className="px-3 py-2 text-center">
+                  <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
+                    (score || 0) >= 70 ? 'bg-red-100 text-red-700' :
+                    (score || 0) >= 40 ? 'bg-orange-100 text-orange-700' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>{score ?? '—'}</span>
+                </td>
+                <td className="px-3 py-2 text-gray-600">{rule.category || rule.type || '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ClassifiersSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('groups');
+  const { authFetch } = useAuth();
+
+  useEffect(() => {
+    authFetch('/api/admin/classifiers')
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setData({ available: false }))
+      .finally(() => setLoading(false));
+  }, [authFetch]);
+
+  const content = () => {
+    if (loading) return <p className="mt-4 text-sm text-gray-400">Loading...</p>;
+    if (!data?.available) return <NotConfigured message="No classifiers saved yet. Run New-FGRiskClassifiers and Save-FGRiskClassifiers to generate them." />;
+
+    const cls = data.classifiers || {};
+    const groupRules = cls.groups || [];
+    const userRules = cls.users || [];
+    const isUniversal = data.source === 'universal';
+
+    return (
+      <div className="mt-4 space-y-3">
+        {isUniversal && (
+          <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            No custom classifiers saved — showing built-in universal classifiers. Run <code className="bg-blue-100 px-1 rounded mx-1">New-FGRiskClassifiers</code> + <code className="bg-blue-100 px-1 rounded">Save-FGRiskClassifiers</code> to get org-specific patterns.
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {!isUniversal && <MetaBadge label="Version" value={data.version} />}
+          {!isUniversal && <MetaBadge label="Customer" value={data.customer} />}
+          {!isUniversal && <MetaBadge label="LLM" value={data.llmProvider} />}
+          {!isUniversal && <MetaBadge label="Generated" value={fmt(data.generatedAt)} />}
+          {isUniversal && <MetaBadge label="Source" value={`Universal v${cls.version || '—'}`} />}
+          <MetaBadge label="Group rules" value={groupRules.length} />
+          <MetaBadge label="User rules" value={userRules.length} />
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="flex gap-2 border-b border-gray-200 mt-2">
+          {[['groups', `Groups (${groupRules.length})`], ['users', `Users (${userRules.length})`]].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === key
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'groups' && <ClassifierTable rules={groupRules} emptyMsg="No group classifiers." />}
+        {activeTab === 'users' && <ClassifierTable rules={userRules} emptyMsg="No user classifiers." />}
+
+        <JsonViewer data={data.classifiers} />
+      </div>
+    );
+  };
+
+  return <Section title="Risk Classifiers" icon="🎯">{content()}</Section>;
+}
+
+// ── Correlation Ruleset section ───────────────────────────────────
+
+function CorrelationSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('signals');
+  const { authFetch } = useAuth();
+
+  useEffect(() => {
+    authFetch('/api/admin/correlation-ruleset')
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setData({ available: false }))
+      .finally(() => setLoading(false));
+  }, [authFetch]);
+
+  const content = () => {
+    if (loading) return <p className="mt-4 text-sm text-gray-400">Loading...</p>;
+    if (!data?.available) return <NotConfigured message="No correlation ruleset saved yet. Run New-FGCorrelationRuleset and Save-FGCorrelationRuleset to configure one." />;
+
+    const rs = data.ruleset || {};
+    const signals = rs.correlationSignals || rs.correlation_signals || [];
+    const accountTypeRules = rs.accountTypeRules || rs.account_type_rules || [];
+    const hrConfig = rs.hrSourceConfig || rs.hr_source_config || null;
+
+    return (
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <MetaBadge label="Version" value={data.version} />
+          <MetaBadge label="Generated" value={fmt(data.generatedAt)} />
+          <MetaBadge label="Signals" value={signals.length} />
+          <MetaBadge label="Account type rules" value={accountTypeRules.length} />
+          {hrConfig?.enabled && <MetaBadge label="HR source" value="Enabled" />}
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="flex gap-2 border-b border-gray-200 mt-2">
+          {[
+            ['signals', `Correlation Signals (${signals.length})`],
+            ['accountTypes', `Account Types (${accountTypeRules.length})`],
+            ...(hrConfig ? [['hr', 'HR Source']] : []),
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === key
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'signals' && (
+          signals.length === 0
+            ? <p className="text-xs text-gray-400 mt-2">No correlation signals defined.</p>
+            : <div className="mt-2 overflow-x-auto rounded border border-gray-200">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-left text-gray-500 uppercase tracking-wide">
+                      <th className="px-3 py-2 font-semibold">Signal</th>
+                      <th className="px-3 py-2 font-semibold">Type</th>
+                      <th className="px-3 py-2 font-semibold">Weight</th>
+                      <th className="px-3 py-2 font-semibold">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {signals.map((s, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium text-gray-800">{s.name || s.signal || '—'}</td>
+                        <td className="px-3 py-2 text-gray-600">{s.type || s.matchType || '—'}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
+                            (s.weight || 0) >= 70 ? 'bg-green-100 text-green-700' :
+                            (s.weight || 0) >= 40 ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{s.weight ?? '—'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-500">{s.description || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+        )}
+
+        {activeTab === 'accountTypes' && (
+          accountTypeRules.length === 0
+            ? <p className="text-xs text-gray-400 mt-2">No account type rules defined.</p>
+            : <div className="mt-2 space-y-2">
+                {accountTypeRules.map((rule, i) => (
+                  <div key={i} className="p-3 bg-gray-50 rounded border border-gray-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium text-sm text-gray-800">{rule.accountType || rule.type || `Rule ${i + 1}`}</span>
+                      {rule.priority !== undefined && (
+                        <span className="text-xs text-gray-400">priority {rule.priority}</span>
+                      )}
+                    </div>
+                    {rule.patterns?.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {rule.patterns.map((p, j) => (
+                          <code key={j} className="text-xs bg-white px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">{p}</code>
+                        ))}
+                      </div>
+                    )}
+                    {rule.description && <p className="text-xs text-gray-500 mt-1">{rule.description}</p>}
+                  </div>
+                ))}
+              </div>
+        )}
+
+        {activeTab === 'hr' && hrConfig && (
+          <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <MetaBadge label="Enabled" value={hrConfig.enabled ? 'Yes' : 'No'} />
+              {hrConfig.sourceSystem && <MetaBadge label="Source" value={hrConfig.sourceSystem} />}
+            </div>
+            {hrConfig.indicators?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Indicators</p>
+                <div className="overflow-x-auto rounded border border-gray-200">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-white text-left text-gray-500 uppercase tracking-wide">
+                        <th className="px-3 py-2 font-semibold">Attribute</th>
+                        <th className="px-3 py-2 font-semibold">Value</th>
+                        <th className="px-3 py-2 font-semibold">Weight</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {hrConfig.indicators.map((ind, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono text-gray-700">{ind.attribute}</td>
+                          <td className="px-3 py-2 font-mono text-gray-700">{ind.value}</td>
+                          <td className="px-3 py-2 text-center">
+                            <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">{ind.weight ?? '—'}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <JsonViewer data={data.ruleset} />
+      </div>
+    );
+  };
+
+  return <Section title="Account Correlation Ruleset" icon="🔗">{content()}</Section>;
+}
+
+// ── Curated Data section ──────────────────────────────────────────
+
+function CuratedDataSection() {
+  const [exporting, setExporting]   = useState(false);
+  const [importing, setImporting]   = useState(false);
+  const [importing2, setImporting2] = useState(false); // file-read step
+  const [result, setResult]         = useState(null);
+  const [error, setError]           = useState(null);
+  const fileInputRef = useRef(null);
+  const { authFetch } = useAuth();
+
+  async function handleExport() {
+    setError(null);
+    setExporting(true);
+    try {
+      const r = await authFetch('/api/admin/export/curated');
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || 'Export failed');
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FGCuratedData_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function handleImportClick() {
+    setResult(null);
+    setError(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset so same file can be re-selected
+    e.target.value = '';
+
+    setImporting2(true);
+    let payload;
+    try {
+      const text = await file.text();
+      payload = JSON.parse(text);
+    } catch {
+      setError('Could not parse file — make sure it is a valid JSON export.');
+      setImporting2(false);
+      return;
+    }
+    setImporting2(false);
+
+    if (!payload.version || (!Array.isArray(payload.tags) && !Array.isArray(payload.categories))) {
+      setError('Unrecognised file format. Use a file created by Export-FGCuratedData or this export button.');
+      return;
+    }
+
+    setImporting(true);
+    setError(null);
+    try {
+      const r = await authFetch('/api/admin/import/curated', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: payload.tags || [], categories: payload.categories || [] }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Import failed');
+      setResult(data.stats);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const busy = importing || importing2 || exporting;
+
+  return (
+    <Section title="Curated Data" icon="📦" defaultOpen>
+      <div className="mt-4 space-y-4">
+        <p className="text-sm text-gray-500">
+          Export and import manually curated data — user tags, group/resource tags, and access package categories —
+          so they can be restored after recreating an environment.
+          Analyst overrides are managed separately via <code className="bg-gray-100 px-1 rounded text-xs">Export-FGCuratedData</code>.
+        </p>
+
+        {/* Buttons */}
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleExport}
+            disabled={busy}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {exporting ? (
+              <svg className="w-4 h-4 animate-spin text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            )}
+            {exporting ? 'Exporting…' : 'Export tags & categories'}
+          </button>
+
+          <button
+            onClick={handleImportClick}
+            disabled={busy}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {busy ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            )}
+            {busy ? 'Importing…' : 'Import from file'}
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {error}
+          </div>
+        )}
+
+        {/* Import result */}
+        {result && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+            <p className="text-sm font-semibold text-green-800">Import complete</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Tags */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Tags</p>
+                <div className="space-y-1 text-xs text-gray-700">
+                  <ResultRow label="Assignments inserted" value={result.assignmentsInserted} good />
+                  {result.assignmentsSoftMatched > 0 && (
+                    <ResultRow label="Matched by name (soft)" value={result.assignmentsSoftMatched} warn />
+                  )}
+                  <ResultRow label="Already existed" value={result.assignmentsSkipped} />
+                  {result.assignmentsNotFound > 0 && (
+                    <ResultRow label="Entity not found" value={result.assignmentsNotFound} bad />
+                  )}
+                </div>
+              </div>
+
+              {/* Categories */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Categories</p>
+                <div className="space-y-1 text-xs text-gray-700">
+                  <ResultRow label="AP assignments inserted" value={result.catAssignInserted} good />
+                  {result.catAssignSoftMatched > 0 && (
+                    <ResultRow label="Matched by name (soft)" value={result.catAssignSoftMatched} warn />
+                  )}
+                  <ResultRow label="Already existed" value={result.catAssignSkipped} />
+                  {result.catAssignNotFound > 0 && (
+                    <ResultRow label="Access package not found" value={result.catAssignNotFound} bad />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {(result.assignmentsNotFound > 0 || result.catAssignNotFound > 0) && (
+              <p className="text-xs text-gray-500">
+                Entities not found: run a full sync first so the records exist in SQL, then retry the import.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function ResultRow({ label, value, good, warn, bad }) {
+  const color = bad ? 'text-red-600' : warn ? 'text-amber-600' : good && value > 0 ? 'text-green-700' : 'text-gray-600';
+  return (
+    <div className="flex justify-between">
+      <span className="text-gray-500">{label}</span>
+      <span className={`font-semibold ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────
+
+export default function AdminPage() {
+  return (
+    <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Admin Configuration</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Saved configuration used for risk scoring and account correlation. Read-only — manage via PowerShell cmdlets.</p>
+        </div>
+      </div>
+
+      <CuratedDataSection />
+      <RiskProfileSection />
+      <ClassifiersSection />
+      <CorrelationSection />
+    </div>
+  );
+}

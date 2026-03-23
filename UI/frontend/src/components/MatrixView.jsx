@@ -155,10 +155,15 @@ export default function MatrixView({
   }, [data, userColumns]);
 
   // User filter fields = columns known to the server from GraphUsers table + __userTag.
-  const userFilterFields = useMemo(
-    () => filterFields.filter(f => userColumnNames.has(f.key) || f.key === '__userTag'),
-    [filterFields, userColumnNames],
-  );
+  // __userTag is always included when the backend supports it, even if no tags exist yet
+  // (col.values.length > 0 guard in filterFields step 2 would otherwise drop it).
+  const userFilterFields = useMemo(() => {
+    const fields = filterFields.filter(f => userColumnNames.has(f.key));
+    if (userColumnNames.has('__userTag') && !fields.some(f => f.key === '__userTag')) {
+      fields.push({ key: '__userTag', label: 'User Tag', dataKey: '__userTag' });
+    }
+    return fields;
+  }, [filterFields, userColumnNames]);
 
   // Get available values for a specific field.
   // Server-provided columns: use server values (full dataset, not just current page).

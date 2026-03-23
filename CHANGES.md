@@ -203,3 +203,8 @@ UI/frontend/src/utils/exportToExcel.js
 - Access package detail page: "Open in Entra ID" link now points to the correct Azure Portal ELM blade (includes catalog ID and names)
 - Access package detail page: policy scope values (e.g. "specificDirectoryUsers") now display as human-readable labels (e.g. "Specific directory users")
 - Access package detail page: auto-assignment policy scope now shows the filter rule expression (e.g. which department or attribute conditions determine who gets the package automatically)
+- Added `Export-FGCuratedData` and `Import-FGCuratedData` PowerShell functions to back up and restore manually curated data (tags, categories, analyst overrides) — useful when recreating environments
+- Added Admin tab (hidden by default, enable via Settings): shows the saved Risk Profile, Risk Classifiers, and Account Correlation Ruleset stored in SQL — read-only view with expandable raw JSON
+- Admin tab: Export and Import buttons for tags and categories — export downloads a JSON file; import matches by GUID first, falls back to soft-match by displayName + resourceType (for groups/resources) or displayName alone (for users and access packages); import result shows counts per match strategy
+- Admin tab: Risk Classifiers section now shows built-in universal classifiers (with blue info banner) when no custom LLM-generated classifiers have been saved — same fallback behavior as Invoke-FGRiskScoring
+- Admin tab: Risk Profile section now shows hardcoded resource-type multiplier defaults (with amber warning banner) when no LLM-generated profile has been saved — so the values actually used by Invoke-FGRiskScoring are always visible
