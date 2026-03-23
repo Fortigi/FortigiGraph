@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, getUserColumnValues, getGroupColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
+import { getUserColumns as getUserCols, getGroupColumns as getGroupCols, getResourceColumns as getResourceCols, getPrincipalOrUserColumns, getUserColumnValues, getPrincipalOrUserColumnValues, getGroupColumnValues, getResourceColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -26,7 +26,7 @@ async function ensureTagTables(pool) {
       entityType NVARCHAR(10) NOT NULL,
       createdAt DATETIME2 DEFAULT GETUTCDATE(),
       CONSTRAINT UQ_GraphTags_Name_Type UNIQUE(name, entityType),
-      CONSTRAINT CK_GraphTags_EntityType CHECK(entityType IN ('user', 'group'))
+      CONSTRAINT CK_GraphTags_EntityType CHECK(entityType IN ('user', 'group', 'resource'))
     );
     IF OBJECT_ID('dbo.GraphTagAssignments', 'U') IS NULL
     CREATE TABLE dbo.GraphTagAssignments (
@@ -94,7 +94,7 @@ router.post('/tags', async (req, res) => {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
     const { name, color, entityType } = req.body;
     if (!name || !entityType) return res.status(400).json({ error: 'name and entityType required' });
-    if (!['user', 'group'].includes(entityType)) return res.status(400).json({ error: 'entityType must be user or group' });
+    if (!['user', 'group', 'resource'].includes(entityType)) return res.status(400).json({ error: 'entityType must be user, group, or resource' });
     if (color && !HEX_COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be a hex value like #3b82f6' });
 
     const p = await db.getPool();
@@ -244,24 +244,38 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
     await ensureTagTables(p);
     const tagId = parseInt(req.params.id, 10);
     if (isNaN(tagId)) return res.status(400).json({ error: 'Invalid tag ID' });
-    const table = entityType === 'user' ? 'GraphUsers' : 'GraphGroups';
+    // Determine user table: prefer Principals for users
+    let userTableForTags = 'GraphUsers';
+    if (entityType === 'user') {
+      try {
+        const tc = await p.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
+        if (tc.recordset[0].principalsExists) userTableForTags = 'Principals';
+      } catch { /* ignore */ }
+    }
+    const table = entityType === 'user' ? userTableForTags : (entityType === 'resource' ? 'Resources' : 'GraphGroups');
     const alias = 'e';
     const search = (rawSearch || '').trim().slice(0, 200);
+    const upnColForSearch = userTableForTags === 'Principals' ? 'email' : 'userPrincipalName';
 
     const request = p.request().input('tagId', tagId);
     let where = '1=1';
     if (search) {
       request.input('search', `%${search}%`);
       if (entityType === 'user') {
-        where += ` AND (${alias}.displayName LIKE @search OR ${alias}.userPrincipalName LIKE @search)`;
+        where += ` AND (${alias}.displayName LIKE @search OR ${alias}.${upnColForSearch} LIKE @search)`;
       } else {
         where += ` AND (${alias}.displayName LIKE @search OR ${alias}.description LIKE @search)`;
       }
     }
 
+    // For temporal tables (Resources, Principals), add ValidTo filter
+    if (entityType === 'resource' || (entityType === 'user' && userTableForTags === 'Principals')) {
+      where += ` AND ${alias}.ValidTo = '9999-12-31 23:59:59.9999999'`;
+    }
+
     // Apply attribute filters
     if (filters && typeof filters === 'object') {
-      const cols = entityType === 'user' ? await getUserCols(p) : await getGroupCols(p);
+      const cols = entityType === 'user' ? await getPrincipalOrUserColumns(p) : (entityType === 'resource' ? await getResourceCols(p) : await getGroupCols(p));
       const colNames = new Set(cols.map(c => c.name));
       where += buildFilterWhere(request, filters, colNames, alias, 'bf');
     }
@@ -301,7 +315,7 @@ router.get('/user-columns-page', async (req, res) => {
     const p = await db.getPool();
 
     // Use cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
-    const grouped = { ...await getUserColumnValues(p) };
+    const grouped = { ...await getPrincipalOrUserColumnValues(p) };
 
     // Add virtual __userTag column (tag names as values)
     try {
@@ -325,8 +339,12 @@ router.get('/user-columns-page', async (req, res) => {
 });
 
 // ─── GET /api/group-columns ──────────────────────────────────────
-// Column discovery for the Groups page (distinct values from GraphGroups)
-router.get('/group-columns', async (req, res) => {
+// Column discovery for the Groups page (Resources or GraphGroups)
+// Also aliased as /api/resource-columns-page for new model
+router.get('/group-columns', groupColumnsHandler);
+router.get('/resource-columns-page', groupColumnsHandler);
+
+async function groupColumnsHandler(req, res) {
   // ?schema=true — return column names only (no distinct values). Fast path.
   const schemaOnly = req.query.schema === 'true';
 
@@ -335,11 +353,28 @@ router.get('/group-columns', async (req, res) => {
     const p = await db.getPool();
 
     let grouped;
-    if (schemaOnly) {
-      const cols = await getGroupColumns(p);
-      grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+
+    // Try Resources table first, fall back to GraphGroups
+    let useResources = false;
+    try {
+      await p.request().query('SELECT TOP 0 * FROM Resources');
+      useResources = true;
+    } catch { /* Resources table doesn't exist */ }
+
+    if (useResources) {
+      if (schemaOnly) {
+        const cols = await getResourceCols(p);
+        grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+      } else {
+        grouped = { ...await getResourceColumnValues(p) };
+      }
     } else {
-      grouped = { ...await getGroupColumnValues(p) };
+      if (schemaOnly) {
+        const cols = await getGroupCols(p);
+        grouped = Object.fromEntries(cols.map(c => [c.name, []]));
+      } else {
+        grouped = { ...await getGroupColumnValues(p) };
+      }
     }
 
     // Add virtual __groupTag column (tag names as values)
@@ -348,7 +383,7 @@ router.get('/group-columns', async (req, res) => {
       const tagResult = await p.request().query(`
         SELECT t.name
         FROM dbo.GraphTags t
-        WHERE t.entityType = 'group'
+        WHERE t.entityType IN ('resource', 'group')
           AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
         ORDER BY t.name
       `);
@@ -361,7 +396,7 @@ router.get('/group-columns', async (req, res) => {
     console.error('group-columns query failed:', err.message);
     return res.json([]);
   }
-});
+}
 
 // ─── GET /api/users ───────────────────────────────────────────────
 router.get('/users', async (req, res) => {
@@ -389,18 +424,31 @@ router.get('/users', async (req, res) => {
     const p = await db.getPool();
     await ensureTagTables(p);
 
+    // Determine user table: prefer Principals, fall back to GraphUsers
+    let usePrincipals = false;
+    try {
+      const tableCheck = await p.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
+      usePrincipals = !!tableCheck.recordset[0].principalsExists;
+    } catch { /* ignore */ }
+    const userTableName = usePrincipals ? 'Principals' : 'GraphUsers';
+    const upnColumn = usePrincipals ? 'email' : 'userPrincipalName';
+
     const request = p.request();
     request.input('limit', limit);
     request.input('offset', offset);
 
     // Validate attribute filters against actual columns
-    const cols = await getUserCols(p);
+    const cols = await getPrincipalOrUserColumns(p);
     const colNames = new Set(cols.map(c => c.name));
     const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'u');
 
     let where = '1=1';
+    // For Principals table, add ValidTo filter for temporal table
+    if (usePrincipals) {
+      where += ` AND u.ValidTo = '9999-12-31 23:59:59.9999999'`;
+    }
     if (search) {
-      where += ` AND (u.displayName LIKE @search OR u.userPrincipalName LIKE @search)`;
+      where += ` AND (u.displayName LIKE @search OR u.${upnColumn} LIKE @search)`;
       request.input('search', `%${search}%`);
     }
     if (tagId) {
@@ -417,20 +465,21 @@ router.get('/users', async (req, res) => {
     where += filterWhere;
 
     const result = await request.query(`
-      SELECT u.id, u.displayName, u.userPrincipalName, u.department, u.jobTitle,
+      SELECT u.id, u.displayName, u.${upnColumn} AS userPrincipalName, u.department, u.jobTitle,
              u.companyName, u.accountEnabled,
+             ${usePrincipals ? `u.principalType, u.systemId, u.externalId,` : ''}
              (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
               FROM dbo.GraphTagAssignments ta
               INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType = 'user'
               WHERE ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
              ) AS tagString
-      FROM dbo.GraphUsers u
+      FROM dbo.${userTableName} u
       ${userTagJoin}
       WHERE ${where}
       ORDER BY u.displayName
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
-      SELECT COUNT(*) AS total FROM dbo.GraphUsers u ${userTagJoin} WHERE ${where};
+      SELECT COUNT(*) AS total FROM dbo.${userTableName} u ${userTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(r => {
@@ -446,6 +495,8 @@ router.get('/users', async (req, res) => {
 });
 
 // ─── GET /api/groups ──────────────────────────────────────────────
+// Now queries Resources table with GraphGroups fallback.
+// Also serves as a filtered view when ?resourceType= is passed.
 router.get('/groups', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0 });
@@ -454,6 +505,7 @@ router.get('/groups', async (req, res) => {
     const tagId = req.query.tagId ? parseInt(req.query.tagId) : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const resourceType = (req.query.resourceType || '').trim();
 
     // Parse attribute filters
     let attrFilters = {};
@@ -467,6 +519,11 @@ router.get('/groups', async (req, res) => {
       groupTagFilter = String(attrFilters['__groupTag']);
       delete attrFilters['__groupTag'];
     }
+    // Also accept __resourceTag
+    if (!groupTagFilter && attrFilters['__resourceTag']) {
+      groupTagFilter = String(attrFilters['__resourceTag']);
+      delete attrFilters['__resourceTag'];
+    }
 
     const p = await db.getPool();
     await ensureTagTables(p);
@@ -475,7 +532,67 @@ router.get('/groups', async (req, res) => {
     request.input('limit', limit);
     request.input('offset', offset);
 
-    // Validate attribute filters against actual columns
+    // Try Resources table first, fall back to GraphGroups
+    let useResources = false;
+    try {
+      await p.request().query('SELECT TOP 0 * FROM Resources');
+      useResources = true;
+    } catch { /* Resources table doesn't exist */ }
+
+    if (useResources) {
+      // Validate attribute filters against Resources columns
+      const cols = await getResourceCols(p);
+      const colNames = new Set(cols.map(c => c.name));
+      const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'r');
+
+      let where = `r.ValidTo = '9999-12-31 23:59:59.9999999'`;
+      if (search) {
+        where += ` AND (r.displayName LIKE @search OR r.description LIKE @search)`;
+        request.input('search', `%${search}%`);
+      }
+      if (resourceType) {
+        where += ` AND r.resourceType = @resourceType`;
+        request.input('resourceType', resourceType);
+      }
+      if (tagId) {
+        where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta INNER JOIN dbo.GraphTags t ON ta.tagId = t.id WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36))) AND t.entityType IN ('resource', 'group'))`;
+        request.input('tagId', tagId);
+      }
+      let groupTagJoin = '';
+      if (groupTagFilter) {
+        groupTagJoin = `
+          INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
+          INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType IN ('resource', 'group')`;
+        request.input('__groupTag', groupTagFilter);
+      }
+      where += filterWhere;
+
+      const result = await request.query(`
+        SELECT r.id, r.displayName, r.resourceType, r.resourceType AS groupTypeCalculated,
+               r.description, r.systemId, r.enabled,
+               (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
+                FROM dbo.GraphTagAssignments ta
+                INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType IN ('resource', 'group')
+                WHERE ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
+               ) AS tagString
+        FROM dbo.Resources r
+        ${groupTagJoin}
+        WHERE ${where}
+        ORDER BY r.displayName
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+
+        SELECT COUNT(*) AS total FROM dbo.Resources r ${groupTagJoin} WHERE ${where};
+      `);
+
+      const data = result.recordsets[0].map(r => {
+        const { tagString, ...rest } = r;
+        return { ...rest, tags: parseTags(tagString) };
+      });
+
+      return res.json({ data, total: result.recordsets[1][0].total });
+    }
+
+    // Fall back to GraphGroups (old model)
     const cols = await getGroupCols(p);
     const colNames = new Set(cols.map(c => c.name));
     const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'g');
@@ -534,8 +651,8 @@ router.get('/entity-tags', async (req, res) => {
   try {
     if (!useSql) return res.json([]);
     const { entityType } = req.query;
-    if (!entityType || !['user', 'group'].includes(entityType)) {
-      return res.status(400).json({ error: 'entityType must be user or group' });
+    if (!entityType || !['user', 'group', 'resource'].includes(entityType)) {
+      return res.status(400).json({ error: 'entityType must be user, group, or resource' });
     }
     const p = await db.getPool();
     await ensureTagTables(p);

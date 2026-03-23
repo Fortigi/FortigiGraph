@@ -35,15 +35,39 @@ router.get('/user/:id', async (req, res) => {
     const pool = await db.getPool();
     const userId = req.params.id;
 
-    // 1. Current attributes
-    const userResult = await timedRequest(pool, 'user-attributes', res)
-      .input('id', userId)
-      .query('SELECT * FROM GraphUsers WHERE id = @id');
+    // 1. Current attributes — try Principals first, fall back to GraphUsers
+    let userResult;
+    let usingPrincipals = false;
+    try {
+      userResult = await timedRequest(pool, 'user-attributes', res)
+        .input('id', userId)
+        .query(`SELECT * FROM Principals WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+      if (userResult.recordset.length > 0) {
+        usingPrincipals = true;
+      } else {
+        // Principals exists but user not found there — try GraphUsers
+        userResult = await timedRequest(pool, 'user-attributes-legacy', res)
+          .input('id', userId)
+          .query('SELECT * FROM GraphUsers WHERE id = @id');
+      }
+    } catch {
+      // Principals table doesn't exist — fall back to GraphUsers
+      userResult = await timedRequest(pool, 'user-attributes-legacy', res)
+        .input('id', userId)
+        .query('SELECT * FROM GraphUsers WHERE id = @id');
+    }
 
     if (userResult.recordset.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
     const attributes = cleanRow(userResult.recordset[0]);
+
+    // Parse extendedAttributes JSON if present (Principals model)
+    if (attributes.extendedAttributes) {
+      try {
+        attributes.extendedAttributesParsed = JSON.parse(attributes.extendedAttributes);
+      } catch { /* ignore bad JSON */ }
+    }
 
     // 2. Tags
     let tags = [];
@@ -63,11 +87,16 @@ router.get('/user/:id', async (req, res) => {
     let membershipCount = 0;
     try {
       const table = await getPermissionTable(pool);
-      const r = await timedRequest(pool, 'user-membership-count', res)
-        .input('id', userId)
-        .query(`
-        SELECT COUNT(DISTINCT groupId) AS cnt FROM ${table} WHERE memberId = @id
-      `);
+      let r;
+      try {
+        r = await timedRequest(pool, 'user-membership-count', res)
+          .input('id', userId)
+          .query(`SELECT COUNT(DISTINCT resourceId) AS cnt FROM ${table} WHERE memberId = @id`);
+      } catch {
+        r = await timedRequest(pool, 'user-membership-count-legacy', res)
+          .input('id', userId)
+          .query(`SELECT COUNT(DISTINCT groupId) AS cnt FROM ${table} WHERE memberId = @id`);
+      }
       membershipCount = r.recordset[0].cnt;
     } catch { /* view may not exist */ }
 
@@ -84,13 +113,17 @@ router.get('/user/:id', async (req, res) => {
 
     let hasHistory = false;
     try {
-      const r = await timedRequest(pool, 'user-history-check', res)
-        .input('id', userId)
-        .query(`
-        SELECT TOP 1 1 AS found FROM GraphUsers_History
-        WHERE id = @id
-      `);
-      hasHistory = r.recordset.length > 0;
+      if (usingPrincipals) {
+        const r = await timedRequest(pool, 'user-history-check', res)
+          .input('id', userId)
+          .query(`SELECT TOP 1 1 AS found FROM Principals FOR SYSTEM_TIME ALL WHERE id = @id AND ValidTo != '9999-12-31 23:59:59.9999999'`);
+        hasHistory = r.recordset.length > 0;
+      } else {
+        const r = await timedRequest(pool, 'user-history-check', res)
+          .input('id', userId)
+          .query(`SELECT TOP 1 1 AS found FROM GraphUsers_History WHERE id = @id`);
+        hasHistory = r.recordset.length > 0;
+      }
     } catch {
       hasHistory = false;
     }
@@ -111,15 +144,34 @@ router.get('/user/:id/memberships', async (req, res) => {
   try {
     const pool = await db.getPool();
     const table = await getPermissionTable(pool);
-    const r = await timedRequest(pool, 'user-memberships', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT groupId, groupDisplayName, groupTypeCalculated,
-             membershipType, managedByAccessPackage
-      FROM ${table}
-      WHERE memberId = @id
-      ORDER BY groupDisplayName, membershipType
-    `);
+    let r;
+    try {
+      // New model: resourceId, resourceDisplayName, resourceType
+      r = await timedRequest(pool, 'user-memberships', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT resourceId, resourceId AS groupId,
+               resourceDisplayName, resourceDisplayName AS groupDisplayName,
+               resourceType, resourceType AS groupTypeCalculated,
+               membershipType, managedByAccessPackage
+        FROM ${table}
+        WHERE memberId = @id
+        ORDER BY resourceDisplayName, membershipType
+      `);
+    } catch {
+      // Fall back to old column names
+      r = await timedRequest(pool, 'user-memberships-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT groupId, groupId AS resourceId,
+               groupDisplayName, groupDisplayName AS resourceDisplayName,
+               groupTypeCalculated, groupTypeCalculated AS resourceType,
+               membershipType, managedByAccessPackage
+        FROM ${table}
+        WHERE memberId = @id
+        ORDER BY groupDisplayName, membershipType
+      `);
+    }
     res.json(r.recordset);
   } catch (err) {
     console.error('Error fetching user memberships:', err.message);
@@ -163,13 +215,26 @@ router.get('/user/:id/history', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await timedRequest(pool, 'user-history', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT * FROM GraphUsers FOR SYSTEM_TIME ALL
-      WHERE id = @id
-      ORDER BY ValidFrom DESC
-    `);
+    let r;
+    try {
+      // Try Principals temporal table first (new model)
+      r = await timedRequest(pool, 'user-history', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT * FROM Principals FOR SYSTEM_TIME ALL
+        WHERE id = @id
+        ORDER BY ValidFrom DESC
+      `);
+    } catch {
+      // Fall back to GraphUsers temporal table (old model)
+      r = await timedRequest(pool, 'user-history-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT * FROM GraphUsers FOR SYSTEM_TIME ALL
+        WHERE id = @id
+        ORDER BY ValidFrom DESC
+      `);
+    }
     res.json(r.recordset.map(cleanRow));
   } catch (err) {
     // Not temporal — return empty
@@ -179,6 +244,7 @@ router.get('/user/:id/history', async (req, res) => {
 
 // ────────────────────────────────────────────────────────────────
 // GET /api/group/:id — Lightweight: attributes, tags, counts only
+// Now queries Resources table (new model) with GraphGroups fallback
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
@@ -187,17 +253,33 @@ router.get('/group/:id', async (req, res) => {
     const pool = await db.getPool();
     const groupId = req.params.id;
 
-    // 1. Current attributes
-    const groupResult = await timedRequest(pool, 'group-attributes', res)
-      .input('id', groupId)
-      .query('SELECT * FROM GraphGroups WHERE id = @id');
+    // 1. Current attributes — try Resources first, fall back to GraphGroups
+    let groupResult;
+    let usingResources = false;
+    try {
+      groupResult = await timedRequest(pool, 'group-attributes', res)
+        .input('id', groupId)
+        .query(`SELECT * FROM Resources WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+      usingResources = true;
+    } catch {
+      groupResult = await timedRequest(pool, 'group-attributes-legacy', res)
+        .input('id', groupId)
+        .query('SELECT * FROM GraphGroups WHERE id = @id');
+    }
 
     if (groupResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Group not found' });
     }
     const attributes = cleanRow(groupResult.recordset[0]);
 
-    // 2. Tags
+    // Parse extendedAttributes if present (Resources model)
+    if (attributes.extendedAttributes) {
+      try {
+        attributes.extendedAttributesParsed = JSON.parse(attributes.extendedAttributes);
+      } catch { /* ignore bad JSON */ }
+    }
+
+    // 2. Tags (support both 'resource' and 'group' entity types)
     let tags = [];
     try {
       const r = await timedRequest(pool, 'group-tags', res)
@@ -206,20 +288,25 @@ router.get('/group/:id', async (req, res) => {
         SELECT t.id, t.name, t.color
         FROM GraphTagAssignments ta
         JOIN GraphTags t ON ta.tagId = t.id
-        WHERE ta.entityId = @id AND t.entityType = 'group'
+        WHERE ta.entityId = @id AND t.entityType IN ('resource', 'group')
       `);
       tags = r.recordset;
     } catch { /* table may not exist */ }
 
-    // 3. Counts only (fast)
+    // 3. Counts only (fast) — try resourceId first, fall back to groupId
     let memberCount = 0;
     try {
       const table = await getPermissionTable(pool);
-      const r = await timedRequest(pool, 'group-member-count', res)
-        .input('id', groupId)
-        .query(`
-        SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE groupId = @id
-      `);
+      let r;
+      try {
+        r = await timedRequest(pool, 'group-member-count', res)
+          .input('id', groupId)
+          .query(`SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE resourceId = @id`);
+      } catch {
+        r = await timedRequest(pool, 'group-member-count-legacy', res)
+          .input('id', groupId)
+          .query(`SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE groupId = @id`);
+      }
       memberCount = r.recordset[0].cnt;
     } catch { /* view may not exist */ }
 
@@ -238,13 +325,17 @@ router.get('/group/:id', async (req, res) => {
 
     let hasHistory = false;
     try {
-      const r = await timedRequest(pool, 'group-history-check', res)
-        .input('id', groupId)
-        .query(`
-        SELECT TOP 1 1 AS found FROM GraphGroups_History
-        WHERE id = @id
-      `);
-      hasHistory = r.recordset.length > 0;
+      if (usingResources) {
+        const r = await timedRequest(pool, 'group-history-check', res)
+          .input('id', groupId)
+          .query(`SELECT TOP 1 1 AS found FROM Resources FOR SYSTEM_TIME ALL WHERE id = @id AND ValidTo != '9999-12-31 23:59:59.9999999'`);
+        hasHistory = r.recordset.length > 0;
+      } else {
+        const r = await timedRequest(pool, 'group-history-check', res)
+          .input('id', groupId)
+          .query(`SELECT TOP 1 1 AS found FROM GraphGroups_History WHERE id = @id`);
+        hasHistory = r.recordset.length > 0;
+      }
     } catch {
       hasHistory = false;
     }
@@ -257,7 +348,7 @@ router.get('/group/:id', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// GET /api/group/:id/members — Lazy-loaded group members
+// GET /api/group/:id/members — Lazy-loaded group/resource members
 // ────────────────────────────────────────────────────────────────
 router.get('/group/:id/members', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
@@ -265,15 +356,29 @@ router.get('/group/:id/members', async (req, res) => {
   try {
     const pool = await db.getPool();
     const table = await getPermissionTable(pool);
-    const r = await timedRequest(pool, 'group-members', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT memberId, memberDisplayName, memberUPN,
-             membershipType, managedByAccessPackage
-      FROM ${table}
-      WHERE groupId = @id
-      ORDER BY memberDisplayName, membershipType
-    `);
+    let r;
+    try {
+      r = await timedRequest(pool, 'group-members', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT memberId, memberDisplayName, memberUPN,
+               membershipType, managedByAccessPackage
+        FROM ${table}
+        WHERE resourceId = @id
+        ORDER BY memberDisplayName, membershipType
+      `);
+    } catch {
+      // Fall back to groupId column name
+      r = await timedRequest(pool, 'group-members-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT memberId, memberDisplayName, memberUPN,
+               membershipType, managedByAccessPackage
+        FROM ${table}
+        WHERE groupId = @id
+        ORDER BY memberDisplayName, membershipType
+      `);
+    }
     res.json(r.recordset);
   } catch (err) {
     console.error('Error fetching group members:', err.message);
@@ -317,13 +422,26 @@ router.get('/group/:id/history', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await timedRequest(pool, 'group-history', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT * FROM GraphGroups FOR SYSTEM_TIME ALL
-      WHERE id = @id
-      ORDER BY ValidFrom DESC
-    `);
+    let r;
+    try {
+      // Try Resources temporal table first (new model)
+      r = await timedRequest(pool, 'group-history', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT * FROM Resources FOR SYSTEM_TIME ALL
+        WHERE id = @id
+        ORDER BY ValidFrom DESC
+      `);
+    } catch {
+      // Fall back to GraphGroups temporal table (old model)
+      r = await timedRequest(pool, 'group-history-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT * FROM GraphGroups FOR SYSTEM_TIME ALL
+        WHERE id = @id
+        ORDER BY ValidFrom DESC
+      `);
+    }
     res.json(r.recordset.map(cleanRow));
   } catch (err) {
     res.json([]);
@@ -500,20 +618,40 @@ router.get('/access-package/:id/assignments', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await timedRequest(pool, 'ap-assignments', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT
-        a.id, a.targetId, a.assignmentState, a.assignmentStatus,
-        u.displayName AS targetDisplayName,
-        u.userPrincipalName AS targetUPN,
-        a.ValidFrom AS assignedDate
-      FROM GraphAccessPackageAssignments a
-      LEFT JOIN GraphUsers u ON a.targetId = u.id
-      WHERE a.accessPackageId = @id
-        AND a.assignmentState = 'Delivered'
-      ORDER BY u.displayName
-    `);
+    let r;
+    try {
+      // Try Principals first (new model — email instead of userPrincipalName)
+      r = await timedRequest(pool, 'ap-assignments', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT
+          a.id, a.targetId, a.assignmentState, a.assignmentStatus,
+          u.displayName AS targetDisplayName,
+          u.email AS targetUPN,
+          a.ValidFrom AS assignedDate
+        FROM GraphAccessPackageAssignments a
+        LEFT JOIN Principals u ON a.targetId = u.id
+        WHERE a.accessPackageId = @id
+          AND a.assignmentState = 'Delivered'
+        ORDER BY u.displayName
+      `);
+    } catch {
+      // Fall back to GraphUsers (old model)
+      r = await timedRequest(pool, 'ap-assignments-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT
+          a.id, a.targetId, a.assignmentState, a.assignmentStatus,
+          u.displayName AS targetDisplayName,
+          u.userPrincipalName AS targetUPN,
+          a.ValidFrom AS assignedDate
+        FROM GraphAccessPackageAssignments a
+        LEFT JOIN GraphUsers u ON a.targetId = u.id
+        WHERE a.accessPackageId = @id
+          AND a.assignmentState = 'Delivered'
+        ORDER BY u.displayName
+      `);
+    }
     res.json(r.recordset);
   } catch (err) {
     res.json([]);
@@ -535,11 +673,16 @@ router.get('/access-package/:id/resource-roles', async (req, res) => {
         rrs.id, rrs.roleDisplayName, rrs.roleOriginSystem,
         rrs.scopeDisplayName, rrs.scopeOriginId, rrs.scopeOriginSystem,
         rrs.createdDateTime,
-        g.displayName AS groupDisplayName
+        COALESCE(r.displayName, g.displayName) AS groupDisplayName,
+        COALESCE(r.displayName, g.displayName) AS resourceDisplayName,
+        r.resourceType, r.systemId
       FROM GraphAccessPackageResourceRoleScopes rrs
+      LEFT JOIN Resources r ON UPPER(rrs.scopeOriginId) = UPPER(r.id)
+        AND r.ValidTo = '9999-12-31 23:59:59.9999999'
       LEFT JOIN GraphGroups g ON UPPER(rrs.scopeOriginId) = UPPER(g.id)
+        AND r.id IS NULL
       WHERE rrs.accessPackageId = @id
-      ORDER BY g.displayName, rrs.roleDisplayName
+      ORDER BY COALESCE(r.displayName, g.displayName), rrs.roleDisplayName
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -583,19 +726,38 @@ router.get('/access-package/:id/requests', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const r = await timedRequest(pool, 'ap-requests', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT
-        req.id, req.requestType, req.requestState, req.requestStatus,
-        req.justification, req.createdDateTime, req.completedDateTime,
-        u.displayName AS requestorDisplayName, u.userPrincipalName AS requestorUPN
-      FROM GraphAccessPackageAssignmentRequests req
-      LEFT JOIN GraphUsers u ON req.requestorId = u.id
-      WHERE req.accessPackageId = @id
-        AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
-      ORDER BY req.createdDateTime DESC
-    `);
+    let r;
+    try {
+      // Try Principals first (new model — email instead of userPrincipalName)
+      r = await timedRequest(pool, 'ap-requests', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT
+          req.id, req.requestType, req.requestState, req.requestStatus,
+          req.justification, req.createdDateTime, req.completedDateTime,
+          u.displayName AS requestorDisplayName, u.email AS requestorUPN
+        FROM GraphAccessPackageAssignmentRequests req
+        LEFT JOIN Principals u ON req.requestorId = u.id
+        WHERE req.accessPackageId = @id
+          AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
+        ORDER BY req.createdDateTime DESC
+      `);
+    } catch {
+      // Fall back to GraphUsers (old model)
+      r = await timedRequest(pool, 'ap-requests-legacy', res)
+        .input('id', req.params.id)
+        .query(`
+        SELECT
+          req.id, req.requestType, req.requestState, req.requestStatus,
+          req.justification, req.createdDateTime, req.completedDateTime,
+          u.displayName AS requestorDisplayName, u.userPrincipalName AS requestorUPN
+        FROM GraphAccessPackageAssignmentRequests req
+        LEFT JOIN GraphUsers u ON req.requestorId = u.id
+        WHERE req.accessPackageId = @id
+          AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
+        ORDER BY req.createdDateTime DESC
+      `);
+    }
     res.json(r.recordset);
   } catch (err) {
     res.json([]);

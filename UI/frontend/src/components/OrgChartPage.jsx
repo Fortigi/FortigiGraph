@@ -74,7 +74,7 @@ function Avatar({ name, tier }) {
 
 // ─── Department box (the clickable card in the flowchart) ────────────────────
 
-function DeptBox({ node, isMatch, onClick, onDetails }) {
+function DeptBox({ node, isMatch, onClick, onDetails, hasChildren }) {
   const s = TIER_STYLES[node.risk.maxTier] || TIER_STYLES.None;
   const direct = node.directCount || node.risk.totalPeople;
   const indirect = node.indirectCount || 0;
@@ -82,18 +82,24 @@ function DeptBox({ node, isMatch, onClick, onDetails }) {
   return (
     <div className="relative min-w-[150px] max-w-[220px]">
       <button
-        onClick={onClick}
-        className={`w-full border-2 rounded-lg px-4 py-3 transition-all cursor-pointer text-center ${
+        onClick={() => onDetails(node.id)}
+        className={`w-full border-2 rounded-lg px-4 py-3 transition-all cursor-pointer text-center hover:shadow-md ${
           isMatch ? 'ring-2 ring-blue-400' : ''
         }`}
         style={{
-          backgroundColor: s.box,
-          borderColor: s.boxBorder,
+          backgroundColor: node.isOrgUnit ? '#f0f9ff' : s.box,
+          borderColor: node.isOrgUnit ? '#bae6fd' : s.boxBorder,
         }}
       >
         <div className="font-semibold text-sm text-gray-900 leading-tight">
           {node.department}
         </div>
+        {node.isOrgUnit && node.orgUnitType && (
+          <div className="text-[9px] text-sky-600 mt-0.5">{node.orgUnitType}</div>
+        )}
+        {node.isOrgUnit && node.managerDisplayName && (
+          <div className="text-[10px] text-gray-500 mt-0.5 truncate">{node.managerDisplayName}</div>
+        )}
         <div className="text-[10px] text-gray-500 mt-1">
           {direct} direct{indirect > 0 && <span className="text-gray-400"> | {indirect} indirect</span>}
         </div>
@@ -106,15 +112,17 @@ function DeptBox({ node, isMatch, onClick, onDetails }) {
         )}
       </button>
 
-      {/* Details link below the box */}
-      <div className="text-center mt-0.5">
-        <button
-          onClick={(e) => { e.stopPropagation(); onDetails(node.id); }}
-          className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline"
-        >
-          details
-        </button>
-      </div>
+      {/* Expand/collapse toggle below the box */}
+      {hasChildren && (
+        <div className="text-center mt-0.5">
+          <button
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline"
+          >
+            expand
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -128,6 +136,16 @@ function OrgNode({ node, depth, onDetails, expandedMap, toggleExpand, matchNodeI
   const hasChildren = node.children.length > 0;
   const useVertical = depth >= 1;
 
+  // Sort children by member count descending (biggest departments first = left-to-right)
+  const sortedChildren = useMemo(() =>
+    [...node.children].sort((a, b) => {
+      const aCount = a.directCount || a.risk?.totalPeople || a.memberCount || 0;
+      const bCount = b.directCount || b.risk?.totalPeople || b.memberCount || 0;
+      return bCount - aCount;
+    }),
+    [node.children]
+  );
+
   // ── Vertical tree layout (depth >= 1) ───────────────────────
   if (useVertical) {
     return (
@@ -137,6 +155,7 @@ function OrgNode({ node, depth, onDetails, expandedMap, toggleExpand, matchNodeI
           isMatch={matchNodeIds && matchNodeIds.has(node.id)}
           onClick={() => { if (hasChildren) toggleExpand(node.id); }}
           onDetails={onDetails}
+          hasChildren={hasChildren}
         />
 
         {hasChildren && !isExpanded && (
@@ -144,14 +163,14 @@ function OrgNode({ node, depth, onDetails, expandedMap, toggleExpand, matchNodeI
             onClick={() => toggleExpand(node.id)}
             className="mt-1 ml-4 text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5"
           >
-            +{node.children.length} sub-dept{node.children.length !== 1 ? 's' : ''}
+            +{sortedChildren.length} sub-dept{sortedChildren.length !== 1 ? 's' : ''}
           </button>
         )}
 
         {hasChildren && isExpanded && (
           <div className="ml-8 mt-2 space-y-0">
-            {node.children.map((child, i) => {
-              const isLast = i === node.children.length - 1;
+            {sortedChildren.map((child, i) => {
+              const isLast = i === sortedChildren.length - 1;
               return (
                 <div key={child.id} className="relative pl-6">
                   {/* Vertical line running down from top; stops at connector for last child */}
@@ -188,28 +207,20 @@ function OrgNode({ node, depth, onDetails, expandedMap, toggleExpand, matchNodeI
         isMatch={matchNodeIds && matchNodeIds.has(node.id)}
         onClick={() => { if (hasChildren) toggleExpand(node.id); }}
         onDetails={onDetails}
+        hasChildren={hasChildren}
       />
-
-      {hasChildren && !isExpanded && (
-        <button
-          onClick={() => toggleExpand(node.id)}
-          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5"
-        >
-          +{node.children.length}
-        </button>
-      )}
 
       {hasChildren && isExpanded && (
         <>
           {/* Vertical stem down from parent */}
           <div className="w-0.5 h-6 bg-gray-300" />
 
-          {/* Children row */}
+          {/* Children row — sorted by member count descending (biggest left) */}
           <div className="flex justify-center">
-            {node.children.map((child, i) => {
+            {sortedChildren.map((child, i) => {
               const isFirst = i === 0;
-              const isLast = i === node.children.length - 1;
-              const isSingle = node.children.length === 1;
+              const isLast = i === sortedChildren.length - 1;
+              const isSingle = sortedChildren.length === 1;
 
               return (
                 <div key={child.id} className="flex flex-col items-center shrink-0">
@@ -253,11 +264,30 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
   const [expandedMap, setExpandedMap] = useState({});
   const initialExpandDone = useRef(false);
 
+  // ─── OrgUnit-based tree (preferred when available) ────────────────
+  const [orgUnitTree, setOrgUnitTree] = useState(null);
+  const [useOrgUnits, setUseOrgUnits] = useState(false);
+
   // ─── Fetch data ──────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      // Try OrgUnits tree first (faster, pre-built hierarchy)
+      try {
+        const ouRes = await authFetch('/api/org-units/tree');
+        if (ouRes.ok) {
+          const ouData = await ouRes.json();
+          if (ouData && ouData.length > 0) {
+            setOrgUnitTree(ouData);
+            setUseOrgUnits(true);
+            setData({ available: true });
+            return;
+          }
+        }
+      } catch { /* OrgUnits not available, fall through to user-based tree */ }
+
+      // Fall back to user-based org chart
       const res = await authFetch('/api/org-chart');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -288,6 +318,54 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
       return { rootNode: null, nodeMap: new Map(), totalUsers: 0, totalDepts: 0 };
     }
 
+    // ── OrgUnit-based tree (preferred) ──────────────────────────────
+    if (useOrgUnits && orgUnitTree && orgUnitTree.length > 0) {
+      const nMap = new Map();
+
+      function convertOrgUnitNode(ou) {
+        const node = {
+          id: ou.id,
+          department: ou.displayName,
+          orgUnitType: ou.orgUnitType,
+          managerDisplayName: ou.managerDisplayName,
+          members: [], // members are loaded on-demand via detail page
+          children: (ou.children || []).map(convertOrgUnitNode),
+          risk: { maxTier: 'None', avgScore: 0, tierCounts: {}, totalPeople: ou.memberCount || 0 },
+          directCount: ou.memberCount || 0,
+          indirectCount: (ou.totalMemberCount || 0) - (ou.memberCount || 0),
+          subtreeCount: ou.totalMemberCount || ou.memberCount || 0,
+          isOrgUnit: true,
+        };
+        nMap.set(node.id, node);
+        return node;
+      }
+
+      const convertedRoots = orgUnitTree.map(convertOrgUnitNode);
+
+      // If multiple roots, wrap in a synthetic root
+      let root;
+      if (convertedRoots.length === 1) {
+        root = convertedRoots[0];
+      } else {
+        const totalMembers = convertedRoots.reduce((sum, r) => sum + (r.subtreeCount || 0), 0);
+        root = {
+          id: 'orgunit-root',
+          department: 'Organization',
+          members: [],
+          children: convertedRoots,
+          risk: { maxTier: 'None', avgScore: 0, tierCounts: {}, totalPeople: totalMembers },
+          directCount: 0,
+          indirectCount: totalMembers,
+          subtreeCount: totalMembers,
+          isOrgUnit: true,
+        };
+        nMap.set(root.id, root);
+      }
+
+      return { rootNode: root, nodeMap: nMap, totalUsers: root.subtreeCount, totalDepts: nMap.size };
+    }
+
+    // ── User-based tree (fallback) ──────────────────────────────────
     const users = data.users || [];
     const userMap = new Map();
     const childrenMap = new Map(); // userId -> [direct report users]
@@ -457,7 +535,7 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
       totalUsers: visited.size,
       totalDepts: deptCount,
     };
-  }, [data]);
+  }, [data, useOrgUnits, orgUnitTree]);
 
   // ─── Initial expand: only root ─────────────────────────────────
   useEffect(() => {
@@ -521,15 +599,24 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
     setExpandedMap({ [rootNode.id]: true });
   }, [rootNode]);
 
-  // ─── Open department detail as tab ─────────────────────────────
+  // ─── Open department/orgunit detail as tab ──────────────────────
   const openDeptDetail = useCallback((nodeId) => {
     const node = nodeMap.get(nodeId);
     if (!node) return;
-    // Cache the node data so DepartmentDetailPage can use it
-    if (onCacheData) {
-      onCacheData(node.department, 'department', { node });
+
+    if (node.isOrgUnit) {
+      // OrgUnit: open orgunit detail tab
+      if (onCacheData) {
+        onCacheData(node.id, 'orgunit', { node });
+      }
+      onOpenDetail('orgunit', node.id, node.department);
+    } else {
+      // Legacy department: cache the node data so DepartmentDetailPage can use it
+      if (onCacheData) {
+        onCacheData(node.department, 'department', { node });
+      }
+      onOpenDetail('department', node.department, node.department);
     }
-    onOpenDetail('department', node.department, node.department);
   }, [nodeMap, onCacheData, onOpenDetail]);
 
   // ─── Render ───────────────────────────────────────────────────

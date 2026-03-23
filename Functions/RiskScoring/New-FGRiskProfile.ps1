@@ -248,6 +248,115 @@ Be specific to THIS organization, not generic. If it's a port authority, include
     }
 
     # ================================================================
+    # Step 1.1b — Resource Type Scoring Multipliers
+    # ================================================================
+
+    Write-Host ""
+    Write-Host "--- Determining Resource Type Scoring ---" -ForegroundColor Cyan
+    Write-Host "Analyzing organization context to determine resource type risk weights..." -ForegroundColor Gray
+    Write-Host ""
+
+    $scoringSystemPrompt = @"
+You are an identity security consultant determining how different authorization resource types should be risk-weighted for a specific organization.
+
+Based on the organizational profile provided, determine appropriate risk scoring multipliers for each resource type. The multiplier affects how the base risk score for that resource type is scaled.
+
+A multiplier of 1.0 is the baseline (standard Entra ID security groups). Higher means more critical for this organization, lower means less critical.
+
+IMPORTANT: You must respond with ONLY a valid JSON object (no markdown fencing, no explanation).
+
+The JSON must follow this exact schema:
+{
+  "resource_type_scoring": {
+    "multipliers": {
+      "EntraGroup": <float 0.5-2.0>,
+      "EntraDirectoryRole": <float 0.5-2.0>,
+      "EntraAppRole": <float 0.5-2.0>,
+      "AzureRBACRole": <float 0.5-2.0>,
+      "SharePointSite": <float 0.5-2.0>,
+      "DevOpsPermission": <float 0.5-2.0>,
+      "FileShare": <float 0.5-2.0>
+    },
+    "propagation_weights": {
+      "EntraDirectoryRole": <float 0.2-0.5>,
+      "EntraAppRole": <float 0.2-0.5>,
+      "EntraGroup": <float 0.2-0.5>
+    },
+    "rationale": {
+      "EntraGroup": "Why this weight for groups at this org",
+      "EntraDirectoryRole": "Why this weight for directory roles",
+      "EntraAppRole": "Why this weight for app roles",
+      "AzureRBACRole": "Why this weight for Azure RBAC",
+      "SharePointSite": "Why this weight for SharePoint",
+      "DevOpsPermission": "Why this weight for DevOps",
+      "FileShare": "Why this weight for file shares"
+    }
+  }
+}
+
+Guidelines:
+- EntraDirectoryRole: Controls tenant-wide admin functions. Most orgs should weight 1.3-1.8. Higher for regulated industries.
+- EntraAppRole: API/service permissions. Weight depends on how API-driven the org is. Tech companies: 1.3+. Traditional: 1.0-1.2.
+- AzureRBACRole: Cloud infrastructure control. Higher for cloud-native orgs. 1.2-1.6.
+- SharePointSite: Document/data access. Higher for knowledge-intensive orgs. 0.7-1.2.
+- DevOpsPermission: CI/CD and code access. Critical for software companies. 0.8-1.5.
+- FileShare: Traditional file server access. Usually lowest priority. 0.5-0.9.
+- If the org uses specific systems (SAP/Pathlock, ServiceNow, Salesforce), suggest appropriate types and weights in the rationale.
+
+Consider:
+- Industry regulations (banking/healthcare = higher for admin roles)
+- Known systems (SAP = AppRole weight higher, cloud-native = RBAC higher)
+- Organization size and type (government = structured, startup = agile)
+"@
+
+    $scoringUserPrompt = @"
+Based on this organizational profile, determine the resource type risk scoring multipliers:
+
+$(($profile | ConvertTo-Json -Depth 100))
+"@
+
+    try {
+        $scoringResponse = Invoke-FGLLMRequest `
+            -Provider $LLMProvider `
+            -ApiKey $LLMApiKey `
+            -SystemPrompt $scoringSystemPrompt `
+            -UserPrompt $scoringUserPrompt `
+            -Model $LLMModel `
+            -MaxTokens 2048 `
+            -Temperature 0.2
+
+        $scoringJson = $scoringResponse -replace '(?s)^```json\s*', '' -replace '(?s)\s*```$', '' -replace '(?s)^```\s*', ''
+        $scoringData = $scoringJson | ConvertFrom-Json
+
+        if ($scoringData.resource_type_scoring) {
+            # Merge into the profile
+            $profile.customer_profile | Add-Member -NotePropertyName "resource_type_scoring" -NotePropertyValue $scoringData.resource_type_scoring -Force
+
+            Write-Host "  Resource Type Multipliers:" -ForegroundColor Gray
+            foreach ($prop in $scoringData.resource_type_scoring.multipliers.PSObject.Properties) {
+                $bar = "=" * [Math]::Floor([double]$prop.Value * 10)
+                $color = if ([double]$prop.Value -ge 1.3) { 'Yellow' } elseif ([double]$prop.Value -le 0.8) { 'DarkGray' } else { 'White' }
+                Write-Host "    $($prop.Name.PadRight(25)) x$($prop.Value) [$bar]" -ForegroundColor $color
+            }
+            Write-Host ""
+            Write-Host "  Propagation Weights:" -ForegroundColor Gray
+            foreach ($prop in $scoringData.resource_type_scoring.propagation_weights.PSObject.Properties) {
+                Write-Host "    $($prop.Name.PadRight(25)) $([int]([double]$prop.Value * 100))%" -ForegroundColor Gray
+            }
+            Write-Host ""
+            Write-Host "  Rationale:" -ForegroundColor Gray
+            foreach ($prop in $scoringData.resource_type_scoring.rationale.PSObject.Properties) {
+                Write-Host "    $($prop.Name): $($prop.Value)" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+        }
+    } catch {
+        Write-Host "  WARNING: Could not determine resource type scoring: $_" -ForegroundColor Yellow
+        Write-Host "  Default multipliers will be used during scoring." -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    # ================================================================
     # Display the discovered profile
     # ================================================================
 
@@ -324,6 +433,24 @@ Be specific to THIS organization, not generic. If it's a port authority, include
         Write-Host ""
     }
 
+    if ($p.resource_type_scoring) {
+        Write-Host "  Resource Type Scoring:" -ForegroundColor Gray
+        if ($p.resource_type_scoring.multipliers) {
+            Write-Host "    Multipliers:" -ForegroundColor Gray
+            foreach ($prop in $p.resource_type_scoring.multipliers.PSObject.Properties) {
+                $color = if ([double]$prop.Value -ge 1.3) { 'Yellow' } elseif ([double]$prop.Value -le 0.8) { 'DarkGray' } else { 'White' }
+                Write-Host "      $($prop.Name.PadRight(25)) x$($prop.Value)" -ForegroundColor $color
+            }
+        }
+        if ($p.resource_type_scoring.propagation_weights) {
+            Write-Host "    Propagation:" -ForegroundColor Gray
+            foreach ($prop in $p.resource_type_scoring.propagation_weights.PSObject.Properties) {
+                Write-Host "      $($prop.Name.PadRight(25)) $([int]([double]$prop.Value * 100))%" -ForegroundColor Gray
+            }
+        }
+        Write-Host ""
+    }
+
     # ================================================================
     # Step 1.2 — Interactive Admin Review Dialog
     # ================================================================
@@ -339,6 +466,8 @@ Be specific to THIS organization, not generic. If it's a port authority, include
         Write-Host "    - 'We also have OT/SCADA systems for container cranes'" -ForegroundColor White
         Write-Host "    - 'Remove the HIPAA regulation, that does not apply'" -ForegroundColor White
         Write-Host "    - 'Add DBA and database administrator to critical roles'" -ForegroundColor White
+        Write-Host "    - 'Increase the EntraDirectoryRole multiplier to 1.8'" -ForegroundColor White
+        Write-Host "    - 'Add Pathlock/SAP as a resource type with multiplier 1.7'" -ForegroundColor White
         Write-Host ""
         Write-Host "  Type 'done' to save, 'show' to display the current profile, or 'cancel' to abort." -ForegroundColor Yellow
         Write-Host ""
@@ -356,6 +485,7 @@ IMPORTANT:
 - Preserve all existing data that wasn't explicitly changed
 - For title_patterns, always use case-insensitive regex patterns
 - Include both English and local language variants for roles
+- The resource_type_scoring section (multipliers, propagation_weights, rationale) can also be refined
 
 Current profile:
 $(($profile | ConvertTo-Json -Depth 100))
@@ -419,6 +549,7 @@ IMPORTANT:
 - Preserve all existing data that wasn't explicitly changed
 - For title_patterns, always use case-insensitive regex patterns
 - Include both English and local language variants for roles
+- The resource_type_scoring section (multipliers, propagation_weights, rationale) can also be refined
 
 Current profile:
 $(($profile | ConvertTo-Json -Depth 100))

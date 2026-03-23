@@ -66,6 +66,69 @@ function Invoke-FGRiskScoring {
         }
     }
 
+    # ================================================================
+    # Load Resource Type Scoring Multipliers
+    # ================================================================
+    # Priority: 1) Config file override, 2) Risk profile (LLM-determined), 3) Defaults
+
+    # Defaults
+    $resourceTypeMultipliers = @{
+        'EntraGroup'          = 1.0
+        'EntraDirectoryRole'  = 1.5
+        'EntraAppRole'        = 1.2
+        'AzureRBACRole'       = 1.4
+        'SharePointSite'      = 0.8
+        'DevOpsPermission'    = 1.1
+        'FileShare'           = 0.7
+    }
+    $resourceTypePropagation = @{
+        'EntraDirectoryRole'  = 0.40
+        'EntraAppRole'        = 0.35
+        'EntraGroup'          = 0.30
+    }
+    $defaultPropagation = 0.30
+    $multipliersSource = "defaults"
+
+    # Priority 2: Load from risk profile in SQL (LLM-determined during New-FGRiskProfile)
+    if ($global:FGSQLConnectionString) {
+        $profileId = if ($config -and $config.RiskScoring.CustomerDomain) { $config.RiskScoring.CustomerDomain } else { $null }
+        $riskProfile = Get-FGRiskProfile -Id $profileId
+        if ($riskProfile -and $riskProfile.customer_profile -and $riskProfile.customer_profile.resource_type_scoring) {
+            $rts = $riskProfile.customer_profile.resource_type_scoring
+            if ($rts.multipliers) {
+                foreach ($prop in $rts.multipliers.PSObject.Properties) {
+                    $resourceTypeMultipliers[$prop.Name] = [double]$prop.Value
+                }
+                $multipliersSource = "risk profile (LLM-determined)"
+            }
+            if ($rts.propagation_weights) {
+                foreach ($prop in $rts.propagation_weights.PSObject.Properties) {
+                    $resourceTypePropagation[$prop.Name] = [double]$prop.Value
+                }
+            }
+        }
+    }
+
+    # Priority 1: Config file overrides (explicit user settings take precedence)
+    if ($config -and $config.RiskScoring.ResourceTypeMultipliers) {
+        foreach ($prop in $config.RiskScoring.ResourceTypeMultipliers.PSObject.Properties) {
+            $resourceTypeMultipliers[$prop.Name] = [double]$prop.Value
+        }
+        $multipliersSource = "config file (user override)"
+    }
+    if ($config -and $config.RiskScoring.ResourceTypePropagation) {
+        foreach ($prop in $config.RiskScoring.ResourceTypePropagation.PSObject.Properties) {
+            $resourceTypePropagation[$prop.Name] = [double]$prop.Value
+        }
+    }
+
+    Write-Host "  Resource type multipliers: $multipliersSource" -ForegroundColor Gray
+    foreach ($t in ($resourceTypeMultipliers.Keys | Sort-Object)) {
+        $m = $resourceTypeMultipliers[$t]
+        $color = if ($m -ge 1.3) { 'Yellow' } elseif ($m -le 0.8) { 'DarkGray' } else { 'Gray' }
+        Write-Host "    $($t.PadRight(25)) x$m" -ForegroundColor $color
+    }
+
     # Validate SQL connection — reconnect if stale or missing
     $sqlReady = $false
     if ($global:FGSQLConnectionString) {
@@ -164,7 +227,28 @@ function Invoke-FGRiskScoring {
         'riskOverrideReason'      = 'NVARCHAR(500)'
     }
 
-    foreach ($tableName in @('GraphUsers', 'GraphGroups')) {
+    foreach ($tableName in @('GraphUsers', 'GraphGroups', 'Resources', 'Principals')) {
+        # Check if the table exists first (Resources and Principals are optional)
+        $tableExists = $false
+        try {
+            $tableExists = Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'"
+                $cmd.Parameters.AddWithValue("@tableName", $tableName) | Out-Null
+                return [int]$cmd.ExecuteScalar() -gt 0
+            }
+        } catch { }
+
+        if (-not $tableExists) {
+            if ($tableName -in @('Resources', 'Principals')) {
+                Write-Host "  $($tableName): table not present (optional)" -ForegroundColor Gray
+                continue
+            }
+            Write-Host "  Table $tableName does not exist yet. Run Start-FGSync first." -ForegroundColor Yellow
+            throw "Table $tableName not found. Sync your data before running risk scoring."
+        }
+
         # Check which columns already exist
         $existingCols = @()
         try {
@@ -199,34 +283,39 @@ function Invoke-FGRiskScoring {
         }
     }
 
-    # Add hierarchy-specific columns (GraphUsers only — managers/reports don't apply to groups)
+    # Add hierarchy-specific columns (users only — managers/reports don't apply to groups)
     $hierarchyColumns = @{
         'riskHierarchyDirectReports' = 'INT'
         'riskHierarchyTotalReports'  = 'INT'
     }
-    $existingUserCols = @()
-    try {
-        $existingUserCols = @(Invoke-FGSQLCommand -ScriptBlock {
-            param($connection)
-            $cmd = $connection.CreateCommand()
-            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo'"
-            $reader = $cmd.ExecuteReader()
-            $cols = @()
-            while ($reader.Read()) { $cols += $reader.GetString(0) }
-            $reader.Close()
-            return $cols
-        })
-    } catch { }
+    foreach ($userTableName in @('GraphUsers', 'Principals')) {
+        $existingUserCols = @()
+        try {
+            $existingUserCols = @(Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'"
+                $cmd.Parameters.AddWithValue("@tableName", $userTableName) | Out-Null
+                $reader = $cmd.ExecuteReader()
+                $cols = @()
+                while ($reader.Read()) { $cols += $reader.GetString(0) }
+                $reader.Close()
+                return $cols
+            })
+        } catch { }
 
-    $missingHierarchy = @{}
-    foreach ($colName in $hierarchyColumns.Keys) {
-        if ($colName -notin $existingUserCols) {
-            $missingHierarchy[$colName] = $hierarchyColumns[$colName]
+        if ($existingUserCols.Count -eq 0) { continue }  # Table doesn't exist
+
+        $missingHierarchy = @{}
+        foreach ($colName in $hierarchyColumns.Keys) {
+            if ($colName -notin $existingUserCols) {
+                $missingHierarchy[$colName] = $hierarchyColumns[$colName]
+            }
         }
-    }
-    if ($missingHierarchy.Count -gt 0) {
-        Write-Host "  Adding $($missingHierarchy.Count) hierarchy column(s) to GraphUsers..." -ForegroundColor Gray
-        Add-FGSQLTableColumn -TableName 'GraphUsers' -Columns $missingHierarchy
+        if ($missingHierarchy.Count -gt 0) {
+            Write-Host "  Adding $($missingHierarchy.Count) hierarchy column(s) to $userTableName..." -ForegroundColor Gray
+            Add-FGSQLTableColumn -TableName $userTableName -Columns $missingHierarchy
+        }
     }
 
     # ================================================================
@@ -242,65 +331,186 @@ function Invoke-FGRiskScoring {
     $dataConnection.Open()
 
     try {
-        # Discover all NVARCHAR columns on GraphUsers for dynamic pattern matching
+        # Detect if Principals table exists (preferred over GraphUsers)
+        $usePrincipals = $false
         $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND DATA_TYPE LIKE 'nvarchar%'"
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Principals', 'U')"
+        $princCheck = $cmd.ExecuteScalar()
+        if ($null -ne $princCheck -and $princCheck -ne [DBNull]::Value) {
+            $usePrincipals = $true
+        }
+
+        if ($usePrincipals) {
+            # Load from Principals with JSON extraction for backward-compatible column names
+            Write-Host "  Loading users from Principals table..." -ForegroundColor Gray
+
+            # Discover NVARCHAR columns on Principals for dynamic pattern matching
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Principals' AND TABLE_SCHEMA = 'dbo' AND DATA_TYPE LIKE 'nvarchar%'"
+            $reader = $cmd.ExecuteReader()
+            $princTextColumns = @()
+            while ($reader.Read()) { $princTextColumns += $reader.GetString(0) }
+            $reader.Close()
+
+            Write-Host "  Text columns: $($princTextColumns.Count) discovered (Principals)" -ForegroundColor Gray
+
+            # Build SELECT: real columns + JSON-extracted fields aliased for compatibility
+            $princRealCols = @('id', 'managerId', 'accountEnabled', 'createdDateTime', 'displayName', 'givenName', 'surname', 'department', 'jobTitle', 'companyName', 'employeeId')
+            $princTextSelect = ($princTextColumns | Where-Object { $_ -notin $princRealCols -and $_ -notin @('email', 'extendedAttributes', 'externalId', 'systemId', 'principalType') } | ForEach-Object { "[$_]" }) -join ', '
+
+            $jsonExtracts = @(
+                "email AS userPrincipalName",
+                "JSON_VALUE(extendedAttributes, '$.lastSignInDateTime') AS lastSignInDateTime",
+                "JSON_VALUE(extendedAttributes, '$.userType') AS userType",
+                "JSON_VALUE(extendedAttributes, '$.employeeType') AS employeeType",
+                "JSON_VALUE(extendedAttributes, '$.onPremisesSamAccountName') AS onPremisesSamAccountName",
+                "JSON_VALUE(extendedAttributes, '$.administrativeUnits') AS administrativeUnits",
+                "JSON_VALUE(extendedAttributes, '$.mail') AS mail"
+            )
+
+            $selectParts = @()
+            $selectParts += ($princRealCols | ForEach-Object { "[$_]" })
+            $selectParts += $jsonExtracts
+            if ($princTextSelect) { $selectParts += $princTextSelect }
+            $userSelectSql = $selectParts -join ', '
+
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT $userSelectSql FROM dbo.Principals WHERE principalType = 'User' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $users = New-Object System.Data.DataTable
+            $adapter.Fill($users) | Out-Null
+            Write-Host "  Users:       $($users.Rows.Count) (from Principals table)" -ForegroundColor Gray
+        } else {
+            # Legacy mode: load from GraphUsers
+            # Discover all NVARCHAR columns on GraphUsers for dynamic pattern matching
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND DATA_TYPE LIKE 'nvarchar%'"
+            $reader = $cmd.ExecuteReader()
+            $userTextColumns = @()
+            while ($reader.Read()) { $userTextColumns += $reader.GetString(0) }
+            $reader.Close()
+
+            Write-Host "  Text columns: $($userTextColumns.Count) discovered (GraphUsers)" -ForegroundColor Gray
+
+            # Build dynamic column list: core non-text columns + all text columns
+            $coreNonTextCols = @('id', 'managerId', 'accountEnabled', 'lastSignInDateTime', 'createdDateTime')
+            $allUserCols = @($coreNonTextCols) + @($userTextColumns) | Select-Object -Unique
+            $userSelectSql = ($allUserCols | ForEach-Object { "[$_]" }) -join ', '
+
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT $userSelectSql FROM dbo.GraphUsers"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $users = New-Object System.Data.DataTable
+            $adapter.Fill($users) | Out-Null
+            Write-Host "  Users:       $($users.Rows.Count) (from GraphUsers — legacy mode)" -ForegroundColor Gray
+        }
+
+        # Load resources (prefer Resources table, fall back to GraphGroups)
+        $useResourceModel = $false
+        $resources = New-Object System.Data.DataTable
+        $cmd = $dataConnection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Resources', 'U')"
+        $resCheck = $cmd.ExecuteScalar()
+
+        if ($null -ne $resCheck -and $resCheck -ne [DBNull]::Value) {
+            $useResourceModel = $true
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT id, displayName, description, resourceType, systemId, extendedAttributes, createdDateTime FROM dbo.Resources WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $adapter.Fill($resources) | Out-Null
+            Write-Host "  Resources:   $($resources.Rows.Count) (from Resources table)" -ForegroundColor Gray
+
+            # Also load into $groups for backward compatibility with existing scoring logic
+            $groups = $resources
+        } else {
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT id, displayName, description, mailEnabled, securityEnabled, isAssignableToRole, membershipRuleProcessingState, groupTypeCalculated, createdDateTime FROM dbo.GraphGroups"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $adapter.Fill($resources) | Out-Null
+            $groups = $resources
+            Write-Host "  Groups:      $($resources.Rows.Count) (from GraphGroups - legacy mode)" -ForegroundColor Gray
+        }
+
+        # Build resource type lookup
+        $resourceTypeMap = @{}
+        if ($useResourceModel) {
+            foreach ($row in $resources.Rows) {
+                $rId = "$($row['id'])"
+                $rType = if ($null -eq $row['resourceType'] -or $row['resourceType'] -is [DBNull]) { 'EntraGroup' } else { "$($row['resourceType'])" }
+                $resourceTypeMap[$rId] = $rType
+            }
+            # Log type breakdown
+            $typeBreakdown = @{}
+            foreach ($t in $resourceTypeMap.Values) {
+                if (-not $typeBreakdown.ContainsKey($t)) { $typeBreakdown[$t] = 0 }
+                $typeBreakdown[$t]++
+            }
+            foreach ($t in ($typeBreakdown.Keys | Sort-Object)) {
+                Write-Host "    $($t): $($typeBreakdown[$t])" -ForegroundColor Gray
+            }
+        }
+
+        # Determine permission source: prefer resource model view, then materialized, then old view
+        $permSource = "vw_UserPermissionAssignments"
+        $permResCol = "groupId"
+        $permPrincCol = "memberId"
+
+        $cmd = $dataConnection.CreateCommand()
+        $cmd.CommandText = @"
+SELECT
+    OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matExists,
+    OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resViewExists
+"@
         $reader = $cmd.ExecuteReader()
-        $userTextColumns = @()
-        while ($reader.Read()) { $userTextColumns += $reader.GetString(0) }
+        $reader.Read()
+        $matExists = ($null -ne $reader[0] -and $reader[0] -isnot [DBNull])
+        $resViewExists = ($null -ne $reader[1] -and $reader[1] -isnot [DBNull])
         $reader.Close()
 
-        Write-Host "  Text columns: $($userTextColumns.Count) discovered" -ForegroundColor Gray
-
-        # Build dynamic column list: core non-text columns + all text columns
-        $coreNonTextCols = @('id', 'managerId', 'accountEnabled', 'lastSignInDateTime', 'createdDateTime')
-        $allUserCols = @($coreNonTextCols) + @($userTextColumns) | Select-Object -Unique
-        $userSelectSql = ($allUserCols | ForEach-Object { "[$_]" }) -join ', '
-
-        $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandTimeout = 300
-        $cmd.CommandText = "SELECT $userSelectSql FROM dbo.GraphUsers"
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $users = New-Object System.Data.DataTable
-        $adapter.Fill($users) | Out-Null
-        Write-Host "  Users:       $($users.Rows.Count) (with $($allUserCols.Count) columns)" -ForegroundColor Gray
-
-        $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandTimeout = 300
-        $cmd.CommandText = "SELECT id, displayName, description, mailEnabled, securityEnabled, isAssignableToRole, membershipRuleProcessingState, groupTypeCalculated, createdDateTime FROM dbo.GraphGroups"
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $groups = New-Object System.Data.DataTable
-        $adapter.Fill($groups) | Out-Null
-        Write-Host "  Groups:      $($groups.Rows.Count)" -ForegroundColor Gray
-
-        # Determine source: materialized table or view
-        $permSource = "vw_UserPermissionAssignments"
-        $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandText = "SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U')"
-        $matCheck = $cmd.ExecuteScalar()
-        if ($null -ne $matCheck -and $matCheck -ne [DBNull]::Value) {
+        if ($resViewExists -and -not $matExists) {
+            $permSource = "vw_ResourceUserPermissionAssignments"
+            $permResCol = "resourceId"
+            $permPrincCol = "principalId"
+        } elseif ($matExists) {
             $permSource = "mat_UserPermissionAssignments"
         }
 
         $cmd = $dataConnection.CreateCommand()
         $cmd.CommandTimeout = 600
-        $cmd.CommandText = "SELECT groupId, memberId, membershipType FROM dbo.$permSource WHERE groupId IS NOT NULL AND memberId IS NOT NULL"
+        $cmd.CommandText = "SELECT $permResCol AS resourceId, $permPrincCol AS principalId, membershipType FROM dbo.$permSource WHERE $permResCol IS NOT NULL AND $permPrincCol IS NOT NULL"
         $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
         $assignments = New-Object System.Data.DataTable
         $adapter.Fill($assignments) | Out-Null
         Write-Host "  Assignments: $($assignments.Rows.Count) (from $permSource)" -ForegroundColor Gray
 
-        # Load group owners
+        # Load owners: prefer ResourceAssignments, fall back to GraphGroupOwners
         $owners = New-Object System.Data.DataTable
-        try {
-            $cmd = $dataConnection.CreateCommand()
-            $cmd.CommandTimeout = 300
-            $cmd.CommandText = "SELECT groupId, ownerId FROM dbo.GraphGroupOwners"
-            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-            $adapter.Fill($owners) | Out-Null
-            Write-Host "  Owners:      $($owners.Rows.Count)" -ForegroundColor Gray
-        } catch {
-            Write-Host "  Owners:      (table not available)" -ForegroundColor Yellow
+        if ($useResourceModel) {
+            try {
+                $cmd = $dataConnection.CreateCommand()
+                $cmd.CommandTimeout = 300
+                $cmd.CommandText = "SELECT resourceId AS groupId, principalId AS ownerId FROM dbo.ResourceAssignments WHERE assignmentType = 'Owner' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+                $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+                $adapter.Fill($owners) | Out-Null
+                Write-Host "  Owners:      $($owners.Rows.Count) (from ResourceAssignments)" -ForegroundColor Gray
+            } catch {
+                Write-Host "  Owners:      (ResourceAssignments not available)" -ForegroundColor Yellow
+            }
+        } else {
+            try {
+                $cmd = $dataConnection.CreateCommand()
+                $cmd.CommandTimeout = 300
+                $cmd.CommandText = "SELECT groupId, ownerId FROM dbo.GraphGroupOwners"
+                $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+                $adapter.Fill($owners) | Out-Null
+                Write-Host "  Owners:      $($owners.Rows.Count) (from GraphGroupOwners)" -ForegroundColor Gray
+            } catch {
+                Write-Host "  Owners:      (table not available)" -ForegroundColor Yellow
+            }
         }
     } finally {
         if ($dataConnection.State -eq 'Open') { $dataConnection.Close() }
@@ -394,9 +604,9 @@ function Invoke-FGRiskScoring {
     $userOwnershipMap = @{}
 
     foreach ($row in $assignments.Rows) {
-        if ((Test-DBNull $row['groupId']) -or (Test-DBNull $row['memberId'])) { continue }
-        $gId = "$($row['groupId'])"
-        $mId = "$($row['memberId'])"
+        if ((Test-DBNull $row['resourceId']) -or (Test-DBNull $row['principalId'])) { continue }
+        $gId = "$($row['resourceId'])"
+        $mId = "$($row['principalId'])"
         $type = if ((Test-DBNull $row['membershipType'])) { 'Direct' } else { "$($row['membershipType'])" }
 
         if ($type -eq 'Owner') {
@@ -517,6 +727,17 @@ function Invoke-FGRiskScoring {
                 $bestScore = [Math]::Max(5, [Math]::Round($bestScore * (1 - $nonProdDiscount)))
                 $directReasons += "Non-production environment detected in $nonProdMatchedOn — score reduced from $originalScore to $bestScore [-$([int]($nonProdDiscount * 100))%]"
                 $nonProdCount++
+            }
+        }
+
+        # Apply resource type multiplier
+        if ($useResourceModel -and $bestScore -gt 0) {
+            $rType = if ($resourceTypeMap.ContainsKey($gId)) { $resourceTypeMap[$gId] } else { 'EntraGroup' }
+            $multiplier = if ($resourceTypeMultipliers.ContainsKey($rType)) { $resourceTypeMultipliers[$rType] } else { 1.0 }
+            if ($multiplier -ne 1.0) {
+                $originalScore = $bestScore
+                $bestScore = [Math]::Min(100, [Math]::Round($bestScore * $multiplier))
+                $directReasons += "Resource type multiplier ($rType x$multiplier): score adjusted from $originalScore to $bestScore"
             }
         }
 
@@ -728,36 +949,132 @@ function Invoke-FGRiskScoring {
         if ([string]::IsNullOrEmpty($gId)) { continue }
         $score = 0
         $reasons = @()
+        $rType = if ($resourceTypeMap.ContainsKey($gId)) { $resourceTypeMap[$gId] } else { 'EntraGroup' }
 
-        # No description
+        # No description (applies to all resource types)
         $descVal = "$($row['description'])"
         if ([string]::IsNullOrWhiteSpace($descVal)) {
             $score += 3
             $reasons += "No description set — poor documentation hygiene [+3]"
         }
-        # Mail-enabled security group
-        $mailEnabled = if ((Test-DBNull $row['mailEnabled'])) { $false } else { [bool]$row['mailEnabled'] }
-        $secEnabled = if ((Test-DBNull $row['securityEnabled'])) { $false } else { [bool]$row['securityEnabled'] }
-        if ($mailEnabled -and $secEnabled) {
-            $score += 3
-            $reasons += "Mail-enabled security group — dual-purpose increases attack surface [+3]"
-        }
-        # Role-assignable
-        $roleAssignable = if ((Test-DBNull $row['isAssignableToRole'])) { $false } else { [bool]$row['isAssignableToRole'] }
-        if ($roleAssignable) {
-            $score += 15
-            $reasons += "Role-assignable group — can be assigned Entra ID directory roles [+15]"
-        }
-        # Dynamic membership
-        $membershipRule = if ((Test-DBNull $row['membershipRuleProcessingState'])) { "" } else { "$($row['membershipRuleProcessingState'])" }
-        if ($membershipRule -eq 'On') {
-            $score += 3
-            $reasons += "Dynamic membership rule active — membership changes automatically [+3]"
+
+        if ($useResourceModel) {
+            # Parse extended attributes from JSON
+            $extAttrs = @{}
+            $extJson = if ($null -ne $row['extendedAttributes'] -and $row['extendedAttributes'] -isnot [DBNull]) { "$($row['extendedAttributes'])" } else { "" }
+            if ($extJson -and $extJson -ne '') {
+                try { $extAttrs = $extJson | ConvertFrom-Json -AsHashtable -ErrorAction SilentlyContinue } catch { $extAttrs = @{} }
+            }
+
+            switch ($rType) {
+                'EntraGroup' {
+                    # Mail-enabled security group
+                    $mailEnabled = if ($extAttrs.ContainsKey('mailEnabled')) { $extAttrs['mailEnabled'] } else { $false }
+                    $secEnabled = if ($extAttrs.ContainsKey('securityEnabled')) { $extAttrs['securityEnabled'] } else { $false }
+                    if ($mailEnabled -and $secEnabled) {
+                        $score += 3
+                        $reasons += "Mail-enabled security group — dual-purpose increases attack surface [+3]"
+                    }
+                    # Role-assignable
+                    $roleAssignable = if ($extAttrs.ContainsKey('isAssignableToRole')) { $extAttrs['isAssignableToRole'] } else { $false }
+                    if ($roleAssignable) {
+                        $score += 15
+                        $reasons += "Role-assignable group — can be assigned Entra ID directory roles [+15]"
+                    }
+                    # Dynamic membership
+                    $membershipRule = if ($extAttrs.ContainsKey('membershipRuleProcessingState')) { $extAttrs['membershipRuleProcessingState'] } else { "" }
+                    if ($membershipRule -eq 'On') {
+                        $score += 3
+                        $reasons += "Dynamic membership rule active — membership changes automatically [+3]"
+                    }
+                }
+                'EntraDirectoryRole' {
+                    # All directory roles are inherently privileged
+                    $score += 10
+                    $reasons += "Entra ID directory role — tenant-wide administrative privilege [+10]"
+
+                    # Check for critical roles via name patterns
+                    $name = if ($null -ne $row['displayName'] -and $row['displayName'] -isnot [DBNull]) { "$($row['displayName'])" } else { "" }
+                    $criticalRolePatterns = @(
+                        @{ Pattern = '(?i)global\s*admin'; Points = 25; Desc = 'Global Administrator — highest privilege in tenant' }
+                        @{ Pattern = '(?i)privileged\s*(role|auth)'; Points = 20; Desc = 'Privileged role/auth management — can elevate others' }
+                        @{ Pattern = '(?i)(exchange|sharepoint|teams)\s*admin'; Points = 15; Desc = 'Service administrator — broad service control' }
+                        @{ Pattern = '(?i)(security|compliance)\s*admin'; Points = 15; Desc = 'Security/Compliance admin — security configuration access' }
+                        @{ Pattern = '(?i)(user|license|helpdesk)\s*admin'; Points = 8; Desc = 'User management role — can modify user accounts' }
+                        @{ Pattern = '(?i)(application|cloud\s*app)\s*admin'; Points = 15; Desc = 'Application admin — can manage app registrations and consent' }
+                        @{ Pattern = '(?i)intune.*admin'; Points = 12; Desc = 'Intune admin — device management control' }
+                        @{ Pattern = '(?i)conditional\s*access'; Points = 15; Desc = 'Conditional Access admin — controls authentication policies' }
+                    )
+                    foreach ($crp in $criticalRolePatterns) {
+                        if ($name -match $crp.Pattern) {
+                            $score += $crp.Points
+                            $reasons += "$($crp.Desc) [+$($crp.Points)]"
+                            break  # Only match the first (most specific) pattern
+                        }
+                    }
+                }
+                'EntraAppRole' {
+                    # Check app role details from extended attributes
+                    $score += 5
+                    $reasons += "Application role assignment — API/service access [+5]"
+
+                    $name = if ($null -ne $row['displayName'] -and $row['displayName'] -isnot [DBNull]) { "$($row['displayName'])" } else { "" }
+                    $roleValue = if ($extAttrs.ContainsKey('roleValue')) { $extAttrs['roleValue'] } else { "" }
+                    $appDisplayName = if ($extAttrs.ContainsKey('appDisplayName')) { $extAttrs['appDisplayName'] } else { "" }
+
+                    # High-risk app role patterns
+                    $highRiskRolePatterns = @(
+                        @{ Pattern = '(?i)(\.ReadWrite\.|\.FullControl\.|\.Manage\.)'; Points = 10; Desc = 'Write/manage permission — can modify data' }
+                        @{ Pattern = '(?i)(RoleManagement|AppRoleAssignment|Directory)\.ReadWrite'; Points = 15; Desc = 'Can manage roles or directory — privilege escalation risk' }
+                        @{ Pattern = '(?i)(Mail|Files|Sites)\.(ReadWrite|Send)'; Points = 8; Desc = 'Can read/write mail, files, or sites — data access risk' }
+                    )
+                    foreach ($hrp in $highRiskRolePatterns) {
+                        if ($roleValue -match $hrp.Pattern -or $name -match $hrp.Pattern) {
+                            $score += $hrp.Points
+                            $reasons += "$($hrp.Desc) [+$($hrp.Points)]"
+                            break
+                        }
+                    }
+
+                    # First-party Microsoft app bonus
+                    $firstPartyPatterns = @('Microsoft Graph', 'Office 365', 'SharePoint', 'Exchange', 'Azure AD', 'Windows Azure')
+                    foreach ($fpp in $firstPartyPatterns) {
+                        if ($appDisplayName -like "*$fpp*") {
+                            $score += 5
+                            $reasons += "First-party Microsoft application ($appDisplayName) — broad tenant access [+5]"
+                            break
+                        }
+                    }
+                }
+                default {
+                    # Future resource types — basic structural scoring
+                    $score += 2
+                    $reasons += "Resource type '$rType' — default structural assessment [+2]"
+                }
+            }
+        } else {
+            # Legacy mode: use direct column access (GraphGroups table)
+            $mailEnabled = if ((Test-DBNull $row['mailEnabled'])) { $false } else { [bool]$row['mailEnabled'] }
+            $secEnabled = if ((Test-DBNull $row['securityEnabled'])) { $false } else { [bool]$row['securityEnabled'] }
+            if ($mailEnabled -and $secEnabled) {
+                $score += 3
+                $reasons += "Mail-enabled security group — dual-purpose increases attack surface [+3]"
+            }
+            $roleAssignable = if ((Test-DBNull $row['isAssignableToRole'])) { $false } else { [bool]$row['isAssignableToRole'] }
+            if ($roleAssignable) {
+                $score += 15
+                $reasons += "Role-assignable group — can be assigned Entra ID directory roles [+15]"
+            }
+            $membershipRule = if ((Test-DBNull $row['membershipRuleProcessingState'])) { "" } else { "$($row['membershipRuleProcessingState'])" }
+            if ($membershipRule -eq 'On') {
+                $score += 3
+                $reasons += "Dynamic membership rule active — membership changes automatically [+3]"
+            }
         }
 
         if ($reasons.Count -eq 0) { $reasons += "No structural risk signals detected" }
-        $groupScores[$gId].structuralScore = [Math]::Min($score, 25)
-        $groupScores[$gId].explanation.structural = @{ score = [Math]::Min($score, 25); reasons = $reasons }
+        $groupScores[$gId].structuralScore = [Math]::Min($score, 40)  # Raised cap from 25 to 40 for directory roles
+        $groupScores[$gId].explanation.structural = @{ score = [Math]::Min($score, 40); reasons = $reasons }
     }
 
     foreach ($row in $users.Rows) {
@@ -804,7 +1121,7 @@ function Invoke-FGRiskScoring {
     Write-Host ""
     Write-Host "--- Layer 4: Risk Propagation ---" -ForegroundColor Cyan
 
-    $propagationGroupToUser = 0.30
+    # Propagation weights now vary by resource type (configured above)
     $propagationUserToGroup = 0.25
 
     # Pre-propagation scores (without propagation component)
@@ -820,27 +1137,34 @@ function Invoke-FGRiskScoring {
         $userPreProp[$uId] = [int](0.60 * $us.directScore + 0.25 * $us.membershipScore + 0.15 * $us.structuralScore)
     }
 
-    # Group → User: user inherits 30% of riskiest group
+    # Resource → User: user inherits risk from their riskiest resource (type-weighted)
     foreach ($uId in $userScores.Keys) {
         $memberships = if ($userMemberships.ContainsKey($uId)) { $userMemberships[$uId] } else { @() }
-        $maxGroupScore = 0
-        $maxGroupId = $null
+        $maxPropScore = 0
+        $maxResourceId = $null
+        $maxResourceType = 'EntraGroup'
         foreach ($gId in $memberships) {
-            if ($groupPreProp.ContainsKey($gId) -and $groupPreProp[$gId] -gt $maxGroupScore) {
-                $maxGroupScore = $groupPreProp[$gId]
-                $maxGroupId = $gId
+            if ($groupPreProp.ContainsKey($gId)) {
+                $rType = if ($resourceTypeMap.ContainsKey($gId)) { $resourceTypeMap[$gId] } else { 'EntraGroup' }
+                $propWeight = if ($resourceTypePropagation.ContainsKey($rType)) { $resourceTypePropagation[$rType] } else { $defaultPropagation }
+                $propCandidate = [int]($groupPreProp[$gId] * $propWeight)
+                if ($propCandidate -gt $maxPropScore) {
+                    $maxPropScore = $propCandidate
+                    $maxResourceId = $gId
+                    $maxResourceType = $rType
+                }
             }
         }
-        $propScore = [int]($maxGroupScore * $propagationGroupToUser)
-        $userScores[$uId].propagatedScore = $propScore
+        $userScores[$uId].propagatedScore = $maxPropScore
         $propReasons = @()
-        if ($propScore -gt 0 -and $maxGroupId) {
-            $gRow = $groups.Select("id = '$maxGroupId'")
-            $gName = if ($gRow.Count -gt 0) { "$($gRow[0]['displayName'])" } else { $maxGroupId }
-            $propReasons += "Inherits 30% of riskiest group '$gName' (score $maxGroupScore) = $propScore [+$propScore]"
+        if ($maxPropScore -gt 0 -and $maxResourceId) {
+            $gRow = $groups.Select("id = '$maxResourceId'")
+            $gName = if ($gRow.Count -gt 0) { "$($gRow[0]['displayName'])" } else { $maxResourceId }
+            $propWeight = if ($resourceTypePropagation.ContainsKey($maxResourceType)) { $resourceTypePropagation[$maxResourceType] } else { $defaultPropagation }
+            $propReasons += "Inherits $([int]($propWeight * 100))% of riskiest $maxResourceType '$gName' (score $($groupPreProp[$maxResourceId])) = $maxPropScore [+$maxPropScore]"
         }
-        if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from group memberships" }
-        $userScores[$uId].explanation.propagated = @{ score = $propScore; reasons = $propReasons }
+        if ($propReasons.Count -eq 0) { $propReasons += "No risk propagated from resource memberships" }
+        $userScores[$uId].explanation.propagated = @{ score = $maxPropScore; reasons = $propReasons }
     }
 
     # User → Group: group inherits 25% of riskiest member
@@ -993,6 +1317,48 @@ WHERE id = @id
         }
     }
 
+    # Also write scores to Resources table (if it exists)
+    if ($useResourceModel) {
+        Write-Host "  Writing scores to Resources table..." -ForegroundColor Gray
+        $resUpdated = 0
+        for ($i = 0; $i -lt $groupUpdates.Count; $i += $batchSize) {
+            $batch = $groupUpdates[$i..[Math]::Min($i + $batchSize - 1, $groupUpdates.Count - 1)]
+            Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                foreach ($item in $batch) {
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandTimeout = 120
+                    $cmd.CommandText = @"
+UPDATE dbo.Resources SET
+    riskScore = @riskScore,
+    riskTier = @riskTier,
+    riskDirectScore = @riskDirectScore,
+    riskMembershipScore = @riskMembershipScore,
+    riskStructuralScore = @riskStructuralScore,
+    riskPropagatedScore = @riskPropagatedScore,
+    riskClassifierMatches = @riskClassifierMatches,
+    riskExplanation = @riskExplanation,
+    riskScoredAt = @riskScoredAt
+WHERE id = @id
+"@
+                    $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
+                    $cmd.ExecuteNonQuery() | Out-Null
+                }
+            }
+            $resUpdated += $batch.Count
+        }
+        Write-Host "  Resources: $resUpdated / $($groupUpdates.Count)" -ForegroundColor Gray
+    }
+
     # Batch update users
     $updated = 0
 
@@ -1040,6 +1406,52 @@ WHERE id = @id
         }
     }
 
+    # Also write user scores to Principals table (if it exists)
+    if ($usePrincipals) {
+        Write-Host "  Writing user scores to Principals table..." -ForegroundColor Gray
+        $princUpdated = 0
+        for ($i = 0; $i -lt $userUpdates.Count; $i += $batchSize) {
+            $batch = $userUpdates[$i..[Math]::Min($i + $batchSize - 1, $userUpdates.Count - 1)]
+            Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                foreach ($item in $batch) {
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandTimeout = 120
+                    $cmd.CommandText = @"
+UPDATE dbo.Principals SET
+    riskScore = @riskScore,
+    riskTier = @riskTier,
+    riskDirectScore = @riskDirectScore,
+    riskMembershipScore = @riskMembershipScore,
+    riskStructuralScore = @riskStructuralScore,
+    riskPropagatedScore = @riskPropagatedScore,
+    riskClassifierMatches = @riskClassifierMatches,
+    riskExplanation = @riskExplanation,
+    riskScoredAt = @riskScoredAt,
+    riskHierarchyDirectReports = @riskHierarchyDirectReports,
+    riskHierarchyTotalReports = @riskHierarchyTotalReports
+WHERE id = @id
+"@
+                    $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskHierarchyDirectReports", $item.riskHierarchyDirectReports) | Out-Null
+                    $cmd.Parameters.AddWithValue("@riskHierarchyTotalReports", $item.riskHierarchyTotalReports) | Out-Null
+                    $cmd.ExecuteNonQuery() | Out-Null
+                }
+            }
+            $princUpdated += $batch.Count
+        }
+        Write-Host "  Principals: $princUpdated / $($userUpdates.Count)" -ForegroundColor Gray
+    }
+
     # Collect memory
     [System.GC]::Collect()
     Write-MemoryUsage "after SQL write"
@@ -1057,7 +1469,8 @@ WHERE id = @id
             -GroupScores $groupScores `
             -GroupUpdates $groupUpdates `
             -GroupClassifiers $groupClassifiers `
-            -NonProdPatterns $nonProdPatterns
+            -NonProdPatterns $nonProdPatterns `
+            -ResourceTypeMap $resourceTypeMap
     } catch {
         Write-Host "  WARNING: Resource clustering failed: $_" -ForegroundColor Yellow
         Write-Host "  Risk scores were saved successfully. Clustering can be retried." -ForegroundColor Yellow
@@ -1089,6 +1502,25 @@ WHERE id = @id
         }
     }
 
+    # Per-type distribution (when using resource model)
+    if ($useResourceModel) {
+        Write-Host ""
+        Write-Host "  Per Resource Type:" -ForegroundColor Gray
+        $typeTiers = @{}
+        foreach ($gu in $groupUpdates) {
+            $rType = if ($resourceTypeMap.ContainsKey($gu.id)) { $resourceTypeMap[$gu.id] } else { 'EntraGroup' }
+            if (-not $typeTiers.ContainsKey($rType)) { $typeTiers[$rType] = @{ Total = 0; Scores = @() } }
+            $typeTiers[$rType].Total++
+            $typeTiers[$rType].Scores += $gu.riskScore
+        }
+        foreach ($rType in ($typeTiers.Keys | Sort-Object)) {
+            $tt = $typeTiers[$rType]
+            $avgScore = if ($tt.Scores.Count -gt 0) { [Math]::Round(($tt.Scores | Measure-Object -Average).Average, 1) } else { 0 }
+            $multiplier = if ($resourceTypeMultipliers.ContainsKey($rType)) { $resourceTypeMultipliers[$rType] } else { 1.0 }
+            Write-Host "    $($rType.PadRight(25)) $($tt.Total) resources, avg score: $avgScore (multiplier: x$multiplier)" -ForegroundColor Gray
+        }
+    }
+
     Write-Host ""
     Write-Host "  User Distribution:" -ForegroundColor Gray
     foreach ($tier in @('Critical', 'High', 'Medium', 'Low', 'Minimal', 'None')) {
@@ -1103,11 +1535,17 @@ WHERE id = @id
     Write-Host "  Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
     Write-Host "  Scored:   $($groupUpdates.Count) groups, $($userUpdates.Count) users" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  Scores are persisted on GraphUsers and GraphGroups tables." -ForegroundColor Gray
+    $persistedTo = @('GraphUsers', 'GraphGroups')
+    if ($usePrincipals) { $persistedTo += 'Principals' }
+    Write-Host "  Scores are persisted on $($persistedTo -join ', ') tables." -ForegroundColor Gray
     Write-Host "  The UI Risk Scores tab reads these directly from SQL." -ForegroundColor Gray
     Write-Host ""
 
     # Write sync log entry
     $totalScored = $groupUpdates.Count + $userUpdates.Count
-    Write-FGSyncLog -SyncType "RiskScoring" -StartTime $startTime -RecordCount $totalScored -Status "Success" -TableName "GraphUsers,GraphGroups"
+    $scoredTablesList = @('GraphUsers', 'GraphGroups')
+    if ($useResourceModel) { $scoredTablesList += 'Resources' }
+    if ($usePrincipals) { $scoredTablesList += 'Principals' }
+    $scoredTables = $scoredTablesList -join ','
+    Write-FGSyncLog -SyncType "RiskScoring" -StartTime $startTime -RecordCount $totalScored -Status "Success" -TableName $scoredTables
 }

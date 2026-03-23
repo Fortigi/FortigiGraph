@@ -1,8 +1,8 @@
 # FortigiGraph
 
-**Unlock the insights hidden in your Entra ID Governance that the Azure Portal doesn't show you.**
+**Unlock the insights hidden in your identity governance that the Azure Portal doesn't show you.**
 
-FortigiGraph syncs Microsoft Graph data to Azure SQL with temporal versioning, enabling powerful governance insights, access analysis, and identity auditing that simply aren't possible through the Entra ID portal alone.
+FortigiGraph syncs authorization data from multiple systems to Azure SQL with temporal versioning, enabling powerful governance insights, access analysis, and identity auditing. The universal resource model supports Entra ID groups, directory roles, application roles, and can be extended to SharePoint, Azure RBAC, SAP/Pathlock, DevOps, and more.
 
 ---
 
@@ -64,8 +64,12 @@ Start-FGSync -ConfigFile '.\Config\mycompany.json'
 ```
 
 This syncs all enabled data types in parallel:
-- Users, Groups, Group Memberships (direct, eligible, owners)
+- Users (→ GraphUsers + Principals), Groups (→ GraphGroups + Resources)
+- Group Memberships (direct, eligible, owners → ResourceAssignments)
+- Entra Directory Roles and members, Application Role Assignments
 - Access Package Catalogs, Packages, Assignments, Policies, Requests, Reviews
+- OrgUnits (calculated from department data)
+- Resource relationships (group nesting, app role grants)
 - Creates performance indexes and analytical SQL views automatically
 
 ### Step 5: Set Up Scheduled Syncs (Optional)
@@ -111,9 +115,10 @@ This adds risk scores (0-100) and tier classifications (Critical/High/Medium/Low
 # Check what tables were created
 Get-FGSQLTable
 
-# Query some data
-Invoke-FGSQLQuery -Query "SELECT COUNT(*) AS UserCount FROM GraphUsers"
-Invoke-FGSQLQuery -Query "SELECT TOP 5 displayName, userPrincipalName FROM GraphUsers"
+# Query some data (v3.0 universal model)
+Invoke-FGSQLQuery -Query "SELECT COUNT(*) AS PrincipalCount FROM Principals"
+Invoke-FGSQLQuery -Query "SELECT resourceType, COUNT(*) FROM Resources GROUP BY resourceType"
+Invoke-FGSQLQuery -Query "SELECT COUNT(*) AS OrgUnitCount FROM OrgUnits"
 
 # Check sync log
 Invoke-FGSQLQuery -Query "SELECT * FROM GraphSyncLog ORDER BY StartTime DESC"
@@ -155,7 +160,7 @@ Remove-FGUI -ConfigFile '.\Config\mycompany.json'
 | **Frontend** | React + Vite + Tailwind CSS + TanStack Table v8 | Interactive SPA |
 | **Authentication** | Entra ID (MSAL) | Supports v1 + v2 JWT token formats; `-NoAuth` for demos |
 | **Deployment** | Azure App Service (Linux, Node 20, P0v3) | Oryx build-on-deploy |
-| **Data Sources** | `vw_UserPermissionAssignments`, `vw_UserPermissionAssignmentViaAccessPackage`, `GraphUsers`, `GraphGroups` | SQL views + tables created by `Start-FGSync` |
+| **Data Sources** | `Resources`, `Principals`, `ResourceAssignments`, `Systems`, `OrgUnits`, `Identities` + legacy `GraphUsers`/`GraphGroups` views | SQL tables created by `Start-FGSync` with automatic migration |
 
 ### Security Hardening
 
@@ -173,13 +178,13 @@ The UI backend includes multiple layers of security:
 
 ### Pages
 
-The UI has nine pages accessible via tab navigation. Four optional pages (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown:
+The UI has eleven pages accessible via tab navigation. The main tabs are Matrix, Users, Resources, Systems, Access Packages, and Sync Log. Five optional pages (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown:
 
 #### Matrix View (default)
 
 The core visualization — an interactive user-group permission matrix.
 
-- **Rows** = groups, **Columns** = users. Each cell shows the membership types (Direct, Indirect, Eligible, Owner) as colored badges
+- **Rows** = resources (groups, roles, app permissions), **Columns** = users. Each cell shows the membership types (Direct, Indirect, Eligible, Owner) as colored badges
 - **Staircase Sort**: Default row order groups rows by their leftmost access package, creating a visual staircase pattern. Unmanaged groups appear at the bottom
 - **Access Package Coloring**: Managed cells are colored by their governing access package (15-color palette). Multi-AP cells show a count badge
 - **Access Package Columns**: SOLL columns sorted first by category name, then by assignment count within each category; uncategorized access packages appear at the end. Category boundaries are marked with thicker borders and a colored indicator stripe.
@@ -209,14 +214,26 @@ Browse and manage all synced users with pagination.
 - **Text Search**: Search by display name or UPN
 - **Selection**: Checkbox selection with bulk tag operations
 
-#### Groups Page
+#### Resources Page (formerly Groups)
 
-Browse and manage all synced groups with pagination.
+Browse and manage all synced resources (groups, directory roles, app roles) with pagination.
 
-- **Tag Management**: Create colored tags, assign/remove tags from selected groups, bulk-tag by filter
-- **Filtering**: Pill-based FilterBar with all group attribute columns + Group Tag
-- **Text Search**: Search by group name or description
+- **Resource Type Filter**: Filter by EntraGroup, EntraDirectoryRole, EntraAppRole, etc.
+- **System Filter**: Filter by connected system
+- **Tag Management**: Create colored tags, assign/remove tags from selected resources, bulk-tag by filter
+- **Filtering**: Pill-based FilterBar with all resource attribute columns + Resource Tag
+- **Text Search**: Search by resource name or description
 - **Selection**: Checkbox selection with bulk tag operations
+
+#### Systems Page
+
+View and manage connected authorization systems.
+
+- **Card Layout**: Each system displayed as a card with name, type, enabled/disabled badge
+- **Statistics**: Resource count and assignment count per system
+- **Last Sync**: Shows when each system was last synced
+- **Resource Types**: Lists the resource types and assignment types available in each system
+- **Owner Management**: Assign/remove team owners for each system
 
 #### Access Packages Page
 
@@ -363,6 +380,36 @@ Response:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `limit` | int | 20 | Number of entries (max 100) |
+
+#### Systems
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/systems` | List all systems with resource/assignment counts |
+| `GET` | `/api/systems/:id` | Single system detail |
+| `PUT` | `/api/systems/:id` | Update system (displayName, description, enabled) |
+| `GET` | `/api/systems/:id/owners` | System owners |
+| `POST` | `/api/systems/:id/owners` | Add system owner |
+| `DELETE` | `/api/systems/:id/owners/:userId` | Remove system owner |
+
+#### Resources
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/resources` | Paginated resource list with type/system/tag filters |
+| `GET` | `/api/resources/:id` | Resource detail with extendedAttributes, tags, counts |
+| `GET` | `/api/resources/:id/members` | Resource members with assignment types |
+| `GET` | `/api/resources/:id/history` | Temporal version history |
+| `GET` | `/api/resource-columns` | Column discovery for Resources table |
+
+#### OrgUnits
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/org-units` | List all OrgUnits with hierarchy |
+| `GET` | `/api/org-units/tree` | Pre-built tree for org chart |
+| `GET` | `/api/org-units/:id` | OrgUnit detail with members and sub-units |
+| `GET` | `/api/org-units/:id/members` | Paginated member list |
 
 #### Users Page
 
@@ -632,11 +679,14 @@ ORDER BY ValidFrom DESC;
 - **Role Mining UI**: Interactive web application for visual permission analysis
 
 ### Data Sync
-- **Users**: All user properties including custom/extension attributes
-- **Groups**: Group details with security, type, and organization info
-- **Memberships**: Direct, transitive, PIM eligible, and owner relationships
+- **Users → Principals**: User accounts with core columns + extendedAttributes JSON
+- **Groups → Resources**: Groups, directory roles, app roles — all as universal resources
+- **Memberships → ResourceAssignments**: Direct, PIM eligible, and owner relationships
 - **Access Packages**: Catalogs, packages, assignments, policies, requests, reviews
+- **OrgUnits**: Organizational units calculated from department data
+- **Identities**: Real persons aggregated from multiple accounts (account correlation)
 - **Automatic Schema Evolution**: Add new columns without recreating tables
+- **Multi-System Support**: Systems table enables importing from multiple authorization sources
 
 ### Analytical Views
 FortigiGraph creates SQL views automatically for instant insights:
@@ -657,6 +707,10 @@ FortigiGraph creates SQL views automatically for instant insights:
 - `vw_PendingRequestTimeline` - Aging pending requests
 - `vw_RequestResponseMetrics` - Aggregate approval statistics
 
+**Resource Model Views** (via `Initialize-FGResourceViews`):
+- `vw_ResourceMembersRecursive` - All resource memberships (direct + indirect) with paths
+- `vw_ResourceUserPermissionAssignments` - Comprehensive view with all types across all resource types
+
 ### Identity Risk Scoring
 - **LLM-Assisted Profiling**: `New-FGRiskProfile` discovers organizational context from public domain info (no sensitive data sent to LLM)
 - **Industry-Specific Classifiers**: `New-FGRiskClassifiers` generates regex-based detection patterns for group/user names
@@ -664,6 +718,8 @@ FortigiGraph creates SQL views automatically for instant insights:
 - **Batch Processing**: `Invoke-FGRiskScoring` scores all users and groups, writing results back to SQL
 - **Resource Clustering**: Automatically groups related resources into logical clusters with owner assignment
 - **Analyst Overrides**: Human-in-the-loop score adjustments with required justification
+- **Resource-Type-Aware Scoring**: Configurable multipliers per resource type (EntraDirectoryRole 1.5x, EntraAppRole 1.2x). Multipliers determined by LLM during risk profiling
+- **Type-Specific Signals**: Directory roles scored with critical role patterns (Global Admin +25), app roles scored with permission patterns (.ReadWrite +10)
 
 ### Production Ready
 - **Azure Automation**: One-command setup with `New-FGAzureAutomationAccount`

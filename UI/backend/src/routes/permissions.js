@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { permissionAssignments } from '../mock/data.js';
 import { ensureTagTables } from './tags.js';
 import { ensureCategoryTables } from './categories.js';
-import { getUserColumns, getGroupColumns, getUserColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
+import { getUserColumns, getGroupColumns, getResourceColumns, getPrincipalOrUserColumns, getUserColumnValues, getPrincipalOrUserColumnValues, FILTERABLE_TYPES } from '../db/columnCache.js';
 import { timedRequest } from '../perf/sqlTimer.js';
 
 const router = Router();
@@ -16,9 +16,14 @@ if (useSql) {
 // Columns always handled with explicit aliases (not included in dynamic list)
 const ALIASED_COLS = new Set(['displayName', 'userPrincipalName']);
 
-// Aliases: GraphGroups column names → permission query aliases
-const GROUP_COL_ALIASES = { displayName: 'groupDisplayName', description: 'groupDescription' };
-const GROUP_ALIAS_TO_COL = { groupDisplayName: 'displayName', groupDescription: 'description' };
+// Aliases: Resources/GraphGroups column names → permission query aliases
+// New model uses resourceDisplayName/resourceDescription, but we keep group aliases for backward compat
+const GROUP_COL_ALIASES = { displayName: 'resourceDisplayName', description: 'resourceDescription' };
+const GROUP_ALIAS_TO_COL = {
+  resourceDisplayName: 'displayName', resourceDescription: 'description',
+  // backward compat
+  groupDisplayName: 'displayName', groupDescription: 'description',
+};
 
 // ─── GET /api/user-columns ────────────────────────────────────────
 // Returns column names + distinct values from GraphUsers for filter dropdowns.
@@ -55,11 +60,11 @@ router.get('/user-columns', async (req, res) => {
     let grouped;
     if (schemaOnly) {
       // Fast: just schema names, no distinct value scan
-      const cols = await getUserColumns(p);
+      const cols = await getPrincipalOrUserColumns(p);
       grouped = Object.fromEntries(cols.map(c => [c.name, []]));
     } else {
       // Slow: cached distinct values (5-min TTL — avoids 44s UNION ALL on every load)
-      grouped = { ...await getUserColumnValues(p) };
+      grouped = { ...await getPrincipalOrUserColumnValues(p) };
     }
 
     // Add virtual __userTag column
@@ -103,25 +108,45 @@ router.get('/permissions', async (req, res) => {
     if (useSql) {
       const p = await db.getPool();
 
-      // Prefer materialized tables (fast) with view fallback (slow but always current)
+      // Prefer materialized tables (fast), then new resource views, then old views as fallback
       const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
           OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
           OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists,
-          OBJECT_ID('dbo.mat_UserCounts', 'U') AS matCountsExists
+          OBJECT_ID('dbo.mat_UserCounts', 'U') AS matCountsExists,
+          OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resourceViewExists,
+          OBJECT_ID('dbo.Principals', 'U') AS principalsExists
       `);
       const permSource = matCheck.recordset[0].matPermExists
         ? 'mat_UserPermissionAssignments'
-        : 'vw_UserPermissionAssignments';
+        : matCheck.recordset[0].resourceViewExists
+          ? 'vw_ResourceUserPermissionAssignments'
+          : 'vw_UserPermissionAssignments';
+      // Detect whether the permission source uses resourceId or groupId
+      const useResourceId = !!matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists;
+      // Column names differ between old views (groupId/memberId/memberType) and new views (resourceId/principalId/principalType)
+      const COL_RES = useResourceId ? 'resourceId' : 'groupId';
+      const COL_PRINC = useResourceId ? 'principalId' : 'memberId';
+      const COL_PTYPE = useResourceId ? 'principalType' : 'memberType';
       const apSource = matCheck.recordset[0].matApExists
         ? 'mat_UserPermissionAssignmentViaAccessPackage'
         : 'vw_UserPermissionAssignmentViaAccessPackage';
       const hasPrecomputedCounts = !!matCheck.recordset[0].matCountsExists;
 
+      // Determine user table: prefer Principals, fall back to GraphUsers
+      const userTable = matCheck.recordset[0].principalsExists ? 'Principals' : 'GraphUsers';
+      const upnCol = userTable === 'Principals' ? 'u.email' : 'u.userPrincipalName';
+
       // Discover user and group columns dynamically
-      const allCols = await getUserColumns(p);
+      const allCols = await getPrincipalOrUserColumns(p);
       const colNames = new Set(allCols.map(c => c.name));
-      const allGroupCols = await getGroupColumns(p);
+      // Use Resources columns if available, fall back to GraphGroups
+      let allGroupCols;
+      try {
+        allGroupCols = await getResourceColumns(p);
+      } catch {
+        allGroupCols = await getGroupColumns(p);
+      }
       const groupColNames = new Set(allGroupCols.map(c => GROUP_COL_ALIASES[c.name] || c.name));
 
       // Build dynamic user column SELECT (exclude aliased cols handled explicitly)
@@ -177,9 +202,9 @@ router.get('/permissions', async (req, res) => {
         }
         for (let i = 0; i < validGroupFilters.length; i++) {
           const f = validGroupFilters[i];
-          // Map aliased names back to real GraphGroups column names
+          // Map aliased names back to real Resources column names
           const realCol = GROUP_ALIAS_TO_COL[f.field] || f.field;
-          groupFilterWhere += ` AND CAST(g.[${realCol}] AS NVARCHAR(400)) = @gf${i}`;
+          groupFilterWhere += ` AND CAST(r.[${realCol}] AS NVARCHAR(400)) = @gf${i}`;
           request.input(`gf${i}`, f.value);
         }
         if (userTagFilter) {
@@ -190,8 +215,8 @@ router.get('/permissions', async (req, res) => {
         }
         if (groupTagFilter) {
           groupTagJoin = `
-            INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(p.groupId AS NVARCHAR(36)))
-            INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType = 'group'`;
+            INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(p.${COL_RES} AS NVARCHAR(36)))
+            INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType IN ('resource', 'group')`;
           request.input('__groupTag', groupTagFilter);
         }
       };
@@ -215,9 +240,9 @@ router.get('/permissions', async (req, res) => {
         request.input('userLimit', userLimit);
         addParams(request);
 
-        // Join GraphGroups in user-count step only when group filters are active
+        // Join Resources in user-count step only when group/resource filters are active
         const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
-          ? `LEFT JOIN GraphGroups g ON p.groupId = g.id` : '';
+          ? `LEFT JOIN Resources r ON p.${COL_RES} = r.id` : '';
 
         // Step 1: Get top users — pre-computed (instant) or computed (GROUP BY)
         const step1Sql = usePrecomputed
@@ -225,29 +250,29 @@ router.get('/permissions', async (req, res) => {
              INTO #UserCounts
              FROM dbo.mat_UserCounts
              ORDER BY cnt DESC`
-          : `SELECT TOP (@userLimit) p.memberId, COUNT(*) AS cnt
+          : `SELECT TOP (@userLimit) p.${COL_PRINC} AS memberId, COUNT(*) AS cnt
              INTO #UserCounts
              FROM ${permSource} p
-             INNER JOIN GraphUsers u ON p.memberId = u.id
+             INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
              ${topUsersGroupJoin}
              ${userTagJoin}
              ${groupTagJoin}
-             WHERE p.memberType != '#microsoft.graph.group'
+             WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
                ${filterWhere}
                ${groupFilterWhere}
-             GROUP BY p.memberId
+             GROUP BY p.${COL_PRINC}
              ORDER BY cnt DESC`;
 
         // Step 3: Total count — must reflect ALL matching users, not just the TOP N
         const step3Sql = usePrecomputed
           ? `SELECT COUNT(*) AS totalUsers FROM dbo.mat_UserCounts`
-          : `SELECT COUNT(DISTINCT p.memberId) AS totalUsers
+          : `SELECT COUNT(DISTINCT p.${COL_PRINC}) AS totalUsers
              FROM ${permSource} p
-             INNER JOIN GraphUsers u ON p.memberId = u.id
+             INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
              ${topUsersGroupJoin}
              ${userTagJoin}
              ${groupTagJoin}
-             WHERE p.memberType != '#microsoft.graph.group'
+             WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
                ${filterWhere}
                ${groupFilterWhere}`;
 
@@ -257,23 +282,28 @@ router.get('/permissions', async (req, res) => {
 
           -- Step 2: Main data for top N users (index seek on memberId)
           SELECT
-            p.groupId,
-            g.displayName AS groupDisplayName,
-            g.groupTypeCalculated,
-            g.description AS groupDescription,
-            p.memberId,
+            p.${COL_RES} AS resourceId,
+            p.${COL_RES} AS groupId,
+            r.displayName AS resourceDisplayName,
+            r.displayName AS groupDisplayName,
+            r.resourceType,
+            r.resourceType AS groupTypeCalculated,
+            r.description AS resourceDescription,
+            r.description AS groupDescription,
+            r.systemId,
+            p.${COL_PRINC} AS memberId,
             u.displayName AS memberDisplayName,
-            u.userPrincipalName AS memberUPN,
-            p.memberType,
+            ${upnCol} AS memberUPN,
+            p.${COL_PTYPE} AS memberType,
             p.membershipType,
             ${dynamicUserCols},
             p.managedByAccessPackage
           FROM ${permSource} p
-          INNER JOIN GraphUsers u ON p.memberId = u.id
-          LEFT JOIN GraphGroups g ON p.groupId = g.id
+          INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
+          LEFT JOIN Resources r ON p.${COL_RES} = r.id
           ${groupTagJoin}
-          WHERE p.memberType != '#microsoft.graph.group'
-            AND p.memberId IN (
+          WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
+            AND p.${COL_PRINC} IN (
               SELECT memberId FROM #UserCounts
             )
             ${groupFilterWhere};
@@ -285,6 +315,7 @@ router.get('/permissions', async (req, res) => {
           BEGIN TRY
             SELECT
               ap.userId AS memberId,
+              ap.groupId AS resourceId,
               ap.groupId,
               STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM ${apSource} ap
@@ -295,6 +326,7 @@ router.get('/permissions', async (req, res) => {
           END TRY
           BEGIN CATCH
             SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
+                   CAST(NULL AS NVARCHAR(36)) AS resourceId,
                    CAST(NULL AS NVARCHAR(36)) AS groupId,
                    CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
             WHERE 1 = 0;
@@ -308,7 +340,8 @@ router.get('/permissions', async (req, res) => {
           .filter(r => r.memberId)
           .map(r => ({
             memberId: r.memberId,
-            groupId: r.groupId,
+            resourceId: r.resourceId || r.groupId,
+            groupId: r.groupId || r.resourceId,
             accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
           }));
 
@@ -327,29 +360,35 @@ router.get('/permissions', async (req, res) => {
 
       const result = await request.query(`
         SELECT
-          p.groupId,
-          g.displayName AS groupDisplayName,
-          g.groupTypeCalculated,
-          g.description AS groupDescription,
-          p.memberId,
+          p.${COL_RES} AS resourceId,
+          p.${COL_RES} AS groupId,
+          r.displayName AS resourceDisplayName,
+          r.displayName AS groupDisplayName,
+          r.resourceType,
+          r.resourceType AS groupTypeCalculated,
+          r.description AS resourceDescription,
+          r.description AS groupDescription,
+          r.systemId,
+          p.${COL_PRINC} AS memberId,
           u.displayName AS memberDisplayName,
-          u.userPrincipalName AS memberUPN,
-          p.memberType,
+          ${upnCol} AS memberUPN,
+          p.${COL_PTYPE} AS memberType,
           p.membershipType,
           ${dynamicUserCols},
           p.managedByAccessPackage
         FROM ${permSource} p
-        INNER JOIN GraphUsers u ON p.memberId = u.id
-        LEFT JOIN GraphGroups g ON p.groupId = g.id
+        INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
+        LEFT JOIN Resources r ON p.${COL_RES} = r.id
         ${userTagJoin}
         ${groupTagJoin}
-        WHERE p.memberType != '#microsoft.graph.group'
+        WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
           ${filterWhere}
           ${groupFilterWhere};
 
         BEGIN TRY
           SELECT
             ap.userId AS memberId,
+            ap.groupId AS resourceId,
             ap.groupId,
             STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
           FROM ${apSource} ap
@@ -357,6 +396,7 @@ router.get('/permissions', async (req, res) => {
         END TRY
         BEGIN CATCH
           SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
+                 CAST(NULL AS NVARCHAR(36)) AS resourceId,
                  CAST(NULL AS NVARCHAR(36)) AS groupId,
                  CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
           WHERE 1 = 0;
@@ -368,7 +408,8 @@ router.get('/permissions', async (req, res) => {
         .filter(r => r.memberId)
         .map(r => ({
           memberId: r.memberId,
-          groupId: r.groupId,
+          resourceId: r.resourceId || r.groupId,
+          groupId: r.groupId || r.resourceId,
           accessPackageIds: r.accessPackageIds ? r.accessPackageIds.split(',') : [],
         }));
 
@@ -406,8 +447,12 @@ router.get('/permissions', async (req, res) => {
   }
 });
 
-// GET /api/access-package-groups - Access package to group mapping
-router.get('/access-package-groups', async (req, res) => {
+// GET /api/access-package-groups - Access package to group/resource mapping
+// Also aliased as /api/access-package-resources
+router.get('/access-package-groups', accessPackageResourcesHandler);
+router.get('/access-package-resources', accessPackageResourcesHandler);
+
+async function accessPackageResourcesHandler(req, res) {
   try {
     if (useSql) {
       const p = await db.getPool();
@@ -417,8 +462,12 @@ router.get('/access-package-groups', async (req, res) => {
           rrs.accessPackageId,
           ap.displayName AS accessPackageName,
           c.displayName  AS catalogName,
+          UPPER(rrs.scopeOriginId) AS resourceId,
           UPPER(rrs.scopeOriginId) AS groupId,
-          g.displayName  AS groupName,
+          r.displayName  AS resourceName,
+          r.displayName  AS groupName,
+          r.resourceType,
+          r.systemId,
           rrs.roleDisplayName AS roleName,
           ISNULL(ac.cnt, 0) AS totalAssignments,
           cat.id AS categoryId,
@@ -427,7 +476,8 @@ router.get('/access-package-groups', async (req, res) => {
         FROM dbo.GraphAccessPackageResourceRoleScopes rrs
         INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
         INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
-        LEFT  JOIN dbo.GraphGroups g ON UPPER(rrs.scopeOriginId) = g.id
+        LEFT  JOIN dbo.Resources r ON UPPER(rrs.scopeOriginId) = r.id
+                   AND r.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN (
           SELECT accessPackageId, COUNT(*) AS cnt
           FROM dbo.GraphAccessPackageAssignments
@@ -446,7 +496,7 @@ router.get('/access-package-groups', async (req, res) => {
     console.error('access-package-groups query failed:', err.message);
     res.json([]);
   }
-});
+}
 
 // GET /api/sync-log - Recent sync log entries from GraphSyncLog
 router.get('/sync-log', async (req, res) => {
@@ -525,7 +575,7 @@ router.get('/sync-log', async (req, res) => {
   }
 });
 
-// GET /api/groups-with-nested - group IDs that are members of other groups
+// GET /api/groups-with-nested - resource/group IDs that are members of other groups
 // (i.e., groups whose members gain indirect access to parent groups)
 router.get('/groups-with-nested', async (req, res) => {
   try {
@@ -533,12 +583,22 @@ router.get('/groups-with-nested', async (req, res) => {
     const p = await db.getPool();
     const result = await timedRequest(p, 'groups-with-nested', res).query(`
       BEGIN TRY
-        SELECT DISTINCT UPPER(memberId) AS groupId
-        FROM dbo.GraphGroupMembers
-        WHERE memberType = '#microsoft.graph.group'
+        SELECT DISTINCT UPPER(principalId) AS groupId
+        FROM dbo.ResourceAssignments
+        WHERE principalType LIKE '%group%'
+          AND assignmentType = 'Direct'
+          AND ValidTo = '9999-12-31 23:59:59.9999999'
       END TRY
       BEGIN CATCH
-        SELECT CAST(NULL AS NVARCHAR(36)) AS groupId WHERE 1 = 0
+        -- Fall back to old table if ResourceAssignments doesn't exist
+        BEGIN TRY
+          SELECT DISTINCT UPPER(memberId) AS groupId
+          FROM dbo.GraphGroupMembers
+          WHERE memberType = '#microsoft.graph.group'
+        END TRY
+        BEGIN CATCH
+          SELECT CAST(NULL AS NVARCHAR(36)) AS groupId WHERE 1 = 0
+        END CATCH
       END CATCH
     `);
     return res.json({ groupIds: result.recordset.map(r => r.groupId) });
@@ -557,39 +617,69 @@ router.get('/group/:groupId/nested-groups', async (req, res) => {
     const groupId = req.params.groupId;
 
     const matCheck = await timedRequest(p, 'nested-mat-check', res).query(`
-      SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists
+      SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
+             OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resourceViewExists
     `);
     const permSource = matCheck.recordset[0].matPermExists
-      ? 'mat_UserPermissionAssignments' : 'vw_UserPermissionAssignments';
+      ? 'mat_UserPermissionAssignments'
+      : matCheck.recordset[0].resourceViewExists
+        ? 'vw_ResourceUserPermissionAssignments'
+        : 'vw_UserPermissionAssignments';
+    const COL_RES_N = matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists ? 'resourceId' : 'groupId';
+    const COL_PRINC_N = matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists ? 'principalId' : 'memberId';
 
     const request = timedRequest(p, 'nested-groups-data', res);
     request.input('childGroupId', groupId);
 
     const result = await request.query(`
-      -- Groups that this group is a member of (parent groups)
-      SELECT
-        UPPER(gm.groupId) AS groupId,
-        g.displayName,
-        g.groupTypeCalculated,
-        g.description
-      FROM dbo.GraphGroupMembers gm
-      LEFT JOIN dbo.GraphGroups g ON UPPER(gm.groupId) = g.id
-      WHERE UPPER(gm.memberId) = UPPER(@childGroupId)
-        AND gm.memberType = '#microsoft.graph.group';
+      -- Resources/groups that this group is a member of (parent groups)
+      -- Try ResourceAssignments first, fall back to GraphGroupMembers
+      BEGIN TRY
+        SELECT
+          UPPER(ra.resourceId) AS groupId,
+          UPPER(ra.resourceId) AS resourceId,
+          r.displayName,
+          r.resourceType,
+          r.resourceType AS groupTypeCalculated,
+          r.description
+        FROM dbo.ResourceAssignments ra
+        LEFT JOIN dbo.Resources r ON UPPER(ra.resourceId) = r.id
+          AND r.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE UPPER(ra.principalId) = UPPER(@childGroupId)
+          AND ra.principalType LIKE '%group%'
+          AND ra.assignmentType = 'Direct'
+          AND ra.ValidTo = '9999-12-31 23:59:59.9999999';
+      END TRY
+      BEGIN CATCH
+        SELECT
+          UPPER(gm.groupId) AS groupId,
+          UPPER(gm.groupId) AS resourceId,
+          g.displayName,
+          g.groupTypeCalculated AS resourceType,
+          g.groupTypeCalculated,
+          g.description
+        FROM dbo.GraphGroupMembers gm
+        LEFT JOIN dbo.GraphGroups g ON UPPER(gm.groupId) = g.id
+        WHERE UPPER(gm.memberId) = UPPER(@childGroupId)
+          AND gm.memberType = '#microsoft.graph.group';
+      END CATCH
 
       -- User memberships for those parent groups
       SELECT
-        p.groupId,
-        p.memberId,
+        p.${COL_RES} AS resourceId,
+        p.${COL_RES} AS groupId,
+        p.${COL_PRINC} AS memberId,
         p.membershipType
       FROM ${permSource} p
-      WHERE p.groupId IN (
-        SELECT UPPER(gm2.groupId)
-        FROM dbo.GraphGroupMembers gm2
-        WHERE UPPER(gm2.memberId) = UPPER(@childGroupId)
-          AND gm2.memberType = '#microsoft.graph.group'
+      WHERE p.${COL_RES} IN (
+        SELECT UPPER(ra2.resourceId)
+        FROM dbo.ResourceAssignments ra2
+        WHERE UPPER(ra2.principalId) = UPPER(@childGroupId)
+          AND ra2.principalType LIKE '%group%'
+          AND ra2.assignmentType = 'Direct'
+          AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
       )
-      AND p.memberType != '#microsoft.graph.group'
+      AND p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} != '#microsoft.graph.group'
     `);
 
     return res.json({

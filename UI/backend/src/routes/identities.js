@@ -197,28 +197,53 @@ router.get('/identities/:id', async (req, res) => {
 
     const identity = identityResult.recordset[0];
 
-    // Fetch all member accounts
-    const membersResult = await timedRequest(p, 'identity-members', res)
-      .input('identityId', identityId)
-      .query(`
-        SELECT m.*, u.department, u.jobTitle, u.lastSignInDateTime, u.createdDateTime, u.accountEnabled AS userAccountEnabled
-        FROM dbo.GraphIdentityMembers m
-        LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
-        WHERE m.identityId = @identityId
-        ORDER BY m.isPrimary DESC, m.accountType ASC
-      `);
-
-    // Enrich members with risk scores (optional — GraphUsers may not have risk columns)
-    let memberRiskMap = {};
+    // Fetch all member accounts — try Principals first (userId column), fall back to GraphUsers
+    let membersResult;
     try {
-      const riskResult = await timedRequest(p, 'identity-member-risks', res)
+      membersResult = await timedRequest(p, 'identity-members', res)
         .input('identityId', identityId)
         .query(`
-          SELECT m.userId, u.riskScore, u.riskTier
+          SELECT m.*, u.department, u.jobTitle, u.createdDateTime, u.accountEnabled AS userAccountEnabled
+          FROM dbo.GraphIdentityMembers m
+          LEFT JOIN dbo.Principals u ON m.userId = u.id
+          WHERE m.identityId = @identityId
+          ORDER BY m.isPrimary DESC, m.accountType ASC
+        `);
+    } catch {
+      membersResult = await timedRequest(p, 'identity-members-legacy', res)
+        .input('identityId', identityId)
+        .query(`
+          SELECT m.*, u.department, u.jobTitle, u.lastSignInDateTime, u.createdDateTime, u.accountEnabled AS userAccountEnabled
           FROM dbo.GraphIdentityMembers m
           LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
           WHERE m.identityId = @identityId
+          ORDER BY m.isPrimary DESC, m.accountType ASC
         `);
+    }
+
+    // Enrich members with risk scores (optional — try Principals then GraphUsers)
+    let memberRiskMap = {};
+    try {
+      let riskResult;
+      try {
+        riskResult = await timedRequest(p, 'identity-member-risks', res)
+          .input('identityId', identityId)
+          .query(`
+            SELECT m.userId, u.riskScore, u.riskTier
+            FROM dbo.GraphIdentityMembers m
+            LEFT JOIN dbo.Principals u ON m.userId = u.id
+            WHERE m.identityId = @identityId
+          `);
+      } catch {
+        riskResult = await timedRequest(p, 'identity-member-risks-legacy', res)
+          .input('identityId', identityId)
+          .query(`
+            SELECT m.userId, u.riskScore, u.riskTier
+            FROM dbo.GraphIdentityMembers m
+            LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
+            WHERE m.identityId = @identityId
+          `);
+      }
       for (const r of riskResult.recordset) {
         memberRiskMap[r.userId] = { riskScore: r.riskScore, riskTier: r.riskTier };
       }

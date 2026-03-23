@@ -54,6 +54,12 @@ function Initialize-FGAccessPackageViews {
     .PARAMETER AccessReviewDecisionsTable
     Name of the access review decisions table. Default: "GraphAccessPackageAccessReviewDecisions"
 
+    .PARAMETER ResourcesTable
+    Name of the universal resources table. Default: "Resources". If this table exists, views will prefer it over GraphGroups.
+
+    .PARAMETER ResourceAssignmentsTable
+    Name of the universal resource assignments table. Default: "ResourceAssignments". If this table exists, views will prefer it over GraphGroupMembers/GraphGroupOwners.
+
     .EXAMPLE
     Initialize-FGAccessPackageViews
 
@@ -119,7 +125,13 @@ function Initialize-FGAccessPackageViews {
         [string]$AssignmentPoliciesTable = "GraphAccessPackageAssignmentPolicies",
 
         [Parameter(Mandatory = $false)]
-        [string]$AccessReviewDecisionsTable = "GraphAccessPackageAccessReviewDecisions"
+        [string]$AccessReviewDecisionsTable = "GraphAccessPackageAccessReviewDecisions",
+
+        [Parameter(Mandatory = $false)]
+        [string]$ResourcesTable = "Resources",
+
+        [Parameter(Mandatory = $false)]
+        [string]$ResourceAssignmentsTable = "ResourceAssignments"
     )
 
     # Check SQL connection
@@ -132,10 +144,60 @@ function Initialize-FGAccessPackageViews {
     Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
 
+        # Check if the universal resource model tables exist
+        $checkCmd = $connection.CreateCommand()
+        $checkCmd.CommandText = @"
+SELECT
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$ResourcesTable') THEN 1 ELSE 0 END AS ResourcesExists,
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$ResourceAssignmentsTable') THEN 1 ELSE 0 END AS ResourceAssignmentsExists
+"@
+        $reader = $checkCmd.ExecuteReader()
+        $reader.Read() | Out-Null
+        $resourcesExists = [bool]$reader["ResourcesExists"]
+        $resourceAssignmentsExists = [bool]$reader["ResourceAssignmentsExists"]
+        $reader.Close()
+        $checkCmd.Dispose()
+
+        if ($resourcesExists) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Resources table found - views will use universal resource model" -ForegroundColor Cyan
+        }
+        if ($resourceAssignmentsExists) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] ResourceAssignments table found - IST views will use universal resource model" -ForegroundColor Cyan
+        }
+
         # View 1: User Permission Assignment Via Access Package
         # Shows: Which resources (groups) and roles users get from their access packages
         $view1Name = "vw_UserPermissionAssignmentViaAccessPackage"
-        $view1Sql = @"
+        if ($resourcesExists) {
+            # Use universal Resources table for resource name lookup
+            $view1Sql = @"
+-- User Permission Assignment Via Access Package View
+-- Shows which resources (groups) and roles users receive from their access packages
+-- Uses universal Resources table for resource name resolution
+CREATE VIEW dbo.$view1Name AS
+SELECT
+    a.targetId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    ap.id AS accessPackageId,
+    ap.displayName AS accessPackageName,
+    c.displayName AS catalogName,
+    UPPER(rrs.scopeOriginId) AS groupId,
+    r.displayName AS groupName,
+    rrs.scopeOriginSystem AS resourceType,
+    rrs.roleDisplayName AS roleName
+FROM dbo.$AssignmentsTable a
+    INNER JOIN dbo.$UsersTable u ON a.targetId = u.id
+    INNER JOIN dbo.$AccessPackagesTable ap ON a.accessPackageId = ap.id
+    INNER JOIN dbo.$CatalogsTable c ON ap.catalogId = c.id
+    INNER JOIN dbo.$ResourceRoleScopesTable rrs ON ap.id = rrs.accessPackageId
+    LEFT JOIN dbo.$ResourcesTable r ON UPPER(rrs.scopeOriginId) = r.id
+WHERE a.assignmentState = 'delivered'  -- Only active assignments
+"@
+        }
+        else {
+            # Fall back to GraphGroups table
+            $view1Sql = @"
 -- User Permission Assignment Via Access Package View
 -- Shows which resources (groups) and roles users receive from their access packages
 CREATE VIEW dbo.$view1Name AS
@@ -158,11 +220,44 @@ FROM dbo.$AssignmentsTable a
     LEFT JOIN dbo.$GroupsTable g ON UPPER(rrs.scopeOriginId) = g.id
 WHERE a.assignmentState = 'delivered'  -- Only active assignments
 "@
+        }
 
         # View 2: Direct Group Memberships (NOT from Access Packages)
         # Shows: The gap between "ist" (as-is) and "soll" (should-be) for memberships
         $view2Name = "vw_DirectGroupMemberships"
-        $view2Sql = @"
+        if ($resourceAssignmentsExists -and $resourcesExists) {
+            # Use universal ResourceAssignments table
+            $view2Sql = @"
+-- Direct Group Memberships View (IST vs SOLL Gap)
+-- Shows group memberships that exist but are NOT assigned via access packages
+-- Uses universal ResourceAssignments table for membership data
+CREATE VIEW dbo.$view2Name AS
+SELECT
+    ra.principalId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    ra.resourceId AS groupId,
+    r.displayName AS groupName,
+    r.mail AS groupMail,
+    'Direct' AS sourceType,
+    'Direct Assignment' AS source,
+    'Member' AS roleName
+FROM dbo.$ResourceAssignmentsTable ra
+    INNER JOIN dbo.$UsersTable u ON ra.principalId = u.id
+    INNER JOIN dbo.$ResourcesTable r ON ra.resourceId = r.id
+    LEFT JOIN dbo.vw_UserPermissionAssignmentViaAccessPackage ap
+        ON ra.principalId = ap.userId
+        AND ra.resourceId = ap.groupId
+        AND ap.resourceType = 'AadGroup'
+        AND ap.roleName = 'Member'
+WHERE ra.assignmentType = 'Direct'
+  AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
+  AND ap.userId IS NULL  -- No matching access package assignment
+"@
+        }
+        else {
+            # Fall back to GraphGroupMembers table
+            $view2Sql = @"
 -- Direct Group Memberships View (IST vs SOLL Gap)
 -- Shows group memberships that exist but are NOT assigned via access packages
 CREATE VIEW dbo.$view2Name AS
@@ -186,11 +281,44 @@ FROM dbo.$GroupMembersTable gm
         AND ap.roleName = 'Member'
 WHERE ap.userId IS NULL  -- No matching access package assignment
 "@
+        }
 
         # View 3: Direct Group Ownerships (NOT from Access Packages)
         # Shows: The gap between "ist" (as-is) and "soll" (should-be) for ownerships
         $view3Name = "vw_DirectGroupOwnerships"
-        $view3Sql = @"
+        if ($resourceAssignmentsExists -and $resourcesExists) {
+            # Use universal ResourceAssignments table
+            $view3Sql = @"
+-- Direct Group Ownerships View (IST vs SOLL Gap)
+-- Shows group ownerships that exist but are NOT assigned via access packages
+-- Uses universal ResourceAssignments table for ownership data
+CREATE VIEW dbo.$view3Name AS
+SELECT
+    ra.principalId AS userId,
+    u.userPrincipalName,
+    u.displayName AS userDisplayName,
+    ra.resourceId AS groupId,
+    r.displayName AS groupName,
+    r.mail AS groupMail,
+    'Direct' AS sourceType,
+    'Direct Assignment' AS source,
+    'Owner' AS roleName
+FROM dbo.$ResourceAssignmentsTable ra
+    INNER JOIN dbo.$UsersTable u ON ra.principalId = u.id
+    INNER JOIN dbo.$ResourcesTable r ON ra.resourceId = r.id
+    LEFT JOIN dbo.vw_UserPermissionAssignmentViaAccessPackage ap
+        ON ra.principalId = ap.userId
+        AND ra.resourceId = ap.groupId
+        AND ap.resourceType = 'AadGroup'
+        AND ap.roleName = 'Owner'
+WHERE ra.assignmentType = 'Owner'
+  AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
+  AND ap.userId IS NULL  -- No matching access package assignment
+"@
+        }
+        else {
+            # Fall back to GraphGroupOwners table
+            $view3Sql = @"
 -- Direct Group Ownerships View (IST vs SOLL Gap)
 -- Shows group ownerships that exist but are NOT assigned via access packages
 CREATE VIEW dbo.$view3Name AS
@@ -214,6 +342,7 @@ FROM dbo.$GroupOwnersTable go
         AND ap.roleName = 'Owner'
 WHERE ap.userId IS NULL  -- No matching access package assignment
 "@
+        }
 
         # View 4: Unmanaged Permissions (Combined)
         # Shows: All direct permissions (memberships + ownerships) not managed by access packages

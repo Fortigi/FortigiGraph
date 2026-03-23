@@ -19,6 +19,9 @@ import orgChartRouter from './routes/orgChart.js';
 import clusterRouter from './routes/clusters.js';
 import identitiesRouter from './routes/identities.js';
 import preferencesRouter from './routes/preferences.js';
+import systemsRouter from './routes/systems.js';
+import resourcesRouter from './routes/resources.js';
+import orgUnitsRouter from './routes/orgUnits.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -79,7 +82,7 @@ const corsOptions = {
       ? false  // Disallow cross-origin in production if not explicitly configured
       : true,  // Allow all origins in development
   credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Server-Timing'],  // Allow browser to read Server-Timing header
 };
@@ -143,6 +146,9 @@ app.use('/api', authMiddleware, orgChartRouter);
 app.use('/api', authMiddleware, clusterRouter);
 app.use('/api', authMiddleware, identitiesRouter);
 app.use('/api', authMiddleware, preferencesRouter);
+app.use('/api', authMiddleware, systemsRouter);
+app.use('/api', authMiddleware, resourcesRouter);
+app.use('/api', authMiddleware, orgUnitsRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // In production, serve the frontend build output

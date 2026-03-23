@@ -30,14 +30,59 @@ function isCacheValid() {
   return cachedUsers !== null && (Date.now() - cacheTimestamp) < CACHE_TTL_MS;
 }
 
+// ─── OrgUnits table detection ────────────────────────────────────────
+// When OrgUnits table exists, the frontend can use /api/org-units/tree
+// for faster tree building instead of loading all users.
+
+let hasOrgUnitsTable = null;
+let orgUnitsCheckTime = 0;
+
+async function checkOrgUnits(pool) {
+  const now = Date.now();
+  if (hasOrgUnitsTable !== null && now - orgUnitsCheckTime < 300000) return hasOrgUnitsTable;
+  try {
+    const r = await pool.request().query(`
+      SELECT OBJECT_ID('dbo.OrgUnits', 'U') AS orgUnitsExists
+    `);
+    hasOrgUnitsTable = !!r.recordset[0].orgUnitsExists;
+    orgUnitsCheckTime = now;
+  } catch {
+    hasOrgUnitsTable = false;
+  }
+  return hasOrgUnitsTable;
+}
+
+// ─── User table detection ────────────────────────────────────────────
+
+// Determine which user table to use: Principals preferred, GraphUsers fallback
+let _orgUserTable = null;
+let _orgUserTableTime = 0;
+const ORG_TABLE_TTL = 5 * 60 * 1000;
+
+async function getOrgUserTable(pool) {
+  const now = Date.now();
+  if (_orgUserTable && (now - _orgUserTableTime) < ORG_TABLE_TTL) return _orgUserTable;
+  try {
+    const r = await pool.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
+    _orgUserTable = r.recordset[0].principalsExists ? 'Principals' : 'GraphUsers';
+  } catch {
+    _orgUserTable = 'GraphUsers';
+  }
+  _orgUserTableTime = now;
+  return _orgUserTable;
+}
+
 // ─── Column detection helpers ────────────────────────────────────────
 
 async function hasManagerColumn(pool, res) {
+  const table = await getOrgUserTable(pool);
   try {
-    const result = await timedRequest(pool, 'org-col-check-managerId', res).query(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'managerId'
-    `);
+    const result = await timedRequest(pool, 'org-col-check-managerId', res)
+      .input('tableName', table)
+      .query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'managerId'
+      `);
     return result.recordset.length > 0;
   } catch {
     return false;
@@ -45,11 +90,14 @@ async function hasManagerColumn(pool, res) {
 }
 
 async function hasRiskColumns(pool, res) {
+  const table = await getOrgUserTable(pool);
   try {
-    const result = await timedRequest(pool, 'org-col-check-risk', res).query(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
-    `);
+    const result = await timedRequest(pool, 'org-col-check-risk', res)
+      .input('tableName', table)
+      .query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
+      `);
     return result.recordset.length > 0;
   } catch {
     return false;
@@ -57,12 +105,15 @@ async function hasRiskColumns(pool, res) {
 }
 
 async function hasHierarchyColumns(pool, res) {
+  const table = await getOrgUserTable(pool);
   try {
-    const result = await timedRequest(pool, 'org-col-check-hierarchy', res).query(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo'
-        AND COLUMN_NAME = 'riskHierarchyDirectReports'
-    `);
+    const result = await timedRequest(pool, 'org-col-check-hierarchy', res)
+      .input('tableName', table)
+      .query(`
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
+          AND COLUMN_NAME = 'riskHierarchyDirectReports'
+      `);
     return result.recordset.length > 0;
   } catch {
     return false;
@@ -149,10 +200,17 @@ function buildTree(users) {
 // ─── Fetch flat user list ────────────────────────────────────────────
 
 async function fetchUsers(pool, res) {
+  const userTable = await getOrgUserTable(pool);
   const hasRisk = await hasRiskColumns(pool, res);
   const hasHierarchy = hasRisk && await hasHierarchyColumns(pool, res);
 
-  let cols = 'id, managerId, displayName, department, jobTitle, companyName, accountEnabled, userType';
+  let cols = 'id, managerId, displayName, department, jobTitle, companyName, accountEnabled';
+  // userType exists on GraphUsers; Principals uses principalType
+  if (userTable === 'Principals') {
+    cols += ', principalType';
+  } else {
+    cols += ', userType';
+  }
   if (hasRisk) {
     cols += ', riskScore, riskTier';
   }
@@ -160,8 +218,11 @@ async function fetchUsers(pool, res) {
     cols += ', riskHierarchyDirectReports, riskHierarchyTotalReports';
   }
 
+  // For Principals, filter to current records only
+  const whereClause = userTable === 'Principals' ? `WHERE ValidTo = '9999-12-31 23:59:59.9999999'` : '';
+
   const result = await timedRequest(pool, 'org-chart-users', res).query(`
-    SELECT ${cols} FROM dbo.GraphUsers
+    SELECT ${cols} FROM dbo.${userTable} ${whereClause}
   `);
 
   return result.recordset;
@@ -188,7 +249,7 @@ router.get('/org-chart', async (req, res) => {
     const p = await db.getPool();
 
     if (!(await hasManagerColumn(p, res))) {
-      return res.json({ available: false, message: 'managerId column not found on GraphUsers. Sync users with manager data first.' });
+      return res.json({ available: false, message: 'managerId column not found. Sync users with manager data first.' });
     }
 
     if (isCacheValid()) {
@@ -199,7 +260,8 @@ router.get('/org-chart', async (req, res) => {
     cachedUsers = users;
     cacheTimestamp = Date.now();
 
-    return res.json({ available: true, users });
+    const orgUnitsAvailable = await checkOrgUnits(p);
+    return res.json({ available: true, users, hasOrgUnits: orgUnitsAvailable });
   } catch (err) {
     console.error('Org chart query failed:', err.message);
     return res.status(500).json({ error: 'Failed to load org chart' });
@@ -221,7 +283,7 @@ router.get('/org-chart/subtree/:id', async (req, res) => {
     const p = await db.getPool();
 
     if (!(await hasManagerColumn(p, res))) {
-      return res.json({ available: false, message: 'managerId column not found on GraphUsers.' });
+      return res.json({ available: false, message: 'managerId column not found.' });
     }
 
     // Ensure cache is populated
@@ -269,6 +331,7 @@ router.get('/org-chart/user/:id/manager', async (req, res) => {
       return res.json({ manager: null, available: false });
     }
 
+    const userTable = await getOrgUserTable(p);
     const hasRisk = await hasRiskColumns(p, res);
 
     let managerCols = 'm.id, m.displayName, m.jobTitle, m.department';
@@ -281,8 +344,8 @@ router.get('/org-chart/user/:id/manager', async (req, res) => {
 
     const result = await request.query(`
       SELECT ${managerCols}
-      FROM dbo.GraphUsers u
-      INNER JOIN dbo.GraphUsers m ON u.managerId = m.id
+      FROM dbo.${userTable} u
+      INNER JOIN dbo.${userTable} m ON u.managerId = m.id
       WHERE u.id = @id
     `);
 
@@ -314,6 +377,7 @@ router.get('/org-chart/user/:id/reports', async (req, res) => {
       return res.json({ reports: [], available: false });
     }
 
+    const userTable = await getOrgUserTable(p);
     const hasRisk = await hasRiskColumns(p, res);
 
     let cols = 'id, displayName, jobTitle, department';
@@ -326,7 +390,7 @@ router.get('/org-chart/user/:id/reports', async (req, res) => {
 
     const result = await request.query(`
       SELECT ${cols}
-      FROM dbo.GraphUsers
+      FROM dbo.${userTable}
       WHERE managerId = @id
       ORDER BY displayName
     `);

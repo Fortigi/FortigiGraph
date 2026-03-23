@@ -106,7 +106,7 @@ export default function MatrixGroupRow({
             <span className="text-gray-300 text-[10px] mr-0.5 flex-shrink-0">{'\u2514'}</span>
           )}
           <div className="truncate cursor-pointer hover:text-blue-600"
-            onClick={() => onOpenDetail?.('group', group.realGroupId || group.id, group.displayName)}>
+            onClick={() => onOpenDetail?.('resource', group.realGroupId || group.id, group.displayName)}>
             {group.displayName}
           </div>
         </div>
@@ -131,7 +131,8 @@ export default function MatrixGroupRow({
           return isOwnerRow ? roleIsOwner : !roleIsOwner;
         });
 
-        const managed = relevantApIds.length > 0;
+        // In "unmanaged" filter mode, suppress AP management indicators — user is focused on ungoverned access
+        const managed = managedFilter !== 'unmanaged' && relevantApIds.length > 0;
         let apColor = null;
         let apCount = 0;
         let apNames = null;
@@ -148,9 +149,10 @@ export default function MatrixGroupRow({
 
         // Provisioning gap: AP manages this cell but user lacks the expected membership type.
         // Owner role → needs Owner; Eligible role → needs Eligible; Member/default → needs Direct.
+        // Skip gap detection in "unmanaged" filter — gaps are irrelevant when viewing only unmanaged access.
         let provisioningGap = false;
         let gapExpected = null;
-        if (managed) {
+        if (managed && managedFilter !== 'unmanaged') {
           for (const apId of relevantApIds) {
             const role = apGroupMap?.get(`${lookupGid}|${apId}`) || 'Member';
             const lower = role.toLowerCase();

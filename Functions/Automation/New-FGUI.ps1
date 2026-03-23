@@ -47,7 +47,8 @@ function New-FGUI {
             [string]$ApiVersion = "2023-01-01"
         )
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop
+        $token = if ($tokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password } else { $tokenObj.Token }
         $headers = @{ Authorization = "Bearer $token" }
         $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
 
@@ -73,7 +74,8 @@ function New-FGUI {
             [object]$Body
         )
 
-        $graphToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        $graphTokenObj = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue -ErrorAction Stop
+        $graphToken = if ($graphTokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $graphTokenObj.Token).Password } else { $graphTokenObj.Token }
         $headers = @{
             Authorization  = "Bearer $graphToken"
             "Content-Type" = "application/json"
@@ -898,7 +900,8 @@ function New-FGUI {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deploying to Azure App Service..." -ForegroundColor Cyan
         Write-Host "  This will take a few minutes (Azure builds the app on the server)..." -ForegroundColor Gray
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop
+        $token = if ($tokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password } else { $tokenObj.Token }
 
         # Get publish credentials
         $credsUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/sites/$WebAppName/config/publishingcredentials/list?api-version=2023-01-01"

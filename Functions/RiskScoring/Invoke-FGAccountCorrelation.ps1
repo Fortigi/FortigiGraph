@@ -86,34 +86,155 @@ function Invoke-FGAccountCorrelation {
     $dataConnection.Open()
 
     $users = $null
+    $usePrincipals = $false
     try {
-        # Discover all columns dynamically
+        # Detect if Principals table exists (preferred over GraphUsers)
         $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' ORDER BY ORDINAL_POSITION"
-        $reader = $cmd.ExecuteReader()
-        $allColumns = @()
-        while ($reader.Read()) { $allColumns += $reader.GetString(0) }
-        $reader.Close()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Principals', 'U')"
+        $princCheck = $cmd.ExecuteScalar()
+        if ($null -ne $princCheck -and $princCheck -ne [DBNull]::Value) {
+            $usePrincipals = $true
+        }
 
-        # Exclude system columns from temporal tables
-        $excludeCols = @('SysStartTime', 'SysEndTime')
-        $selectCols = $allColumns | Where-Object { $_ -notin $excludeCols }
-        $selectSql = ($selectCols | ForEach-Object { "[$_]" }) -join ', '
+        if ($usePrincipals) {
+            # Load from Principals with JSON extraction for backward-compatible column names
+            Write-Host "  Loading users from Principals table..." -ForegroundColor Gray
 
-        $cmd = $dataConnection.CreateCommand()
-        $cmd.CommandTimeout = 300
-        $cmd.CommandText = "SELECT $selectSql FROM dbo.GraphUsers"
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-        $users = New-Object System.Data.DataTable
-        $adapter.Fill($users) | Out-Null
-        Write-Host "  Users loaded: $($users.Rows.Count) (with $($selectCols.Count) columns)" -ForegroundColor Gray
+            # Discover all NVARCHAR columns on Principals
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Principals' AND TABLE_SCHEMA = 'dbo' ORDER BY ORDINAL_POSITION"
+            $reader = $cmd.ExecuteReader()
+            $allColumns = @()
+            while ($reader.Read()) { $allColumns += $reader.GetString(0) }
+            $reader.Close()
+
+            # Build SELECT: real columns + JSON-extracted fields aliased for compatibility
+            $princRealCols = @('id', 'managerId', 'accountEnabled', 'createdDateTime', 'displayName', 'givenName', 'surname', 'department', 'jobTitle', 'companyName', 'employeeId')
+            $jsonExtracts = @(
+                "email AS userPrincipalName",
+                "JSON_VALUE(extendedAttributes, '$.userType') AS userType",
+                "JSON_VALUE(extendedAttributes, '$.employeeType') AS employeeType",
+                "JSON_VALUE(extendedAttributes, '$.onPremisesSamAccountName') AS onPremisesSamAccountName",
+                "JSON_VALUE(extendedAttributes, '$.mail') AS mail",
+                "JSON_VALUE(extendedAttributes, '$.city') AS city",
+                "JSON_VALUE(extendedAttributes, '$.country') AS country",
+                "JSON_VALUE(extendedAttributes, '$.officeLocation') AS officeLocation",
+                "JSON_VALUE(extendedAttributes, '$.lastSignInDateTime') AS lastSignInDateTime"
+            )
+
+            # Dynamically add JSON extracts for extension attributes referenced in HR indicators
+            $hrExtAttrs = @()
+            $hrCfgCheck = $ruleset.hrSourceConfig
+            if ($hrCfgCheck -and $hrCfgCheck.enabled -eq $true -and $hrCfgCheck.indicators) {
+                $hrExtAttrs = @($hrCfgCheck.indicators |
+                    Where-Object { $_.attribute -match '^extensionAttribute\d+$' } |
+                    ForEach-Object { $_.attribute } | Select-Object -Unique)
+                foreach ($extAttr in $hrExtAttrs) {
+                    $jsonExtracts += "JSON_VALUE(extendedAttributes, '$.$extAttr') AS $extAttr"
+                }
+            }
+
+            # Include any extra NVARCHAR columns that aren't already covered
+            $coveredCols = $princRealCols + @('email', 'extendedAttributes', 'externalId', 'systemId', 'principalType', 'SysStartTime', 'SysEndTime', 'ValidFrom', 'ValidTo') + $hrExtAttrs
+            $extraCols = $allColumns | Where-Object { $_ -notin $coveredCols }
+            $extraColsSql = if ($extraCols.Count -gt 0) { ($extraCols | ForEach-Object { "[$_]" }) -join ', ' } else { $null }
+
+            $selectParts = @()
+            $selectParts += ($princRealCols | ForEach-Object { "[$_]" })
+            $selectParts += $jsonExtracts
+            if ($extraColsSql) { $selectParts += $extraColsSql }
+            $selectSql = $selectParts -join ', '
+
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT $selectSql FROM dbo.Principals WHERE principalType = 'User' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $users = New-Object System.Data.DataTable
+            $adapter.Fill($users) | Out-Null
+            Write-Host "  Users loaded: $($users.Rows.Count) (from Principals table)" -ForegroundColor Gray
+
+            # Fallback: if HR extension attributes are referenced but not populated in extendedAttributes,
+            # merge values from GraphUsers (which stores them as direct columns)
+            if ($hrExtAttrs.Count -gt 0) {
+                $needsFallback = $false
+                if ($users.Rows.Count -gt 0) {
+                    $sample = $users.Rows[0]
+                    foreach ($extAttr in $hrExtAttrs) {
+                        $val = try { $sample[$extAttr] } catch { $null }
+                        if ($null -eq $val -or $val -is [DBNull] -or "$val".Trim() -eq '') {
+                            $needsFallback = $true; break
+                        }
+                    }
+                }
+                if ($needsFallback) {
+                    $cmd2 = $dataConnection.CreateCommand()
+                    $cmd2.CommandText = "SELECT OBJECT_ID('dbo.GraphUsers', 'U')"
+                    $guExists = $cmd2.ExecuteScalar()
+                    if ($null -ne $guExists -and $guExists -ne [DBNull]::Value) {
+                        Write-Host "  Extension attributes not in Principals.extendedAttributes — merging from GraphUsers..." -ForegroundColor Yellow
+                        $attrSelect = ($hrExtAttrs | ForEach-Object { "[$_]" }) -join ', '
+                        $cmd2 = $dataConnection.CreateCommand()
+                        $cmd2.CommandText = "SELECT [id], $attrSelect FROM dbo.GraphUsers WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+                        $guAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd2)
+                        $guData = New-Object System.Data.DataTable
+                        $guAdapter.Fill($guData) | Out-Null
+                        $guById = @{}
+                        foreach ($guRow in $guData.Rows) { $guById[$guRow['id'].ToString().ToLower()] = $guRow }
+                        foreach ($attr in $hrExtAttrs) {
+                            if (-not $users.Columns.Contains($attr)) {
+                                $users.Columns.Add($attr, [string]) | Out-Null
+                            }
+                        }
+                        foreach ($row in $users.Rows) {
+                            $rid = $row['id'].ToString().ToLower()
+                            if ($guById.ContainsKey($rid)) {
+                                $guRow = $guById[$rid]
+                                foreach ($attr in $hrExtAttrs) {
+                                    $existing = try { $row[$attr] } catch { $null }
+                                    if ($null -eq $existing -or $existing -is [DBNull] -or "$existing".Trim() -eq '') {
+                                        $guVal = try { $guRow[$attr] } catch { $null }
+                                        if ($null -ne $guVal -and $guVal -isnot [DBNull] -and "$guVal".Trim() -ne '') {
+                                            $row[$attr] = $guVal
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Write-Host "  Merged extension attributes from GraphUsers: $($hrExtAttrs -join ', ')" -ForegroundColor Gray
+                    }
+                }
+            }
+        } else {
+            # Legacy mode: load from GraphUsers
+            # Discover all columns dynamically
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'GraphUsers' AND TABLE_SCHEMA = 'dbo' ORDER BY ORDINAL_POSITION"
+            $reader = $cmd.ExecuteReader()
+            $allColumns = @()
+            while ($reader.Read()) { $allColumns += $reader.GetString(0) }
+            $reader.Close()
+
+            # Exclude system columns from temporal tables
+            $excludeCols = @('SysStartTime', 'SysEndTime')
+            $selectCols = $allColumns | Where-Object { $_ -notin $excludeCols }
+            $selectSql = ($selectCols | ForEach-Object { "[$_]" }) -join ', '
+
+            $cmd = $dataConnection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "SELECT $selectSql FROM dbo.GraphUsers"
+            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
+            $users = New-Object System.Data.DataTable
+            $adapter.Fill($users) | Out-Null
+            Write-Host "  Users loaded: $($users.Rows.Count) (from GraphUsers — legacy mode)" -ForegroundColor Gray
+        }
     } finally {
         if ($dataConnection.State -eq 'Open') { $dataConnection.Close() }
         $dataConnection.Dispose()
     }
 
     if ($users.Rows.Count -eq 0) {
-        Write-Host "  No users found in GraphUsers table. Run Sync-FGUser first." -ForegroundColor Red
+        $sourceTable = if ($usePrincipals) { "Principals" } else { "GraphUsers" }
+        Write-Host "  No users found in $sourceTable table. Run Sync-FGUser first." -ForegroundColor Red
         return
     }
 
@@ -829,7 +950,25 @@ function Invoke-FGAccountCorrelation {
     # ── 11. Ensure SQL tables exist ──
     Write-Host "`n--- Persisting to SQL ---" -ForegroundColor Cyan
 
-    # Check if identity tables exist
+    # Check if new-model tables exist (Identities / IdentityMembers)
+    $useNewIdentityTables = $false
+    $newIdentityTablesExist = Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Identities', 'U') AS identitiesExists, OBJECT_ID('dbo.IdentityMembers', 'U') AS membersExists"
+        $reader = $cmd.ExecuteReader()
+        $reader.Read()
+        $idExists = ($null -ne $reader[0] -and $reader[0] -isnot [DBNull])
+        $memExists = ($null -ne $reader[1] -and $reader[1] -isnot [DBNull])
+        $reader.Close()
+        return @{ identities = $idExists; members = $memExists }
+    }
+    if ($newIdentityTablesExist.identities -and $newIdentityTablesExist.members) {
+        $useNewIdentityTables = $true
+        Write-Host "  Detected Identities + IdentityMembers tables (new model)" -ForegroundColor Gray
+    }
+
+    # Check if legacy identity tables exist
     $tablesExist = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
         $cmd = $connection.CreateCommand()
@@ -1106,7 +1245,7 @@ WHEN NOT MATCHED THEN INSERT (
         }
     }
 
-    # ── 14. Clean up stale identities ──
+    # ── 14. Clean up stale identities (GraphIdentities/GraphIdentityMembers) ──
     Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
         $cmd = $connection.CreateCommand()
@@ -1122,7 +1261,190 @@ WHEN NOT MATCHED THEN INSERT (
         $staleIdentities = $cmd2.ExecuteNonQuery()
 
         if ($staleMembers -gt 0 -or $staleIdentities -gt 0) {
-            Write-Host "  Cleaned up $staleIdentities stale identities and $staleMembers stale members" -ForegroundColor Gray
+            Write-Host "  Cleaned up $staleIdentities stale identities and $staleMembers stale members (GraphIdentities)" -ForegroundColor Gray
+        }
+    }
+
+    # ── 14b. Write to new Identities/IdentityMembers tables (if they exist) ──
+    if ($useNewIdentityTables) {
+        Write-Host "`n  Writing to Identities + IdentityMembers tables..." -ForegroundColor Gray
+
+        # Ensure columns exist on Identities table (add HR columns if missing)
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $newCols = @(
+                @{ name = 'isHrAnchored'; type = 'BIT NOT NULL DEFAULT 0' }
+                @{ name = 'hrAccountId'; type = 'NVARCHAR(36) NULL' }
+                @{ name = 'orphanStatus'; type = 'NVARCHAR(50) NULL' }
+            )
+            foreach ($col in $newCols) {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Identities' AND COLUMN_NAME = '$($col.name)'"
+                if ([int]$cmd.ExecuteScalar() -eq 0) {
+                    $cmd2 = $connection.CreateCommand()
+                    $cmd2.CommandText = "ALTER TABLE dbo.Identities ADD [$($col.name)] $($col.type)"
+                    try { $cmd2.ExecuteNonQuery() | Out-Null } catch { }
+                }
+            }
+        }
+
+        # Clear existing members (preserving analyst overrides)
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $cmd.CommandText = "DELETE FROM dbo.IdentityMembers WHERE analystOverride IS NULL OR analystOverride = ''"
+            try { $cmd.ExecuteNonQuery() | Out-Null } catch { }
+        }
+
+        # MERGE identities into Identities table
+        $newIdMerged = 0
+        $idKeys = @($identities.Keys)
+        for ($i = 0; $i -lt $idKeys.Count; $i += $batchSize) {
+            $batchKeys = $idKeys[$i..[Math]::Min($i + $batchSize - 1, $idKeys.Count - 1)]
+
+            Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                foreach ($key in $batchKeys) {
+                    $identity = $identities[$key]
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandTimeout = 120
+                    $cmd.CommandText = @"
+MERGE dbo.Identities AS target
+USING (SELECT @id AS id) AS source ON target.id = source.id
+WHEN MATCHED THEN UPDATE SET
+    displayName = @displayName,
+    email = @email,
+    primaryPrincipalId = @primaryPrincipalId,
+    accountCount = @accountCount,
+    accountTypes = @accountTypes,
+    correlationConfidence = @correlationConfidence,
+    correlationSignals = @correlationSignals,
+    department = @department,
+    jobTitle = @jobTitle,
+    givenName = @givenName,
+    surname = @surname,
+    employeeId = @employeeId,
+    companyName = @companyName,
+    city = @city,
+    country = @country,
+    officeLocation = @officeLocation,
+    isHrAnchored = @isHrAnchored,
+    hrAccountId = @hrAccountId,
+    orphanStatus = @orphanStatus,
+    correlatedAt = @correlatedAt
+WHEN NOT MATCHED THEN INSERT (
+    id, displayName, email, primaryPrincipalId, accountCount, accountTypes,
+    correlationConfidence, correlationSignals, department, jobTitle,
+    givenName, surname, employeeId, companyName, city, country, officeLocation,
+    isHrAnchored, hrAccountId, orphanStatus, correlatedAt, analystVerified
+) VALUES (
+    @id, @displayName, @email, @primaryPrincipalId, @accountCount, @accountTypes,
+    @correlationConfidence, @correlationSignals, @department, @jobTitle,
+    @givenName, @surname, @employeeId, @companyName, @city, @country, @officeLocation,
+    @isHrAnchored, @hrAccountId, @orphanStatus, @correlatedAt, 0
+);
+"@
+                    $cmd.Parameters.AddWithValue("@id", $identity.id) | Out-Null
+                    $cmd.Parameters.AddWithValue("@displayName", $(if ($identity.displayName) { $identity.displayName } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@email", $(if ($identity.primaryAccountUpn) { $identity.primaryAccountUpn } elseif ($identity.mail) { $identity.mail } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@primaryPrincipalId", $(if ($identity.primaryAccountId) { $identity.primaryAccountId } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@accountCount", $identity.accountCount) | Out-Null
+                    $cmd.Parameters.AddWithValue("@accountTypes", $(if ($identity.accountTypes) { $identity.accountTypes } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@correlationConfidence", $identity.correlationConfidence) | Out-Null
+                    $cmd.Parameters.AddWithValue("@correlationSignals", $(if ($identity.correlationSignals) { $identity.correlationSignals } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@department", $(if ($identity.department) { $identity.department } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@jobTitle", $(if ($identity.jobTitle) { $identity.jobTitle } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@givenName", $(if ($identity.givenName) { $identity.givenName } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@surname", $(if ($identity.surname) { $identity.surname } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@employeeId", $(if ($identity.employeeId) { $identity.employeeId } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@companyName", $(if ($identity.companyName) { $identity.companyName } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@city", $(if ($identity.city) { $identity.city } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@country", $(if ($identity.country) { $identity.country } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@officeLocation", $(if ($identity.officeLocation) { $identity.officeLocation } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@isHrAnchored", [int]$identity.isHrAnchored) | Out-Null
+                    $cmd.Parameters.AddWithValue("@hrAccountId", $(if ($identity.hrAccountId) { $identity.hrAccountId } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@orphanStatus", $(if ($identity.orphanStatus) { $identity.orphanStatus } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@correlatedAt", $identity.correlatedAt) | Out-Null
+                    $cmd.ExecuteNonQuery() | Out-Null
+                }
+            }
+            $newIdMerged += $batchKeys.Count
+        }
+        Write-Host "  Identities: $newIdMerged / $($idKeys.Count)" -ForegroundColor Gray
+
+        # MERGE identity members into IdentityMembers table (using principalId instead of userId)
+        $newMemInserted = 0
+        for ($i = 0; $i -lt $identityMembers.Count; $i += $memberBatchSize) {
+            $batch = $identityMembers[$i..[Math]::Min($i + $memberBatchSize - 1, $identityMembers.Count - 1)]
+
+            Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+                foreach ($m in $batch) {
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandTimeout = 120
+                    $cmd.CommandText = @"
+MERGE dbo.IdentityMembers AS target
+USING (SELECT @identityId AS identityId, @principalId AS principalId) AS source
+    ON target.identityId = source.identityId AND target.principalId = source.principalId
+WHEN MATCHED AND (target.analystOverride IS NULL OR target.analystOverride = '') THEN UPDATE SET
+    displayName = @displayName,
+    accountType = @accountType,
+    accountTypePattern = @accountTypePattern,
+    isPrimary = @isPrimary,
+    signalConfidence = @signalConfidence,
+    correlationSignals = @correlationSignals,
+    accountEnabled = @accountEnabled,
+    isHrAuthoritative = @isHrAuthoritative,
+    hrScore = @hrScore,
+    hrIndicators = @hrIndicators
+WHEN NOT MATCHED THEN INSERT (
+    identityId, principalId, displayName, accountType,
+    accountTypePattern, isPrimary, signalConfidence, correlationSignals, accountEnabled,
+    isHrAuthoritative, hrScore, hrIndicators
+) VALUES (
+    @identityId, @principalId, @displayName, @accountType,
+    @accountTypePattern, @isPrimary, @signalConfidence, @correlationSignals, @accountEnabled,
+    @isHrAuthoritative, @hrScore, @hrIndicators
+);
+"@
+                    $cmd.Parameters.AddWithValue("@identityId", $m.identityId) | Out-Null
+                    $cmd.Parameters.AddWithValue("@principalId", $m.userId) | Out-Null
+                    $cmd.Parameters.AddWithValue("@displayName", $(if ($m.displayName) { $m.displayName } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@accountType", $m.accountType) | Out-Null
+                    $cmd.Parameters.AddWithValue("@accountTypePattern", $(if ($m.accountTypePattern) { $m.accountTypePattern } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@isPrimary", [int]$m.isPrimary) | Out-Null
+                    $cmd.Parameters.AddWithValue("@signalConfidence", $m.signalConfidence) | Out-Null
+                    $cmd.Parameters.AddWithValue("@correlationSignals", $(if ($m.correlationSignals) { $m.correlationSignals } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@accountEnabled", $(if ($m.accountEnabled) { $m.accountEnabled } else { [DBNull]::Value })) | Out-Null
+                    $cmd.Parameters.AddWithValue("@isHrAuthoritative", [int]$m.isHrAuthoritative) | Out-Null
+                    $cmd.Parameters.AddWithValue("@hrScore", $m.hrScore) | Out-Null
+                    $cmd.Parameters.AddWithValue("@hrIndicators", $(if ($m.hrIndicators) { $m.hrIndicators } else { [DBNull]::Value })) | Out-Null
+                    $cmd.ExecuteNonQuery() | Out-Null
+                }
+            }
+            $newMemInserted += $batch.Count
+        }
+        Write-Host "  IdentityMembers: $newMemInserted / $($identityMembers.Count)" -ForegroundColor Gray
+
+        # Clean up stale data from new tables
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = "DELETE FROM dbo.IdentityMembers WHERE identityId NOT IN (SELECT id FROM dbo.Identities WHERE correlatedAt >= @correlatedAt) AND (analystOverride IS NULL OR analystOverride = '')"
+            $cmd.Parameters.AddWithValue("@correlatedAt", $correlatedAt) | Out-Null
+            $staleMembers = $cmd.ExecuteNonQuery()
+
+            $cmd2 = $connection.CreateCommand()
+            $cmd2.CommandTimeout = 120
+            $cmd2.CommandText = "DELETE FROM dbo.Identities WHERE correlatedAt < @correlatedAt AND analystVerified = 0"
+            $cmd2.Parameters.AddWithValue("@correlatedAt", $correlatedAt) | Out-Null
+            $staleIdentities = $cmd2.ExecuteNonQuery()
+
+            if ($staleMembers -gt 0 -or $staleIdentities -gt 0) {
+                Write-Host "  Cleaned up $staleIdentities stale identities and $staleMembers stale members (Identities)" -ForegroundColor Gray
+            }
         }
     }
 
@@ -1135,6 +1457,11 @@ WHEN NOT MATCHED THEN INSERT (
     $orphanCount = ($identities.Values | Where-Object { $_.orphanStatus }).Count
 
     Write-Host "`n=== Correlation Complete ===" -ForegroundColor Cyan
+    $outputTables = @('GraphIdentities', 'GraphIdentityMembers')
+    if ($useNewIdentityTables) { $outputTables += @('Identities', 'IdentityMembers') }
+    $sourceTable = if ($usePrincipals) { "Principals" } else { "GraphUsers" }
+    Write-Host "  Source:                  $sourceTable" -ForegroundColor Gray
+    Write-Host "  Output tables:           $($outputTables -join ', ')" -ForegroundColor Gray
     Write-Host "  Total identities:        $($identities.Count)" -ForegroundColor Gray
     Write-Host "  Multi-account identities: $multiAccountIdentities" -ForegroundColor Gray
     Write-Host "  Single-account:          $singleAccountIdentities" -ForegroundColor Gray

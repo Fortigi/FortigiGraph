@@ -16,7 +16,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
-- **Current Version:** 2.4.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
+- **Current Version:** 3.0.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
 
 ## Major Features
 
@@ -56,7 +56,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 ### 6. Role Mining UI
 - **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
 - **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
-- **Tab Navigation**: Nine pages — Matrix, Users, Groups, Access Packages, Sync Log, Risk Scoring, Identities, Org Chart, Performance — plus dynamic detail tabs. Optional tabs (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown.
+- **Tab Navigation**: Eleven pages — Matrix, Users, Resources, Systems, Access Packages, Sync Log, Risk Scoring, Identities, Org Chart, Performance — plus dynamic detail tabs. Optional tabs (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown.
 - **User Preferences**: Clicking the user avatar in the top-right opens a settings dropdown with toggle switches for optional tabs. Preferences are stored per-user in the `GraphUserPreferences` SQL table (auto-created). User identified by Entra ID `oid` claim; `anonymous` fallback for no-auth mode.
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
 - **Staircase Sort**: Default row order groups rows by their leftmost AP bucket, creating a visual staircase pattern; unmanaged groups at the bottom. Custom drag order persists via versioned localStorage (bump `ROW_ORDER_VERSION` in `useMatrixRowOrder.js` when changing default sort logic)
@@ -87,6 +87,45 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Data Privacy**: Only Phase 1 contacts LLM (public org context only); all identity scoring runs locally
 - **LLM Providers**: Supports Anthropic Claude (default: claude-sonnet-4-20250514) and OpenAI (default: gpt-4o)
 
+### 8. Universal Data Model (v3.0)
+
+The data model supports importing authorization data from any system, not just Entra ID.
+
+```
+                                    ┌──────────┐
+                                    │ Systems  │
+                                    └────┬─────┘
+                         ┌───────────────┼───────────────┐
+                         │               │               │
+                    ┌────▼────┐    ┌─────▼─────┐   ┌─────▼─────┐
+                    │Resources│    │Principals │   │ OrgUnits  │
+                    └────┬────┘    └─────┬─────┘   └───────────┘
+                         │               │               ▲
+                    ┌────▼────────┐      │          orgUnitId
+                    │Resource     │◄─────┘         ┌─────┴─────┐
+                    │Assignments  │  principalId   │Identities │
+                    └─────────────┘                └─────┬─────┘
+                         │                         ┌─────▼──────┐
+                    ┌────▼────────┐                │Identity    │
+                    │Resource     │                │Members     │
+                    │Relationships│                └────────────┘
+                    └─────────────┘
+```
+
+**Tables:**
+- **Systems** — Connected authorization sources (EntraID, SharePoint, AzureRM, DevOps, etc.)
+- **Resources** — Any permission-granting resource (groups, directory roles, app roles, sites) with `resourceType` and `extendedAttributes` JSON
+- **ResourceAssignments** — Who has access to what (`resourceId` + `principalId` + `assignmentType`)
+- **ResourceRelationships** — Resource-to-resource links (Contains, GrantsAccessTo)
+- **Principals** — User accounts from any system with `principalType` and `extendedAttributes` JSON
+- **OrgUnits** — Organizational units (departments, teams) calculated from data or synced from HR
+- **Identities** — Real persons aggregated from multiple accounts (from account correlation)
+- **IdentityMembers** — Links identities to their principals across systems
+
+**Core + JSON pattern:** Both Resources and Principals use frequently-queried attributes as real SQL columns (displayName, department, resourceType) and system-specific attributes in `extendedAttributes` JSON column. This enables SQL indexing on hot columns while keeping the schema extensible.
+
+**Backward compatibility:** All queries prefer new tables (Resources, Principals) with automatic fallback to legacy tables (GraphGroups, GraphUsers).
+
 ## Repository Structure
 
 ```
@@ -110,13 +149,19 @@ FortigiGraph/
 │   │   ├── Add-FG*.ps1         # Add operations (members, resources)
 │   │   └── Remove-FG*.ps1      # Delete/remove operations
 │   │
-│   ├── Sync/                   # High-performance data sync operations (16)
+│   ├── Sync/                   # High-performance data sync operations (24)
 │   │   ├── Start-FGSync.ps1              # Orchestrates all sync operations
-│   │   ├── Sync-FGUser.ps1               # Sync users to SQL
-│   │   ├── Sync-FGGroup.ps1              # Sync groups to SQL
+│   │   ├── Sync-FGUser.ps1               # Sync users to GraphUsers (legacy)
+│   │   ├── Sync-FGPrincipal.ps1          # Sync users to Principals (v3.0)
+│   │   ├── Sync-FGGroup.ps1              # Sync groups to GraphGroups (legacy)
 │   │   ├── Sync-FGGroupMember.ps1        # Sync direct group memberships
 │   │   ├── Sync-FGGroupEligibleMember.ps1
 │   │   ├── Sync-FGGroupOwner.ps1
+│   │   ├── Sync-FGEntraDirectoryRole.ps1 # Sync directory roles → Resources
+│   │   ├── Sync-FGEntraAppRoleAssignment.ps1 # Sync app role assignments → Resources + ResourceAssignments
+│   │   ├── Sync-FGResourceRelationship.ps1   # Sync resource-to-resource links
+│   │   ├── Sync-FGSystem.ps1             # Ensure system record exists
+│   │   ├── Sync-FGOrgUnit.ps1            # Calculate OrgUnits from Principals
 │   │   ├── Sync-FGAccessPackage.ps1
 │   │   ├── Sync-FGAccessPackageAssignment.ps1
 │   │   ├── Sync-FGAccessPackageResourceRoleScope.ps1
@@ -124,16 +169,21 @@ FortigiGraph/
 │   │   ├── Sync-FGAccessPackageAssignmentRequest.ps1
 │   │   ├── Sync-FGAccessPackageAccessReview.ps1
 │   │   ├── Sync-FGCatalog.ps1
+│   │   ├── Invoke-FGPrincipalMigration.ps1    # Migrate GraphUsers → Principals
+│   │   ├── Invoke-FGResourceModelMigration.ps1 # Migrate GraphGroups → Resources
 │   │   ├── Initialize-FGSyncTable.ps1           # Shared table lifecycle helper
 │   │   └── New-FGDataTableFromGraphObjects.ps1  # Shared DataTable builder
 │   │
-│   ├── SQL/                    # Azure SQL operations (24)
+│   ├── SQL/                    # Azure SQL operations (28)
 │   │   ├── Invoke-FGSQLCommand.ps1       # Helper for connection lifecycle
 │   │   ├── Connect-FGSQLServer.ps1       # Connect with firewall & ConfigFile
 │   │   ├── Initialize-FGSQLTable.ps1     # Create temporal tables
+│   │   ├── Initialize-FGSystemTables.ps1 # Create Systems, Resources, Principals, OrgUnits, Identities tables
+│   │   ├── Initialize-FGResourceViews.ps1     # Resource-based permission views (v3.0)
+│   │   ├── Initialize-FGResourceIndexes.ps1   # Resource-based indexes (v3.0)
 │   │   ├── Initialize-FGAccessPackageViews.ps1
-│   │   ├── Initialize-FGGroupMembershipViews.ps1
-│   │   ├── Initialize-FGGroupMembershipIndexes.ps1
+│   │   ├── Initialize-FGGroupMembershipViews.ps1  # Legacy group views (backward compat)
+│   │   ├── Initialize-FGGroupMembershipIndexes.ps1 # Legacy group indexes
 │   │   └── ...                           # Query, bulk ops, server management
 │   │
 │   ├── Specific/               # Higher-level helper functions (9)
@@ -172,7 +222,11 @@ FortigiGraph/
 │   │   └── src/
 │   │       ├── routes/permissions.js  # API endpoints (permissions, AP groups, sync log)
 │   │       ├── routes/categories.js  # Category CRUD, AP list, category assignments
-│   │       ├── routes/details.js     # User/group detail endpoints with version history
+│   │       ├── routes/details.js     # User/group/resource detail endpoints with version history
+│   │       ├── routes/resources.js   # Resource CRUD, filtering, column discovery
+│   │       ├── routes/systems.js     # Systems CRUD, owners, statistics
+│   │       ├── routes/orgUnits.js    # OrgUnit tree, detail, members
+│   │       ├── routes/identities.js  # Identity correlation results
 │   │       ├── routes/riskScores.js  # Risk score reading + analyst override endpoints
 │   │       ├── routes/clusters.js   # Resource cluster management endpoints
 │   │       ├── routes/orgChart.js   # Manager hierarchy tree endpoints (cached 5 min)
@@ -199,8 +253,11 @@ FortigiGraph/
 │               ├── MatrixView.jsx     # Main matrix orchestrator (staircase sort, managedApMap, apIdToIndex)
 │               ├── PermissionGrid.jsx # TanStack Table grid view
 │               ├── SyncLogPage.jsx    # Sync log viewer
-│               ├── UserDetailPage.jsx # User detail with attributes, memberships, history
-│               ├── GroupDetailPage.jsx # Group detail with attributes, members, history
+│               ├── UserDetailPage.jsx # User/principal detail with attributes, memberships, history
+│               ├── ResourceDetailPage.jsx # Resource detail with extendedAttributes, members, history
+│               ├── OrgUnitDetailPage.jsx  # OrgUnit detail with members and sub-units
+│               ├── SystemsPage.jsx   # Connected systems overview with stats and owners
+│               ├── GroupsPage.jsx    # Legacy groups page (redirects to Resources)
 │               ├── RiskScoringPage.jsx # Risk score visualization with override controls
 │               ├── OrgChartPage.jsx  # Manager hierarchy tree with risk propagation
 │               ├── DepartmentDetailPage.jsx # Department risk profile deep dive
@@ -232,12 +289,12 @@ FortigiGraph/
 |----------|-------|---------|
 | **Base** | 21 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
-| **Sync** | 16 | High-performance data sync (Start-FGSync + 13 entity syncs + 2 helpers) |
-| **SQL** | 24 | Azure SQL database operations (tables, views, indexes, bulk ops) |
+| **Sync** | 24 | High-performance data sync (Start-FGSync + entity syncs + migration + helpers) |
+| **SQL** | 28 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables) |
 | **Automation** | 8 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
 | **RiskScoring** | 13 | LLM-assisted risk profiling, batch scoring, cluster analysis |
-| **Total** | **140 functions** | |
+| **Total** | **164 functions** | |
 
 ## Architecture & Design Patterns
 

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 import RiskScoreSection, { RISK_FIELDS } from './RiskScoreSection';
 
-const HEADER_FIELDS = ['userPrincipalName', 'department', 'jobTitle', 'companyName'];
-const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, ...RISK_FIELDS, 'ValidFrom', 'ValidTo']);
+const HEADER_FIELDS = ['userPrincipalName', 'email', 'department', 'jobTitle', 'companyName'];
+const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, ...RISK_FIELDS, 'ValidFrom', 'ValidTo', 'extendedAttributes', 'extendedAttributesParsed']);
 
 function formatDate(val) {
   if (!val) return '';
@@ -183,8 +183,18 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
               {(attributes.displayName || '?')[0]}
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">{attributes.displayName}</h2>
-              <p className="text-sm text-gray-500">{attributes.userPrincipalName}</p>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-semibold text-gray-900">{attributes.displayName}</h2>
+                {attributes.principalType && (
+                  <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
+                    {attributes.principalType}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-gray-500">{attributes.userPrincipalName || attributes.email}</p>
+              {attributes.systemId && (
+                <p className="text-xs text-gray-400">System: {attributes.systemId}</p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
@@ -314,6 +324,26 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
           </tbody>
         </table>
       </Section>
+
+      {/* Extended Attributes (Principals model) */}
+      {attributes.extendedAttributesParsed && Object.keys(attributes.extendedAttributesParsed).length > 0 && (
+        <div className="mt-4">
+          <Section title="Extended Attributes" count={Object.keys(attributes.extendedAttributesParsed).filter(k => attributes.extendedAttributesParsed[k] != null).length}>
+            <table className="w-full text-sm">
+              <tbody>
+                {Object.entries(attributes.extendedAttributesParsed)
+                  .filter(([, val]) => val != null)
+                  .map(([key, val]) => (
+                    <tr key={key} className="border-b border-gray-50 last:border-b-0">
+                      <td className="py-1 pr-4 text-gray-500 whitespace-nowrap align-top">{friendlyLabel(key)}</td>
+                      <td className="py-1 text-gray-900 font-medium break-all">{formatValue(val)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </Section>
+        </div>
+      )}
 
       {/* Version History - collapsible, lazy-loaded */}
       <div className="mt-6">

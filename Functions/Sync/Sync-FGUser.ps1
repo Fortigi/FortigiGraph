@@ -199,6 +199,11 @@ function Sync-FGUser {
         'administrativeUnits' = 'NVARCHAR(MAX)'
     }
 
+    # Add extensionAttribute1-15 to type map dynamically
+    for ($i = 1; $i -le 15; $i++) {
+        $graphToSqlTypeMap["extensionAttribute$i"] = 'NVARCHAR(255)'
+    }
+
     # Build column definitions
     $columns = @{}
     foreach ($attr in $Attributes) {
@@ -228,6 +233,16 @@ function Sync-FGUser {
     $needsSignInActivity = $Attributes -contains 'lastSignInDateTime'
     $needsOU = $Attributes -contains 'organizationalUnit'
     $needsAU = $Attributes -contains 'administrativeUnits'
+
+    # Handle extensionAttribute1-15: Graph returns these under onPremisesExtensionAttributes
+    $extensionAttrs = @($regularAttributes | Where-Object { $_ -match '^extensionAttribute\d+$' })
+    $regularAttributes = @($regularAttributes | Where-Object { $_ -notmatch '^extensionAttribute\d+$' })
+    if ($extensionAttrs.Count -gt 0) {
+        if ($regularAttributes -notcontains 'onPremisesExtensionAttributes') {
+            $regularAttributes += 'onPremisesExtensionAttributes'
+        }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extension attributes ($($extensionAttrs -join ', ')) will be read from onPremisesExtensionAttributes" -ForegroundColor Gray
+    }
 
     # Ensure onPremisesDistinguishedName is fetched from Graph if organizationalUnit is requested
     if ($needsOU -and $regularAttributes -notcontains 'onPremisesDistinguishedName') {
@@ -335,6 +350,11 @@ function Sync-FGUser {
             }
             return $null
         }
+    }
+
+    # Add resolvers for extensionAttribute1-15 (nested under onPremisesExtensionAttributes in Graph)
+    foreach ($extAttr in $extensionAttrs) {
+        $valueResolvers[$extAttr] = [scriptblock]::Create("param(`$obj) if (`$obj.onPremisesExtensionAttributes -and `$obj.onPremisesExtensionAttributes.'$extAttr' -ne '') { `$obj.onPremisesExtensionAttributes.'$extAttr' } else { `$null }")
     }
 
     $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allUsers -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers

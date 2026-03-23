@@ -183,7 +183,25 @@ Command-line parameter overrides config file setting
     [bool]$GroupMembersUseBatching = $false,
 
     [Parameter(Mandatory = $false)]
-    [bool]$AssignmentRequestsUseBatching = $false
+    [bool]$AssignmentRequestsUseBatching = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncEntraDirectoryRoles = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncEntraAppRoleAssignments = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncResourceRelationships = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$MigrateResourceModel = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncPrincipals = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncOrgUnits = $true
 )
 
     $ErrorActionPreference = "Stop"
@@ -209,6 +227,11 @@ Command-line parameter overrides config file setting
     AccessPackageAssignmentPolicies = $null
     AccessPackageAssignmentRequests = $null
     AccessPackageAccessReviews = $null
+    EntraDirectoryRoles = $null
+    EntraAppRoleAssignments = $null
+    ResourceRelationships = $null
+    Principals = $null
+    OrgUnits = $null
     Errors = @()
 }
 
@@ -347,6 +370,46 @@ function Write-SyncError {
             $GroupAdditionalAttributes = $config.Sync.Groups.AdditionalAttributes
         }
 
+        # Read new resource model settings from config
+        if ($PSBoundParameters.ContainsKey('SyncEntraDirectoryRoles') -eq $false) {
+            if ($config.Sync.Systems.EntraID.Resources.DirectoryRoles.Enabled -ne $null) {
+                $SyncEntraDirectoryRoles = $config.Sync.Systems.EntraID.Resources.DirectoryRoles.Enabled
+            } elseif ($config.Sync.EntraDirectoryRoles.Enabled -ne $null) {
+                $SyncEntraDirectoryRoles = $config.Sync.EntraDirectoryRoles.Enabled
+            } else {
+                $SyncEntraDirectoryRoles = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('SyncEntraAppRoleAssignments') -eq $false) {
+            if ($config.Sync.Systems.EntraID.Resources.AppRoles.Enabled -ne $null) {
+                $SyncEntraAppRoleAssignments = $config.Sync.Systems.EntraID.Resources.AppRoles.Enabled
+            } elseif ($config.Sync.EntraAppRoleAssignments.Enabled -ne $null) {
+                $SyncEntraAppRoleAssignments = $config.Sync.EntraAppRoleAssignments.Enabled
+            } else {
+                $SyncEntraAppRoleAssignments = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('SyncResourceRelationships') -eq $false) {
+            if ($config.Sync.ResourceRelationships.Enabled -ne $null) {
+                $SyncResourceRelationships = $config.Sync.ResourceRelationships.Enabled
+            } else {
+                $SyncResourceRelationships = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('MigrateResourceModel') -eq $false) {
+            if ($config.Sync.MigrateResourceModel -ne $null) {
+                $MigrateResourceModel = $config.Sync.MigrateResourceModel
+            } else {
+                $MigrateResourceModel = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('SyncPrincipals') -eq $false -and $null -ne $config.Sync.Principals.Enabled) {
+            $SyncPrincipals = $config.Sync.Principals.Enabled
+        }
+        if ($PSBoundParameters.ContainsKey('SyncOrgUnits') -eq $false -and $null -ne $config.Sync.OrgUnits.Enabled) {
+            $SyncOrgUnits = $config.Sync.OrgUnits.Enabled
+        }
+
         Write-SyncSuccess "Sync configuration read from config file"
     }
 
@@ -465,6 +528,58 @@ function Write-SyncError {
     # Verify connection
     $connectionInfo = Test-FGSQLConnection
     Write-SyncSuccess "SQL connection verified: $($connectionInfo.Database)"
+    #endregion
+
+    #region Resource Model Tables
+    # Always ensure system tables exist when any resource model sync is active
+    if ($SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships) {
+        try {
+            Write-SyncStep "Ensuring resource model tables exist..."
+            Initialize-FGSystemTables
+            Write-SyncSuccess "Resource model tables ready"
+
+            # Auto-migrate on first run: if Resources is empty but GraphGroups has data, migrate automatically
+            $resourceCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar -ErrorAction SilentlyContinue
+            $legacyCount   = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphGroups WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar -ErrorAction SilentlyContinue
+            if ([int]$resourceCount -eq 0 -and [int]$legacyCount -gt 0) {
+                Write-SyncStep "Resources table is empty but legacy data found — running automatic migration..."
+                try {
+                    Invoke-FGResourceModelMigration -Force
+                    Write-SyncSuccess "Automatic migration complete"
+                } catch {
+                    Write-SyncError "Automatic migration failed" $_.Exception.Message
+                }
+            }
+        } catch {
+            Write-SyncError "Failed to initialize resource model tables" $_.Exception.Message
+        }
+    }
+    #endregion
+
+    #region Resource Model Migration
+    if ($MigrateResourceModel) {
+        Write-SyncHeader "Resource Model Setup"
+
+        try {
+            # Migrate existing data if old tables exist
+            Write-SyncStep "Checking for data migration..."
+            Invoke-FGResourceModelMigration -Force
+            Write-SyncSuccess "Data migration complete"
+
+            # Migrate principal data
+            try {
+                Write-SyncStep "Checking for principal migration..."
+                Invoke-FGPrincipalMigration -Force
+                Write-SyncSuccess "Principal migration complete"
+            } catch {
+                Write-SyncError "Principal migration failed" $_.Exception.Message
+            }
+        }
+        catch {
+            Write-SyncError "Resource model migration failed" $_.Exception.Message
+            # Continue with sync - migration failure shouldn't block everything
+        }
+    }
     #endregion
 
     #region Microsoft Graph Connection
@@ -637,6 +752,31 @@ function Write-SyncError {
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
+                    "EntraDirectoryRoles" {
+                        $null = Sync-FGEntraDirectoryRole
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'EntraDirectoryRole'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "EntraAppRoleAssignments" {
+                        $null = Sync-FGEntraAppRoleAssignment
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'EntraAppRole'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "ResourceRelationships" {
+                        $null = Sync-FGResourceRelationship
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceRelationships WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "Principals" {
+                        $null = Sync-FGPrincipal @SyncParams
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Principals WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "OrgUnits" {
+                        $null = Sync-FGOrgUnit
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
                 }
 
                 # Return only the result object
@@ -676,6 +816,36 @@ function Write-SyncError {
 
             $jobs += @{
                 Name = "Users"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for Principals sync
+        if ($SyncPrincipals) {
+            Write-SyncStep "Starting principals sync job..."
+            $principalSyncParams = @{}
+            if ($UserFilter) { $principalSyncParams.Filter = $UserFilter }
+            if ($UserAdditionalAttributes) { $principalSyncParams.AdditionalAttributes = $UserAdditionalAttributes }
+
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "Principals")
+            [void]$ps.AddParameter("TableName", "Principals")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+            [void]$ps.AddParameter("SyncParams", $principalSyncParams)
+
+            $jobs += @{
+                Name = "Principals"
                 PowerShell = $ps
                 Handle = $ps.BeginInvoke()
             }
@@ -969,6 +1139,106 @@ function Write-SyncError {
             }
         }
 
+        # Create job for EntraDirectoryRoles sync
+        if ($SyncEntraDirectoryRoles) {
+            Write-SyncStep "Starting Entra directory roles sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "EntraDirectoryRoles")
+            [void]$ps.AddParameter("TableName", "Resources")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "EntraDirectoryRoles"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for EntraAppRoleAssignments sync
+        if ($SyncEntraAppRoleAssignments) {
+            Write-SyncStep "Starting Entra app role assignments sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "EntraAppRoleAssignments")
+            [void]$ps.AddParameter("TableName", "Resources")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "EntraAppRoleAssignments"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for ResourceRelationships sync
+        if ($SyncResourceRelationships) {
+            Write-SyncStep "Starting resource relationships sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "ResourceRelationships")
+            [void]$ps.AddParameter("TableName", "ResourceRelationships")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "ResourceRelationships"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for OrgUnits sync (depends on Principals data, but runs as parallel job)
+        if ($SyncOrgUnits) {
+            Write-SyncStep "Starting org units sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "OrgUnits")
+            [void]$ps.AddParameter("TableName", "OrgUnits")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "OrgUnits"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
         # Wait for all jobs to complete and process results
         Write-SyncStep "Waiting for parallel jobs to complete..."
         foreach ($job in $jobs) {
@@ -1046,6 +1316,26 @@ function Write-SyncError {
                         "AccessPackageAccessReviews" {
                             $script:SyncStats.AccessPackageAccessReviews = $result.Count
                             Write-SyncSuccess "Access package access reviews synced: $($result.Count) (table: $accessPackageAccessReviewsTableName)"
+                        }
+                        "EntraDirectoryRoles" {
+                            $script:SyncStats.EntraDirectoryRoles = $result.Count
+                            Write-SyncSuccess "Entra directory roles synced: $($result.Count)"
+                        }
+                        "EntraAppRoleAssignments" {
+                            $script:SyncStats.EntraAppRoleAssignments = $result.Count
+                            Write-SyncSuccess "Entra app role assignments synced: $($result.Count)"
+                        }
+                        "ResourceRelationships" {
+                            $script:SyncStats.ResourceRelationships = $result.Count
+                            Write-SyncSuccess "Resource relationships synced: $($result.Count)"
+                        }
+                        "Principals" {
+                            $script:SyncStats.Principals = $result.Count
+                            Write-SyncSuccess "Principals synced: $($result.Count)"
+                        }
+                        "OrgUnits" {
+                            $script:SyncStats.OrgUnits = $result.Count
+                            Write-SyncSuccess "OrgUnits synced: $($result.Count)"
                         }
                     }
                 } elseif ($result -and -not $result.Success) {
@@ -1289,6 +1579,80 @@ function Write-SyncError {
                 Write-SyncError "Access package access review sync failed" $_.Exception.Message
             }
         }
+
+        # Sync Entra Directory Roles
+        if ($SyncEntraDirectoryRoles) {
+            Write-SyncStep "Syncing Entra directory roles..."
+            try {
+                Sync-FGEntraDirectoryRole
+
+                $roleCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'EntraDirectoryRole'" -AsScalar
+                $script:SyncStats.EntraDirectoryRoles = $roleCount
+                Write-SyncSuccess "Entra directory roles synced: $roleCount"
+            } catch {
+                Write-SyncError "Entra directory role sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Entra App Role Assignments
+        if ($SyncEntraAppRoleAssignments) {
+            Write-SyncStep "Syncing Entra app role assignments..."
+            try {
+                Sync-FGEntraAppRoleAssignment
+
+                $appRoleCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'EntraAppRole'" -AsScalar
+                $script:SyncStats.EntraAppRoleAssignments = $appRoleCount
+                Write-SyncSuccess "Entra app role assignments synced: $appRoleCount"
+            } catch {
+                Write-SyncError "Entra app role assignment sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Resource Relationships
+        if ($SyncResourceRelationships) {
+            Write-SyncStep "Syncing resource relationships..."
+            try {
+                Sync-FGResourceRelationship
+
+                $relCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceRelationships WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                $script:SyncStats.ResourceRelationships = $relCount
+                Write-SyncSuccess "Resource relationships synced: $relCount"
+            } catch {
+                Write-SyncError "Resource relationship sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync Principals
+        if ($SyncPrincipals) {
+            Write-SyncStep "Syncing principals..."
+            try {
+                $syncParams = @{}
+                if ($UserFilter) { $syncParams.Filter = $UserFilter }
+                if ($UserAdditionalAttributes) { $syncParams.AdditionalAttributes = $UserAdditionalAttributes }
+
+                Sync-FGPrincipal @syncParams
+
+                $principalCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Principals WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                $script:SyncStats.Principals = $principalCount
+                Write-SyncSuccess "Principals synced: $principalCount"
+            } catch {
+                Write-SyncError "Principal sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync OrgUnits (depends on Principals data)
+        if ($SyncOrgUnits) {
+            Write-SyncStep "Syncing org units..."
+            try {
+                Sync-FGOrgUnit
+
+                $orgUnitCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                $script:SyncStats.OrgUnits = $orgUnitCount
+                Write-SyncSuccess "OrgUnits synced: $orgUnitCount"
+            } catch {
+                Write-SyncError "OrgUnit sync failed" $_.Exception.Message
+            }
+        }
     }
     #endregion
 
@@ -1405,6 +1769,23 @@ function Write-SyncError {
             Write-SyncError "Access package view creation failed" $_.Exception.Message
         }
 
+        # Create resource model views
+        try {
+            Write-SyncStep "Creating resource model views..."
+            Initialize-FGResourceViews
+            Write-SyncSuccess "Resource model views created"
+        } catch {
+            Write-SyncError "Failed to create resource views" $_.Exception.Message
+        }
+
+        try {
+            Write-SyncStep "Creating resource model indexes..."
+            Initialize-FGResourceIndexes
+            Write-SyncSuccess "Resource model indexes created"
+        } catch {
+            Write-SyncError "Failed to create resource indexes" $_.Exception.Message
+        }
+
         # Materialize views into tables for fast UI queries
         try {
             Write-SyncStep "Materializing views into indexed tables..."
@@ -1461,6 +1842,21 @@ function Write-SyncError {
     }
     if ($SyncAccessPackageAccessReviews -and $script:SyncStats.AccessPackageAccessReviews -ne $null) {
         Write-Host "  Access Reviews:          $($script:SyncStats.AccessPackageAccessReviews)" -ForegroundColor White
+    }
+    if ($SyncEntraDirectoryRoles -and $script:SyncStats.EntraDirectoryRoles -ne $null) {
+        Write-Host "  Directory Roles:         $($script:SyncStats.EntraDirectoryRoles)" -ForegroundColor White
+    }
+    if ($SyncEntraAppRoleAssignments -and $script:SyncStats.EntraAppRoleAssignments -ne $null) {
+        Write-Host "  App Role Assignments:    $($script:SyncStats.EntraAppRoleAssignments)" -ForegroundColor White
+    }
+    if ($SyncResourceRelationships -and $script:SyncStats.ResourceRelationships -ne $null) {
+        Write-Host "  Resource Relationships:  $($script:SyncStats.ResourceRelationships)" -ForegroundColor White
+    }
+    if ($SyncPrincipals -and $script:SyncStats.Principals -ne $null) {
+        Write-Host "  Principals:              $($script:SyncStats.Principals)" -ForegroundColor White
+    }
+    if ($SyncOrgUnits -and $script:SyncStats.OrgUnits -ne $null) {
+        Write-Host "  OrgUnits:                $($script:SyncStats.OrgUnits)" -ForegroundColor White
     }
 
     if ($script:SyncStats.Errors.Count -gt 0) {

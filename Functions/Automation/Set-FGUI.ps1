@@ -287,7 +287,8 @@ function Set-FGUI {
     $currentAppTier = "Unknown"
     try {
         $planUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/serverfarms/${appServicePlanName}?api-version=2023-01-01"
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop
+        $token = if ($tokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password } else { $tokenObj.Token }
         $planResult = Invoke-RestMethod -Uri $planUri -Headers @{ Authorization = "Bearer $token" } -Method GET
         $currentAppSku = $planResult.sku.name
         $currentAppTier = $planResult.sku.tier
@@ -405,7 +406,8 @@ function Set-FGUI {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Scaling App Service Plan to $targetAppSku..." -ForegroundColor Cyan
 
         try {
-            $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop
+            $token = if ($tokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password } else { $tokenObj.Token }
 
             $planUri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$resourceGroupName/providers/Microsoft.Web/serverfarms/${appServicePlanName}?api-version=2023-01-01"
             $planBody = @{

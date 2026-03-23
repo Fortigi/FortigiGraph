@@ -45,7 +45,7 @@ export default function MatrixToolbar({
           type="text"
           value={filterText}
           onChange={e => setFilterText(e.target.value)}
-          placeholder="Search users or groups..."
+          placeholder="Search users or resources..."
           className="px-2 py-1 border border-gray-300 rounded text-xs w-44"
         />
 
@@ -89,7 +89,7 @@ export default function MatrixToolbar({
               Showing {stats.users} of {stats.totalUsers} users
             </span>
           )}
-          {' '}&times; {stats.groups} groups &middot; {stats.memberships} assignments
+          {' '}&times; {stats.groups} resources &middot; {stats.memberships} assignments
         </div>
       </div>
 

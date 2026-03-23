@@ -64,7 +64,7 @@ function VerifiedBadge({ verified }) {
 
 // ─── Orphaned Accounts Notice ────────────────────────────────────────────
 
-function OrphanedAccountsNotice({ orphanCount, onShowOrphans }) {
+function OrphanedAccountsNotice({ orphanCount, onShowOrphans, allVisible }) {
   if (!orphanCount || orphanCount === 0) return null;
   return (
     <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
@@ -73,16 +73,22 @@ function OrphanedAccountsNotice({ orphanCount, onShowOrphans }) {
           <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
         </svg>
         <div>
-          <span className="text-sm font-medium text-orange-800">{orphanCount} orphaned account group{orphanCount !== 1 ? 's' : ''} not shown</span>
-          <span className="text-xs text-orange-600 ml-2">— correlated accounts with no HR-authoritative anchor (not linked to a real identity)</span>
+          {allVisible
+            ? <><span className="text-sm font-medium text-orange-800">{orphanCount} identit{orphanCount !== 1 ? 'ies' : 'y'} have no HR anchor</span>
+                <span className="text-xs text-orange-600 ml-2">— no HR-authoritative account found. Re-run correlation with HR indicators to resolve.</span></>
+            : <><span className="text-sm font-medium text-orange-800">{orphanCount} orphaned account group{orphanCount !== 1 ? 's' : ''} not shown</span>
+                <span className="text-xs text-orange-600 ml-2">— correlated accounts with no HR-authoritative anchor</span></>
+          }
         </div>
       </div>
-      <button
-        onClick={onShowOrphans}
-        className="text-xs text-orange-700 border border-orange-300 bg-white hover:bg-orange-50 px-3 py-1 rounded whitespace-nowrap"
-      >
-        Show orphaned accounts
-      </button>
+      {!allVisible && (
+        <button
+          onClick={onShowOrphans}
+          className="text-xs text-orange-700 border border-orange-300 bg-white hover:bg-orange-50 px-3 py-1 rounded whitespace-nowrap"
+        >
+          Show orphaned accounts
+        </button>
+      )}
     </div>
   );
 }
@@ -117,14 +123,14 @@ function HrBadge({ isHrAnchored }) {
 function SummaryCards({ summary, hasHrColumns }) {
   if (!summary) return null;
 
-  // When HR columns exist, lead with HR Anchored (= real identities), then supporting stats
+  // Lead with total identities; when HR columns exist, add HR-anchored + orphaned as supporting stats
   const cards = hasHrColumns && summary.hrAnchoredCount != null ? [
-    { label: 'Identities', value: summary.hrAnchoredCount, color: 'text-emerald-700', primary: true },
+    { label: 'Identities', value: summary.totalIdentities, color: 'text-emerald-700', primary: true },
     { label: 'Multi-Account', value: summary.multiAccountIdentities, color: 'text-blue-600' },
     { label: 'Single Account', value: summary.singleAccountIdentities, color: 'text-gray-500' },
     { label: 'Verified', value: summary.verifiedCount, color: 'text-green-600' },
     { label: 'Avg Confidence', value: summary.avgConfidence ? `${Math.round(summary.avgConfidence)}%` : '—', color: 'text-indigo-600' },
-    { label: 'Corr. Groups', value: summary.totalIdentities, color: 'text-gray-400', title: 'Total correlated groups including orphaned accounts' },
+    { label: 'HR-Anchored', value: summary.hrAnchoredCount || 0, color: summary.hrAnchoredCount > 0 ? 'text-teal-600' : 'text-gray-400', title: 'Identities with a confirmed HR-authoritative account' },
     { label: 'Orphaned', value: summary.orphanCount || 0, color: summary.orphanCount > 0 ? 'text-orange-600' : 'text-gray-400' },
   ] : [
     { label: 'Total Identities', value: summary.totalIdentities, color: 'text-gray-900' },
@@ -453,10 +459,10 @@ export default function IdentitiesPage({ onOpenDetail }) {
   // Filters
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [minAccounts, setMinAccounts] = useState(2); // Default: show multi-account only
+  const [minAccounts, setMinAccounts] = useState(1); // Default: show all identities
   const [accountTypeFilter, setAccountTypeFilter] = useState('');
   const [verifiedFilter, setVerifiedFilter] = useState('');
-  const [hrAnchoredFilter, setHrAnchoredFilter] = useState('true'); // default: real identities only
+  const [hrAnchoredFilter, setHrAnchoredFilter] = useState(''); // default: all identities
   const [orphanFilter, setOrphanFilter] = useState('');
   const [sortBy, setSortBy] = useState('accountCount');
   const [offset, setOffset] = useState(0);
@@ -528,10 +534,11 @@ export default function IdentitiesPage({ onOpenDetail }) {
       <SummaryCards summary={summary} hasHrColumns={hasHrColumns} />
       <TypeDistribution distribution={summary?.accountTypeDistribution} />
 
-      {/* Orphaned accounts notice — only when viewing real identities */}
-      {hasHrColumns && hrAnchoredFilter === 'true' && (
+      {/* Orphaned accounts notice — when not already viewing orphans */}
+      {hasHrColumns && hrAnchoredFilter !== 'false' && (
         <OrphanedAccountsNotice
           orphanCount={summary?.orphanCount}
+          allVisible={hrAnchoredFilter === ''}
           onShowOrphans={() => { setHrAnchoredFilter('false'); setOrphanFilter('any'); setMinAccounts(1); }}
         />
       )}
@@ -637,8 +644,8 @@ export default function IdentitiesPage({ onOpenDetail }) {
         </label>
 
         <span className="text-xs text-gray-400 ml-auto">
-          {total} {hasHrColumns && hrAnchoredFilter === 'true' ? `real identit${total === 1 ? 'y' : 'ies'}` : hrAnchoredFilter === 'false' ? `orphaned group${total === 1 ? '' : 's'}` : `correlated group${total === 1 ? '' : 's'}`}
-          {hasHrColumns && summary && hrAnchoredFilter !== 'true' && ` · ${summary.hrAnchoredCount ?? 0} real identities`}
+          {total} {hasHrColumns && hrAnchoredFilter === 'true' ? `real identit${total === 1 ? 'y' : 'ies'}` : hrAnchoredFilter === 'false' ? `orphaned group${total === 1 ? '' : 's'}` : `identit${total === 1 ? 'y' : 'ies'}`}
+          {hasHrColumns && summary && hrAnchoredFilter !== 'true' && (summary.hrAnchoredCount ?? 0) > 0 && ` · ${summary.hrAnchoredCount} HR-anchored`}
         </span>
       </div>
 
@@ -647,9 +654,7 @@ export default function IdentitiesPage({ onOpenDetail }) {
         <div className="text-center py-12 text-gray-400">Loading identities...</div>
       ) : data.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
-          {hasHrColumns && hrAnchoredFilter === 'true'
-            ? 'No HR-anchored identities found. Run Invoke-FGAccountCorrelation with a ruleset that has HR indicators configured.'
-            : 'No accounts match your filters'}
+          {'No accounts match your filters'}
         </div>
       ) : (
         <div className="space-y-2">

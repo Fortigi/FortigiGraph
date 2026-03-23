@@ -45,7 +45,10 @@ function Save-FGResourceClusters {
         [array]$GroupClassifiers,
 
         [Parameter(Mandatory = $false)]
-        [array]$NonProdPatterns
+        [array]$NonProdPatterns,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$ResourceTypeMap = @{}
     )
 
     # Build quick lookup: groupId -> update data (riskScore, riskTier)
@@ -141,9 +144,10 @@ function Save-FGResourceClusters {
             }
             if ($isNonProd) { $nonProdCount++ } else { $prodCount++ }
 
+            $memberResourceType = if ($ResourceTypeMap.ContainsKey($gId)) { $ResourceTypeMap[$gId] } else { 'group' }
             $memberData += @{
                 clusterId       = $clusterId
-                resourceType    = 'group'
+                resourceType    = $memberResourceType
                 resourceId      = $gId
                 resourceName    = $gName
                 resourceRiskScore = $score
@@ -274,9 +278,10 @@ function Save-FGResourceClusters {
             }
             if ($isNonProd) { $nonProdCount++ } else { $prodCount++ }
 
+            $memberResourceType = if ($ResourceTypeMap.ContainsKey($gId)) { $ResourceTypeMap[$gId] } else { 'group' }
             $memberData += @{
                 clusterId       = $clusterId
-                resourceType    = 'group'
+                resourceType    = $memberResourceType
                 resourceId      = $gId
                 resourceName    = $gName
                 resourceRiskScore = $score

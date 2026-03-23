@@ -253,6 +253,11 @@ function New-FGAzureAutomationAccount {
             "Sync-FGAccessPackageAssignmentPolicies" = "AccessPackageAssignmentPolicies"
             "Sync-FGAccessPackageAssignmentRequests" = "AccessPackageAssignmentRequests"
             "Sync-FGAccessPackageAccessReviews" = "AccessPackageAccessReviews"
+            "Sync-FGEntraDirectoryRoles" = "EntraDirectoryRoles"
+            "Sync-FGEntraAppRoleAssignments" = "EntraAppRoleAssignments"
+            "Sync-FGResourceRelationships" = "ResourceRelationships"
+            "Sync-FGPrincipals" = "Principals"
+            "Sync-FGOrgUnits" = "OrgUnits"
             "Sync-FGMaterializedViews" = "MaterializedViews"
         }
 
@@ -1007,6 +1012,33 @@ function New-FGAzureAutomationAccount {
                     Description = "Syncs access package access review decisions to Azure SQL"
                     SyncFunction = "Sync-FGAccessPackageAccessReview"
                 }
+                # Resource model sync
+                @{
+                    Name = "Sync-FGEntraDirectoryRoles"
+                    Description = "Syncs Entra ID directory roles and members to Resources/ResourceAssignments tables"
+                    SyncFunction = "Sync-FGEntraDirectoryRole"
+                }
+                @{
+                    Name = "Sync-FGEntraAppRoleAssignments"
+                    Description = "Syncs Entra ID application role assignments to Resources/ResourceAssignments tables"
+                    SyncFunction = "Sync-FGEntraAppRoleAssignment"
+                }
+                @{
+                    Name = "Sync-FGResourceRelationships"
+                    Description = "Discovers and syncs resource-to-resource relationships"
+                    SyncFunction = "Sync-FGResourceRelationship"
+                }
+                @{
+                    Name = "Sync-FGPrincipals"
+                    Description = "Syncs Microsoft Graph users to the Principals table"
+                    SyncFunction = "Sync-FGPrincipal"
+                    HasSyncConfig = $true
+                }
+                @{
+                    Name = "Sync-FGOrgUnits"
+                    Description = "Calculates and syncs organizational units from department data"
+                    SyncFunction = "Sync-FGOrgUnit"
+                }
                 # Post-sync: Materialize views for UI performance
                 @{
                     Name = "Sync-FGMaterializedViews"
@@ -1230,6 +1262,12 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Connecting to Azure S
 Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Recreating group membership views..."
 Initialize-FGGroupMembershipViews -DropIfExists
 
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Recreating resource model views..."
+Initialize-FGResourceViews
+
+Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Creating resource model indexes..."
+Initialize-FGResourceIndexes
+
 Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Recreating access package views..."
 Initialize-FGAccessPackageViews -DropIfExists
 
@@ -1414,6 +1452,10 @@ Write-Output "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($runbook.Name) comp
                     @{ RunbookName = "Sync-FGAccessPackageAssignmentPolicies"; ScheduleName = "Daily-AccessPackageAssignmentPolicies-0645"; Hour = 6; Minute = 45; Frequency = "Daily"; TimeZone = "UTC" }
                     @{ RunbookName = "Sync-FGAccessPackageAssignmentRequests"; ScheduleName = "Daily-AccessPackageAssignmentRequests-0900"; Hour = 9; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
                     @{ RunbookName = "Sync-FGAccessPackageAccessReviews"; ScheduleName = "Daily-AccessPackageAccessReviews-0930"; Hour = 9; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    # Resource model sync
+                    @{ RunbookName = "Sync-FGEntraDirectoryRoles"; ScheduleName = "Daily-EntraDirectoryRoles-0715"; Hour = 7; Minute = 15; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGEntraAppRoleAssignments"; ScheduleName = "Daily-EntraAppRoleAssignments-0730"; Hour = 7; Minute = 30; Frequency = "Daily"; TimeZone = "UTC" }
+                    @{ RunbookName = "Sync-FGResourceRelationships"; ScheduleName = "Daily-ResourceRelationships-0845"; Hour = 8; Minute = 45; Frequency = "Daily"; TimeZone = "UTC" }
                     # Post-sync: Materialize views for UI (after all syncs complete)
                     @{ RunbookName = "Sync-FGMaterializedViews"; ScheduleName = "Daily-MaterializedViews-1000"; Hour = 10; Minute = 0; Frequency = "Daily"; TimeZone = "UTC" }
                     # Post-sync: Risk scoring (after materialized views)

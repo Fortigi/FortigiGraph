@@ -14,7 +14,7 @@ function arrayMove(arr, from, to) {
 }
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
-const EXCLUDE_FIELDS = new Set(['groupId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
+const EXCLUDE_FIELDS = new Set(['groupId', 'resourceId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
 // Friendly labels for known fields
 const FIELD_LABELS = {
   // User columns
@@ -219,7 +219,7 @@ export default function MatrixView({
       const lower = filterText.toLowerCase();
       result = result.filter(d =>
         (d.memberDisplayName || '').toLowerCase().includes(lower) ||
-        (d.groupDisplayName || '').toLowerCase().includes(lower) ||
+        (d.resourceDisplayName || d.groupDisplayName || '').toLowerCase().includes(lower) ||
         (d.memberUPN || '').toLowerCase().includes(lower)
       );
     }
@@ -253,40 +253,41 @@ export default function MatrixView({
         });
       }
 
-      // Always create the base group entry
-      if (d.groupId && !groupMap.has(d.groupId)) {
-        const name = d.groupDisplayName || d.groupId;
-        const tags = groupTagMap?.get(d.groupId.toUpperCase()) || [];
+      // Always create the base group/resource entry
+      const gid = d.resourceId || d.groupId;
+      if (gid && !groupMap.has(gid)) {
+        const name = d.resourceDisplayName || d.groupDisplayName || gid;
+        const tags = groupTagMap?.get(gid.toUpperCase()) || [];
 
-        groupMap.set(d.groupId, {
-          id: d.groupId,
+        groupMap.set(gid, {
+          id: gid,
           displayName: name,
           tags,
-          description: d.groupDescription || '',
-          groupType: d.groupTypeCalculated || '',
+          description: d.resourceDescription || d.groupDescription || '',
+          groupType: d.resourceType || d.groupTypeCalculated || '',
         });
       }
 
       // Owner memberships go to a separate synthetic group row
       const isOwner = d.membershipType === 'Owner';
-      if (isOwner && d.groupId) {
-        const ownerGroupId = `${d.groupId}__owner`;
+      if (isOwner && gid) {
+        const ownerGroupId = `${gid}__owner`;
         if (!groupMap.has(ownerGroupId)) {
-          const name = d.groupDisplayName || d.groupId;
-          const tags = groupTagMap?.get(d.groupId.toUpperCase()) || [];
+          const name = d.resourceDisplayName || d.groupDisplayName || gid;
+          const tags = groupTagMap?.get(gid.toUpperCase()) || [];
           groupMap.set(ownerGroupId, {
             id: ownerGroupId,
-            realGroupId: d.groupId,
+            realGroupId: gid,
             displayName: `${name} (Owner)`,
             tags,
-            description: d.groupDescription || '',
-            groupType: d.groupTypeCalculated || '',
+            description: d.resourceDescription || d.groupDescription || '',
+            groupType: d.resourceType || d.groupTypeCalculated || '',
           });
         }
       }
 
       // Memberships: Owner -> synthetic owner group, others -> real group
-      const effectiveGroupId = isOwner ? `${d.groupId}__owner` : d.groupId;
+      const effectiveGroupId = isOwner ? `${gid}__owner` : gid;
       const key = `${effectiveGroupId}|${d.memberId}`;
       if (!membershipMap.has(key)) {
         membershipMap.set(key, new Set());
@@ -358,7 +359,8 @@ export default function MatrixView({
     const map = new Map();
     if (!managedByPackages || managedByPackages.length === 0) return map;
     for (const r of managedByPackages) {
-      const key = `${(r.groupId || '').toLowerCase()}|${(r.memberId || '').toLowerCase()}`;
+      const rid = (r.resourceId || r.groupId || '').toLowerCase();
+      const key = `${rid}|${(r.memberId || '').toLowerCase()}`;
       map.set(key, (r.accessPackageIds || []).map(id => id.toLowerCase()));
     }
     return map;
@@ -376,7 +378,7 @@ export default function MatrixView({
     const mapping = new Map(); // "groupId|apId" -> roleName
 
     for (const row of accessPackageGroups) {
-      const gid = row.groupId?.toUpperCase();
+      const gid = (row.resourceId || row.groupId)?.toUpperCase();
       if (!gid || !visibleGroupIds.has(gid)) continue;
       if (!apMap.has(row.accessPackageId)) {
         apMap.set(row.accessPackageId, {
@@ -613,9 +615,9 @@ export default function MatrixView({
         }
         const nestedGroup = {
           id: syntheticId,
-          realGroupId: ng.groupId,
-          displayName: ng.displayName || ng.groupId,
-          groupType: ng.groupTypeCalculated || '',
+          realGroupId: ng.resourceId || ng.groupId,
+          displayName: ng.displayName || ng.resourceId || ng.groupId,
+          groupType: ng.resourceType || ng.groupTypeCalculated || '',
           description: ng.description || '',
           tags: [],
           isNestedRow: true,

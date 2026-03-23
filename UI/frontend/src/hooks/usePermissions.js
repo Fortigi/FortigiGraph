@@ -3,8 +3,14 @@ import { useAuth } from '../auth/AuthGate';
 
 const API_BASE = '/api';
 
-// GraphGroups column names → permission query aliases (for Matrix tab)
-const GROUP_COL_ALIASES = { displayName: 'groupDisplayName', description: 'groupDescription' };
+// GraphGroups/GraphResources column names → permission query aliases (for Matrix tab)
+const GROUP_COL_ALIASES = {
+  displayName: 'resourceDisplayName',
+  description: 'resourceDescription',
+  // Legacy aliases for backward compat
+  groupDisplayName: 'resourceDisplayName',
+  groupDescription: 'resourceDescription',
+};
 
 export function usePermissions(userLimit = 25, activeFilters = []) {
   const { authFetch } = useAuth();
@@ -30,7 +36,7 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
     // Phase 1: fast schema (names only)
     Promise.all([
       authFetch(`${API_BASE}/user-columns?schema=true`).then(r => r.ok ? r.json() : []).catch(() => []),
-      authFetch(`${API_BASE}/group-columns?schema=true`).then(r => r.ok ? r.json() : []).catch(() => []),
+      authFetch(`${API_BASE}/resource-columns?schema=true`).then(r => r.ok ? r.json() : authFetch(`${API_BASE}/group-columns?schema=true`).then(r2 => r2.ok ? r2.json() : [])).catch(() => []),
     ]).then(([userCols, groupCols]) => {
       if (cancelled) return;
       setUserColumns(userCols);
@@ -42,15 +48,15 @@ export function usePermissions(userLimit = 25, activeFilters = []) {
       .then(res => res.ok ? res.json() : [])
       .then(cols => { if (!cancelled) setUserColumns(cols); })
       .catch(() => {});
-    authFetch(`${API_BASE}/group-columns`)
-      .then(res => res.ok ? res.json() : [])
+    authFetch(`${API_BASE}/resource-columns`)
+      .then(res => res.ok ? res.json() : authFetch(`${API_BASE}/group-columns`).then(r2 => r2.ok ? r2.json() : []))
       .then(cols => {
         if (cancelled) return;
         const aliased = cols.map(c => ({ ...c, column: GROUP_COL_ALIASES[c.column] || c.column }));
         setGroupColumns(aliased);
       })
       .catch(() => {});
-    authFetch(`${API_BASE}/entity-tags?entityType=group`)
+    authFetch(`${API_BASE}/entity-tags?entityType=resource`).then(r => r.ok ? r : authFetch(`${API_BASE}/entity-tags?entityType=group`))
       .then(res => res.ok ? res.json() : [])
       .then(rows => {
         if (cancelled) return;

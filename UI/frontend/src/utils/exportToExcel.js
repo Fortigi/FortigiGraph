@@ -124,7 +124,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 
   setHeaderCell(ws.getCell(2, 1), '');
   setHeaderCell(ws.getCell(2, 2), 'Category');
-  setHeaderCell(ws.getCell(2, 3), 'Group Name');
+  setHeaderCell(ws.getCell(2, 3), 'Resource Name');
   setHeaderCell(ws.getCell(2, 4), 'GUID');
 
   for (let u = 0; u < userCount; u++) {

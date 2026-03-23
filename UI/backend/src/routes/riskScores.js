@@ -43,7 +43,7 @@ function parseJsonColumns(row) {
 }
 
 // Check if risk score columns exist
-const ALLOWED_RISK_TABLES = new Set(['GraphUsers', 'GraphGroups']);
+const ALLOWED_RISK_TABLES = new Set(['GraphUsers', 'GraphGroups', 'Resources', 'Principals']);
 
 async function hasRiskColumns(pool, tableName, res) {
   if (!ALLOWED_RISK_TABLES.has(tableName)) return false;
@@ -60,6 +60,24 @@ async function hasRiskColumns(pool, tableName, res) {
   }
 }
 
+// Determine the best table for resource/group risk scores (Resources preferred over GraphGroups)
+async function getResourceRiskSource(pool, res) {
+  const hasResources = await hasRiskColumns(pool, 'Resources', res);
+  if (hasResources) return 'Resources';
+  const hasGroups = await hasRiskColumns(pool, 'GraphGroups', res);
+  if (hasGroups) return 'GraphGroups';
+  return null;
+}
+
+// Determine the best table for user risk scores (Principals preferred over GraphUsers)
+async function getUserRiskSource(pool, res) {
+  const hasPrincipals = await hasRiskColumns(pool, 'Principals', res);
+  if (hasPrincipals) return 'Principals';
+  const hasUsers = await hasRiskColumns(pool, 'GraphUsers', res);
+  if (hasUsers) return 'GraphUsers';
+  return null;
+}
+
 // Select columns shared across queries
 const GROUP_COLS = `id, displayName, description, groupTypeCalculated,
   riskScore, riskTier,
@@ -67,7 +85,19 @@ const GROUP_COLS = `id, displayName, description, groupTypeCalculated,
   riskClassifierMatches, riskExplanation, riskScoredAt,
   riskOverride, riskOverrideReason`;
 
-const USER_COLS = `id, displayName, userPrincipalName, department, jobTitle,
+const RESOURCE_COLS = `id, displayName, description, resourceType,
+  riskScore, riskTier,
+  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
+  riskClassifierMatches, riskExplanation, riskScoredAt,
+  riskOverride, riskOverrideReason`;
+
+const USER_COLS_GRAPH = `id, displayName, userPrincipalName, department, jobTitle,
+  riskScore, riskTier,
+  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
+  riskClassifierMatches, riskExplanation, riskScoredAt,
+  riskOverride, riskOverrideReason`;
+
+const USER_COLS_PRINCIPALS = `id, displayName, email AS userPrincipalName, department, jobTitle,
   riskScore, riskTier,
   riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
   riskClassifierMatches, riskExplanation, riskScoredAt,
@@ -82,33 +112,43 @@ router.get('/risk-scores', async (req, res) => {
 
     const p = await db.getPool();
 
-    // Check if scoring has been run
-    const hasGroups = await hasRiskColumns(p, 'GraphGroups', res);
-    const hasUsers = await hasRiskColumns(p, 'GraphUsers', res);
+    // Check if scoring has been run — prefer Resources table over GraphGroups, Principals over GraphUsers
+    const resourceSource = await getResourceRiskSource(p, res);
+    const userSource = await getUserRiskSource(p, res);
 
-    if (!hasGroups && !hasUsers) {
+    if (!resourceSource && !userSource) {
       return res.json({ available: false, message: 'Risk scores not yet computed. Run Invoke-FGRiskScoring in PowerShell.' });
     }
 
+    const hasUsers = !!userSource;
+    const usePrincipals = userSource === 'Principals';
+    const userTable = userSource || 'GraphUsers';
+    const USER_COLS = usePrincipals ? USER_COLS_PRINCIPALS : USER_COLS_GRAPH;
+    const userSearchCol = usePrincipals ? 'email' : 'userPrincipalName';
+
+    const useResources = resourceSource === 'Resources';
+    const groupTable = resourceSource || 'GraphGroups';
+    const groupCols = useResources ? RESOURCE_COLS : GROUP_COLS;
+
     // Summary: tier distribution
-    const groupTiers = hasGroups ? await timedRequest(p, 'risk-group-tiers', res).query(`
+    const groupTiers = resourceSource ? await timedRequest(p, 'risk-group-tiers', res).query(`
       SELECT riskTier, COUNT(*) as count
-      FROM dbo.GraphGroups
+      FROM dbo.${groupTable}
       WHERE riskScore IS NOT NULL
       GROUP BY riskTier
     `) : { recordset: [] };
 
     const userTiers = hasUsers ? await timedRequest(p, 'risk-user-tiers', res).query(`
       SELECT riskTier, COUNT(*) as count
-      FROM dbo.GraphUsers
+      FROM dbo.${userTable}
       WHERE riskScore IS NOT NULL
       GROUP BY riskTier
     `) : { recordset: [] };
 
-    // Top 10 groups by score (use effective score: computed + override)
-    const topGroups = hasGroups ? await timedRequest(p, 'risk-top-groups', res).query(`
-      SELECT TOP 10 ${GROUP_COLS}
-      FROM dbo.GraphGroups
+    // Top 10 groups/resources by score (use effective score: computed + override)
+    const topGroups = resourceSource ? await timedRequest(p, 'risk-top-groups', res).query(`
+      SELECT TOP 10 ${groupCols}
+      FROM dbo.${groupTable}
       WHERE riskScore IS NOT NULL
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
     `) : { recordset: [] };
@@ -116,36 +156,51 @@ router.get('/risk-scores', async (req, res) => {
     // Top 10 users by score
     const topUsers = hasUsers ? await timedRequest(p, 'risk-top-users', res).query(`
       SELECT TOP 10 ${USER_COLS}
-      FROM dbo.GraphUsers
+      FROM dbo.${userTable}
       WHERE riskScore IS NOT NULL
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
     `) : { recordset: [] };
 
     // Totals
-    const totalGroups = hasGroups ? await timedRequest(p, 'risk-total-groups', res).query(`
-      SELECT COUNT(*) as total FROM dbo.GraphGroups WHERE riskScore IS NOT NULL
+    const totalGroups = resourceSource ? await timedRequest(p, 'risk-total-groups', res).query(`
+      SELECT COUNT(*) as total FROM dbo.${groupTable} WHERE riskScore IS NOT NULL
     `) : { recordset: [{ total: 0 }] };
 
     const totalUsers = hasUsers ? await timedRequest(p, 'risk-total-users', res).query(`
-      SELECT COUNT(*) as total FROM dbo.GraphUsers WHERE riskScore IS NOT NULL
+      SELECT COUNT(*) as total FROM dbo.${userTable} WHERE riskScore IS NOT NULL
     `) : { recordset: [{ total: 0 }] };
 
     // Override counts
-    const groupOverrides = hasGroups ? await timedRequest(p, 'risk-group-overrides', res).query(`
-      SELECT COUNT(*) as count FROM dbo.GraphGroups WHERE riskOverride IS NOT NULL
+    const groupOverrides = resourceSource ? await timedRequest(p, 'risk-group-overrides', res).query(`
+      SELECT COUNT(*) as count FROM dbo.${groupTable} WHERE riskOverride IS NOT NULL
     `) : { recordset: [{ count: 0 }] };
 
     const userOverrides = hasUsers ? await timedRequest(p, 'risk-user-overrides', res).query(`
-      SELECT COUNT(*) as count FROM dbo.GraphUsers WHERE riskOverride IS NOT NULL
+      SELECT COUNT(*) as count FROM dbo.${userTable} WHERE riskOverride IS NOT NULL
     `) : { recordset: [{ count: 0 }] };
 
     // Scored timestamp (most recent)
     let scoredAt = null;
-    if (hasGroups) {
+    if (resourceSource) {
       const ts = await timedRequest(p, 'risk-scored-at', res).query(`
-        SELECT TOP 1 riskScoredAt FROM dbo.GraphGroups WHERE riskScoredAt IS NOT NULL ORDER BY riskScoredAt DESC
+        SELECT TOP 1 riskScoredAt FROM dbo.${groupTable} WHERE riskScoredAt IS NOT NULL ORDER BY riskScoredAt DESC
       `);
       if (ts.recordset.length > 0) scoredAt = ts.recordset[0].riskScoredAt;
+    }
+
+    // Resource type breakdown (Resources table only)
+    let resourceTypeBreakdown = null;
+    if (useResources) {
+      try {
+        const typeResult = await timedRequest(p, 'risk-resource-types', res).query(`
+          SELECT resourceType, COUNT(*) as count, AVG(CAST(riskScore AS FLOAT)) as avgScore
+          FROM dbo.Resources
+          WHERE riskScore IS NOT NULL
+          GROUP BY resourceType
+          ORDER BY AVG(CAST(riskScore AS FLOAT)) DESC
+        `);
+        resourceTypeBreakdown = typeResult.recordset;
+      } catch { resourceTypeBreakdown = null; }
     }
 
     // Build tier summary objects
@@ -156,6 +211,7 @@ router.get('/risk-scores', async (req, res) => {
 
     return res.json({
       available: true,
+      useResources,
       summary: {
         totalGroups: totalGroups.recordset[0].total,
         totalUsers: totalUsers.recordset[0].total,
@@ -165,6 +221,7 @@ router.get('/risk-scores', async (req, res) => {
         usersByTier,
         topGroups: topGroups.recordset.map(parseJsonColumns),
         topUsers: topUsers.recordset.map(parseJsonColumns),
+        resourceTypeBreakdown,
       },
       scoredAt,
     });
@@ -182,14 +239,20 @@ router.get('/risk-scores/groups', async (req, res) => {
     }
 
     const p = await db.getPool();
-    if (!(await hasRiskColumns(p, 'GraphGroups', res))) {
+    const resourceSource = await getResourceRiskSource(p, res);
+    if (!resourceSource) {
       return res.json({ data: [], total: 0, available: false });
     }
+
+    const useResources = resourceSource === 'Resources';
+    const groupTable = resourceSource;
+    const groupCols = useResources ? RESOURCE_COLS : GROUP_COLS;
 
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const offset = parseInt(req.query.offset) || 0;
     const tier = req.query.tier || '';
     const search = req.query.search || '';
+    const resourceType = req.query.resourceType || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
     let whereClause = 'WHERE riskScore IS NOT NULL';
@@ -203,6 +266,10 @@ router.get('/risk-scores/groups', async (req, res) => {
       whereClause += ' AND (displayName LIKE @search OR description LIKE @search)';
       request.input('search', `%${search}%`);
     }
+    if (resourceType && useResources) {
+      whereClause += ' AND resourceType = @resourceType';
+      request.input('resourceType', resourceType);
+    }
     if (overridesOnly) {
       whereClause += ' AND riskOverride IS NOT NULL';
     }
@@ -210,8 +277,8 @@ router.get('/risk-scores/groups', async (req, res) => {
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT ${GROUP_COLS}
-      FROM dbo.GraphGroups
+      SELECT ${groupCols}
+      FROM dbo.${groupTable}
       ${whereClause}
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -220,12 +287,14 @@ router.get('/risk-scores/groups', async (req, res) => {
     const countReq = timedRequest(p, 'risk-groups-count', res);
     if (tier) countReq.input('tier', tier);
     if (search) countReq.input('search', `%${search}%`);
-    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.GraphGroups ${whereClause}`);
+    if (resourceType && useResources) countReq.input('resourceType', resourceType);
+    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.${groupTable} ${whereClause}`);
 
     return res.json({
       data: result.recordset.map(parseJsonColumns),
       total: countResult.recordset[0].total,
       available: true,
+      useResources,
     });
   } catch (err) {
     console.error('Risk groups query failed:', err.message);
@@ -241,9 +310,15 @@ router.get('/risk-scores/users', async (req, res) => {
     }
 
     const p = await db.getPool();
-    if (!(await hasRiskColumns(p, 'GraphUsers', res))) {
+    const userSource = await getUserRiskSource(p, res);
+    if (!userSource) {
       return res.json({ data: [], total: 0, available: false });
     }
+
+    const usePrincipalsForList = userSource === 'Principals';
+    const userTableForList = userSource;
+    const userColsForList = usePrincipalsForList ? USER_COLS_PRINCIPALS : USER_COLS_GRAPH;
+    const searchCol = usePrincipalsForList ? 'email' : 'userPrincipalName';
 
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const offset = parseInt(req.query.offset) || 0;
@@ -259,7 +334,7 @@ router.get('/risk-scores/users', async (req, res) => {
       request.input('tier', tier);
     }
     if (search) {
-      whereClause += ' AND (displayName LIKE @search OR userPrincipalName LIKE @search OR department LIKE @search)';
+      whereClause += ` AND (displayName LIKE @search OR ${searchCol} LIKE @search OR department LIKE @search)`;
       request.input('search', `%${search}%`);
     }
     if (overridesOnly) {
@@ -269,8 +344,8 @@ router.get('/risk-scores/users', async (req, res) => {
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT ${USER_COLS}
-      FROM dbo.GraphUsers
+      SELECT ${userColsForList}
+      FROM dbo.${userTableForList}
       ${whereClause}
       ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -279,7 +354,7 @@ router.get('/risk-scores/users', async (req, res) => {
     const countReq = timedRequest(p, 'risk-users-count', res);
     if (tier) countReq.input('tier', tier);
     if (search) countReq.input('search', `%${search}%`);
-    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.GraphUsers ${whereClause}`);
+    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.${userTableForList} ${whereClause}`);
 
     return res.json({
       data: result.recordset.map(parseJsonColumns),
@@ -302,8 +377,8 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
     }
 
     const { type, id } = req.params;
-    if (type !== 'groups' && type !== 'users') {
-      return res.status(400).json({ error: 'Type must be "groups" or "users"' });
+    if (type !== 'groups' && type !== 'users' && type !== 'resources') {
+      return res.status(400).json({ error: 'Type must be "groups", "users", or "resources"' });
     }
 
     // Validate UUID format
@@ -323,8 +398,19 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
       return res.status(400).json({ error: 'Reason must be 500 characters or fewer' });
     }
 
-    const tableName = type === 'groups' ? 'GraphGroups' : 'GraphUsers';
     const p = await db.getPool();
+
+    // For groups/resources, determine the best table
+    let tableName;
+    if (type === 'users') {
+      const userSrc = await getUserRiskSource(p, res);
+      tableName = userSrc || 'GraphUsers';
+    } else if (type === 'resources') {
+      tableName = 'Resources';
+    } else {
+      const resourceSource = await getResourceRiskSource(p, res);
+      tableName = resourceSource || 'GraphGroups';
+    }
 
     const request = timedRequest(p, `risk-override-set-${type}`, res);
     request.input('id', id);
@@ -357,8 +443,8 @@ router.delete('/risk-scores/:type/:id/override', async (req, res) => {
     }
 
     const { type, id } = req.params;
-    if (type !== 'groups' && type !== 'users') {
-      return res.status(400).json({ error: 'Type must be "groups" or "users"' });
+    if (type !== 'groups' && type !== 'users' && type !== 'resources') {
+      return res.status(400).json({ error: 'Type must be "groups", "users", or "resources"' });
     }
 
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -366,8 +452,19 @@ router.delete('/risk-scores/:type/:id/override', async (req, res) => {
       return res.status(400).json({ error: 'Invalid entity ID format' });
     }
 
-    const tableName = type === 'groups' ? 'GraphGroups' : 'GraphUsers';
     const p = await db.getPool();
+
+    // For groups/resources, determine the best table
+    let tableName;
+    if (type === 'users') {
+      const userSrc = await getUserRiskSource(p, res);
+      tableName = userSrc || 'GraphUsers';
+    } else if (type === 'resources') {
+      tableName = 'Resources';
+    } else {
+      const resourceSource = await getResourceRiskSource(p, res);
+      tableName = resourceSource || 'GraphGroups';
+    }
 
     const request = timedRequest(p, `risk-override-clear-${type}`, res);
     request.input('id', id);

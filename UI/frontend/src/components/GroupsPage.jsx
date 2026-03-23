@@ -6,6 +6,7 @@ import { TAG_COLORS } from '../utils/colors';
 
 const FIELD_LABELS = {
   displayName: 'Name',
+  resourceType: 'Resource Type',
   groupTypeCalculated: 'Group Type',
   description: 'Description',
   mailEnabled: 'Mail Enabled',
@@ -16,24 +17,26 @@ const FIELD_LABELS = {
   onPremisesSyncEnabled: 'On-Prem Sync',
   mail: 'Mail',
   resourceProvisioningOptions: 'Provisioning',
+  __resourceTag: 'Resource Tag',
   __groupTag: 'Group Tag',
 };
 
 const TABLE_COLUMNS = [
-  { key: 'displayName',         label: 'Display Name' },
-  { key: 'groupTypeCalculated', label: 'Type' },
-  { key: 'description',         label: 'Description' },
+  { key: 'displayName',  label: 'Display Name' },
+  { key: 'resourceType', label: 'Type' },
+  { key: 'description',  label: 'Description' },
 ];
 
-export default function GroupsPage({ onOpenDetail }) {
+// Exported as both ResourcesPage (new) and GroupsPage (backward compat)
+export default function ResourcesPage({ onOpenDetail }) {
   const { authFetch } = useAuth();
 
   const ep = useEntityPage({
     authFetch,
-    entityType: 'group',
-    listEndpoint: '/api/groups',
-    columnsEndpoint: '/api/group-columns',
-    tagFilterKey: '__groupTag',
+    entityType: 'resource',
+    listEndpoint: '/api/resources',
+    columnsEndpoint: '/api/resource-columns',
+    tagFilterKey: '__resourceTag',
   });
 
   const filterFields = useMemo(() => ep.getFilterFields(FIELD_LABELS), [ep.getFilterFields]);
@@ -42,7 +45,7 @@ export default function GroupsPage({ onOpenDetail }) {
     <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Groups</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Resources</h2>
         <span className="text-sm text-gray-500">{ep.total.toLocaleString()} total</span>
       </div>
 
@@ -60,12 +63,12 @@ export default function GroupsPage({ onOpenDetail }) {
             style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
             onClick={() => {
               if (ep.activeTagFilter === t.name) {
-                ep.removeFilter('__groupTag');
+                ep.removeFilter('__resourceTag');
               } else {
-                ep.addFilter('__groupTag', t.name);
+                ep.addFilter('__resourceTag', t.name);
               }
             }}
-            title={`${t.assignmentCount} groups tagged — click to filter`}
+            title={`${t.assignmentCount} resources tagged -- click to filter`}
           >
             {t.name}
             <span className="text-[10px] opacity-70">({t.assignmentCount})</span>
@@ -142,7 +145,7 @@ export default function GroupsPage({ onOpenDetail }) {
           type="text"
           value={ep.search}
           onChange={e => ep.setSearch(e.target.value)}
-          placeholder="Search by group name or description..."
+          placeholder="Search by resource name or description..."
           className="px-2 py-1 border border-gray-300 rounded text-xs w-64"
         />
 
@@ -195,7 +198,7 @@ export default function GroupsPage({ onOpenDetail }) {
                 onClick={ep.assignTagToAll}
                 disabled={!ep.actionTag || ep.busy}
                 className="px-3 py-1 rounded text-sm font-medium text-blue-700 hover:bg-blue-100 border border-blue-300 disabled:opacity-50"
-                title={`Tag all ${ep.total} groups matching current filters`}
+                title={`Tag all ${ep.total} resources matching current filters`}
               >
                 Tag all {ep.total} matching
               </button>
@@ -212,10 +215,10 @@ export default function GroupsPage({ onOpenDetail }) {
 
       {/* Table */}
       {ep.loading ? (
-        <div className="text-center text-gray-500 py-12">Loading groups...</div>
+        <div className="text-center text-gray-500 py-12">Loading resources...</div>
       ) : ep.items.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {ep.hasAnyFilter ? 'No groups match the current filters.' : 'No groups found.'}
+          {ep.hasAnyFilter ? 'No resources match the current filters.' : 'No resources found.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -267,8 +270,8 @@ export default function GroupsPage({ onOpenDetail }) {
                     />
                   </td>
                   <td className="px-3 py-2 font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
-                    onClick={() => onOpenDetail?.('group', g.id, g.displayName)}>{g.displayName}</td>
-                  <td className="px-3 py-2 text-gray-600 text-xs">{g.groupTypeCalculated || ''}</td>
+                    onClick={() => onOpenDetail?.('resource', g.id, g.displayName)}>{g.displayName}</td>
+                  <td className="px-3 py-2 text-gray-600 text-xs">{g.resourceType || g.groupTypeCalculated || ''}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs max-w-xs truncate" title={g.description || ''}>
                     {g.description || ''}
                   </td>
@@ -320,3 +323,6 @@ export default function GroupsPage({ onOpenDetail }) {
     </div>
   );
 }
+
+// Backward compat alias
+export { ResourcesPage as GroupsPage };

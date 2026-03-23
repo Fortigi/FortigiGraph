@@ -81,7 +81,8 @@ function Remove-FGUI {
             [string]$ApiVersion = "2023-01-01"
         )
 
-        $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+        $tokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com" -WarningAction SilentlyContinue -ErrorAction Stop
+        $token = if ($tokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $tokenObj.Token).Password } else { $tokenObj.Token }
         $headers = @{ Authorization = "Bearer $token" }
         $fullUri = if ($Uri -match '\?') { "$Uri&api-version=$ApiVersion" } else { "$Uri`?api-version=$ApiVersion" }
 
@@ -92,7 +93,8 @@ function Remove-FGUI {
     if ($authClientId) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deleting App Registration: $authAppName..." -ForegroundColor Cyan
         try {
-            $graphToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue -ErrorAction Stop).Token
+            $graphTokenObj = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -WarningAction SilentlyContinue -ErrorAction Stop
+            $graphToken = if ($graphTokenObj.Token -is [System.Security.SecureString]) { [System.Net.NetworkCredential]::new('', $graphTokenObj.Token).Password } else { $graphTokenObj.Token }
             $graphHeaders = @{
                 Authorization  = "Bearer $graphToken"
                 "Content-Type" = "application/json"
