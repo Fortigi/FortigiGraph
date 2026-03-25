@@ -23,7 +23,6 @@
     "ScheduleTimeZone": "W. Europe Standard Time",
     "Users": {
       "Enabled": true,
-      "TableName": "Principals",
       "Filter": "",
       "AdditionalAttributes": [
         "streetAddress",
@@ -38,7 +37,6 @@
     },
     "Groups": {
       "Enabled": true,
-      "TableName": "Resources",
       "Filter": "",
       "Schedule": {
         "Enabled": true,
@@ -48,7 +46,6 @@
     },
     "GroupMembers": {
       "Enabled": true,
-      "TableName": "ResourceAssignments",
       "Schedule": {
         "Enabled": true,
         "Time": "07:00",
@@ -60,12 +57,10 @@
       "_Comment": "PIM not configured in this environment"
     },
     "GroupOwners": {
-      "Enabled": true,
-      "TableName": "ResourceAssignments"
+      "Enabled": true
     },
     "Catalogs": {
       "Enabled": true,
-      "TableName": "GovernanceCatalogs",
       "Schedule": {
         "Enabled": true,
         "Time": "06:00",
@@ -74,7 +69,6 @@
     },
     "AccessPackages": {
       "Enabled": true,
-      "TableName": "BusinessRoles",
       "Schedule": {
         "Enabled": true,
         "Time": "06:15",
@@ -83,7 +77,6 @@
     },
     "AccessPackageAssignments": {
       "Enabled": true,
-      "TableName": "BusinessRoleAssignments",
       "Schedule": [
         { "Enabled": true, "Time": "06:00", "Frequency": "Daily" },
         { "Enabled": true, "Time": "12:00", "Frequency": "Daily" },
@@ -91,20 +84,16 @@
       ]
     },
     "AccessPackageResourceRoleScopes": {
-      "Enabled": true,
-      "TableName": "BusinessRoleResources"
+      "Enabled": true
     },
     "AccessPackageAssignmentPolicies": {
-      "Enabled": true,
-      "TableName": "BusinessRolePolicies"
+      "Enabled": true
     },
     "AccessPackageAssignmentRequests": {
-      "Enabled": true,
-      "TableName": "BusinessRoleRequests"
+      "Enabled": true
     },
     "AccessPackageAccessReviews": {
-      "Enabled": true,
-      "TableName": "CertificationDecisions"
+      "Enabled": true
     },
     "_V3_NOTE": "The following sync types are part of the v3.0 Universal Resource Model. They populate the Systems, Resources, Principals, OrgUnits tables alongside the legacy GraphUsers/GraphGroups tables.",
     "Principals": {

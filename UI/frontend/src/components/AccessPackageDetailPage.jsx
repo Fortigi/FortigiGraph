@@ -247,12 +247,12 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   }, [loadHistory]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64 text-gray-500">Loading access package details...</div>;
+    return <div className="flex items-center justify-center h-64 text-gray-500">Loading business role details...</div>;
   }
   if (error) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-        <h2 className="text-red-800 font-semibold">Error loading access package</h2>
+        <h2 className="text-red-800 font-semibold">Error loading business role</h2>
         <p className="text-red-600 mt-1 text-sm">{error}</p>
       </div>
     );
@@ -328,7 +328,7 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
           </div>
           {lastReviewDate && (
             <div className="mt-2 text-sm text-gray-600">
-              <span className="text-gray-500">Last Access Review:</span>{' '}
+              <span className="text-gray-500">Last Certification:</span>{' '}
               <span className="font-medium">{formatDate(lastReviewDate)}</span>
               {lastReviewedBy && <span className="text-gray-500"> by {lastReviewedBy}</span>}
             </div>
@@ -526,14 +526,14 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
       {/* Access Reviews */}
       <div className="mt-6">
         <CollapsibleSection
-          title="Access Reviews"
+          title="Certification Decisions"
           count={reviewCount}
           open={reviewsOpen}
           onToggle={toggleReviews}
           loading={reviewsLoading}
         >
           {reviews && reviews.length === 0 ? (
-            <p className="text-sm text-gray-400 italic p-4">No access reviews found</p>
+            <p className="text-sm text-gray-400 italic p-4">No certification decisions found yet</p>
           ) : reviews && (
             <table className="w-full text-sm">
               <thead>

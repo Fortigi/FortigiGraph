@@ -23,9 +23,6 @@ function Sync-FGGroupMember {
     .PARAMETER GroupIds
     Optional array of specific group IDs to sync. If not specified, syncs all groups.
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "ResourceAssignments"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -74,9 +71,6 @@ function Sync-FGGroupMember {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "ResourceAssignments",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
@@ -85,6 +79,9 @@ function Sync-FGGroupMember {
         [Parameter(Mandatory = $false)]
         [switch]$UseBatching
     )
+
+    # Hardcoded table name
+    $tableName = "ResourceAssignments"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date
@@ -132,10 +129,10 @@ function Sync-FGGroupMember {
 
     # Check if table exists and handle schema
     try {
-        $tableExists = Test-FGSQLTableExists -TableName $TableName
+        $tableExists = Test-FGSQLTableExists -TableName $tableName
 
         if ($tableExists -and $RecreateTable) {
-            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Recreating table '$TableName' - all history will be lost!"
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Recreating table '$tableName' - all history will be lost!"
             $confirm = Read-Host "Are you sure? (Y/N)"
             if ($confirm -notmatch '^[Yy]') {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Operation cancelled." -ForegroundColor Yellow
@@ -143,26 +140,26 @@ function Sync-FGGroupMember {
             }
         }
         elseif ($tableExists) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$tableName' already exists." -ForegroundColor Cyan
 
             # For batching mode, ensure syncBatchId column exists
             if ($UseBatching) {
-                $existingColumns = Get-FGSQLTableSchema -TableName $TableName
+                $existingColumns = Get-FGSQLTableSchema -TableName $tableName
                 if ($existingColumns -notcontains 'syncBatchId') {
                     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Adding syncBatchId column for batching support..." -ForegroundColor Yellow
-                    Add-FGSQLTableColumn -TableName $TableName -Columns @{ 'syncBatchId' = 'UNIQUEIDENTIFIER' }
+                    Add-FGSQLTableColumn -TableName $tableName -Columns @{ 'syncBatchId' = 'UNIQUEIDENTIFIER' }
                 }
             }
         }
         else {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' does not exist. Will be created..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$tableName' does not exist. Will be created..." -ForegroundColor Cyan
         }
 
         # Create table if needed (with composite primary key)
-        $tableStillExists = Test-FGSQLTableExists -TableName $TableName
+        $tableStillExists = Test-FGSQLTableExists -TableName $tableName
 
         if (-not $tableStillExists -or $RecreateTable) {
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('resourceId', 'principalId', 'assignmentType') -DropIfExists:$RecreateTable
+            Initialize-FGSQLTable -TableName $tableName -Columns $columns -PrimaryKey @('resourceId', 'principalId', 'assignmentType') -DropIfExists:$RecreateTable
         }
     }
     catch {
@@ -291,7 +288,7 @@ function Sync-FGGroupMember {
                         $mergeResult = Invoke-FGSQLBulkMerge `
                             -Connection $connection `
                             -Transaction $transaction `
-                            -TargetTableName $TableName `
+                            -TargetTableName $tableName `
                             -DataTable $dataTable `
                             -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
@@ -345,7 +342,7 @@ function Sync-FGGroupMember {
                 $deleteCmd = $connection.CreateCommand()
                 $deleteCmd.Transaction = $transaction
                 $deleteCmd.CommandText = @"
-                    DELETE FROM dbo.[$TableName]
+                    DELETE FROM dbo.[$tableName]
                     WHERE syncBatchId IS NULL OR syncBatchId <> @syncBatchId
 "@
                 $deleteCmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
@@ -378,14 +375,14 @@ function Sync-FGGroupMember {
         Write-Host "`n========================================" -ForegroundColor Green
         Write-Host "Sync Complete! (Batched Mode)" -ForegroundColor Green
         Write-Host "========================================" -ForegroundColor Green
-        Write-Host "Table:           $TableName" -ForegroundColor White
+        Write-Host "Table:           $tableName" -ForegroundColor White
         Write-Host "Groups:          $totalGroups" -ForegroundColor White
         Write-Host "Memberships:     $totalMemberships" -ForegroundColor White
         Write-Host "Inserted:        $totalInserted" -ForegroundColor White
         Write-Host "Updated:         $totalUpdated" -ForegroundColor White
         Write-Host "Deleted:         $deletedCount" -ForegroundColor White
         Write-Host "Errors:          $errorCount" -ForegroundColor White
-        Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
+        Write-Host "`nAll changes are automatically tracked in ${tableName}_History" -ForegroundColor Cyan
         Write-Host "========================================`n" -ForegroundColor Green
 
         # Set sync status for logging (batched mode)
@@ -393,7 +390,7 @@ function Sync-FGGroupMember {
         $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
 
         return @{
-            TableName = $TableName
+            TableName = $tableName
             TotalGroups = $totalGroups
             TotalMemberships = $totalMemberships
             SyncedCount = $syncedCount
@@ -506,7 +503,7 @@ function Sync-FGGroupMember {
                 $mergeResult = Invoke-FGSQLBulkMerge `
                     -Connection $connection `
                     -Transaction $transaction `
-                    -TargetTableName $TableName `
+                    -TargetTableName $tableName `
                     -DataTable $dataTable `
                     -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
@@ -522,7 +519,7 @@ function Sync-FGGroupMember {
                 $deletedCount = Invoke-FGSQLBulkDelete `
                     -Connection $connection `
                     -Transaction $transaction `
-                    -TargetTableName $TableName `
+                    -TargetTableName $tableName `
                     -DataTable $dataTable `
                     -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
@@ -566,13 +563,13 @@ function Sync-FGGroupMember {
         Write-Host "`n========================================" -ForegroundColor Green
         Write-Host "Sync Complete!" -ForegroundColor Green
         Write-Host "========================================" -ForegroundColor Green
-        Write-Host "Table:           $TableName" -ForegroundColor White
+        Write-Host "Table:           $tableName" -ForegroundColor White
         Write-Host "Groups:          $totalGroups" -ForegroundColor White
         Write-Host "Memberships:     $($allMemberships.Count)" -ForegroundColor White
         Write-Host "Synced:          $syncedCount" -ForegroundColor White
         Write-Host "Deleted:         $deletedCount" -ForegroundColor White
         Write-Host "Errors:          $errorCount" -ForegroundColor White
-        Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
+        Write-Host "`nAll changes are automatically tracked in ${tableName}_History" -ForegroundColor Cyan
         Write-Host "========================================`n" -ForegroundColor Green
 
         # Set sync status for logging
@@ -580,7 +577,7 @@ function Sync-FGGroupMember {
         $syncStatus = if ($errorCount -gt 0) { "PartialSuccess" } else { "Success" }
 
         return @{
-            TableName = $TableName
+            TableName = $tableName
             TotalGroups = $totalGroups
             TotalMemberships = $allMemberships.Count
             SyncedCount = $syncedCount
@@ -598,6 +595,6 @@ function Sync-FGGroupMember {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "GroupMembers (Direct)" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+        Write-FGSyncLog -SyncType "GroupMembers (Direct)" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $tableName
     }
 }

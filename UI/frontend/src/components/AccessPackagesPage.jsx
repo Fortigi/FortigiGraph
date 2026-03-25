@@ -229,7 +229,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
   };
 
   const handleExportExcel = useCallback(async () => {
-    setExportStatus('Fetching access packages...');
+    setExportStatus('Fetching business roles...');
     try {
       const { exportAccessPackagesToExcel } = await import('../utils/exportAccessPackagesToExcel');
       await exportAccessPackagesToExcel({
@@ -256,13 +256,13 @@ export default function AccessPackagesPage({ onOpenDetail }) {
     <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Access Packages</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Business Roles</h2>
         <span className="text-sm text-gray-500">{total.toLocaleString()} total</span>
         <button
           onClick={handleExportExcel}
           disabled={!!exportStatus}
           className="ml-auto px-3 py-1 rounded text-xs text-white bg-green-600 hover:bg-green-700 border border-green-700 font-medium disabled:opacity-50"
-          title="Export access packages to Excel (.xlsx)"
+          title="Export business roles to Excel (.xlsx)"
         >
           {exportStatus ? exportStatus : 'Export Excel'}
         </button>
@@ -281,7 +281,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
             }`}
             style={{ backgroundColor: c.color + '20', borderColor: c.color, color: c.color }}
             onClick={() => setCategoryFilter(categoryFilter === c.id ? null : c.id)}
-            title={`${c.assignmentCount} access packages — click to filter`}
+            title={`${c.assignmentCount} business roles — click to filter`}
           >
             {c.name}
             <span className="text-[10px] opacity-70">({c.assignmentCount})</span>
@@ -301,7 +301,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
               : 'hover:opacity-80 bg-gray-50 border-gray-300 text-gray-500'
           }`}
           onClick={() => setCategoryFilter(categoryFilter === 'uncategorized' ? null : 'uncategorized')}
-          title="Show access packages without a category"
+          title="Show business roles without a category"
         >
           Uncategorized
         </span>
@@ -423,10 +423,10 @@ export default function AccessPackagesPage({ onOpenDetail }) {
 
       {/* Table */}
       {loading ? (
-        <div className="text-center text-gray-500 py-12">Loading access packages...</div>
+        <div className="text-center text-gray-500 py-12">Loading business roles...</div>
       ) : packages.length === 0 ? (
         <div className="text-center text-gray-500 py-12">
-          {hasAnyFilter ? 'No access packages match the current filters.' : 'No access packages found.'}
+          {hasAnyFilter ? 'No business roles match the current filters.' : 'No business roles found.'}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -555,7 +555,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                       <div>
                         <span
                           className="inline-block px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-50 text-yellow-700 border-yellow-300"
-                          title="Access review is configured on the assignment policy but no review instance has been created yet"
+                          title="Certification is configured on the assignment policy but no review instance has been created yet"
                         >
                           Pending first review
                         </span>
@@ -576,7 +576,7 @@ export default function AccessPackagesPage({ onOpenDetail }) {
                     ) : (
                       <span
                         className="text-gray-400 text-xs"
-                        title="No access review is configured on any assignment policy for this package"
+                        title="No certification is configured on any assignment policy for this business role"
                       >
                         Not required
                       </span>

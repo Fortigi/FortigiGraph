@@ -20,9 +20,6 @@ function Sync-FGCSVPrincipal {
     .PARAMETER Path
     Path to the Users.csv file.
 
-    .PARAMETER TableName
-    Target SQL table name. Default: "Principals"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the Principals table (WARNING: loses all history!)
 
@@ -46,11 +43,10 @@ function Sync-FGCSVPrincipal {
         [string]$Path,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "Principals",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
     )
+
+    $TableName = "Principals"
 
     # Helper: Generate deterministic GUID from a string
     function New-DeterministicGuid {

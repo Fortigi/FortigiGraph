@@ -12,9 +12,6 @@ function Sync-FGCSVResourceAssignment {
     .PARAMETER Path
     Path to the Account-Permission.csv file (semicolon-delimited, quoted, UTF8).
 
-    .PARAMETER TableName
-    Name of the SQL table to sync to. Default: "ResourceAssignments"
-
     .EXAMPLE
     Sync-FGCSVResourceAssignment -Path ".\data\Account-Permission.csv"
 
@@ -28,11 +25,10 @@ function Sync-FGCSVResourceAssignment {
     [Alias("Sync-CSVResourceAssignment")]
     Param(
         [Parameter(Mandatory = $true)]
-        [string]$Path,
-
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "ResourceAssignments"
+        [string]$Path
     )
+
+    $TableName = "ResourceAssignments"
 
     function New-DeterministicGuid {
         param([string]$InputString)

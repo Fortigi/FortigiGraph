@@ -17,18 +17,18 @@ function MatrixCell({ cellKey, membershipTypes, managed, apColor, apCount, apNam
     if (apNames && apNames.length > 0) {
       title = `${types}\nManaged by: ${apNames.join(', ')}`;
     } else if (managed) {
-      title = `${types} (managed by access package)`;
+      title = `${types} (managed by business role)`;
     } else {
       title = types;
     }
     if (provisioningGap) {
       const expectedLabel = gapExpected ? ` (expects ${gapExpected})` : '';
-      title += `\n\u26a0 Provisioning gap: user lacks the membership type specified by the access package${expectedLabel}`;
+      title += `\n\u26a0 Provisioning gap: user lacks the membership type specified by the business role${expectedLabel}`;
     }
   } else if (provisioningGap) {
     // AP manages this cell but user has no membership at all
     const expectedLabel = gapExpected ? ` ${gapExpected}` : '';
-    title = `\u26a0 Provisioning gap: access package expects${expectedLabel} membership but user has none`;
+    title = `\u26a0 Provisioning gap: business role expects${expectedLabel} membership but user has none`;
     if (apNames && apNames.length > 0) {
       title += `\nManaged by: ${apNames.join(', ')}`;
     }

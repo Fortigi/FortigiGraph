@@ -25,9 +25,6 @@ function Sync-FGGroup {
     .PARAMETER Filter
     Optional OData filter to limit which groups to sync (e.g., "securityEnabled eq true")
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "Resources"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -69,14 +66,14 @@ function Sync-FGGroup {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "Resources",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
         [int]$BatchSize = 100
     )
+
+    # Hardcoded table name
+    $TableName = "Resources"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date

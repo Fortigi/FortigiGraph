@@ -561,7 +561,7 @@ function CuratedDataSection() {
     <Section title="Curated Data" icon="📦" defaultOpen>
       <div className="mt-4 space-y-4">
         <p className="text-sm text-gray-500">
-          Export and import manually curated data — user tags, group/resource tags, and access package categories —
+          Export and import manually curated data — user tags, group/resource tags, and business role categories —
           so they can be restored after recreating an environment.
           Analyst overrides are managed separately via <code className="bg-gray-100 px-1 rounded text-xs">Export-FGCuratedData</code>.
         </p>
@@ -652,7 +652,7 @@ function CuratedDataSection() {
                   )}
                   <ResultRow label="Already existed" value={result.catAssignSkipped} />
                   {result.catAssignNotFound > 0 && (
-                    <ResultRow label="Access package not found" value={result.catAssignNotFound} bad />
+                    <ResultRow label="Business role not found" value={result.catAssignNotFound} bad />
                   )}
                 </div>
               </div>

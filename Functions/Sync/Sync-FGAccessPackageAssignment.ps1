@@ -22,9 +22,6 @@ function Sync-FGAccessPackageAssignment {
     .PARAMETER Filter
     Optional OData filter to limit which assignments to sync (e.g., "state eq 'delivered'")
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "BusinessRoleAssignments"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -76,9 +73,6 @@ function Sync-FGAccessPackageAssignment {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "BusinessRoleAssignments",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
@@ -108,6 +102,8 @@ function Sync-FGAccessPackageAssignment {
     }
 
     try {
+
+    $tableName = "BusinessRoleAssignments"
 
     # Define default attributes
     $defaultAttributes = @(
@@ -183,7 +179,7 @@ function Sync-FGAccessPackageAssignment {
 
     # Check if table exists and handle schema
     try {
-        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable
+        $tableReady = Initialize-FGSyncTable -TableName $tableName -Columns $columns -RecreateTable:$RecreateTable
         if ($tableReady -eq $false) { return }
     }
     catch {
@@ -329,7 +325,7 @@ function Sync-FGAccessPackageAssignment {
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName $TableName `
+                -TargetTableName $tableName `
                 -DataTable $dataTable `
                 -KeyColumns @('id')
 
@@ -345,7 +341,7 @@ function Sync-FGAccessPackageAssignment {
             $deletedCount = Invoke-FGSQLBulkDelete `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName $TableName `
+                -TargetTableName $tableName `
                 -DataTable $dataTable `
                 -KeyColumns @('id')
 
@@ -389,13 +385,13 @@ function Sync-FGAccessPackageAssignment {
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host "Sync Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "Table:               $TableName" -ForegroundColor White
+    Write-Host "Table:               $tableName" -ForegroundColor White
     Write-Host "Total Assignments:   $($allAssignments.Count)" -ForegroundColor White
     Write-Host "Synced:              $syncedCount" -ForegroundColor White
     Write-Host "Deleted:             $deletedCount" -ForegroundColor White
     Write-Host "Errors:              $errorCount" -ForegroundColor White
     Write-Host "Attributes:          $($Attributes.Count)" -ForegroundColor White
-    Write-Host "`nAll changes are automatically tracked in ${TableName}_History" -ForegroundColor Cyan
+    Write-Host "`nAll changes are automatically tracked in ${tableName}_History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
 
     # Set sync status for logging
@@ -410,11 +406,11 @@ function Sync-FGAccessPackageAssignment {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "AccessPackageAssignments" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+        Write-FGSyncLog -SyncType "AccessPackageAssignments" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $tableName
     }
 
     return @{
-        TableName = $TableName
+        TableName = $tableName
         TotalAssignments = $allAssignments.Count
         SyncedCount = $syncedCount
         DeletedCount = $deletedCount

@@ -16,9 +16,6 @@ function Sync-FGCSVCertification {
     .PARAMETER Path
     Path to the CRAs.csv file (semicolon-delimited, quoted, UTF8).
 
-    .PARAMETER TableName
-    Name of the SQL table to sync to. Default: "CertificationDecisions"
-
     .EXAMPLE
     Sync-FGCSVCertification -Path ".\data\CRAs.csv"
 
@@ -33,11 +30,10 @@ function Sync-FGCSVCertification {
     [Alias("Sync-CSVCertification")]
     Param(
         [Parameter(Mandatory = $true)]
-        [string]$Path,
-
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "CertificationDecisions"
+        [string]$Path
     )
+
+    $TableName = "CertificationDecisions"
 
     function New-DeterministicGuid {
         param([string]$InputString)

@@ -13,6 +13,7 @@ let tablesReady = false;
 
 async function ensureCategoryTables(pool) {
   if (tablesReady) return;
+  // Create each table in a separate statement to avoid partial failures
   await pool.request().query(`
     IF OBJECT_ID('dbo.GovernanceCategories', 'U') IS NULL
     CREATE TABLE dbo.GovernanceCategories (
@@ -21,12 +22,12 @@ async function ensureCategoryTables(pool) {
       color NVARCHAR(7) NOT NULL DEFAULT '#3b82f6',
       createdAt DATETIME2 DEFAULT GETUTCDATE()
     );
+  `);
+  await pool.request().query(`
     IF OBJECT_ID('dbo.GovernanceCategoryAssignments', 'U') IS NULL
     CREATE TABLE dbo.GovernanceCategoryAssignments (
-      businessRoleId NVARCHAR(36) NOT NULL,
-      categoryId INT NOT NULL,
-      CONSTRAINT PK_GovernanceCategoryAssignments PRIMARY KEY (businessRoleId),
-      CONSTRAINT FK_CategoryAssignment_Category FOREIGN KEY (categoryId) REFERENCES dbo.GovernanceCategories(id) ON DELETE CASCADE
+      businessRoleId NVARCHAR(36) NOT NULL PRIMARY KEY,
+      categoryId INT NOT NULL REFERENCES dbo.GovernanceCategories(id) ON DELETE CASCADE
     );
   `);
   tablesReady = true;

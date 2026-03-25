@@ -22,9 +22,6 @@ function Sync-FGCSVIdentity {
     .PARAMETER Path
     Path to the Identities.csv file.
 
-    .PARAMETER TableName
-    Target SQL table name for identities. Default: "Identities"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the target tables (WARNING: loses all history!)
 
@@ -49,11 +46,10 @@ function Sync-FGCSVIdentity {
         [string]$Path,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "Identities",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
     )
+
+    $TableName = "Identities"
 
     # Helper: Generate deterministic GUID from a string
     function New-DeterministicGuid {

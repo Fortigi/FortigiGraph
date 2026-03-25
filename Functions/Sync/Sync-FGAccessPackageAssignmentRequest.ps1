@@ -24,9 +24,6 @@ function Sync-FGAccessPackageAssignmentRequest {
     .PARAMETER Filter
     Optional OData filter to limit which requests to sync (e.g., "requestState eq 'Delivered'")
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "BusinessRoleRequests"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -79,9 +76,6 @@ function Sync-FGAccessPackageAssignmentRequest {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "BusinessRoleRequests",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
@@ -111,6 +105,8 @@ function Sync-FGAccessPackageAssignmentRequest {
     }
 
     try {
+
+    $TableName = "BusinessRoleRequests"
 
     $syncMode = if ($UseBatching) { "batched (low memory)" } else { "bulk (high performance)" }
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting assignment request sync ($syncMode)..." -ForegroundColor Cyan
@@ -236,13 +232,23 @@ function Sync-FGAccessPackageAssignmentRequest {
         elseif ($tableExists) {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Table '$TableName' already exists." -ForegroundColor Cyan
 
-            # For batching mode, ensure syncBatchId column exists
-            if ($UseBatching) {
-                $existingColumns = Get-FGSQLTableSchema -TableName $TableName
-                if ($existingColumns -notcontains 'syncBatchId') {
-                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Adding syncBatchId column for batching support..." -ForegroundColor Yellow
-                    Add-FGSQLTableColumn -TableName $TableName -Columns @{ 'syncBatchId' = 'UNIQUEIDENTIFIER' }
+            # Schema evolution: add any missing columns
+            $existingColumns = Get-FGSQLTableSchema -TableName $TableName
+            $missingColumns = @{}
+            foreach ($colName in $columns.Keys) {
+                if ($existingColumns -notcontains $colName) {
+                    $missingColumns[$colName] = $columns[$colName]
                 }
+            }
+            if ($missingColumns.Count -gt 0) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($missingColumns.Count) new column(s) to add: $($missingColumns.Keys -join ', ')" -ForegroundColor Yellow
+                Add-FGSQLTableColumn -TableName $TableName -Columns $missingColumns
+            }
+
+            # For batching mode, ensure syncBatchId column exists
+            if ($UseBatching -and $existingColumns -notcontains 'syncBatchId') {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Adding syncBatchId column for batching support..." -ForegroundColor Yellow
+                Add-FGSQLTableColumn -TableName $TableName -Columns @{ 'syncBatchId' = 'UNIQUEIDENTIFIER' }
             }
         }
         else {

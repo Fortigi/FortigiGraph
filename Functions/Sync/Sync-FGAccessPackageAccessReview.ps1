@@ -15,9 +15,6 @@ function Sync-FGAccessPackageAccessReview {
     - Review decisions (approve, deny, no decision)
     - Review coverage and compliance
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "CertificationDecisions"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -37,9 +34,6 @@ function Sync-FGAccessPackageAccessReview {
     [CmdletBinding()]
     [Alias("Sync-AccessPackageAccessReview")]
     Param(
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "CertificationDecisions",
-
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
     )
@@ -61,6 +55,8 @@ function Sync-FGAccessPackageAccessReview {
     }
 
     try {
+
+    $TableName = "CertificationDecisions"
 
     # Define attributes for flattened review decision data
     $Attributes = @(

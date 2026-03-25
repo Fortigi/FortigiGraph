@@ -609,19 +609,19 @@ function Write-SyncError {
     $executionMode = if ($ParallelExecution) { "Parallel" } else { "Sequential" }
     Write-SyncHeader "Starting Data Synchronization ($executionMode)"
 
-    # Determine table names (from config or defaults)
-    $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "Principals" }
-    $groupTableName = if ($config.Sync.Groups.TableName) { $config.Sync.Groups.TableName } else { "Resources" }
-    $groupMembersTableName = if ($config.Sync.GroupMembers.TableName) { $config.Sync.GroupMembers.TableName } else { "ResourceAssignments" }
-    $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "ResourceAssignments" }
-    $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "ResourceAssignments" }
-    $catalogsTableName = if ($config.Sync.Catalogs.TableName) { $config.Sync.Catalogs.TableName } else { "GovernanceCatalogs" }
-    $accessPackagesTableName = if ($config.Sync.AccessPackages.TableName) { $config.Sync.AccessPackages.TableName } else { "BusinessRoles" }
-    $accessPackageAssignmentsTableName = if ($config.Sync.AccessPackageAssignments.TableName) { $config.Sync.AccessPackageAssignments.TableName } else { "BusinessRoleAssignments" }
-    $accessPackageResourceRoleScopesTableName = if ($config.Sync.AccessPackageResourceRoleScopes.TableName) { $config.Sync.AccessPackageResourceRoleScopes.TableName } else { "BusinessRoleResources" }
-    $accessPackageAssignmentPoliciesTableName = if ($config.Sync.AccessPackageAssignmentPolicies.TableName) { $config.Sync.AccessPackageAssignmentPolicies.TableName } else { "BusinessRolePolicies" }
-    $accessPackageAssignmentRequestsTableName = if ($config.Sync.AccessPackageAssignmentRequests.TableName) { $config.Sync.AccessPackageAssignmentRequests.TableName } else { "BusinessRoleRequests" }
-    $accessPackageAccessReviewsTableName = if ($config.Sync.AccessPackageAccessReviews.TableName) { $config.Sync.AccessPackageAccessReviews.TableName } else { "CertificationDecisions" }
+    # Table names (hardcoded to universal data model)
+    $userTableName = "Principals"
+    $groupTableName = "Resources"
+    $groupMembersTableName = "ResourceAssignments"
+    $groupEligibleMembersTableName = "ResourceAssignments"
+    $groupOwnersTableName = "ResourceAssignments"
+    $catalogsTableName = "GovernanceCatalogs"
+    $accessPackagesTableName = "BusinessRoles"
+    $accessPackageAssignmentsTableName = "BusinessRoleAssignments"
+    $accessPackageResourceRoleScopesTableName = "BusinessRoleResources"
+    $accessPackageAssignmentPoliciesTableName = "BusinessRolePolicies"
+    $accessPackageAssignmentRequestsTableName = "BusinessRoleRequests"
+    $accessPackageAccessReviewsTableName = "CertificationDecisions"
 
     if ($ParallelExecution) {
         # Parallel execution using runspaces
@@ -678,52 +678,52 @@ function Write-SyncError {
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupMembers" {
-                        $null = Sync-FGGroupMember -TableName $TableName @SyncParams
+                        $null = Sync-FGGroupMember @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupEligibleMembers" {
-                        $null = Sync-FGGroupEligibleMember -TableName $TableName
+                        $null = Sync-FGGroupEligibleMember
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "GroupOwners" {
-                        $null = Sync-FGGroupOwner -TableName $TableName
+                        $null = Sync-FGGroupOwner
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "Catalogs" {
-                        $null = Sync-FGCatalog -TableName $TableName
+                        $null = Sync-FGCatalog
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackages" {
-                        $null = Sync-FGAccessPackage -TableName $TableName
+                        $null = Sync-FGAccessPackage
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignments" {
-                        $null = Sync-FGAccessPackageAssignment -TableName $TableName
+                        $null = Sync-FGAccessPackageAssignment
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageResourceRoleScopes" {
-                        $null = Sync-FGAccessPackageResourceRoleScope -TableName $TableName
+                        $null = Sync-FGAccessPackageResourceRoleScope
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignmentPolicies" {
-                        $null = Sync-FGAccessPackageAssignmentPolicy -TableName $TableName
+                        $null = Sync-FGAccessPackageAssignmentPolicy
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignmentRequests" {
-                        $null = Sync-FGAccessPackageAssignmentRequest -TableName $TableName @SyncParams
+                        $null = Sync-FGAccessPackageAssignmentRequest @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAccessReviews" {
-                        $null = Sync-FGAccessPackageAccessReview -TableName $TableName
+                        $null = Sync-FGAccessPackageAccessReview
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
@@ -799,7 +799,7 @@ function Write-SyncError {
         # Create job for Groups sync
         if ($SyncGroups) {
             Write-SyncStep "Starting group sync job..."
-            $groupSyncParams = @{ TableName = $groupTableName }
+            $groupSyncParams = @{}
             if ($GroupFilter) { $groupSyncParams.Filter = $GroupFilter }
             if ($GroupAdditionalAttributes) { $groupSyncParams.AdditionalAttributes = $GroupAdditionalAttributes }
 
@@ -1303,9 +1303,7 @@ function Write-SyncError {
         if ($SyncGroups) {
             Write-SyncStep "Syncing groups to SQL..."
             try {
-                $syncParams = @{
-                    TableName = $groupTableName
-                }
+                $syncParams = @{}
 
                 if ($GroupFilter) {
                     $syncParams.Filter = $GroupFilter
@@ -1332,7 +1330,7 @@ function Write-SyncError {
             $batchingMode = if ($GroupMembersUseBatching) { " (batched mode)" } else { "" }
             Write-SyncStep "Syncing direct group memberships$batchingMode..."
             try {
-                $syncParams = @{ TableName = $groupMembersTableName }
+                $syncParams = @{}
                 if ($GroupMembersUseBatching) { $syncParams.UseBatching = $true }
 
                 Sync-FGGroupMember @syncParams
@@ -1360,7 +1358,7 @@ function Write-SyncError {
                 }
 
                 if ($pimGroupCount -gt 0 -or -not $SyncGroups) {
-                    Sync-FGGroupEligibleMember -TableName $groupEligibleMembersTableName
+                    Sync-FGGroupEligibleMember
 
                     $eligibleCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupEligibleMembersTableName" -AsScalar
                     $script:SyncStats.EligibleMembers = $eligibleCount
@@ -1380,7 +1378,7 @@ function Write-SyncError {
         if ($SyncGroupOwners) {
             Write-SyncStep "Syncing group ownership relationships..."
             try {
-                Sync-FGGroupOwner -TableName $groupOwnersTableName
+                Sync-FGGroupOwner
 
                 $ownerCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$groupOwnersTableName" -AsScalar
                 $script:SyncStats.Owners = $ownerCount
@@ -1394,7 +1392,7 @@ function Write-SyncError {
         if ($SyncCatalogs) {
             Write-SyncStep "Syncing access package catalogs..."
             try {
-                Sync-FGCatalog -TableName $catalogsTableName
+                Sync-FGCatalog
 
                 $catalogCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$catalogsTableName" -AsScalar
                 $script:SyncStats.Catalogs = $catalogCount
@@ -1408,7 +1406,7 @@ function Write-SyncError {
         if ($SyncAccessPackages) {
             Write-SyncStep "Syncing access packages..."
             try {
-                Sync-FGAccessPackage -TableName $accessPackagesTableName
+                Sync-FGAccessPackage
 
                 $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackagesTableName" -AsScalar
                 $script:SyncStats.AccessPackages = $packageCount
@@ -1422,7 +1420,7 @@ function Write-SyncError {
         if ($SyncAccessPackageAssignments) {
             Write-SyncStep "Syncing access package assignments..."
             try {
-                Sync-FGAccessPackageAssignment -TableName $accessPackageAssignmentsTableName
+                Sync-FGAccessPackageAssignment
 
                 $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentsTableName" -AsScalar
                 $script:SyncStats.AccessPackageAssignments = $assignmentCount
@@ -1436,7 +1434,7 @@ function Write-SyncError {
         if ($SyncAccessPackageResourceRoleScopes) {
             Write-SyncStep "Syncing access package resource role scopes..."
             try {
-                Sync-FGAccessPackageResourceRoleScope -TableName $accessPackageResourceRoleScopesTableName
+                Sync-FGAccessPackageResourceRoleScope
 
                 $scopeCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageResourceRoleScopesTableName" -AsScalar
                 $script:SyncStats.AccessPackageResourceRoleScopes = $scopeCount
@@ -1450,7 +1448,7 @@ function Write-SyncError {
         if ($SyncAccessPackageAssignmentPolicies) {
             Write-SyncStep "Syncing access package assignment policies..."
             try {
-                Sync-FGAccessPackageAssignmentPolicy -TableName $accessPackageAssignmentPoliciesTableName
+                Sync-FGAccessPackageAssignmentPolicy
 
                 $policyCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentPoliciesTableName" -AsScalar
                 $script:SyncStats.AccessPackageAssignmentPolicies = $policyCount
@@ -1465,7 +1463,7 @@ function Write-SyncError {
             $batchingMode = if ($AssignmentRequestsUseBatching) { " (batched mode)" } else { "" }
             Write-SyncStep "Syncing access package assignment requests$batchingMode..."
             try {
-                $syncParams = @{ TableName = $accessPackageAssignmentRequestsTableName }
+                $syncParams = @{}
                 if ($AssignmentRequestsUseBatching) { $syncParams.UseBatching = $true }
 
                 Sync-FGAccessPackageAssignmentRequest @syncParams
@@ -1482,7 +1480,7 @@ function Write-SyncError {
         if ($SyncAccessPackageAccessReviews) {
             Write-SyncStep "Syncing access package access reviews..."
             try {
-                Sync-FGAccessPackageAccessReview -TableName $accessPackageAccessReviewsTableName
+                Sync-FGAccessPackageAccessReview
 
                 $reviewCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAccessReviewsTableName" -AsScalar
                 $script:SyncStats.AccessPackageAccessReviews = $reviewCount
@@ -1578,41 +1576,6 @@ function Write-SyncError {
 
             $apViewParams = @{
                 DropIfExists = $true
-            }
-
-            # Use configured table names
-            if ($SyncCatalogs) {
-                $apViewParams.CatalogsTable = $catalogsTableName
-            }
-            if ($SyncAccessPackages) {
-                $apViewParams.AccessPackagesTable = $accessPackagesTableName
-            }
-            if ($SyncAccessPackageAssignments) {
-                $apViewParams.AssignmentsTable = $accessPackageAssignmentsTableName
-            }
-            if ($SyncAccessPackageResourceRoleScopes) {
-                $apViewParams.ResourceRoleScopesTable = $accessPackageResourceRoleScopesTableName
-            }
-            if ($SyncUsers) {
-                $apViewParams.UsersTable = $userTableName
-            }
-            if ($SyncGroups) {
-                $apViewParams.GroupsTable = $groupTableName
-            }
-            if ($SyncGroupMembers) {
-                $apViewParams.GroupMembersTable = $groupMembersTableName
-            }
-            if ($SyncGroupOwners) {
-                $apViewParams.GroupOwnersTable = $groupOwnersTableName
-            }
-            if ($SyncAccessPackageAssignmentRequests) {
-                $apViewParams.AssignmentRequestsTable = $accessPackageAssignmentRequestsTableName
-            }
-            if ($SyncAccessPackageAssignmentPolicies) {
-                $apViewParams.AssignmentPoliciesTable = $accessPackageAssignmentPoliciesTableName
-            }
-            if ($SyncAccessPackageAccessReviews) {
-                $apViewParams.AccessReviewDecisionsTable = $accessPackageAccessReviewsTableName
             }
 
             Initialize-FGAccessPackageViews @apViewParams

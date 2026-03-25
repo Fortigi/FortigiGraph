@@ -21,9 +21,6 @@ function Sync-FGAccessPackage {
     .PARAMETER Filter
     Optional OData filter to limit which access packages to sync (e.g., "isHidden eq false")
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "BusinessRoles"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -41,9 +38,9 @@ function Sync-FGAccessPackage {
     Syncs access packages with default attributes PLUS the additional ones specified
 
     .EXAMPLE
-    Sync-FGAccessPackage -Filter "isHidden eq false" -TableName "VisibleAccessPackages"
+    Sync-FGAccessPackage -Filter "isHidden eq false"
 
-    Syncs only visible access packages to a custom table name
+    Syncs only visible access packages
 
     .NOTES
     Requires:
@@ -65,14 +62,14 @@ function Sync-FGAccessPackage {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "BusinessRoles",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
         [int]$BatchSize = 100
     )
+
+    # Hardcoded table name
+    $TableName = "BusinessRoles"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date

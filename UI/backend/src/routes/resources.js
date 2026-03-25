@@ -235,7 +235,7 @@ router.get('/resources/:id', async (req, res) => {
       const r = await timedRequest(pool, 'resource-ap-count', res)
         .input('id', resourceId)
         .query(`
-          SELECT COUNT(DISTINCT rrs.accessPackageId) AS cnt
+          SELECT COUNT(DISTINCT rrs.businessRoleId) AS cnt
           FROM BusinessRoleResources rrs
           WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
             AND rrs.scopeOriginSystem = 'AadGroup'

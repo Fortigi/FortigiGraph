@@ -21,9 +21,6 @@ function Sync-FGCatalog {
     .PARAMETER Filter
     Optional OData filter to limit which catalogs to sync (e.g., "catalogType eq 'userManaged'")
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GovernanceCatalogs"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -41,9 +38,9 @@ function Sync-FGCatalog {
     Syncs catalogs with default attributes PLUS the additional ones specified
 
     .EXAMPLE
-    Sync-FGCatalog -Filter "catalogType eq 'userManaged'" -TableName "UserManagedCatalogs"
+    Sync-FGCatalog -Filter "catalogType eq 'userManaged'"
 
-    Syncs only user-managed catalogs to a custom table name
+    Syncs only user-managed catalogs
 
     .NOTES
     Requires:
@@ -65,14 +62,14 @@ function Sync-FGCatalog {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GovernanceCatalogs",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
         [int]$BatchSize = 100
     )
+
+    # Hardcoded table name
+    $TableName = "GovernanceCatalogs"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date

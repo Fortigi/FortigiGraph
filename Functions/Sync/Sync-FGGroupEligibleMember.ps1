@@ -23,9 +23,6 @@ function Sync-FGGroupEligibleMember {
     .PARAMETER GroupIds
     Optional array of specific group IDs to sync. If not specified, syncs all PIM groups.
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "ResourceAssignments"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -53,11 +50,11 @@ function Sync-FGGroupEligibleMember {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "ResourceAssignments",
-
-        [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
     )
+
+    # Hardcoded table name
+    $TableName = "ResourceAssignments"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date

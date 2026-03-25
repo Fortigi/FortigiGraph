@@ -456,7 +456,7 @@ async function accessPackageResourcesHandler(req, res) {
   try {
     if (useSql) {
       const p = await db.getPool();
-      await ensureCategoryTables(p);
+      try { await ensureCategoryTables(p); } catch { /* category tables optional */ }
       const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
           rrs.businessRoleId,
@@ -475,7 +475,9 @@ async function accessPackageResourcesHandler(req, res) {
           cat.color AS categoryColor
         FROM dbo.BusinessRoleResources rrs
         INNER JOIN dbo.BusinessRoles ap ON rrs.businessRoleId = ap.id
+                   AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
         INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+                   AND c.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN dbo.Resources r ON UPPER(rrs.scopeOriginId) = r.id
                    AND r.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN (
@@ -487,6 +489,7 @@ async function accessPackageResourcesHandler(req, res) {
         LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.businessRoleId) = ca.businessRoleId
         LEFT  JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
         WHERE rrs.scopeOriginSystem = 'AadGroup'
+          AND rrs.ValidTo = '9999-12-31 23:59:59.9999999'
       `);
       return res.json(result.recordset);
     }

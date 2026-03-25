@@ -150,12 +150,12 @@ export default function GovernancePage() {
   }, [loadDrilldown, selectedCategory]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64 text-gray-500">Loading access review data...</div>;
+    return <div className="flex items-center justify-center h-64 text-gray-500">Loading certification data...</div>;
   }
   if (error) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-        <h2 className="text-red-800 font-semibold">Error loading access review data</h2>
+        <h2 className="text-red-800 font-semibold">Error loading certification data</h2>
         <p className="text-red-600 mt-1 text-sm">{error}</p>
       </div>
     );
@@ -166,18 +166,18 @@ export default function GovernancePage() {
   const compliantPct = totalAPs > 0 ? Math.round((compliant / totalAPs) * 1000) / 10 : 0;
 
   const FILTER_LABELS = {
-    overdue: 'Overdue Access Packages',
+    overdue: 'Overdue Business Roles',
     'reviewed-late': 'Reviewed Late',
-    compliant: 'Compliant Access Packages',
+    compliant: 'Compliant Business Roles',
     'in-progress': 'Reviews In Progress',
   };
 
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Access Review Compliance</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Certification Compliance</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Per access package: is the latest periodic review completed on time?
+          Per business role: is the latest periodic review completed on time?
         </p>
       </div>
 
@@ -202,7 +202,7 @@ export default function GovernancePage() {
       {/* ─── Stat Cards (AP-centric) ───────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
         <StatCard
-          label="Access Packages"
+          label="Business Roles"
           value={formatNum(totalAPs)}
           sub="with periodic reviews"
           color="gray"
@@ -258,7 +258,7 @@ export default function GovernancePage() {
       {/* ─── Drill-down ────────────────────────────────────── */}
       {drilldown && (
         <CollapsibleSection
-          title={FILTER_LABELS[drilldown.filter] || 'Access Packages'}
+          title={FILTER_LABELS[drilldown.filter] || 'Business Roles'}
           count={drilldown.data?.length}
           open={drilldownOpen}
           onToggle={() => setDrilldownOpen(o => !o)}
@@ -274,7 +274,7 @@ export default function GovernancePage() {
 
 function DrilldownTable({ data: drilldown }) {
   if (drilldown.loading) return <div className="text-sm text-gray-400 animate-pulse">Loading...</div>;
-  if (!drilldown.data || drilldown.data.length === 0) return <p className="text-sm text-gray-400 italic">No access packages found</p>;
+  if (!drilldown.data || drilldown.data.length === 0) return <p className="text-sm text-gray-400 italic">No business roles found</p>;
 
   const rows = drilldown.data;
 
@@ -283,7 +283,7 @@ function DrilldownTable({ data: drilldown }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
-            <th className="px-3 py-2 font-medium">Access Package</th>
+            <th className="px-3 py-2 font-medium">Business Role</th>
             <th className="px-3 py-2 font-medium">Category</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 font-medium">Review Deadline</th>

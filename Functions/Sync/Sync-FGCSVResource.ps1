@@ -23,9 +23,6 @@ function Sync-FGCSVResource {
     .PARAMETER Path
     Path to the ResourceSystem.csv file (semicolon-delimited, UTF-8).
 
-    .PARAMETER TableName
-    Target SQL table name. Default: 'Resources'
-
     .EXAMPLE
     Sync-FGCSVResource -Path "C:\Exports\ResourceSystem.csv"
 
@@ -40,11 +37,10 @@ function Sync-FGCSVResource {
     [Alias("Sync-CSVResource")]
     Param(
         [Parameter(Mandatory = $true)]
-        [string]$Path,
-
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "Resources"
+        [string]$Path
     )
+
+    $TableName = "Resources"
 
     # Deterministic GUID helper for rows without a native GUID
     function New-DeterministicGuid {

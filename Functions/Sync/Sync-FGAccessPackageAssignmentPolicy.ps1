@@ -22,9 +22,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
     .PARAMETER Filter
     Optional OData filter to limit which policies to sync
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "BusinessRolePolicies"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -35,11 +32,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Sync-FGAccessPackageAssignmentPolicy
 
     Syncs all access package assignment policies with default attributes
-
-    .EXAMPLE
-    Sync-FGAccessPackageAssignmentPolicy -TableName "APPolicies"
-
-    Syncs to a custom table name
 
     .NOTES
     Requires:
@@ -60,9 +52,6 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
         [Parameter(Mandatory = $false)]
         [string]$Filter,
-
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "BusinessRolePolicies",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -88,6 +77,8 @@ function Sync-FGAccessPackageAssignmentPolicy {
     }
 
     try {
+
+    $TableName = "BusinessRolePolicies"
 
     # Define default attributes
     # NOTE: Uses v1.0 Graph endpoint (not beta) because automaticRequestSettings

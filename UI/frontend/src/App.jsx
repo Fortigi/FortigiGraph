@@ -87,7 +87,7 @@ const ALL_NAV_TABS = [
   { key: 'users',            label: 'Users' },
   { key: 'resources',        label: 'Resources' },
   { key: 'systems',          label: 'Systems' },
-  { key: 'access-packages',  label: 'Access Packages' },
+  { key: 'access-packages',  label: 'Business Roles' },
   { key: 'sync-log',         label: 'Sync Log' },
   { key: 'risk-scores',      label: 'Risk Scores',  feature: 'riskScoring',        optional: true },
   { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },

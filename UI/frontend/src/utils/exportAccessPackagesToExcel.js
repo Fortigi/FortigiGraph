@@ -35,7 +35,7 @@ async function fetchAllPackages(authFetch, { search, categoryFilter, sortCol, so
   }
   if (sortCol) { params.set('sortCol', sortCol); params.set('sortDir', sortDir); }
   const res = await authFetch(`/api/access-packages?${params}`);
-  if (!res.ok) throw new Error('Failed to fetch access packages');
+  if (!res.ok) throw new Error('Failed to fetch business roles');
   const json = await res.json();
   return json.data;
 }
@@ -58,7 +58,7 @@ async function fetchResourceRoles(authFetch, apId) {
 
 export async function exportAccessPackagesToExcel({ authFetch, search, categoryFilter, sortCol, sortDir, typeFilter, onProgress }) {
   // 1. Fetch all matching APs
-  onProgress?.('Fetching access packages...');
+  onProgress?.('Fetching business roles...');
   const allPackages = await fetchAllPackages(authFetch, { search, categoryFilter, sortCol, sortDir });
 
   // Apply client-side type filter (same as the page does)
@@ -81,7 +81,7 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
   wb.creator = 'FortigiGraph';
   wb.created = new Date();
 
-  const ws = wb.addWorksheet('Access Packages');
+  const ws = wb.addWorksheet('Business Roles');
 
   const columns = [
     { header: 'Name',          width: 40 },
@@ -196,7 +196,7 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `access-packages-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `business-roles-${new Date().toISOString().slice(0, 10)}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }

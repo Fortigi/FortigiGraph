@@ -13,9 +13,6 @@ function Sync-FGAccessPackageResourceRoleScope {
     - Uses temporal tables for automatic change tracking
     - Enables analysis: "Which groups does a user get from access package X?"
 
-    .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "BusinessRoleResources"
-
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
 
@@ -26,11 +23,6 @@ function Sync-FGAccessPackageResourceRoleScope {
     Sync-FGAccessPackageResourceRoleScope
 
     Syncs all access package resource role scopes
-
-    .EXAMPLE
-    Sync-FGAccessPackageResourceRoleScope -TableName "APResourceRoles"
-
-    Syncs to a custom table name
 
     .NOTES
     Requires:
@@ -44,9 +36,6 @@ function Sync-FGAccessPackageResourceRoleScope {
     [CmdletBinding()]
     [Alias("Sync-AccessPackageResourceRoleScope")]
     Param(
-        [Parameter(Mandatory = $false)]
-        [string]$TableName = "BusinessRoleResources",
-
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
 
@@ -71,6 +60,8 @@ function Sync-FGAccessPackageResourceRoleScope {
     }
 
     try {
+
+    $TableName = "BusinessRoleResources"
 
     # Define fixed attributes for resource role scopes
     # These represent the flattened structure we'll store

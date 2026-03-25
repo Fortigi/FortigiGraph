@@ -21,45 +21,6 @@ function Initialize-FGAccessPackageViews {
     .PARAMETER DropIfExists
     If specified, drops existing views before creating new ones
 
-    .PARAMETER GovernanceCatalogsTable
-    Name of the governance catalogs table. Default: "GovernanceCatalogs"
-
-    .PARAMETER BusinessRolesTable
-    Name of the business roles table. Default: "BusinessRoles"
-
-    .PARAMETER BusinessRoleAssignmentsTable
-    Name of the business role assignments table. Default: "BusinessRoleAssignments"
-
-    .PARAMETER BusinessRoleResourcesTable
-    Name of the business role resources table. Default: "BusinessRoleResources"
-
-    .PARAMETER UsersTable
-    Name of the users table. Default: "GraphUsers"
-
-    .PARAMETER GroupsTable
-    Name of the groups table. Default: "GraphGroups"
-
-    .PARAMETER GroupMembersTable
-    Name of the group members table. Default: "GraphGroupMembers"
-
-    .PARAMETER GroupOwnersTable
-    Name of the group owners table. Default: "GraphGroupOwners"
-
-    .PARAMETER BusinessRoleRequestsTable
-    Name of the business role requests table. Default: "BusinessRoleRequests"
-
-    .PARAMETER BusinessRolePoliciesTable
-    Name of the business role policies table. Default: "BusinessRolePolicies"
-
-    .PARAMETER CertificationDecisionsTable
-    Name of the certification decisions table. Default: "CertificationDecisions"
-
-    .PARAMETER ResourcesTable
-    Name of the universal resources table. Default: "Resources". If this table exists, views will prefer it over GraphGroups.
-
-    .PARAMETER ResourceAssignmentsTable
-    Name of the universal resource assignments table. Default: "ResourceAssignments". If this table exists, views will prefer it over GraphGroupMembers/GraphGroupOwners.
-
     .EXAMPLE
     Initialize-FGAccessPackageViews
 
@@ -92,47 +53,23 @@ function Initialize-FGAccessPackageViews {
     [Alias("Initialize-AccessPackageViews")]
     Param(
         [Parameter(Mandatory = $false)]
-        [switch]$DropIfExists,
-
-        [Parameter(Mandatory = $false)]
-        [string]$GovernanceCatalogsTable = "GovernanceCatalogs",
-
-        [Parameter(Mandatory = $false)]
-        [string]$BusinessRolesTable = "BusinessRoles",
-
-        [Parameter(Mandatory = $false)]
-        [string]$BusinessRoleAssignmentsTable = "BusinessRoleAssignments",
-
-        [Parameter(Mandatory = $false)]
-        [string]$BusinessRoleResourcesTable = "BusinessRoleResources",
-
-        [Parameter(Mandatory = $false)]
-        [string]$UsersTable = "GraphUsers",
-
-        [Parameter(Mandatory = $false)]
-        [string]$GroupsTable = "GraphGroups",
-
-        [Parameter(Mandatory = $false)]
-        [string]$GroupMembersTable = "GraphGroupMembers",
-
-        [Parameter(Mandatory = $false)]
-        [string]$GroupOwnersTable = "GraphGroupOwners",
-
-        [Parameter(Mandatory = $false)]
-        [string]$BusinessRoleRequestsTable = "BusinessRoleRequests",
-
-        [Parameter(Mandatory = $false)]
-        [string]$BusinessRolePoliciesTable = "BusinessRolePolicies",
-
-        [Parameter(Mandatory = $false)]
-        [string]$CertificationDecisionsTable = "CertificationDecisions",
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResourcesTable = "Resources",
-
-        [Parameter(Mandatory = $false)]
-        [string]$ResourceAssignmentsTable = "ResourceAssignments"
+        [switch]$DropIfExists
     )
+
+    # Fixed table names (v3.0 universal governance model)
+    $GovernanceCatalogsTable = "GovernanceCatalogs"
+    $BusinessRolesTable = "BusinessRoles"
+    $BusinessRoleAssignmentsTable = "BusinessRoleAssignments"
+    $BusinessRoleResourcesTable = "BusinessRoleResources"
+    $UsersTable = "Principals"
+    $GroupsTable = "Resources"
+    $GroupMembersTable = "ResourceAssignments"
+    $GroupOwnersTable = "ResourceAssignments"
+    $BusinessRoleRequestsTable = "BusinessRoleRequests"
+    $BusinessRolePoliciesTable = "BusinessRolePolicies"
+    $CertificationDecisionsTable = "CertificationDecisions"
+    $ResourcesTable = "Resources"
+    $ResourceAssignmentsTable = "ResourceAssignments"
 
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {

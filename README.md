@@ -1008,6 +1008,222 @@ Works with HR provisioning (Workday, SuccessFactors), Azure AD Connect Cloud Syn
 
 ---
 
+## Data Model
+
+FortigiGraph uses a universal data model that supports authorization data from any system — not just Entra ID. All tables use SQL Server temporal versioning for automatic change tracking.
+
+### Core Tables
+
+```
+                                    ┌──────────────┐
+                                    │   Systems    │
+                                    │  (INT PK)    │
+                                    └──────┬───────┘
+                       ┌──────────────────┼──────────────────┐
+                       │                  │                  │
+                  ┌────▼─────┐     ┌──────▼──────┐    ┌──────▼──────┐
+                  │Resources │     │ Principals  │    │  OrgUnits   │
+                  │(GUID PK) │     │ (GUID PK)   │    │ (GUID PK)   │
+                  └────┬─────┘     └──┬───┬──────┘    └─────────────┘
+                       │              │   │                  ▲
+                  ┌────▼──────────┐   │   │             orgUnitId
+                  │  Resource     │◄──┘   │                  │
+                  │  Assignments  │       │            ┌─────┴──────┐
+                  │ (composite PK)│       │            │ Identities │
+                  └────┬──────────┘       │            │ (GUID PK)  │
+                       │                  │            └─────┬──────┘
+                  ┌────▼──────────┐       │            ┌─────▼──────┐
+                  │  Resource     │       └───────────▶│  Identity  │
+                  │ Relationships │       principalId  │  Members   │
+                  │ (composite PK)│                    │(composite) │
+                  └───────────────┘                    └────────────┘
+```
+
+| Table | Purpose | PK | Temporal |
+|-------|---------|-----|----------|
+| **Systems** | Connected authorization sources (EntraID, Omada, SAP, etc.) | INT IDENTITY | Yes |
+| **Resources** | Any permission-granting resource (groups, directory roles, app roles, sites) | UNIQUEIDENTIFIER | Yes |
+| **ResourceAssignments** | Who has access to what — links principals to resources with assignment type (Direct, Owner, Eligible) | resourceId + principalId + assignmentType | Yes |
+| **ResourceRelationships** | Resource-to-resource links (Contains, GrantsAccessTo) | parentResourceId + childResourceId + relationshipType | Yes |
+| **Principals** | User accounts from any system, with `extendedAttributes` JSON for system-specific fields | UNIQUEIDENTIFIER | Yes |
+| **OrgUnits** | Organizational units (departments, teams) calculated from principal data or synced from HR | UNIQUEIDENTIFIER | Yes |
+| **Identities** | Real persons aggregated from multiple accounts across systems | UNIQUEIDENTIFIER | Yes |
+| **IdentityMembers** | Links identities to their principals across systems | identityId + principalId | Yes |
+
+### Governance Tables
+
+The governance model supports business roles, certifications, and access policies from any IGA platform.
+
+```
+                         ┌────────────────────┐
+                         │GovernanceCatalogs   │
+                         │ (GUID PK)           │
+                         └─────────┬──────────┘
+                                   │ catalogId
+                         ┌─────────▼──────────┐
+                         │   BusinessRoles     │
+                         │ (GUID PK)           │
+                         └─────────┬──────────┘
+              ┌────────────┬───────┼───────┬────────────┐
+              │            │       │       │            │
+     ┌────────▼───┐ ┌──────▼────┐ │ ┌─────▼──────┐ ┌───▼──────────┐
+     │ Business   │ │ Business  │ │ │ Business   │ │ Business     │
+     │ Role       │ │ Role      │ │ │ Role       │ │ Role         │
+     │ Resources  │ │Assignments│ │ │ Policies   │ │ Requests     │
+     └────────────┘ └───────────┘ │ └────────────┘ └──────────────┘
+                                  │
+                         ┌────────▼──────────┐
+                         │  Certification    │
+                         │  Decisions        │
+                         └───────────────────┘
+```
+
+| Table | Purpose | IGA Platform Mapping |
+|-------|---------|---------------------|
+| **GovernanceCatalogs** | Containers for business roles | Entra: Catalog, SailPoint: Source |
+| **BusinessRoles** | Named entitlement bundles | Entra: Access Package, Omada: Business Role, SailPoint: Access Profile |
+| **BusinessRoleResources** | Which resources a business role grants | Entra: Resource Role Scopes, Omada: Role Entitlements |
+| **BusinessRoleAssignments** | Who currently holds a business role | Entra: AP Assignment, Omada: Role Assignment |
+| **BusinessRolePolicies** | Assignment rules with `policyConditions` JSON for ABAC | Entra: Assignment Policy, Omada: Context Rules |
+| **BusinessRoleRequests** | Request/approval workflow history | Entra: AP Request |
+| **CertificationDecisions** | Review/certification results (per-role or per-assignment) | Entra: Access Review, Omada: CRA |
+
+### Design Pattern: Core + JSON
+
+Resources and Principals use frequently-queried attributes as real SQL columns (displayName, department, resourceType) and system-specific attributes in an `extendedAttributes` JSON column. This enables SQL indexing on hot columns while keeping the schema extensible for any source system.
+
+---
+
+## SQL Views
+
+Views transform raw assignment data into analytical perspectives. They're created automatically during `Start-FGSync`.
+
+### Resource Permission Views
+
+Created by `Initialize-FGResourceViews`:
+
+| View | Purpose |
+|------|---------|
+| **vw_ResourceMembersRecursive** | Calculates ALL memberships (direct + indirect via nested groups) using a recursive CTE with cycle prevention (max 10 levels deep). Includes the complete membership path. |
+| **vw_ResourceUserPermissionAssignments** | Comprehensive view combining all assignment types (Direct, Indirect, Owner, Eligible, CrossResourceIndirect) into a single queryable surface. Includes `managedByAccessPackage` flag for IST vs SOLL analysis. |
+
+### Governance Analysis Views
+
+Created by `Initialize-FGAccessPackageViews`:
+
+| View | Purpose |
+|------|---------|
+| **vw_UserPermissionAssignmentViaBusinessRole** | Maps users through business roles to the resources they grant — answers "what does this user get from their business roles?" |
+| **vw_DirectGroupMemberships** | Shows direct memberships that are NOT assigned via business roles — the IST vs SOLL gap. These are unmanaged permissions that should be brought into governance. |
+| **vw_DirectGroupOwnerships** | Same as above but for ownership relationships. |
+| **vw_UnmanagedPermissions** | Union of unmanaged memberships and ownerships — the complete list of permissions outside governance. |
+| **vw_BusinessRoleAssignmentDetails** | Shows HOW each business role was assigned: automatic (policy rule), user-requested, or admin-assigned. Infers method from policies when request records are missing. |
+| **vw_BusinessRoleLastReview** | Last certification review per business role — who reviewed, when, what decision, and days since last review. |
+| **vw_ApprovedRequestTimeline** | Approved requests with response time metrics and bucketed categories (< 1 hour, 1-4 hours, 1-3 days, etc.). |
+| **vw_DeniedRequestTimeline** | Denied requests with the same response time analysis. |
+| **vw_PendingRequestTimeline** | Pending requests with aging metrics and overdue flag (> 7 days). |
+| **vw_RequestResponseMetrics** | Aggregate statistics per business role: approval rate, average/min/max response time, response category. |
+
+### Materialized Views
+
+For UI performance, expensive view queries are materialized into indexed tables during sync:
+
+| Materialized Table | Source | Why |
+|--------------------|--------|-----|
+| **mat_UserPermissionAssignmentViaBusinessRole** | vw_UserPermissionAssignmentViaBusinessRole | Eliminates 6-table join on every AP lookup |
+| **mat_UserPermissionAssignments** | vw_ResourceUserPermissionAssignments | Eliminates recursive CTE on every matrix page load |
+| **mat_UserCounts** | Pre-computed from mat_UserPermissionAssignments | "Top 25 users by permission count" becomes an instant index scan instead of GROUP BY over all assignments |
+
+---
+
+## API Architecture
+
+The Role Mining UI is a React + Node.js application backed by Azure SQL. All endpoints are under `/api/` and require Entra ID authentication (except health/config endpoints).
+
+### Data Flow
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────────────────────┐
+│   Browser   │────▶│  Express API     │────▶│         Azure SQL               │
+│  (React +   │     │  (Node.js)       │     │                                 │
+│   MSAL)     │◀────│                  │◀────│  Tables ─▶ Views ─▶ Mat. Tables │
+└─────────────┘     └──────────────────┘     └─────────────────────────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │ Auth        │
+                    │ Middleware   │
+                    │ (Entra JWT) │
+                    └─────────────┘
+```
+
+### API Endpoints by Domain
+
+#### Matrix & Permissions
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/permissions` | Matrix data (user × resource × membership type) | mat_UserPermissionAssignments → Principals + Resources |
+| `GET /api/access-package-groups` | Business role → resource mappings for SOLL columns | BusinessRoleResources + BusinessRoles + GovernanceCatalogs |
+| `GET /api/user-columns` | Filterable user columns + distinct values | Principals |
+| `GET /api/resource-columns` | Filterable resource columns + distinct values | Resources |
+| `GET /api/groups-with-nested` | Resource IDs that are members of other resources | ResourceAssignments |
+
+#### Entity Detail (lazy-loaded sections)
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/user/:id` | User attributes + counts | Principals |
+| `GET /api/user/:id/memberships` | User's resource memberships with type badges | mat_UserPermissionAssignments + Resources |
+| `GET /api/user/:id/access-packages` | User's business role assignments | BusinessRoleAssignments + BusinessRoles |
+| `GET /api/user/:id/history` | Temporal version history | Principals FOR SYSTEM_TIME ALL |
+| `GET /api/group/:id` | Resource attributes + counts | Resources |
+| `GET /api/group/:id/members` | Resource member list with types | mat_UserPermissionAssignments |
+| `GET /api/group/:id/access-packages` | Business roles governing this resource | BusinessRoleResources + BusinessRoles |
+| `GET /api/group/:id/history` | Temporal version history | Resources FOR SYSTEM_TIME ALL |
+| `GET /api/access-package/:id` | Business role detail + compliance status | BusinessRoles + GovernanceCatalogs + CertificationDecisions |
+| `GET /api/access-package/:id/assignments` | Active user assignments | BusinessRoleAssignments + Principals |
+| `GET /api/access-package/:id/resource-roles` | Resources granted by this role | BusinessRoleResources + Resources |
+| `GET /api/access-package/:id/policies` | Assignment policies (auto-add rules, scope) | BusinessRolePolicies |
+| `GET /api/access-package/:id/reviews` | Certification decisions | CertificationDecisions |
+| `GET /api/access-package/:id/requests` | Request history | BusinessRoleRequests + Principals |
+
+#### Business Roles & Categories
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/access-packages` | Paginated list with compliance info | BusinessRoles + GovernanceCatalogs + BusinessRoleAssignments |
+| `GET/POST/PATCH/DELETE /api/categories` | Category CRUD | GovernanceCategories |
+| `POST /api/categories/:id/assign` | Assign category to business role | GovernanceCategoryAssignments |
+
+#### Systems & Resources
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/systems` | Connected systems with counts + resource types | Systems + Resources + Principals + ResourceAssignments |
+| `GET /api/resources` | Paginated resource list with filters | Resources |
+| `GET /api/org-units` | Organizational unit list/tree | OrgUnits + Principals |
+
+#### Risk Scoring
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/risk-scores` | Summary + top risky entities | Principals + Resources (riskScore columns) |
+| `GET /api/risk-scores/users` | Paginated user risk scores | Principals |
+| `GET /api/risk-scores/groups` | Paginated resource risk scores | Resources |
+| `PUT /api/risk-scores/:type/:id/override` | Analyst score adjustment (-50 to +50) | Principals or Resources |
+| `GET /api/risk-scores/clusters` | Resource clusters with aggregate risk | GraphResourceClusters |
+
+#### Identity Correlation
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/identities` | Correlated identities across systems | Identities + IdentityMembers |
+| `PUT /api/identities/:id/verify` | Analyst verification of correlation | Identities |
+
+#### Operations
+| Endpoint | Purpose | Reads From |
+|----------|---------|------------|
+| `GET /api/sync-log` | Recent sync operations | GraphSyncLog |
+| `GET /api/org-chart` | Manager hierarchy tree (cached 5 min) | Principals (managerId) |
+| `GET /api/health` | Health check (no auth required) | — |
+| `GET /api/auth-config` | MSAL config (no auth required) | — |
+
+---
+
 ## Repository Structure
 
 ```

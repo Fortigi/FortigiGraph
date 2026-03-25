@@ -102,7 +102,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       ws.mergeCells(1, apColStart, 1, apColStart + apCount - 1);
     }
     const apBanner = ws.getCell(1, apColStart);
-    apBanner.value = 'Access Packages (SOLL)';
+    apBanner.value = 'Business Roles (SOLL)';
     apBanner.font = { size: 11, bold: true, color: { argb: 'FF3730A3' } };
     apBanner.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
     apBanner.fill = {
