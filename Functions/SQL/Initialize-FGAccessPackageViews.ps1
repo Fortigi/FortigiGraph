@@ -114,7 +114,7 @@ SELECT
 CREATE VIEW dbo.$view1Name AS
 SELECT
     a.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     ap.id AS businessRoleId,
     ap.displayName AS businessRoleName,
@@ -140,7 +140,7 @@ WHERE a.assignmentState = 'delivered'  -- Only active assignments
 CREATE VIEW dbo.$view1Name AS
 SELECT
     a.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     ap.id AS businessRoleId,
     ap.displayName AS businessRoleName,
@@ -171,7 +171,7 @@ WHERE a.assignmentState = 'delivered'  -- Only active assignments
 CREATE VIEW dbo.$view2Name AS
 SELECT
     ra.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     ra.resourceId AS groupId,
     r.displayName AS groupName,
@@ -200,7 +200,7 @@ WHERE ra.assignmentType = 'Direct'
 CREATE VIEW dbo.$view2Name AS
 SELECT
     gm.memberId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     gm.groupId,
     g.displayName AS groupName,
@@ -232,7 +232,7 @@ WHERE ap.userId IS NULL  -- No matching access package assignment
 CREATE VIEW dbo.$view3Name AS
 SELECT
     ra.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     ra.resourceId AS groupId,
     r.displayName AS groupName,
@@ -261,7 +261,7 @@ WHERE ra.assignmentType = 'Owner'
 CREATE VIEW dbo.$view3Name AS
 SELECT
     go.ownerId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     go.groupId,
     g.displayName AS groupName,
@@ -354,7 +354,7 @@ WITH BRPolicyType AS (
 SELECT
     a.id AS assignmentId,
     a.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     a.businessRoleId,
     ap.displayName AS businessRoleName,
@@ -401,7 +401,7 @@ CREATE VIEW dbo.$view5Name AS
 SELECT
     a.id AS assignmentId,
     a.principalId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     a.businessRoleId,
     ap.displayName AS businessRoleName,
@@ -486,7 +486,7 @@ CREATE VIEW dbo.$view7Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     req.businessRoleId,
     ap.displayName AS businessRoleName,
@@ -527,7 +527,7 @@ CREATE VIEW dbo.$view8Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     req.businessRoleId,
     ap.displayName AS businessRoleName,
@@ -567,7 +567,7 @@ CREATE VIEW dbo.$view9Name AS
 SELECT
     req.id AS requestId,
     req.requestorId AS userId,
-    u.userPrincipalName,
+    u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
     req.businessRoleId,
     ap.displayName AS businessRoleName,

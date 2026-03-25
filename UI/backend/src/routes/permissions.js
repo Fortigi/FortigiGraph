@@ -460,6 +460,7 @@ async function accessPackageResourcesHandler(req, res) {
       const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
           rrs.businessRoleId,
+          rrs.businessRoleId AS accessPackageId,
           ap.displayName AS accessPackageName,
           c.displayName  AS catalogName,
           UPPER(rrs.scopeOriginId) AS resourceId,
