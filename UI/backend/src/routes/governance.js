@@ -23,23 +23,23 @@ const LAST_REVIEW_CTE = `
 WITH LatestInstance AS (
   -- Find the most recent review instance per access package
   SELECT
-    accessPackageId,
+    businessRoleId,
     MAX(reviewInstanceId) AS reviewInstanceId,
     MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime,
     MAX(reviewInstanceStartDateTime) AS reviewInstanceStartDateTime,
     MAX(reviewInstanceStatus) AS reviewInstanceStatus
-  FROM GraphAccessPackageAccessReviewDecisions
+  FROM CertificationDecisions
   WHERE reviewInstanceEndDateTime = (
     SELECT MAX(r2.reviewInstanceEndDateTime)
-    FROM GraphAccessPackageAccessReviewDecisions r2
-    WHERE r2.accessPackageId = GraphAccessPackageAccessReviewDecisions.accessPackageId
+    FROM CertificationDecisions r2
+    WHERE r2.businessRoleId = CertificationDecisions.businessRoleId
   )
-  GROUP BY accessPackageId
+  GROUP BY businessRoleId
 ),
 LastReviewPerAP AS (
   -- Summarize decisions within the latest instance only
   SELECT
-    li.accessPackageId,
+    li.businessRoleId,
     li.reviewInstanceEndDateTime AS deadline,
     li.reviewInstanceStartDateTime AS reviewStart,
     li.reviewInstanceStatus,
@@ -71,10 +71,10 @@ LastReviewPerAP AS (
       ELSE 0
     END AS daysOverdue
   FROM LatestInstance li
-    INNER JOIN GraphAccessPackageAccessReviewDecisions d
-      ON d.accessPackageId = li.accessPackageId
+    INNER JOIN CertificationDecisions d
+      ON d.businessRoleId = li.businessRoleId
       AND d.reviewInstanceId = li.reviewInstanceId
-  GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
+  GROUP BY li.businessRoleId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
 )`;
 
 // ────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ router.get('/governance/review-compliance', async (req, res) => {
     const result = await request.query(
       `${LAST_REVIEW_CTE}
       SELECT
-        ap.id AS accessPackageId,
+        ap.id AS businessRoleId,
         ap.displayName AS accessPackageName,
         c.displayName AS catalogName,
         cat.name AS categoryName,
@@ -163,10 +163,10 @@ router.get('/governance/review-compliance', async (req, res) => {
         lr.lastReviewedBy,
         lr.reviewInstanceStatus
       FROM LastReviewPerAP lr
-        INNER JOIN GraphAccessPackages ap ON lr.accessPackageId = ap.id
-        LEFT JOIN GraphCatalogs c ON ap.catalogId = c.id
-        LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
-        LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
+        INNER JOIN BusinessRoles ap ON lr.businessRoleId = ap.id
+        LEFT JOIN GovernanceCatalogs c ON ap.catalogId = c.id
+        LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.businessRoleId
+        LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
       WHERE 1=1 ${filterClause} ${categoryClause}
       ORDER BY
         CASE lr.complianceStatus
@@ -191,7 +191,7 @@ router.get('/governance/categories', async (req, res) => {
   try {
     const pool = await db.getPool();
     const rows = await safeQuery(pool, 'gov-categories', res,
-      `SELECT id, name, color FROM dbo.GraphCategories ORDER BY name`);
+      `SELECT id, name, color FROM dbo.GovernanceCategories ORDER BY name`);
     res.json(rows);
   } catch {
     res.json([]);

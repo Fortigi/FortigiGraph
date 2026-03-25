@@ -16,7 +16,7 @@ function Sync-FGAccessPackageAccessReview {
     - Review coverage and compliance
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackageAccessReviewDecisions"
+    Name of the SQL table to create/sync to. Default: "CertificationDecisions"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -38,7 +38,7 @@ function Sync-FGAccessPackageAccessReview {
     [Alias("Sync-AccessPackageAccessReview")]
     Param(
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackageAccessReviewDecisions",
+        [string]$TableName = "CertificationDecisions",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
@@ -67,7 +67,7 @@ function Sync-FGAccessPackageAccessReview {
         'id'                           # Decision ID (unique)
         'reviewInstanceId'             # Which review instance this decision belongs to
         'reviewDefinitionId'           # Which review definition/schedule
-        'accessPackageId'              # Which access package was reviewed
+        'businessRoleId'               # Which business role (access package) was reviewed
         'principalId'                  # User whose access is being reviewed
         'principalDisplayName'         # Display name of user being reviewed
         'reviewedResourceId'           # Resource being reviewed (often the access package assignment)
@@ -90,7 +90,7 @@ function Sync-FGAccessPackageAccessReview {
         'id' = 'UNIQUEIDENTIFIER'
         'reviewInstanceId' = 'UNIQUEIDENTIFIER'
         'reviewDefinitionId' = 'UNIQUEIDENTIFIER'
-        'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'businessRoleId' = 'UNIQUEIDENTIFIER'
         'principalId' = 'UNIQUEIDENTIFIER'
         'principalDisplayName' = 'NVARCHAR(255)'
         'reviewedResourceId' = 'UNIQUEIDENTIFIER'
@@ -215,7 +215,7 @@ function Sync-FGAccessPackageAccessReview {
                                     id = $decision.id
                                     reviewInstanceId = $instance.id
                                     reviewDefinitionId = $definition.id
-                                    accessPackageId = $definitionAccessPackageId
+                                    businessRoleId = $definitionAccessPackageId
                                     principalId = $decision.principal.id
                                     principalDisplayName = $decision.principal.displayName
                                     reviewedResourceId = $decision.resource.id

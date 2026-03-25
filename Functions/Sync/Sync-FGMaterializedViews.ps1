@@ -5,13 +5,13 @@ function Sync-FGMaterializedViews {
 
     .DESCRIPTION
     Converts the complex analysis views (vw_UserPermissionAssignments and
-    vw_UserPermissionAssignmentViaAccessPackage) into physical tables with indexes.
+    vw_UserPermissionAssignmentViaBusinessRole) into physical tables with indexes.
     This eliminates the expensive recursive CTE and EXISTS subqueries that run on
     every API request, reducing query time from minutes to milliseconds.
 
     The materialized tables use the "mat_" prefix:
     - mat_UserPermissionAssignments (from vw_UserPermissionAssignments)
-    - mat_UserPermissionAssignmentViaAccessPackage (from vw_UserPermissionAssignmentViaAccessPackage)
+    - mat_UserPermissionAssignmentViaBusinessRole (from vw_UserPermissionAssignmentViaBusinessRole)
 
     The UI backend automatically detects and prefers materialized tables, falling
     back to the views if they don't exist.
@@ -78,7 +78,7 @@ function Sync-FGMaterializedViews {
         $checkCmd.CommandTimeout = 60
         $checkCmd.CommandText = @"
 SELECT
-    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaAccessPackage') THEN 1 ELSE 0 END AS ApViewExists,
+    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaBusinessRole') THEN 1 ELSE 0 END AS ApViewExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupMembers') THEN 1 ELSE 0 END AS DirectMembersExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupOwners') THEN 1 ELSE 0 END AS OwnersExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupEligibleMembers') THEN 1 ELSE 0 END AS EligibleExists
@@ -94,7 +94,7 @@ SELECT
         $materialized = 0
 
         # ═══════════════════════════════════════════════════════════════
-        # Step 1: Materialize vw_UserPermissionAssignmentViaAccessPackage
+        # Step 1: Materialize vw_UserPermissionAssignmentViaBusinessRole
         # Simple 6-table join, no recursion — materialize first so we can
         # use it for the managedByAccessPackage LEFT JOIN in step 2.
         # ═══════════════════════════════════════════════════════════════
@@ -105,28 +105,28 @@ SELECT
                 $cmd = $connection.CreateCommand()
                 $cmd.CommandTimeout = $CommandTimeout
                 $cmd.CommandText = @"
-IF OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') IS NOT NULL
-    DROP TABLE dbo.mat_UserPermissionAssignmentViaAccessPackage;
+IF OBJECT_ID('dbo.mat_UserPermissionAssignmentViaBusinessRole', 'U') IS NOT NULL
+    DROP TABLE dbo.mat_UserPermissionAssignmentViaBusinessRole;
 
 SELECT *
-INTO dbo.mat_UserPermissionAssignmentViaAccessPackage
-FROM dbo.vw_UserPermissionAssignmentViaAccessPackage;
+INTO dbo.mat_UserPermissionAssignmentViaBusinessRole
+FROM dbo.vw_UserPermissionAssignmentViaBusinessRole;
 
 CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_userId_groupId
-    ON dbo.mat_UserPermissionAssignmentViaAccessPackage (userId, groupId)
-    INCLUDE (accessPackageId);
+    ON dbo.mat_UserPermissionAssignmentViaBusinessRole (userId, groupId)
+    INCLUDE (businessRoleId);
 
-CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_accessPackageId
-    ON dbo.mat_UserPermissionAssignmentViaAccessPackage (accessPackageId);
+CREATE NONCLUSTERED INDEX IX_mat_UPAVBR_businessRoleId
+    ON dbo.mat_UserPermissionAssignmentViaBusinessRole (businessRoleId);
 "@
                 $cmd.ExecuteNonQuery() | Out-Null
 
                 $countCmd = $connection.CreateCommand()
                 $countCmd.CommandTimeout = 120
-                $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignmentViaAccessPackage"
+                $countCmd.CommandText = "SELECT COUNT(*) FROM dbo.mat_UserPermissionAssignmentViaBusinessRole"
                 $rowCount = $countCmd.ExecuteScalar()
 
-                Write-Host "    Materialized mat_UserPermissionAssignmentViaAccessPackage: $rowCount rows" -ForegroundColor Green
+                Write-Host "    Materialized mat_UserPermissionAssignmentViaBusinessRole: $rowCount rows" -ForegroundColor Green
                 $materialized++
             }
             catch {
@@ -135,7 +135,7 @@ CREATE NONCLUSTERED INDEX IX_mat_UPAVAP_accessPackageId
             }
         }
         else {
-            Write-Host "  View vw_UserPermissionAssignmentViaAccessPackage does not exist (optional)" -ForegroundColor Yellow
+            Write-Host "  View vw_UserPermissionAssignmentViaBusinessRole does not exist (optional)" -ForegroundColor Yellow
         }
 
         # ═══════════════════════════════════════════════════════════════
@@ -239,7 +239,7 @@ FROM dbo.GraphGroupEligibleMembers WHERE ValidTo = '9999-12-31 23:59:59.9999999'
                         $apJoinSQL = @"
 LEFT JOIN (
     SELECT DISTINCT userId, groupId
-    FROM dbo.mat_UserPermissionAssignmentViaAccessPackage
+    FROM dbo.mat_UserPermissionAssignmentViaBusinessRole
 ) ap ON ap.userId = a.memberId AND ap.groupId = a.groupId
 "@
                         $apColumnSQL = "CAST(CASE WHEN ap.userId IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage"
@@ -352,7 +352,7 @@ UPDATE STATISTICS dbo.mat_UserCounts;
             try {
                 $cmd = $connection.CreateCommand()
                 $cmd.CommandTimeout = 300
-                $cmd.CommandText = "UPDATE STATISTICS dbo.mat_UserPermissionAssignmentViaAccessPackage"
+                $cmd.CommandText = "UPDATE STATISTICS dbo.mat_UserPermissionAssignmentViaBusinessRole"
                 $cmd.ExecuteNonQuery() | Out-Null
             }
             catch {

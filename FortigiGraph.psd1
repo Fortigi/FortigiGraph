@@ -12,7 +12,7 @@
 RootModule = '.\FortigiGraph.psm1'
 
 # Version number of this module.
-ModuleVersion = '3.0.20260323.1700'
+ModuleVersion = '3.1.20260324.1830'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()

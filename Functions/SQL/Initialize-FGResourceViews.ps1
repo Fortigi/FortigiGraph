@@ -29,7 +29,7 @@ function Initialize-FGResourceViews {
     - Connect-FGSQLServer to be called first
     - Resources and ResourceAssignments tables to exist
     - ResourceRelationships table is optional (cross-resource indirect access)
-    - vw_UserPermissionAssignmentViaAccessPackage is optional (for managedByAccessPackage column)
+    - vw_UserPermissionAssignmentViaBusinessRole is optional (for managedByAccessPackage column)
     #>
 
     [CmdletBinding()]
@@ -53,7 +53,7 @@ SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Resources' AND TABLE_SCHEMA = 'dbo') THEN 1 ELSE 0 END AS ResourcesExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceAssignments' AND TABLE_SCHEMA = 'dbo') THEN 1 ELSE 0 END AS AssignmentsExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceRelationships' AND TABLE_SCHEMA = 'dbo') THEN 1 ELSE 0 END AS RelationshipsExists,
-    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaAccessPackage') THEN 1 ELSE 0 END AS SollViewExists
+    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaBusinessRole') THEN 1 ELSE 0 END AS SollViewExists
 "@
         $reader = $checkCmd.ExecuteReader()
         $reader.Read()
@@ -76,7 +76,7 @@ SELECT
         }
 
         if (-not $sollViewExists) {
-            Write-Warning "View 'vw_UserPermissionAssignmentViaAccessPackage' does not exist. managedByAccessPackage will always be 0."
+            Write-Warning "View 'vw_UserPermissionAssignmentViaBusinessRole' does not exist. managedByAccessPackage will always be 0."
         }
 
         # View 1: Recursive Resource Memberships
@@ -247,7 +247,7 @@ SELECT
             $createView2SQL += @"
 
     CAST(CASE WHEN EXISTS (
-        SELECT 1 FROM dbo.vw_UserPermissionAssignmentViaAccessPackage ap
+        SELECT 1 FROM dbo.vw_UserPermissionAssignmentViaBusinessRole ap
         WHERE ap.userId = a.principalId
           AND ap.groupId = a.resourceId
     ) THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage
@@ -285,7 +285,7 @@ FROM AllAssignments a;
         Write-Host "  - Single query to get complete permission picture" -ForegroundColor Gray
         Write-Host "  - Columns: resourceId, principalId, principalType, membershipType, ValidFrom, ValidTo, managedByAccessPackage" -ForegroundColor Gray
         if ($sollViewExists) {
-            Write-Host "  - managedByAccessPackage: Checks against vw_UserPermissionAssignmentViaAccessPackage (SOLL)" -ForegroundColor Gray
+            Write-Host "  - managedByAccessPackage: Checks against vw_UserPermissionAssignmentViaBusinessRole (SOLL)" -ForegroundColor Gray
         }
         else {
             Write-Host "  - managedByAccessPackage: Always 0 (run Initialize-FGAccessPackageViews first, then re-run this)" -ForegroundColor Yellow

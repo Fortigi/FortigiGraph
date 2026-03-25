@@ -23,7 +23,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Optional OData filter to limit which policies to sync
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackageAssignmentPolicies"
+    Name of the SQL table to create/sync to. Default: "BusinessRolePolicies"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -62,7 +62,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackageAssignmentPolicies",
+        [string]$TableName = "BusinessRolePolicies",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -101,7 +101,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'description'
 
         # Relationships (derived from $expand=accessPackage)
-        'accessPackageId'
+        'businessRoleId'
 
         # v1.0 policy scope
         'allowedTargetScope'
@@ -159,7 +159,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'id' = 'UNIQUEIDENTIFIER'
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
-        'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'businessRoleId' = 'UNIQUEIDENTIFIER'
         'allowedTargetScope' = 'NVARCHAR(255)'
         'automaticRequestSettings' = 'NVARCHAR(MAX)'
         'hasAutoAddRule' = 'BIT'
@@ -195,7 +195,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
     # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
     # accessPackageId is derived from expanded accessPackage navigation property in v1.0
-    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'hasAccessReview', 'accessPackageId')
+    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'hasAccessReview', 'businessRoleId')
     $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
     $selectProperties = $graphAttributes -join ','
     # Use v1.0 endpoint — automaticRequestSettings only exists in v1.0, not beta
@@ -233,7 +233,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $valueResolvers = @{
-        'accessPackageId' = { param($obj) if ($obj.accessPackage -and $obj.accessPackage.id) { $obj.accessPackage.id } else { $null } }
+        'businessRoleId' = { param($obj) if ($obj.accessPackage -and $obj.accessPackage.id) { $obj.accessPackage.id } elseif ($obj.accessPackageId) { $obj.accessPackageId } else { $null } }
         'automaticRequestSettings' = { param($obj) if ($obj.automaticRequestSettings) { $obj.automaticRequestSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'hasAutoAddRule' = {
             param($obj)

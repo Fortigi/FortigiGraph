@@ -532,53 +532,33 @@ function Write-SyncError {
 
     #region Resource Model Tables
     # Always ensure system tables exist when any resource model sync is active
-    if ($SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships) {
+    if ($SyncUsers -or $SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships) {
         try {
             Write-SyncStep "Ensuring resource model tables exist..."
             Initialize-FGSystemTables
             Write-SyncSuccess "Resource model tables ready"
-
-            # Auto-migrate on first run: if Resources is empty but GraphGroups has data, migrate automatically
-            $resourceCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar -ErrorAction SilentlyContinue
-            $legacyCount   = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.GraphGroups WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar -ErrorAction SilentlyContinue
-            if ([int]$resourceCount -eq 0 -and [int]$legacyCount -gt 0) {
-                Write-SyncStep "Resources table is empty but legacy data found — running automatic migration..."
-                try {
-                    Invoke-FGResourceModelMigration -Force
-                    Write-SyncSuccess "Automatic migration complete"
-                } catch {
-                    Write-SyncError "Automatic migration failed" $_.Exception.Message
-                }
-            }
         } catch {
             Write-SyncError "Failed to initialize resource model tables" $_.Exception.Message
         }
     }
     #endregion
 
-    #region Resource Model Migration
-    if ($MigrateResourceModel) {
-        Write-SyncHeader "Resource Model Setup"
-
+    #region Governance Model Tables
+    # Always ensure governance tables exist when any access package sync is active
+    if ($SyncCatalogs -or $SyncAccessPackages -or $SyncAccessPackageAssignments -or $SyncAccessPackageResourceRoleScopes -or $SyncAccessPackageAssignmentPolicies -or $SyncAccessPackageAssignmentRequests -or $SyncAccessPackageAccessReviews) {
         try {
-            # Migrate existing data if old tables exist
-            Write-SyncStep "Checking for data migration..."
-            Invoke-FGResourceModelMigration -Force
-            Write-SyncSuccess "Data migration complete"
+            Write-SyncStep "Ensuring governance model tables exist..."
+            Initialize-FGGovernanceTables
+            Write-SyncSuccess "Governance model tables ready"
+        } catch {
+            Write-SyncError "Failed to initialize governance model tables" $_.Exception.Message
+        }
+    }
+    #endregion
 
-            # Migrate principal data
-            try {
-                Write-SyncStep "Checking for principal migration..."
-                Invoke-FGPrincipalMigration -Force
-                Write-SyncSuccess "Principal migration complete"
-            } catch {
-                Write-SyncError "Principal migration failed" $_.Exception.Message
-            }
-        }
-        catch {
-            Write-SyncError "Resource model migration failed" $_.Exception.Message
-            # Continue with sync - migration failure shouldn't block everything
-        }
+    #region Resource Model Migration (deprecated)
+    if ($MigrateResourceModel) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource model migration is no longer needed — sync functions now write directly to universal tables." -ForegroundColor Yellow
     }
     #endregion
 
@@ -630,18 +610,18 @@ function Write-SyncError {
     Write-SyncHeader "Starting Data Synchronization ($executionMode)"
 
     # Determine table names (from config or defaults)
-    $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "GraphUsers" }
-    $groupTableName = if ($config.Sync.Groups.TableName) { $config.Sync.Groups.TableName } else { "GraphGroups" }
-    $groupMembersTableName = if ($config.Sync.GroupMembers.TableName) { $config.Sync.GroupMembers.TableName } else { "GraphGroupMembers" }
-    $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "GraphGroupEligibleMembers" }
-    $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "GraphGroupOwners" }
-    $catalogsTableName = if ($config.Sync.Catalogs.TableName) { $config.Sync.Catalogs.TableName } else { "GraphCatalogs" }
-    $accessPackagesTableName = if ($config.Sync.AccessPackages.TableName) { $config.Sync.AccessPackages.TableName } else { "GraphAccessPackages" }
-    $accessPackageAssignmentsTableName = if ($config.Sync.AccessPackageAssignments.TableName) { $config.Sync.AccessPackageAssignments.TableName } else { "GraphAccessPackageAssignments" }
-    $accessPackageResourceRoleScopesTableName = if ($config.Sync.AccessPackageResourceRoleScopes.TableName) { $config.Sync.AccessPackageResourceRoleScopes.TableName } else { "GraphAccessPackageResourceRoleScopes" }
-    $accessPackageAssignmentPoliciesTableName = if ($config.Sync.AccessPackageAssignmentPolicies.TableName) { $config.Sync.AccessPackageAssignmentPolicies.TableName } else { "GraphAccessPackageAssignmentPolicies" }
-    $accessPackageAssignmentRequestsTableName = if ($config.Sync.AccessPackageAssignmentRequests.TableName) { $config.Sync.AccessPackageAssignmentRequests.TableName } else { "GraphAccessPackageAssignmentRequests" }
-    $accessPackageAccessReviewsTableName = if ($config.Sync.AccessPackageAccessReviews.TableName) { $config.Sync.AccessPackageAccessReviews.TableName } else { "GraphAccessPackageAccessReviewDecisions" }
+    $userTableName = if ($config.Sync.Users.TableName) { $config.Sync.Users.TableName } else { "Principals" }
+    $groupTableName = if ($config.Sync.Groups.TableName) { $config.Sync.Groups.TableName } else { "Resources" }
+    $groupMembersTableName = if ($config.Sync.GroupMembers.TableName) { $config.Sync.GroupMembers.TableName } else { "ResourceAssignments" }
+    $groupEligibleMembersTableName = if ($config.Sync.GroupEligibleMembers.TableName) { $config.Sync.GroupEligibleMembers.TableName } else { "ResourceAssignments" }
+    $groupOwnersTableName = if ($config.Sync.GroupOwners.TableName) { $config.Sync.GroupOwners.TableName } else { "ResourceAssignments" }
+    $catalogsTableName = if ($config.Sync.Catalogs.TableName) { $config.Sync.Catalogs.TableName } else { "GovernanceCatalogs" }
+    $accessPackagesTableName = if ($config.Sync.AccessPackages.TableName) { $config.Sync.AccessPackages.TableName } else { "BusinessRoles" }
+    $accessPackageAssignmentsTableName = if ($config.Sync.AccessPackageAssignments.TableName) { $config.Sync.AccessPackageAssignments.TableName } else { "BusinessRoleAssignments" }
+    $accessPackageResourceRoleScopesTableName = if ($config.Sync.AccessPackageResourceRoleScopes.TableName) { $config.Sync.AccessPackageResourceRoleScopes.TableName } else { "BusinessRoleResources" }
+    $accessPackageAssignmentPoliciesTableName = if ($config.Sync.AccessPackageAssignmentPolicies.TableName) { $config.Sync.AccessPackageAssignmentPolicies.TableName } else { "BusinessRolePolicies" }
+    $accessPackageAssignmentRequestsTableName = if ($config.Sync.AccessPackageAssignmentRequests.TableName) { $config.Sync.AccessPackageAssignmentRequests.TableName } else { "BusinessRoleRequests" }
+    $accessPackageAccessReviewsTableName = if ($config.Sync.AccessPackageAccessReviews.TableName) { $config.Sync.AccessPackageAccessReviews.TableName } else { "CertificationDecisions" }
 
     if ($ParallelExecution) {
         # Parallel execution using runspaces
@@ -692,11 +672,6 @@ function Write-SyncError {
                 # Suppress all output and only return the result object
                 $outputMode = $null
                 switch ($SyncType) {
-                    "Users" {
-                        $null = Sync-FGUser @SyncParams
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
-                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
-                    }
                     "Groups" {
                         $null = Sync-FGGroup @SyncParams
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
@@ -791,38 +766,8 @@ function Write-SyncError {
             }
         }
 
-        # Create job for Users sync
-        if ($SyncUsers) {
-            Write-SyncStep "Starting user sync job..."
-            $userSyncParams = @{ TableName = $userTableName }
-            if ($UserFilter) { $userSyncParams.Filter = $UserFilter }
-            if ($UserAdditionalAttributes) { $userSyncParams.AdditionalAttributes = $UserAdditionalAttributes }
-
-            $ps = [PowerShell]::Create()
-            $ps.RunspacePool = $runspacePool
-            [void]$ps.AddScript($syncScriptBlock)
-            [void]$ps.AddParameter("SyncType", "Users")
-            [void]$ps.AddParameter("TableName", $userTableName)
-            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
-            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
-            [void]$ps.AddParameter("SqlServer", $sqlServerName)
-            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
-            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
-            [void]$ps.AddParameter("TenantId", $graphTenantId)
-            [void]$ps.AddParameter("ClientId", $graphClientId)
-            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
-            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
-            [void]$ps.AddParameter("SyncParams", $userSyncParams)
-
-            $jobs += @{
-                Name = "Users"
-                PowerShell = $ps
-                Handle = $ps.BeginInvoke()
-            }
-        }
-
-        # Create job for Principals sync
-        if ($SyncPrincipals) {
+        # Create job for Principals sync (triggered by SyncUsers or SyncPrincipals)
+        if ($SyncUsers -or $SyncPrincipals) {
             Write-SyncStep "Starting principals sync job..."
             $principalSyncParams = @{}
             if ($UserFilter) { $principalSyncParams.Filter = $UserFilter }
@@ -1269,10 +1214,6 @@ function Write-SyncError {
                 # Process result
                 if ($result -and $result.Success) {
                     switch ($result.Type) {
-                        "Users" {
-                            $script:SyncStats.Users = $result.Count
-                            Write-SyncSuccess "Users synced: $($result.Count) (table: $userTableName)"
-                        }
                         "Groups" {
                             $script:SyncStats.Groups = $result.Count
                             Write-SyncSuccess "Groups synced: $($result.Count) (table: $groupTableName)"
@@ -1357,35 +1298,6 @@ function Write-SyncError {
     } else {
         # Sequential execution (original code)
         Write-SyncStep "Using sequential execution"
-
-        # Sync Users
-        if ($SyncUsers) {
-            Write-SyncStep "Syncing users to SQL..."
-            try {
-                $syncParams = @{
-                    TableName = $userTableName
-                }
-
-                if ($UserFilter) {
-                    $syncParams.Filter = $UserFilter
-                    Write-SyncStep "Using user filter: $UserFilter"
-                }
-
-                if ($UserAdditionalAttributes) {
-                    $syncParams.AdditionalAttributes = $UserAdditionalAttributes
-                    Write-SyncStep "Additional attributes: $($UserAdditionalAttributes -join ', ')"
-                }
-
-                Sync-FGUser @syncParams
-
-                # Get count
-                $userCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$userTableName" -AsScalar
-                $script:SyncStats.Users = $userCount
-                Write-SyncSuccess "Users synced: $userCount (table: $userTableName)"
-            } catch {
-                Write-SyncError "User sync failed" $_.Exception.Message
-            }
-        }
 
         # Sync Groups
         if ($SyncGroups) {
@@ -1622,8 +1534,8 @@ function Write-SyncError {
             }
         }
 
-        # Sync Principals
-        if ($SyncPrincipals) {
+        # Sync Principals (triggered by SyncUsers or SyncPrincipals)
+        if ($SyncUsers -or $SyncPrincipals) {
             Write-SyncStep "Syncing principals..."
             try {
                 $syncParams = @{}
@@ -1656,68 +1568,9 @@ function Write-SyncError {
     }
     #endregion
 
-    #region Create Performance Indexes
-    if ($CreateViews) {
-        Write-SyncHeader "Creating Performance Indexes"
-
-        try {
-            Write-SyncStep "Creating indexes for group membership tables..."
-
-            $indexParams = @{}
-
-            # Use configured table names
-            if ($SyncGroupMembers) {
-                $indexParams.DirectMembersTable = $groupMembersTableName
-            }
-            if ($SyncGroupEligibleMembers) {
-                $indexParams.EligibleMembersTable = $groupEligibleMembersTableName
-            }
-            if ($SyncGroupOwners) {
-                $indexParams.OwnersTable = $groupOwnersTableName
-            }
-
-            $indexResult = Initialize-FGGroupMembershipIndexes @indexParams
-
-            if ($indexResult.Created -gt 0) {
-                Write-SyncSuccess "Performance indexes created: $($indexResult.Created) created, $($indexResult.Skipped) already existed"
-            } else {
-                Write-SyncStep "All performance indexes already exist ($($indexResult.Skipped) indexes)"
-            }
-        } catch {
-            Write-SyncError "Performance index creation failed" $_.Exception.Message
-            Write-Host "  ⚠ Views will still be created but may perform slowly without indexes" -ForegroundColor Yellow
-        }
-    }
-    #endregion
-
     #region Create Views
     if ($CreateViews) {
         Write-SyncHeader "Creating Analysis Views"
-
-        try {
-            Write-SyncStep "Creating group membership analysis views..."
-
-            $viewParams = @{
-                DropIfExists = $true
-            }
-
-            # Use configured table names
-            if ($SyncGroupMembers) {
-                $viewParams.DirectMembersTable = $groupMembersTableName
-            }
-            if ($SyncGroupEligibleMembers) {
-                $viewParams.EligibleMembersTable = $groupEligibleMembersTableName
-            }
-            if ($SyncGroupOwners) {
-                $viewParams.OwnersTable = $groupOwnersTableName
-            }
-
-            Initialize-FGGroupMembershipViews @viewParams
-
-            Write-SyncSuccess "Group membership analysis views created"
-        } catch {
-            Write-SyncError "Group membership view creation failed" $_.Exception.Message
-        }
 
         # Create access package views
         try {
@@ -1807,9 +1660,6 @@ function Write-SyncError {
     Write-Host "  Sync Duration: $($duration.ToString('hh\:mm\:ss'))" -ForegroundColor Cyan
     Write-Host ""
 
-    if ($SyncUsers -and $script:SyncStats.Users -ne $null) {
-        Write-Host "  Users:                   $($script:SyncStats.Users)" -ForegroundColor White
-    }
     if ($SyncGroups -and $script:SyncStats.Groups -ne $null) {
         Write-Host "  Groups:                  $($script:SyncStats.Groups)" -ForegroundColor White
     }
@@ -1852,7 +1702,7 @@ function Write-SyncError {
     if ($SyncResourceRelationships -and $script:SyncStats.ResourceRelationships -ne $null) {
         Write-Host "  Resource Relationships:  $($script:SyncStats.ResourceRelationships)" -ForegroundColor White
     }
-    if ($SyncPrincipals -and $script:SyncStats.Principals -ne $null) {
+    if (($SyncUsers -or $SyncPrincipals) -and $script:SyncStats.Principals -ne $null) {
         Write-Host "  Principals:              $($script:SyncStats.Principals)" -ForegroundColor White
     }
     if ($SyncOrgUnits -and $script:SyncStats.OrgUnits -ne $null) {

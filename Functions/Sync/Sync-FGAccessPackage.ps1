@@ -22,7 +22,7 @@ function Sync-FGAccessPackage {
     Optional OData filter to limit which access packages to sync (e.g., "isHidden eq false")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackages"
+    Name of the SQL table to create/sync to. Default: "BusinessRoles"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -65,7 +65,7 @@ function Sync-FGAccessPackage {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackages",
+        [string]$TableName = "BusinessRoles",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,

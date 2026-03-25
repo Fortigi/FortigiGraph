@@ -26,7 +26,18 @@ router.get('/systems', async (req, res) => {
          INNER JOIN Resources r ON ra.resourceId = r.id
          WHERE r.systemId = s.id
            AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
-           AND r.ValidTo = '9999-12-31 23:59:59.9999999') AS assignmentCount
+           AND r.ValidTo = '9999-12-31 23:59:59.9999999') AS assignmentCount,
+        (SELECT '[' + STRING_AGG('"' + rt.resourceType + '"', ',') + ']'
+         FROM (SELECT DISTINCT resourceType FROM Resources
+               WHERE systemId = s.id AND ValidTo = '9999-12-31 23:59:59.9999999'
+                 AND resourceType IS NOT NULL) rt) AS computedResourceTypes,
+        (SELECT '[' + STRING_AGG('"' + at.assignmentType + '"', ',') + ']'
+         FROM (SELECT DISTINCT assignmentType FROM ResourceAssignments ra2
+               INNER JOIN Resources r2 ON ra2.resourceId = r2.id
+               WHERE r2.systemId = s.id
+                 AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
+                 AND r2.ValidTo = '9999-12-31 23:59:59.9999999'
+                 AND ra2.assignmentType IS NOT NULL) at) AS computedAssignmentTypes
       FROM Systems s
       WHERE s.ValidTo = '9999-12-31 23:59:59.9999999'
       ORDER BY s.displayName
@@ -57,7 +68,18 @@ router.get('/systems/:id', async (req, res) => {
            INNER JOIN Resources r ON ra.resourceId = r.id
            WHERE r.systemId = s.id
              AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
-             AND r.ValidTo = '9999-12-31 23:59:59.9999999') AS assignmentCount
+             AND r.ValidTo = '9999-12-31 23:59:59.9999999') AS assignmentCount,
+          (SELECT '[' + STRING_AGG('"' + rt.resourceType + '"', ',') + ']'
+           FROM (SELECT DISTINCT resourceType FROM Resources
+                 WHERE systemId = s.id AND ValidTo = '9999-12-31 23:59:59.9999999'
+                   AND resourceType IS NOT NULL) rt) AS computedResourceTypes,
+          (SELECT '[' + STRING_AGG('"' + at.assignmentType + '"', ',') + ']'
+           FROM (SELECT DISTINCT assignmentType FROM ResourceAssignments ra2
+                 INNER JOIN Resources r2 ON ra2.resourceId = r2.id
+                 WHERE r2.systemId = s.id
+                   AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
+                   AND r2.ValidTo = '9999-12-31 23:59:59.9999999'
+                   AND ra2.assignmentType IS NOT NULL) at) AS computedAssignmentTypes
         FROM Systems s
         WHERE s.id = @id
           AND s.ValidTo = '9999-12-31 23:59:59.9999999'

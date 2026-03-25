@@ -22,7 +22,7 @@ function Sync-FGCatalog {
     Optional OData filter to limit which catalogs to sync (e.g., "catalogType eq 'userManaged'")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphCatalogs"
+    Name of the SQL table to create/sync to. Default: "GovernanceCatalogs"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -65,7 +65,7 @@ function Sync-FGCatalog {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphCatalogs",
+        [string]$TableName = "GovernanceCatalogs",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,

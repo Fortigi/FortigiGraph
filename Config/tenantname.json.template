@@ -23,7 +23,7 @@
     "ScheduleTimeZone": "W. Europe Standard Time",
     "Users": {
       "Enabled": true,
-      "TableName": "GraphUsers",
+      "TableName": "Principals",
       "Filter": "",
       "AdditionalAttributes": [
         "streetAddress",
@@ -38,7 +38,7 @@
     },
     "Groups": {
       "Enabled": true,
-      "TableName": "GraphGroups",
+      "TableName": "Resources",
       "Filter": "",
       "Schedule": {
         "Enabled": true,
@@ -48,7 +48,7 @@
     },
     "GroupMembers": {
       "Enabled": true,
-      "TableName": "GraphGroupMembers",
+      "TableName": "ResourceAssignments",
       "Schedule": {
         "Enabled": true,
         "Time": "07:00",
@@ -61,11 +61,11 @@
     },
     "GroupOwners": {
       "Enabled": true,
-      "TableName": "GraphGroupOwners"
+      "TableName": "ResourceAssignments"
     },
     "Catalogs": {
       "Enabled": true,
-      "TableName": "GraphCatalogs",
+      "TableName": "GovernanceCatalogs",
       "Schedule": {
         "Enabled": true,
         "Time": "06:00",
@@ -74,7 +74,7 @@
     },
     "AccessPackages": {
       "Enabled": true,
-      "TableName": "GraphAccessPackages",
+      "TableName": "BusinessRoles",
       "Schedule": {
         "Enabled": true,
         "Time": "06:15",
@@ -83,7 +83,7 @@
     },
     "AccessPackageAssignments": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageAssignments",
+      "TableName": "BusinessRoleAssignments",
       "Schedule": [
         { "Enabled": true, "Time": "06:00", "Frequency": "Daily" },
         { "Enabled": true, "Time": "12:00", "Frequency": "Daily" },
@@ -92,19 +92,65 @@
     },
     "AccessPackageResourceRoleScopes": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageResourceRoleScopes"
+      "TableName": "BusinessRoleResources"
     },
     "AccessPackageAssignmentPolicies": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageAssignmentPolicies"
+      "TableName": "BusinessRolePolicies"
     },
     "AccessPackageAssignmentRequests": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageAssignmentRequests"
+      "TableName": "BusinessRoleRequests"
     },
     "AccessPackageAccessReviews": {
       "Enabled": true,
-      "TableName": "GraphAccessPackageAccessReviewDecisions"
+      "TableName": "CertificationDecisions"
+    },
+    "_V3_NOTE": "The following sync types are part of the v3.0 Universal Resource Model. They populate the Systems, Resources, Principals, OrgUnits tables alongside the legacy GraphUsers/GraphGroups tables.",
+    "Principals": {
+      "Enabled": true,
+      "_Comment": "Syncs Entra ID users to the Principals table (v3.0 universal model)",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
+    },
+    "EntraDirectoryRoles": {
+      "Enabled": true,
+      "_Comment": "Syncs Entra ID directory roles and their members to Resources + ResourceAssignments",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
+    },
+    "EntraAppRoleAssignments": {
+      "Enabled": true,
+      "_Comment": "Syncs app role assignments (enterprise app permissions) to Resources + ResourceAssignments",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "06:00",
+        "Frequency": "Daily"
+      }
+    },
+    "ResourceRelationships": {
+      "Enabled": true,
+      "_Comment": "Discovers and syncs resource-to-resource links (e.g. group grants access to app role)",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "08:00",
+        "Frequency": "Daily"
+      }
+    },
+    "OrgUnits": {
+      "Enabled": true,
+      "_Comment": "Calculates organisational units (departments/teams) from Principals data",
+      "Schedule": {
+        "Enabled": true,
+        "Time": "08:30",
+        "Frequency": "Daily"
+      }
     },
     "Views": {
       "Enabled": true

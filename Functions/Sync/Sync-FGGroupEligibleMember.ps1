@@ -4,12 +4,14 @@ function Sync-FGGroupEligibleMember {
     Syncs Microsoft Graph group eligible memberships (PIM) to Azure SQL with temporal versioning.
 
     .DESCRIPTION
-    This function syncs eligible group memberships from Privileged Identity Management (PIM):
+    This function syncs eligible group memberships from Privileged Identity Management (PIM)
+    to the universal ResourceAssignments table:
     - Queries eligibility schedules directly to identify actual PIM-enabled groups
     - Note: Since January 2023, PIM-enabled and role-assignable are INDEPENDENT properties
     - Any group (except dynamic/on-prem synced) can be PIM-enabled, not just role-assignable
-    - Creates a table with groupId, memberId, and memberType columns
-    - Uses composite primary key (groupId, memberId)
+    - Creates a table with resourceId, principalId, principalType, and assignmentType columns
+    - Uses composite primary key (resourceId, principalId, assignmentType)
+    - assignmentType is set to 'Eligible' for all rows
     - Automatically creates temporal table for change tracking
     - Tracks PIM eligibility changes over time
 
@@ -22,7 +24,7 @@ function Sync-FGGroupEligibleMember {
     Optional array of specific group IDs to sync. If not specified, syncs all PIM groups.
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphGroupEligibleMembers"
+    Name of the SQL table to create/sync to. Default: "ResourceAssignments"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -51,7 +53,7 @@ function Sync-FGGroupEligibleMember {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphGroupEligibleMembers",
+        [string]$TableName = "ResourceAssignments",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
@@ -78,13 +80,14 @@ function Sync-FGGroupEligibleMember {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting eligible group membership sync (PIM)..." -ForegroundColor Cyan
 
     # Define attributes for the membership table
-    $attributes = @('groupId', 'memberId', 'memberType')
+    $attributes = @('resourceId', 'principalId', 'principalType', 'assignmentType')
 
     # Map to SQL types
     $graphToSqlTypeMap = @{
-        'groupId' = 'UNIQUEIDENTIFIER'
-        'memberId' = 'UNIQUEIDENTIFIER'
-        'memberType' = 'NVARCHAR(100)'
+        'resourceId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
+        'principalType' = 'NVARCHAR(100)'
+        'assignmentType' = 'NVARCHAR(50)'  # 'Eligible'
     }
 
     # Build column definitions
@@ -116,7 +119,7 @@ function Sync-FGGroupEligibleMember {
         $tableStillExists = Test-FGSQLTableExists -TableName $TableName
 
         if (-not $tableStillExists -or $RecreateTable) {
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('groupId', 'memberId') -DropIfExists:$RecreateTable
+            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('resourceId', 'principalId', 'assignmentType') -DropIfExists:$RecreateTable
         }
     }
     catch {
@@ -201,18 +204,20 @@ function Sync-FGGroupEligibleMember {
                             $principal = Invoke-FGGetRequest -URI $principalUri
 
                             $membership = [PSCustomObject]@{
-                                groupId = $eligibility.groupId
-                                memberId = $eligibility.principalId
-                                memberType = $principal.'@odata.type'
+                                resourceId = $eligibility.groupId
+                                principalId = $eligibility.principalId
+                                principalType = $principal.'@odata.type'
+                                assignmentType = 'Eligible'
                             }
                             $allEligibleMembers += $membership
                         }
                         catch {
                             # If we can't get principal details, add without type
                             $membership = [PSCustomObject]@{
-                                groupId = $eligibility.groupId
-                                memberId = $eligibility.principalId
-                                memberType = $null
+                                resourceId = $eligibility.groupId
+                                principalId = $eligibility.principalId
+                                principalType = $null
+                                assignmentType = 'Eligible'
                             }
                             $allEligibleMembers += $membership
                         }
@@ -247,15 +252,17 @@ function Sync-FGGroupEligibleMember {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $dataTable = New-Object System.Data.DataTable
-    $dataTable.Columns.Add("groupId", [guid]) | Out-Null
-    $dataTable.Columns.Add("memberId", [guid]) | Out-Null
-    $dataTable.Columns.Add("memberType", [string]) | Out-Null
+    $dataTable.Columns.Add("resourceId", [guid]) | Out-Null
+    $dataTable.Columns.Add("principalId", [guid]) | Out-Null
+    $dataTable.Columns.Add("principalType", [string]) | Out-Null
+    $dataTable.Columns.Add("assignmentType", [string]) | Out-Null
 
     foreach ($membership in $allEligibleMembers) {
         $row = $dataTable.NewRow()
-        $row["groupId"] = [guid]$membership.groupId
-        $row["memberId"] = [guid]$membership.memberId
-        $row["memberType"] = if ($membership.memberType) { $membership.memberType } else { [DBNull]::Value }
+        $row["resourceId"] = [guid]$membership.resourceId
+        $row["principalId"] = [guid]$membership.principalId
+        $row["principalType"] = if ($membership.principalType) { $membership.principalType } else { [DBNull]::Value }
+        $row["assignmentType"] = $membership.assignmentType
         $dataTable.Rows.Add($row)
     }
 
@@ -282,7 +289,7 @@ function Sync-FGGroupEligibleMember {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('groupId', 'memberId')
+                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
             $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
@@ -298,7 +305,7 @@ function Sync-FGGroupEligibleMember {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('groupId', 'memberId')
+                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount eligible memberships that no longer exist" -ForegroundColor Yellow
@@ -362,7 +369,7 @@ function Sync-FGGroupEligibleMember {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "GroupEligibleMembers" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+        Write-FGSyncLog -SyncType "GroupEligibleMembers (Eligible)" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
     }
 
     return @{

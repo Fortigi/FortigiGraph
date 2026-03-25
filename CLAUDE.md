@@ -187,6 +187,55 @@ The data model supports importing authorization data from any system, not just E
 
 **Backward compatibility:** All queries prefer new tables (Resources, Principals) with automatic fallback to legacy tables (GraphGroups, GraphUsers).
 
+### 9. Universal Governance Model
+
+The governance model supports business roles, certifications, and access policies from any IGA platform — not just Entra ID Access Packages.
+
+```
+                         ┌──────────────────┐
+                         │GovernanceCatalogs │
+                         └────────┬─────────┘
+                                  │
+                         ┌────────▼─────────┐
+                         │  BusinessRoles    │
+                         └────────┬─────────┘
+              ┌──────────┬────────┼────────┬──────────┐
+              │          │        │        │          │
+     ┌────────▼───┐ ┌────▼────┐ ┌▼──────┐ ▼────────┐ │
+     │BusinessRole│ │Business │ │Busines│ │Business │ │
+     │Resources   │ │RoleAssig│ │sRole  │ │Role     │ │
+     │            │ │nments   │ │Policie│ │Requests │ │
+     └────────────┘ └─────────┘ │s      │ └─────────┘ │
+                                └───────┘              │
+                                              ┌────────▼──────┐
+                                              │Certification  │
+                                              │Decisions      │
+                                              └───────────────┘
+```
+
+**Tables:**
+- **GovernanceCatalogs** — Containers for business roles (Entra: Catalogs, Omada: Policy groups)
+- **BusinessRoles** — Named entitlement bundles (Entra: Access Packages, Omada: Business Roles, SailPoint: Access Profiles)
+- **BusinessRoleResources** — Which resources a business role grants (Entra: Resource Role Scopes)
+- **BusinessRoleAssignments** — Who currently holds a business role, with `complianceState`
+- **BusinessRolePolicies** — Assignment rules with `policyConditions` JSON for ABAC (Entra: Assignment Policies, Omada: Context rules)
+- **BusinessRoleRequests** — Request/approval workflow history
+- **CertificationDecisions** — Review/certification results with `certificationScopeType` (BusinessRole or ResourceAssignment)
+
+**IGA platform mapping:**
+
+| Universal | Entra ID | Omada | SailPoint |
+|-----------|----------|-------|-----------|
+| GovernanceCatalog | Catalog | — | Source |
+| BusinessRole | Access Package | Business Role | Access Profile |
+| BusinessRoleResources | Resource Role Scopes | Role Entitlements | Entitlements |
+| BusinessRoleAssignment | AP Assignment | Role Assignment | Access Request Result |
+| BusinessRolePolicy | AP Assignment Policy | Assignment Policy | Access Request Config |
+| BusinessRoleRequest | AP Assignment Request | — | Access Request |
+| CertificationDecision | AP Access Review | CRA | Certification |
+
+**Breaking change:** The governance model replaces the legacy `GraphAccessPackage*` tables. Existing deployments must re-sync to populate the new tables. Tags/categories can be exported from the old setup and imported into the new one.
+
 ## Repository Structure
 
 ```
@@ -242,6 +291,7 @@ FortigiGraph/
 │   │   ├── Initialize-FGSystemTables.ps1 # Create Systems, Resources, Principals, OrgUnits, Identities tables
 │   │   ├── Initialize-FGResourceViews.ps1     # Resource-based permission views (v3.0)
 │   │   ├── Initialize-FGResourceIndexes.ps1   # Resource-based indexes (v3.0)
+│   │   ├── Initialize-FGGovernanceTables.ps1  # Create governance model tables (BusinessRoles, etc.)
 │   │   ├── Initialize-FGAccessPackageViews.ps1
 │   │   ├── Initialize-FGGroupMembershipViews.ps1  # Legacy group views (backward compat)
 │   │   ├── Initialize-FGGroupMembershipIndexes.ps1 # Legacy group indexes
@@ -351,11 +401,11 @@ FortigiGraph/
 | **Base** | 21 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
 | **Sync** | 24 | High-performance data sync (Start-FGSync + entity syncs + migration + helpers) |
-| **SQL** | 28 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables) |
+| **SQL** | 29 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables, governance tables) |
 | **Automation** | 8 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
 | **RiskScoring** | 13 | LLM-assisted risk profiling, batch scoring, cluster analysis |
-| **Total** | **164 functions** | |
+| **Total** | **165 functions** | |
 
 ## Architecture & Design Patterns
 
@@ -558,6 +608,8 @@ function Get-FGSQLResource {
 | `Group.Read.All` | `5b567255-7703-4780-807c-7be8301ae99b` | Read all groups |
 | `GroupMember.Read.All` | `98830695-27a2-44f7-8c18-0c3ebc9698f6` | Read group memberships |
 | `Directory.Read.All` | `7ab1d382-f21e-4acd-a863-ba3e13f7da61` | Read directory data |
+| `Application.Read.All` | `9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30` | Read service principals + app role assignments (Sync-FGEntraAppRoleAssignment) |
+| `PrivilegedEligibilitySchedule.Read.AzureADGroup` | `b3a539c9-59be-4c8d-b62c-11ae8c4f2a37` | Read PIM group eligibility schedules (Sync-FGGroupEligibleMember) |
 | `EntitlementManagement.Read.All` | `c74fd47d-ed3c-45c3-9a9e-b8676de685d2` | Read access packages |
 | `AccessReview.Read.All` | `d07a8cc0-3d51-4b77-b3b0-32704d1f69fa` | Read access reviews |
 | `AuditLog.Read.All` | `b0afded3-3588-46d8-8b3d-9842eff778da` | Read audit/sign-in data |

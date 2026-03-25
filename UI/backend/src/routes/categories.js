@@ -14,19 +14,19 @@ let tablesReady = false;
 async function ensureCategoryTables(pool) {
   if (tablesReady) return;
   await pool.request().query(`
-    IF OBJECT_ID('dbo.GraphCategories', 'U') IS NULL
-    CREATE TABLE dbo.GraphCategories (
+    IF OBJECT_ID('dbo.GovernanceCategories', 'U') IS NULL
+    CREATE TABLE dbo.GovernanceCategories (
       id INT IDENTITY(1,1) PRIMARY KEY,
       name NVARCHAR(100) NOT NULL UNIQUE,
       color NVARCHAR(7) NOT NULL DEFAULT '#3b82f6',
       createdAt DATETIME2 DEFAULT GETUTCDATE()
     );
-    IF OBJECT_ID('dbo.GraphCategoryAssignments', 'U') IS NULL
-    CREATE TABLE dbo.GraphCategoryAssignments (
-      accessPackageId NVARCHAR(36) NOT NULL,
+    IF OBJECT_ID('dbo.GovernanceCategoryAssignments', 'U') IS NULL
+    CREATE TABLE dbo.GovernanceCategoryAssignments (
+      businessRoleId NVARCHAR(36) NOT NULL,
       categoryId INT NOT NULL,
-      CONSTRAINT PK_GraphCategoryAssignments PRIMARY KEY (accessPackageId),
-      CONSTRAINT FK_CategoryAssignment_Category FOREIGN KEY (categoryId) REFERENCES dbo.GraphCategories(id) ON DELETE CASCADE
+      CONSTRAINT PK_GovernanceCategoryAssignments PRIMARY KEY (businessRoleId),
+      CONSTRAINT FK_CategoryAssignment_Category FOREIGN KEY (categoryId) REFERENCES dbo.GovernanceCategories(id) ON DELETE CASCADE
     );
   `);
   tablesReady = true;
@@ -50,8 +50,8 @@ router.get('/categories', async (req, res) => {
     await ensureCategoryTables(p);
     const result = await p.request().query(`
       SELECT c.*, ISNULL(COUNT(ca.categoryId), 0) AS assignmentCount
-      FROM dbo.GraphCategories c
-      LEFT JOIN dbo.GraphCategoryAssignments ca ON ca.categoryId = c.id
+      FROM dbo.GovernanceCategories c
+      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON ca.categoryId = c.id
       GROUP BY c.id, c.name, c.color, c.createdAt
       ORDER BY c.name
     `);
@@ -76,13 +76,13 @@ router.post('/categories', async (req, res) => {
       .input('name', name.trim())
       .input('color', color || TAG_COLORS[0])
       .query(`
-        INSERT INTO dbo.GraphCategories (name, color)
+        INSERT INTO dbo.GovernanceCategories (name, color)
         OUTPUT INSERTED.*
         VALUES (@name, @color)
       `);
     res.status(201).json(result.recordset[0]);
   } catch (err) {
-    if (err.message?.includes('UQ__GraphCat') || err.message?.includes('UNIQUE')) {
+    if (err.message?.includes('UQ__Governance') || err.message?.includes('UQ__GraphCat') || err.message?.includes('UNIQUE')) {
       return res.status(409).json({ error: 'A category with this name already exists' });
     }
     console.error('POST /categories failed:', err.message);
@@ -106,7 +106,7 @@ router.patch('/categories/:id', async (req, res) => {
     if (color) { sets.push('color = @color'); request.input('color', color); }
     if (sets.length === 0) return res.status(400).json({ error: 'Nothing to update' });
     const result = await request.query(
-      `UPDATE dbo.GraphCategories SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`
+      `UPDATE dbo.GovernanceCategories SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`
     );
     res.json(result.recordset[0] || null);
   } catch (err) {
@@ -125,7 +125,7 @@ router.delete('/categories/:id', async (req, res) => {
     await ensureCategoryTables(p);
     await p.request()
       .input('id', id)
-      .query('DELETE FROM dbo.GraphCategories WHERE id = @id');
+      .query('DELETE FROM dbo.GovernanceCategories WHERE id = @id');
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /categories failed:', err.message);
@@ -139,8 +139,8 @@ router.delete('/categories/:id', async (req, res) => {
 router.post('/categories/:id/assign', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
-    const { accessPackageId } = req.body;
-    if (!accessPackageId) return res.status(400).json({ error: 'accessPackageId required' });
+    const { businessRoleId } = req.body;
+    if (!businessRoleId) return res.status(400).json({ error: 'businessRoleId required' });
 
     const p = await db.getPool();
     await ensureCategoryTables(p);
@@ -150,13 +150,13 @@ router.post('/categories/:id/assign', async (req, res) => {
     // MERGE: insert or replace the category for this AP (only one allowed)
     await p.request()
       .input('categoryId', categoryId)
-      .input('accessPackageId', String(accessPackageId).toLowerCase())
+      .input('businessRoleId', String(businessRoleId).toLowerCase())
       .query(`
-        MERGE dbo.GraphCategoryAssignments AS target
-        USING (SELECT @accessPackageId AS accessPackageId) AS source
-        ON target.accessPackageId = source.accessPackageId
+        MERGE dbo.GovernanceCategoryAssignments AS target
+        USING (SELECT @businessRoleId AS businessRoleId) AS source
+        ON target.businessRoleId = source.businessRoleId
         WHEN MATCHED THEN UPDATE SET categoryId = @categoryId
-        WHEN NOT MATCHED THEN INSERT (accessPackageId, categoryId) VALUES (@accessPackageId, @categoryId);
+        WHEN NOT MATCHED THEN INSERT (businessRoleId, categoryId) VALUES (@businessRoleId, @categoryId);
       `);
     res.json({ ok: true });
   } catch (err) {
@@ -170,15 +170,15 @@ router.post('/categories/:id/assign', async (req, res) => {
 router.post('/categories/unassign', async (req, res) => {
   try {
     if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
-    const { accessPackageId } = req.body;
-    if (!accessPackageId) return res.status(400).json({ error: 'accessPackageId required' });
+    const { businessRoleId } = req.body;
+    if (!businessRoleId) return res.status(400).json({ error: 'businessRoleId required' });
 
     const p = await db.getPool();
     await ensureCategoryTables(p);
 
     await p.request()
-      .input('accessPackageId', String(accessPackageId).toLowerCase())
-      .query('DELETE FROM dbo.GraphCategoryAssignments WHERE accessPackageId = @accessPackageId');
+      .input('businessRoleId', String(businessRoleId).toLowerCase())
+      .query('DELETE FROM dbo.GovernanceCategoryAssignments WHERE businessRoleId = @businessRoleId');
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /categories/unassign failed:', err.message);
@@ -237,14 +237,14 @@ router.get('/access-packages', async (req, res) => {
       where += ` AND ca.categoryId = @categoryId`;
       request.input('categoryId', categoryFilter);
     } else if (showUncategorized) {
-      where += ` AND ca.accessPackageId IS NULL`;
+      where += ` AND ca.businessRoleId IS NULL`;
     }
 
     // Check if the review decisions table exists (it may not if reviews haven't been synced)
     let hasReviewTable = false;
     try {
       const check = await p.request().query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphAccessPackageAccessReviewDecisions'
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CertificationDecisions'
       `);
       hasReviewTable = check.recordset.length > 0;
     } catch { /* ignore */ }
@@ -254,7 +254,7 @@ router.get('/access-packages', async (req, res) => {
     try {
       const check = await p.request().query(`
         SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'GraphAccessPackageAssignmentPolicies' AND COLUMN_NAME = 'hasAccessReview'
+        WHERE TABLE_NAME = 'BusinessRolePolicies' AND COLUMN_NAME = 'hasAccessReview'
       `);
       hasReviewCol = check.recordset.length > 0;
     } catch { /* ignore */ }
@@ -264,7 +264,7 @@ router.get('/access-packages', async (req, res) => {
     try {
       const check = await p.request().query(`
         SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'GraphAccessPackageAssignmentPolicies' AND COLUMN_NAME = 'reviewSettings'
+        WHERE TABLE_NAME = 'BusinessRolePolicies' AND COLUMN_NAME = 'reviewSettings'
       `);
       hasReviewSettingsCol = check.recordset.length > 0;
     } catch { /* ignore */ }
@@ -279,20 +279,20 @@ router.get('/access-packages', async (req, res) => {
     if (hasReviewTable) {
       reviewCte = `,
         _LatestInstance AS (
-          SELECT accessPackageId,
+          SELECT businessRoleId,
                  MAX(reviewInstanceId) AS reviewInstanceId,
                  MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime
-          FROM GraphAccessPackageAccessReviewDecisions
+          FROM CertificationDecisions
           WHERE reviewInstanceEndDateTime = (
             SELECT MAX(r2.reviewInstanceEndDateTime)
-            FROM GraphAccessPackageAccessReviewDecisions r2
-            WHERE r2.accessPackageId = GraphAccessPackageAccessReviewDecisions.accessPackageId
+            FROM CertificationDecisions r2
+            WHERE r2.businessRoleId = CertificationDecisions.businessRoleId
           )
-          GROUP BY accessPackageId
+          GROUP BY businessRoleId
         ),
         _LastReviewPerAP AS (
           SELECT
-            li.accessPackageId,
+            li.businessRoleId,
             li.reviewInstanceEndDateTime AS deadline,
             MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedDateTime END) AS lastReviewDate,
             MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedByDisplayName END) AS lastReviewedBy,
@@ -314,24 +314,24 @@ router.get('/access-packages', async (req, res) => {
               ELSE 0
             END AS daysOverdue
           FROM _LatestInstance li
-            INNER JOIN GraphAccessPackageAccessReviewDecisions d
-              ON d.accessPackageId = li.accessPackageId
+            INNER JOIN CertificationDecisions d
+              ON d.businessRoleId = li.businessRoleId
               AND d.reviewInstanceId = li.reviewInstanceId
-          GROUP BY li.accessPackageId, li.reviewInstanceEndDateTime
+          GROUP BY li.businessRoleId, li.reviewInstanceEndDateTime
         ),
         _MissedReviewCount AS (
-          SELECT accessPackageId, COUNT(*) AS missedCount
+          SELECT businessRoleId, COUNT(*) AS missedCount
           FROM (
-            SELECT accessPackageId, reviewInstanceId
-            FROM dbo.GraphAccessPackageAccessReviewDecisions
+            SELECT businessRoleId, reviewInstanceId
+            FROM dbo.CertificationDecisions
             WHERE reviewInstanceEndDateTime < GETUTCDATE()
-            GROUP BY accessPackageId, reviewInstanceId
+            GROUP BY businessRoleId, reviewInstanceId
             HAVING SUM(CASE WHEN decision <> 'NotReviewed' THEN 1 ELSE 0 END) = 0
           ) x
-          GROUP BY accessPackageId
+          GROUP BY businessRoleId
         )`;
-      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.accessPackageId
-        LEFT JOIN _MissedReviewCount mrc ON ap.id = mrc.accessPackageId`;
+      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.businessRoleId
+        LEFT JOIN _MissedReviewCount mrc ON ap.id = mrc.businessRoleId`;
       reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue, ISNULL(mrc.missedCount, 0) AS missedReviewsCount';
     } else if (isReviewSort) {
       // No review data — fall back to default sort
@@ -340,13 +340,13 @@ router.get('/access-packages', async (req, res) => {
 
     const result = await request.query(`
       WITH _assignmentCounts AS (
-        SELECT accessPackageId, COUNT(*) AS cnt
-        FROM dbo.GraphAccessPackageAssignments
+        SELECT businessRoleId, COUNT(*) AS cnt
+        FROM dbo.BusinessRoleAssignments
         WHERE assignmentState = 'delivered'
-        GROUP BY accessPackageId
+        GROUP BY businessRoleId
       ),
       _policyCounts AS (
-        SELECT accessPackageId,
+        SELECT businessRoleId,
                COUNT(*) AS policyCount,
                SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddCount,
                SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnlyCount${
@@ -354,11 +354,11 @@ router.get('/access-packages', async (req, res) => {
                    ? `,\n               MAX(CAST(ISNULL(hasAccessReview, 0) AS INT)) AS hasReviewConfigured`
                    : `,\n               0 AS hasReviewConfigured`
                }
-        FROM dbo.GraphAccessPackageAssignmentPolicies
-        GROUP BY accessPackageId
+        FROM dbo.BusinessRolePolicies
+        GROUP BY businessRoleId
       )${hasReviewSettingsCol ? `,
       _reviewerInfo AS (
-        SELECT p.accessPackageId,
+        SELECT p.businessRoleId,
                STRING_AGG(
                  CASE rv.[odata_type]
                    WHEN '#microsoft.graph.singleUser'       THEN ISNULL(rv.[description], rv.[userId])
@@ -370,7 +370,7 @@ router.get('/access-packages', async (req, res) => {
                    ELSE rv.[odata_type]
                  END, ', '
                ) AS reviewers
-        FROM dbo.GraphAccessPackageAssignmentPolicies p
+        FROM dbo.BusinessRolePolicies p
         CROSS APPLY OPENJSON(JSON_QUERY(p.reviewSettings, '$.primaryReviewers'))
           WITH (
             [odata_type]  NVARCHAR(100) '$."@odata.type"',
@@ -378,7 +378,7 @@ router.get('/access-packages', async (req, res) => {
             [description] NVARCHAR(255) '$.description'
           ) rv
         WHERE p.reviewSettings IS NOT NULL
-        GROUP BY p.accessPackageId
+        GROUP BY p.businessRoleId
       )` : ''}
       ${reviewCte}
       SELECT ap.id, ap.displayName, ap.description,
@@ -391,23 +391,23 @@ router.get('/access-packages', async (req, res) => {
              ISNULL(pol.hasReviewConfigured, 0) AS hasReviewConfigured
              ${reviewCols}
              ${hasReviewSettingsCol ? ', ri.reviewers AS reviewerInfo' : ', NULL AS reviewerInfo'}
-      FROM dbo.GraphAccessPackages ap
-      INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
-      LEFT JOIN _assignmentCounts ac ON ap.id = ac.accessPackageId
-      LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
-      LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
-      LEFT JOIN _policyCounts pol ON ap.id = pol.accessPackageId
+      FROM dbo.BusinessRoles ap
+      INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+      LEFT JOIN _assignmentCounts ac ON ap.id = ac.businessRoleId
+      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.businessRoleId
+      LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
+      LEFT JOIN _policyCounts pol ON ap.id = pol.businessRoleId
       ${reviewJoin}
-      ${hasReviewSettingsCol ? 'LEFT JOIN _reviewerInfo ri ON ap.id = ri.accessPackageId' : ''}
+      ${hasReviewSettingsCol ? 'LEFT JOIN _reviewerInfo ri ON ap.id = ri.businessRoleId' : ''}
       WHERE ${where}
       ORDER BY ${sortExpr} ${sortDir}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
       SELECT COUNT(*) AS total
-      FROM dbo.GraphAccessPackages ap
-      INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
-      LEFT JOIN dbo.GraphCategoryAssignments ca ON LOWER(ap.id) = ca.accessPackageId
-      LEFT JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
+      FROM dbo.BusinessRoles ap
+      INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.businessRoleId
+      LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
       WHERE ${where};
     `);
 
@@ -465,10 +465,10 @@ router.get('/category-assignments', async (req, res) => {
     const p = await db.getPool();
     await ensureCategoryTables(p);
     const result = await p.request().query(`
-      SELECT ca.accessPackageId, c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
-      FROM dbo.GraphCategoryAssignments ca
-      INNER JOIN dbo.GraphCategories c ON ca.categoryId = c.id
-      ORDER BY c.name, ca.accessPackageId
+      SELECT ca.businessRoleId, c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
+      FROM dbo.GovernanceCategoryAssignments ca
+      INNER JOIN dbo.GovernanceCategories c ON ca.categoryId = c.id
+      ORDER BY c.name, ca.businessRoleId
     `);
     res.json(result.recordset);
   } catch (err) {

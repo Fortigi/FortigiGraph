@@ -133,13 +133,13 @@ function Import-FGCuratedData {
 
             foreach ($cat in $importData.categories) {
                 $checkCmd = $conn.CreateCommand()
-                $checkCmd.CommandText = "SELECT id FROM dbo.GraphCategories WHERE name = @name"
+                $checkCmd.CommandText = "SELECT id FROM dbo.GovernanceCategories WHERE name = @name"
                 $checkCmd.Parameters.AddWithValue("@name", $cat.name) | Out-Null
                 $catId = $checkCmd.ExecuteScalar()
 
                 if ($null -eq $catId -or $catId -is [DBNull]) {
                     $insertCmd = $conn.CreateCommand()
-                    $insertCmd.CommandText = "INSERT INTO dbo.GraphCategories (name, color, createdAt) OUTPUT INSERTED.id VALUES (@name, @color, GETDATE())"
+                    $insertCmd.CommandText = "INSERT INTO dbo.GovernanceCategories (name, color, createdAt) OUTPUT INSERTED.id VALUES (@name, @color, GETDATE())"
                     $insertCmd.Parameters.AddWithValue("@name", $cat.name) | Out-Null
                     $insertCmd.Parameters.AddWithValue("@color", $(if ($cat.color) { $cat.color } else { [DBNull]::Value })) | Out-Null
                     $catId = $insertCmd.ExecuteScalar()
@@ -147,7 +147,7 @@ function Import-FGCuratedData {
                 } else {
                     if ($Overwrite -and $cat.color) {
                         $updateCmd = $conn.CreateCommand()
-                        $updateCmd.CommandText = "UPDATE dbo.GraphCategories SET color = @color WHERE id = @id"
+                        $updateCmd.CommandText = "UPDATE dbo.GovernanceCategories SET color = @color WHERE id = @id"
                         $updateCmd.Parameters.AddWithValue("@color", $cat.color) | Out-Null
                         $updateCmd.Parameters.AddWithValue("@id", $catId) | Out-Null
                         $updateCmd.ExecuteNonQuery() | Out-Null
@@ -157,14 +157,14 @@ function Import-FGCuratedData {
 
                 foreach ($apAssign in $cat.assignments) {
                     $checkCmd = $conn.CreateCommand()
-                    $checkCmd.CommandText = "SELECT COUNT(*) FROM dbo.GraphCategoryAssignments WHERE categoryId = @catId AND accessPackageId = @apId"
+                    $checkCmd.CommandText = "SELECT COUNT(*) FROM dbo.GovernanceCategoryAssignments WHERE categoryId = @catId AND businessRoleId = @apId"
                     $checkCmd.Parameters.AddWithValue("@catId", $catId) | Out-Null
                     $checkCmd.Parameters.AddWithValue("@apId", $apAssign.accessPackageId) | Out-Null
                     $exists = [int]$checkCmd.ExecuteScalar()
 
                     if ($exists -eq 0) {
                         $insertCmd = $conn.CreateCommand()
-                        $insertCmd.CommandText = "INSERT INTO dbo.GraphCategoryAssignments (categoryId, accessPackageId) VALUES (@catId, @apId)"
+                        $insertCmd.CommandText = "INSERT INTO dbo.GovernanceCategoryAssignments (categoryId, businessRoleId) VALUES (@catId, @apId)"
                         $insertCmd.Parameters.AddWithValue("@catId", $catId) | Out-Null
                         $insertCmd.Parameters.AddWithValue("@apId", $apAssign.accessPackageId) | Out-Null
                         $insertCmd.ExecuteNonQuery() | Out-Null

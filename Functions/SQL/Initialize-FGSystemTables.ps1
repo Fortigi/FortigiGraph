@@ -165,10 +165,11 @@ CREATE TABLE dbo.SystemOwners (
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: ResourceAssignments" -ForegroundColor Cyan
 
     $assignmentColumns = @{
-        'resourceId'     = 'UNIQUEIDENTIFIER'
-        'principalId'    = 'UNIQUEIDENTIFIER'
-        'principalType'  = 'NVARCHAR(100)'
-        'assignmentType' = 'NVARCHAR(50)'
+        'resourceId'      = 'UNIQUEIDENTIFIER'
+        'principalId'     = 'UNIQUEIDENTIFIER'
+        'principalType'   = 'NVARCHAR(100)'
+        'assignmentType'  = 'NVARCHAR(50)'
+        'complianceState' = 'NVARCHAR(100)'
     }
 
     $tableReady = Initialize-FGSyncTable -TableName "ResourceAssignments" -Columns $assignmentColumns -CompositePrimaryKey @('resourceId', 'principalId', 'assignmentType') -RecreateTable:$DropIfExists

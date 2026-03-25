@@ -74,8 +74,8 @@ export default function SystemsPage() {
         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2">
           {systems.map(sys => {
             const isExpanded = expandedId === sys.id;
-            const resourceTypes = parseJsonArray(sys.resourceTypes);
-            const assignmentTypes = parseJsonArray(sys.assignmentTypes);
+            const resourceTypes = parseJsonArray(sys.computedResourceTypes || sys.resourceTypes);
+            const assignmentTypes = parseJsonArray(sys.computedAssignmentTypes || sys.assignmentTypes);
             const owners = parseJsonArray(sys.owners);
             const enabled = sys.enabled !== false && sys.enabled !== 0;
 

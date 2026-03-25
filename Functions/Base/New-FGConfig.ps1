@@ -553,12 +553,20 @@ function New-FGConfig {
 
             $graphApiId = '00000003-0000-0000-c000-000000000000'
             $permissions = @(
+                # Core identity data
                 @{ Name = 'User.Read.All';                  Id = 'df021288-bdef-4463-88db-98f22de89214' }
                 @{ Name = 'Group.Read.All';                 Id = '5b567255-7703-4780-807c-7be8301ae99b' }
                 @{ Name = 'GroupMember.Read.All';           Id = '98830695-27a2-44f7-8c18-0c3ebc9698f6' }
                 @{ Name = 'Directory.Read.All';             Id = '7ab1d382-f21e-4acd-a863-ba3e13f7da61' }
+                # Applications & app role assignments (Sync-FGEntraAppRoleAssignment)
+                @{ Name = 'Application.Read.All';           Id = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30' }
+                # PIM group eligibility schedules (Sync-FGGroupEligibleMember)
+                # Note: PrivilegedAccess.Read.All does not exist — use the resource-specific permission
+                @{ Name = 'PrivilegedEligibilitySchedule.Read.AzureADGroup'; Id = 'b3a539c9-59be-4c8d-b62c-11ae8c4f2a37' }
+                # Access packages & entitlement management
                 @{ Name = 'EntitlementManagement.Read.All'; Id = 'c74fd47d-ed3c-45c3-9a9e-b8676de685d2' }
                 @{ Name = 'AccessReview.Read.All';          Id = 'd07a8cc0-3d51-4b77-b3b0-32704d1f69fa' }
+                # Audit & sign-in logs
                 @{ Name = 'AuditLog.Read.All';              Id = 'b0afded3-3588-46d8-8b3d-9842eff778da' }
             )
 
@@ -606,18 +614,18 @@ function New-FGConfig {
     # Sync Settings
     # ============================================================
     $syncConfig = @{
-        Users = @{ Enabled = $true; TableName = "GraphUsers"; Filter = ""; AdditionalAttributes = @() }
-        Groups = @{ Enabled = $true; TableName = "GraphGroups"; Filter = ""; AdditionalAttributes = @() }
-        GroupMembers = @{ Enabled = $true; TableName = "GraphGroupMembers" }
+        Users = @{ Enabled = $true; TableName = "Principals"; Filter = ""; AdditionalAttributes = @() }
+        Groups = @{ Enabled = $true; TableName = "Resources"; Filter = ""; AdditionalAttributes = @() }
+        GroupMembers = @{ Enabled = $true; TableName = "ResourceAssignments" }
         GroupEligibleMembers = @{ Enabled = $true }
-        GroupOwners = @{ Enabled = $true; TableName = "GraphGroupOwners" }
-        Catalogs = @{ Enabled = $true; TableName = "GraphCatalogs" }
-        AccessPackages = @{ Enabled = $true; TableName = "GraphAccessPackages" }
-        AccessPackageAssignments = @{ Enabled = $true; TableName = "GraphAccessPackageAssignments" }
-        AccessPackageResourceRoleScopes = @{ Enabled = $true; TableName = "GraphAccessPackageResourceRoleScopes" }
-        AccessPackageAssignmentPolicies = @{ Enabled = $true; TableName = "GraphAccessPackageAssignmentPolicies" }
-        AccessPackageAssignmentRequests = @{ Enabled = $true; TableName = "GraphAccessPackageAssignmentRequests" }
-        AccessPackageAccessReviews = @{ Enabled = $true; TableName = "GraphAccessPackageAccessReviewDecisions" }
+        GroupOwners = @{ Enabled = $true; TableName = "ResourceAssignments" }
+        Catalogs = @{ Enabled = $true; TableName = "GovernanceCatalogs" }
+        AccessPackages = @{ Enabled = $true; TableName = "BusinessRoles" }
+        AccessPackageAssignments = @{ Enabled = $true; TableName = "BusinessRoleAssignments" }
+        AccessPackageResourceRoleScopes = @{ Enabled = $true; TableName = "BusinessRoleResources" }
+        AccessPackageAssignmentPolicies = @{ Enabled = $true; TableName = "BusinessRolePolicies" }
+        AccessPackageAssignmentRequests = @{ Enabled = $true; TableName = "BusinessRoleRequests" }
+        AccessPackageAccessReviews = @{ Enabled = $true; TableName = "CertificationDecisions" }
         Views = @{ Enabled = $true }
         ParallelExecution = $true
     }

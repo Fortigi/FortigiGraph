@@ -4,9 +4,11 @@ function Sync-FGGroupMember {
     Syncs Microsoft Graph group memberships to Azure SQL with temporal versioning.
 
     .DESCRIPTION
-    This function syncs the many-to-many relationship between groups and their members:
-    - Creates a table with groupId, memberId, and memberType columns
-    - Uses composite primary key (groupId, memberId)
+    This function syncs the many-to-many relationship between groups and their members
+    to the universal ResourceAssignments table:
+    - Creates a table with resourceId, principalId, principalType, and assignmentType columns
+    - Uses composite primary key (resourceId, principalId, assignmentType)
+    - assignmentType is set to 'Direct' for all rows
     - Automatically creates temporal table for change tracking
     - Iterates through all groups and fetches members for each
     - Handles all member types (users, groups, devices, service principals)
@@ -22,7 +24,7 @@ function Sync-FGGroupMember {
     Optional array of specific group IDs to sync. If not specified, syncs all groups.
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphGroupMembers"
+    Name of the SQL table to create/sync to. Default: "ResourceAssignments"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -72,7 +74,7 @@ function Sync-FGGroupMember {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphGroupMembers",
+        [string]$TableName = "ResourceAssignments",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -106,13 +108,14 @@ function Sync-FGGroupMember {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group membership sync ($syncMode)..." -ForegroundColor Cyan
 
     # Define attributes for the membership table
-    $attributes = @('groupId', 'memberId', 'memberType')
+    $attributes = @('resourceId', 'principalId', 'principalType', 'assignmentType')
 
     # Map to SQL types
     $graphToSqlTypeMap = @{
-        'groupId' = 'UNIQUEIDENTIFIER'
-        'memberId' = 'UNIQUEIDENTIFIER'
-        'memberType' = 'NVARCHAR(100)'  # e.g., #microsoft.graph.user
+        'resourceId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
+        'principalType' = 'NVARCHAR(100)'  # e.g., #microsoft.graph.user
+        'assignmentType' = 'NVARCHAR(50)'   # 'Direct'
     }
 
     # Add syncBatchId for batching mode to track which records were seen
@@ -159,7 +162,7 @@ function Sync-FGGroupMember {
         $tableStillExists = Test-FGSQLTableExists -TableName $TableName
 
         if (-not $tableStillExists -or $RecreateTable) {
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('groupId', 'memberId') -DropIfExists:$RecreateTable
+            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('resourceId', 'principalId', 'assignmentType') -DropIfExists:$RecreateTable
         }
     }
     catch {
@@ -259,16 +262,18 @@ function Sync-FGGroupMember {
 
                 # Build small DataTable for this group's members
                 $dataTable = New-Object System.Data.DataTable
-                $dataTable.Columns.Add("groupId", [guid]) | Out-Null
-                $dataTable.Columns.Add("memberId", [guid]) | Out-Null
-                $dataTable.Columns.Add("memberType", [string]) | Out-Null
+                $dataTable.Columns.Add("resourceId", [guid]) | Out-Null
+                $dataTable.Columns.Add("principalId", [guid]) | Out-Null
+                $dataTable.Columns.Add("principalType", [string]) | Out-Null
+                $dataTable.Columns.Add("assignmentType", [string]) | Out-Null
                 $dataTable.Columns.Add("syncBatchId", [guid]) | Out-Null
 
                 foreach ($member in $members) {
                     $row = $dataTable.NewRow()
-                    $row["groupId"] = [guid]$group.id
-                    $row["memberId"] = [guid]$member.id
-                    $row["memberType"] = if ($member.'@odata.type') { $member.'@odata.type' } else { [DBNull]::Value }
+                    $row["resourceId"] = [guid]$group.id
+                    $row["principalId"] = [guid]$member.id
+                    $row["principalType"] = if ($member.'@odata.type') { $member.'@odata.type' } else { [DBNull]::Value }
+                    $row["assignmentType"] = 'Direct'
                     $row["syncBatchId"] = $syncBatchId
                     $dataTable.Rows.Add($row)
                 }
@@ -288,7 +293,7 @@ function Sync-FGGroupMember {
                             -Transaction $transaction `
                             -TargetTableName $TableName `
                             -DataTable $dataTable `
-                            -KeyColumns @('groupId', 'memberId')
+                            -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
                         $transaction.Commit()
                         $transaction.Dispose()
@@ -436,9 +441,10 @@ function Sync-FGGroupMember {
                 # Create membership records
                 foreach ($member in $members) {
                     $membership = [PSCustomObject]@{
-                        groupId = $group.id
-                        memberId = $member.id
-                        memberType = $member.'@odata.type'
+                        resourceId = $group.id
+                        principalId = $member.id
+                        principalType = $member.'@odata.type'
+                        assignmentType = 'Direct'
                     }
                     $allMemberships += $membership
                 }
@@ -465,15 +471,17 @@ function Sync-FGGroupMember {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
         $dataTable = New-Object System.Data.DataTable
-        $dataTable.Columns.Add("groupId", [guid]) | Out-Null
-        $dataTable.Columns.Add("memberId", [guid]) | Out-Null
-        $dataTable.Columns.Add("memberType", [string]) | Out-Null
+        $dataTable.Columns.Add("resourceId", [guid]) | Out-Null
+        $dataTable.Columns.Add("principalId", [guid]) | Out-Null
+        $dataTable.Columns.Add("principalType", [string]) | Out-Null
+        $dataTable.Columns.Add("assignmentType", [string]) | Out-Null
 
         foreach ($membership in $allMemberships) {
             $row = $dataTable.NewRow()
-            $row["groupId"] = [guid]$membership.groupId
-            $row["memberId"] = [guid]$membership.memberId
-            $row["memberType"] = if ($membership.memberType) { $membership.memberType } else { [DBNull]::Value }
+            $row["resourceId"] = [guid]$membership.resourceId
+            $row["principalId"] = [guid]$membership.principalId
+            $row["principalType"] = if ($membership.principalType) { $membership.principalType } else { [DBNull]::Value }
+            $row["assignmentType"] = $membership.assignmentType
             $dataTable.Rows.Add($row)
         }
 
@@ -500,7 +508,7 @@ function Sync-FGGroupMember {
                     -Transaction $transaction `
                     -TargetTableName $TableName `
                     -DataTable $dataTable `
-                    -KeyColumns @('groupId', 'memberId')
+                    -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
                 $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
@@ -516,7 +524,7 @@ function Sync-FGGroupMember {
                     -Transaction $transaction `
                     -TargetTableName $TableName `
                     -DataTable $dataTable `
-                    -KeyColumns @('groupId', 'memberId')
+                    -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
                 if ($deletedCount -gt 0) {
                     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount memberships that no longer exist in Graph" -ForegroundColor Yellow
@@ -590,6 +598,6 @@ function Sync-FGGroupMember {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "GroupMembers" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+        Write-FGSyncLog -SyncType "GroupMembers (Direct)" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
     }
 }

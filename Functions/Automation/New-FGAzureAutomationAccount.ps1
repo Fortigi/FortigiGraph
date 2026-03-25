@@ -261,6 +261,7 @@ function New-FGAzureAutomationAccount {
             "Sync-FGMaterializedViews" = "MaterializedViews"
         }
 
+        $syncSchedulesFound = $false
         foreach ($runbookName in $scheduleMapping.Keys) {
             $configKey = $scheduleMapping[$runbookName]
             $syncEntry = $config.Sync.$configKey
@@ -279,6 +280,7 @@ function New-FGAzureAutomationAccount {
                 foreach ($scheduleEntry in $scheduleEntries) {
                     if ($scheduleEntry.Enabled -eq $true) {
                         $scheduleConfig.Enabled = $true  # At least one schedule is enabled
+                        $syncSchedulesFound = $true
                         $time = if ($scheduleEntry.Time) { $scheduleEntry.Time } else { "06:00" }
                         $frequency = if ($scheduleEntry.Frequency) { $scheduleEntry.Frequency } else { "Daily" }
 
@@ -401,22 +403,25 @@ function New-FGAzureAutomationAccount {
             Write-Host "  Account Correlation is disabled in config — skipping schedule" -ForegroundColor Gray
         }
 
-        if ($scheduleConfig.Schedules.Count -gt 0) {
-            Write-Host "  Schedule configuration: $($scheduleConfig.Schedules.Count) schedules configured" -ForegroundColor Cyan
-        }
-        else {
-            # No schedules configured - ask if user wants to add default daily schedules
+        if (-not $syncSchedulesFound) {
+            # No sync runbook schedules in config — prompt to add them
             Write-Host ""
-            Write-Host "  No schedules configured in config file." -ForegroundColor Yellow
-            $addSchedules = Read-Host "  Would you like to add daily schedules (6AM) and save to config? (Y/N)"
+            Write-Host "  No sync schedules configured in config file." -ForegroundColor Yellow
+            Write-Host "  This covers: Users, Groups, Group Members, Access Packages, Directory Roles, etc." -ForegroundColor Gray
+            $addSchedules = Read-Host "  Would you like to add daily sync schedules and save to config? (Y/N)"
 
             if ($addSchedules -match '^[Yy]') {
+                # Ask for time
+                $defaultTime = "06:00"
+                $timeInput = Read-Host "  Enter time for daily sync (default: $defaultTime, format HH:mm)"
+                $selectedTime = if ($timeInput.Trim() -match '^\d{2}:\d{2}$') { $timeInput.Trim() } else { $defaultTime }
+
                 # Ask for time zone
-                $defaultTz = "W. Europe Standard Time"
+                $defaultTz = if ($config.Sync.ScheduleTimeZone) { $config.Sync.ScheduleTimeZone } else { "W. Europe Standard Time" }
                 $tzInput = Read-Host "  Enter time zone (default: $defaultTz)"
                 $selectedTz = if ($tzInput.Trim()) { $tzInput.Trim() } else { $defaultTz }
 
-                # Build default schedules for all runbooks
+                # Build schedules for all sync runbooks
                 $scheduleConfig.Enabled = $true
                 $scheduleConfig.TimeZone = $selectedTz
 
@@ -424,40 +429,47 @@ function New-FGAzureAutomationAccount {
                     $configKey = $scheduleMapping[$runbookName]
                     $scheduleConfig.Schedules += @{
                         RunbookName = $runbookName
-                        ConfigKey = $configKey
-                        Time = "06:00"
-                        Frequency = "Daily"
+                        ConfigKey   = $configKey
+                        Time        = $selectedTime
+                        Frequency   = "Daily"
                     }
                 }
 
                 # Update the config file with schedules
                 try {
-                    # Add ScheduleTimeZone to Sync section
                     if (-not $config.Sync.ScheduleTimeZone) {
                         $config.Sync | Add-Member -NotePropertyName "ScheduleTimeZone" -NotePropertyValue $selectedTz -Force
                     }
 
-                    # Add Schedule to each sync entity that has a runbook
                     foreach ($configKey in $scheduleMapping.Values) {
+                        $syncSchedule = [PSCustomObject]@{
+                            Enabled   = $true
+                            Time      = $selectedTime
+                            Frequency = "Daily"
+                        }
                         if ($config.Sync.$configKey) {
-                            $defaultSchedule = [PSCustomObject]@{
-                                Enabled = $true
-                                Time = "06:00"
-                                Frequency = "Daily"
-                            }
-                            $config.Sync.$configKey | Add-Member -NotePropertyName "Schedule" -NotePropertyValue $defaultSchedule -Force
+                            # Entry exists — just add/update the Schedule property
+                            $config.Sync.$configKey | Add-Member -NotePropertyName "Schedule" -NotePropertyValue $syncSchedule -Force
+                        }
+                        else {
+                            # Entry missing (e.g. v3.0 sync types not yet in config) — create minimal entry
+                            $newEntry = [PSCustomObject]@{ Enabled = $true; Schedule = $syncSchedule }
+                            $config.Sync | Add-Member -NotePropertyName $configKey -NotePropertyValue $newEntry -Force
                         }
                     }
 
-                    # Save updated config
                     $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
-                    Write-Host "  Config file updated with daily schedules at 06:00 ($selectedTz)" -ForegroundColor Green
+                    Write-Host "  Config file updated with daily sync schedules at $selectedTime ($selectedTz)" -ForegroundColor Green
                 }
                 catch {
                     Write-Warning "  Failed to update config file: $_"
                     Write-Host "  Schedules will still be created, but config file was not updated" -ForegroundColor Yellow
                 }
             }
+        }
+
+        if ($scheduleConfig.Schedules.Count -gt 0) {
+            Write-Host "  Schedule configuration: $($scheduleConfig.Schedules.Count) schedules configured" -ForegroundColor Cyan
         }
 
         # Validate required fields
@@ -476,6 +488,17 @@ function New-FGAzureAutomationAccount {
         if (-not $Location) { $Location = "northeurope" }
 
         Write-Host "  Configuration loaded successfully" -ForegroundColor Green
+
+        # Check for missing sections compared to the current template
+        $configCheck = Update-FGConfig -ConfigFile $ConfigFile -Silent
+        if ($configCheck.Missing.Count -gt 0) {
+            $answer = Read-Host "  Would you like to review and add the missing sections now? (Y/N)"
+            if ($answer -match '^[Yy]') {
+                Update-FGConfig -ConfigFile $ConfigFile
+                # Reload config after updates
+                $config = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
+            }
+        }
     }
     else {
         # Explicit parameter set - validate required parameters

@@ -25,7 +25,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     Optional OData filter to limit which requests to sync (e.g., "requestState eq 'Delivered'")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackageAssignmentRequests"
+    Name of the SQL table to create/sync to. Default: "BusinessRoleRequests"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -79,7 +79,7 @@ function Sync-FGAccessPackageAssignmentRequest {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackageAssignmentRequests",
+        [string]$TableName = "BusinessRoleRequests",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -121,7 +121,7 @@ function Sync-FGAccessPackageAssignmentRequest {
         'id'
 
         # Relationships
-        'accessPackageId'
+        'businessRoleId'
         'accessPackage'
         'requestor'
         'requestorId'  # We'll extract from expanded requestor object
@@ -176,7 +176,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Map Graph attribute types to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'UNIQUEIDENTIFIER'
-        'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'businessRoleId' = 'UNIQUEIDENTIFIER'
         'assignmentPolicyId' = 'UNIQUEIDENTIFIER'
         'requestorId' = 'UNIQUEIDENTIFIER'
         'requestType' = 'NVARCHAR(50)'
@@ -215,7 +215,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Value resolvers for special attributes
     $valueResolvers = @{
         'requestorId' = { param($obj) $obj.requestor.id }
-        'accessPackageId' = { param($obj) $obj.accessPackage.id }
+        'businessRoleId' = { param($obj) $obj.accessPackage.id }
         'schedule' = { param($obj) if ($obj.schedule) { $obj.schedule | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'accessPackage' = { param($obj) if ($obj.accessPackage) { $obj.accessPackage | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'requestor' = { param($obj) if ($obj.requestor) { $obj.requestor | ConvertTo-Json -Compress -Depth 10 } else { $null } }
@@ -533,17 +533,17 @@ function Sync-FGAccessPackageAssignmentRequest {
             return
         }
 
-        # Analyze requests with null accessPackageId by requestType
-        $nullAccessPackageRequests = $allRequests | Where-Object { $null -eq $_.accessPackage -or [string]::IsNullOrWhiteSpace($_.accessPackage.id) }
-        if ($nullAccessPackageRequests.Count -gt 0) {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Analysis: Found $($nullAccessPackageRequests.Count) requests with null/empty accessPackageId:" -ForegroundColor Cyan
-            $byRequestType = $nullAccessPackageRequests | Group-Object -Property requestType | Sort-Object Count -Descending
+        # Analyze requests with null businessRoleId by requestType
+        $nullBusinessRoleRequests = $allRequests | Where-Object { $null -eq $_.accessPackage -or [string]::IsNullOrWhiteSpace($_.accessPackage.id) }
+        if ($nullBusinessRoleRequests.Count -gt 0) {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Analysis: Found $($nullBusinessRoleRequests.Count) requests with null/empty businessRoleId:" -ForegroundColor Cyan
+            $byRequestType = $nullBusinessRoleRequests | Group-Object -Property requestType | Sort-Object Count -Descending
             foreach ($group in $byRequestType) {
-                $percentage = [math]::Round(($group.Count / $nullAccessPackageRequests.Count) * 100, 1)
+                $percentage = [math]::Round(($group.Count / $nullBusinessRoleRequests.Count) * 100, 1)
                 Write-Host "  $($group.Name): $($group.Count) requests ($percentage%)" -ForegroundColor Gray
             }
             Write-Host "  This is normal for removal requests (UserRemove/AdminRemove/SystemRemove)" -ForegroundColor Gray
-            Write-Host "  These will sync with accessPackageId = NULL in SQL" -ForegroundColor Gray
+            Write-Host "  These will sync with businessRoleId = NULL in SQL" -ForegroundColor Gray
         }
 
         # Check for NULL or duplicate IDs in source data

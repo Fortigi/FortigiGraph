@@ -236,7 +236,7 @@ router.get('/resources/:id', async (req, res) => {
         .input('id', resourceId)
         .query(`
           SELECT COUNT(DISTINCT rrs.accessPackageId) AS cnt
-          FROM GraphAccessPackageResourceRoleScopes rrs
+          FROM BusinessRoleResources rrs
           WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
             AND rrs.scopeOriginSystem = 'AadGroup'
         `);

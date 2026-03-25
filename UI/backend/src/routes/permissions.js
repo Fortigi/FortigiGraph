@@ -112,7 +112,7 @@ router.get('/permissions', async (req, res) => {
       const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
           OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
-          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaAccessPackage', 'U') AS matApExists,
+          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaBusinessRole', 'U') AS matApExists,
           OBJECT_ID('dbo.mat_UserCounts', 'U') AS matCountsExists,
           OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resourceViewExists,
           OBJECT_ID('dbo.Principals', 'U') AS principalsExists
@@ -129,8 +129,8 @@ router.get('/permissions', async (req, res) => {
       const COL_PRINC = useResourceId ? 'principalId' : 'memberId';
       const COL_PTYPE = useResourceId ? 'principalType' : 'memberType';
       const apSource = matCheck.recordset[0].matApExists
-        ? 'mat_UserPermissionAssignmentViaAccessPackage'
-        : 'vw_UserPermissionAssignmentViaAccessPackage';
+        ? 'mat_UserPermissionAssignmentViaBusinessRole'
+        : 'vw_UserPermissionAssignmentViaBusinessRole';
       const hasPrecomputedCounts = !!matCheck.recordset[0].matCountsExists;
 
       // Determine user table: prefer Principals, fall back to GraphUsers
@@ -317,7 +317,7 @@ router.get('/permissions', async (req, res) => {
               ap.userId AS memberId,
               ap.groupId AS resourceId,
               ap.groupId,
-              STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+              STRING_AGG(CAST(ap.businessRoleId AS NVARCHAR(36)), ',') AS accessPackageIds
             FROM ${apSource} ap
             WHERE ap.userId IN (
               SELECT memberId FROM #UserCounts
@@ -390,7 +390,7 @@ router.get('/permissions', async (req, res) => {
             ap.userId AS memberId,
             ap.groupId AS resourceId,
             ap.groupId,
-            STRING_AGG(CAST(ap.accessPackageId AS NVARCHAR(36)), ',') AS accessPackageIds
+            STRING_AGG(CAST(ap.businessRoleId AS NVARCHAR(36)), ',') AS accessPackageIds
           FROM ${apSource} ap
           GROUP BY ap.userId, ap.groupId;
         END TRY
@@ -459,7 +459,7 @@ async function accessPackageResourcesHandler(req, res) {
       await ensureCategoryTables(p);
       const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
-          rrs.accessPackageId,
+          rrs.businessRoleId,
           ap.displayName AS accessPackageName,
           c.displayName  AS catalogName,
           UPPER(rrs.scopeOriginId) AS resourceId,
@@ -473,19 +473,19 @@ async function accessPackageResourcesHandler(req, res) {
           cat.id AS categoryId,
           cat.name AS categoryName,
           cat.color AS categoryColor
-        FROM dbo.GraphAccessPackageResourceRoleScopes rrs
-        INNER JOIN dbo.GraphAccessPackages ap ON rrs.accessPackageId = ap.id
-        INNER JOIN dbo.GraphCatalogs c ON ap.catalogId = c.id
+        FROM dbo.BusinessRoleResources rrs
+        INNER JOIN dbo.BusinessRoles ap ON rrs.businessRoleId = ap.id
+        INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
         LEFT  JOIN dbo.Resources r ON UPPER(rrs.scopeOriginId) = r.id
                    AND r.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN (
-          SELECT accessPackageId, COUNT(*) AS cnt
-          FROM dbo.GraphAccessPackageAssignments
+          SELECT businessRoleId, COUNT(*) AS cnt
+          FROM dbo.BusinessRoleAssignments
           WHERE assignmentState = 'delivered'
-          GROUP BY accessPackageId
-        ) ac ON rrs.accessPackageId = ac.accessPackageId
-        LEFT  JOIN dbo.GraphCategoryAssignments ca ON LOWER(rrs.accessPackageId) = ca.accessPackageId
-        LEFT  JOIN dbo.GraphCategories cat ON ca.categoryId = cat.id
+          GROUP BY businessRoleId
+        ) ac ON rrs.businessRoleId = ac.businessRoleId
+        LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.businessRoleId) = ca.businessRoleId
+        LEFT  JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
         WHERE rrs.scopeOriginSystem = 'AadGroup'
       `);
       return res.json(result.recordset);
@@ -531,13 +531,13 @@ router.get('/sync-log', async (req, res) => {
       { type: 'GroupTransitiveMembers', table: 'GraphGroupTransitiveMembers', records: 8932 },
       { type: 'GroupEligibleMembers', table: 'GraphGroupEligibleMembers', records: 156 },
       { type: 'GroupOwners', table: 'GraphGroupOwners', records: 412 },
-      { type: 'Catalogs', table: 'GraphCatalogs', records: 12 },
-      { type: 'AccessPackages', table: 'GraphAccessPackages', records: 67 },
-      { type: 'AccessPackageAssignments', table: 'GraphAccessPackageAssignments', records: 834 },
-      { type: 'AccessPackageResourceRoleScopes', table: 'GraphAccessPackageResourceRoleScopes', records: 203 },
-      { type: 'AccessPackageAssignmentPolicies', table: 'GraphAccessPackageAssignmentPolicies', records: 71 },
-      { type: 'AccessPackageAssignmentRequests', table: 'GraphAccessPackageAssignmentRequests', records: 2103 },
-      { type: 'AccessPackageAccessReviews', table: 'GraphAccessPackageAccessReviews', records: 45 },
+      { type: 'Catalogs', table: 'GovernanceCatalogs', records: 12 },
+      { type: 'AccessPackages', table: 'BusinessRoles', records: 67 },
+      { type: 'AccessPackageAssignments', table: 'BusinessRoleAssignments', records: 834 },
+      { type: 'AccessPackageResourceRoleScopes', table: 'BusinessRoleResources', records: 203 },
+      { type: 'AccessPackageAssignmentPolicies', table: 'BusinessRolePolicies', records: 71 },
+      { type: 'AccessPackageAssignmentRequests', table: 'BusinessRoleRequests', records: 2103 },
+      { type: 'AccessPackageAccessReviews', table: 'CertificationDecisions', records: 45 },
       { type: 'MaterializedViews', table: 'mat_UserPermissionAssignments', records: 0 },
       { type: 'RiskScoring', table: 'GraphUsers,GraphGroups', records: 1636 },
     ];

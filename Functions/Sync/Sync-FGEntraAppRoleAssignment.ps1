@@ -71,9 +71,10 @@ function Sync-FGEntraAppRoleAssignment {
 
     # Helper function: Generate deterministic GUID from string
     function New-DeterministicGuid {
-        param([string]$InputValue)
+        param([string]$InputString)
+        if ([string]::IsNullOrEmpty($InputString)) { throw "New-DeterministicGuid: InputString must not be null or empty" }
         $md5Provider = [System.Security.Cryptography.MD5]::Create()
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputValue)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputString)
         $hash = $md5Provider.ComputeHash($bytes)
         $md5Provider.Dispose()
         $hex = ($hash | ForEach-Object { $_.ToString('x2') }) -join ''
@@ -157,6 +158,7 @@ function Sync-FGEntraAppRoleAssignment {
     $appRoleLookup = @{}
     foreach ($sp in $spsWithRoles) {
         foreach ($role in $sp.appRoles) {
+            if ([string]::IsNullOrEmpty($sp.id) -or [string]::IsNullOrEmpty($role.id)) { continue }
             $compositeKey = "$($sp.id)_$($role.id)"
             $appRoleLookup[$compositeKey] = @{
                 ServicePrincipalId = $sp.id

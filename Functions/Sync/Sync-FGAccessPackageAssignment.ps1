@@ -23,7 +23,7 @@ function Sync-FGAccessPackageAssignment {
     Optional OData filter to limit which assignments to sync (e.g., "state eq 'delivered'")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackageAssignments"
+    Name of the SQL table to create/sync to. Default: "BusinessRoleAssignments"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -76,7 +76,7 @@ function Sync-FGAccessPackageAssignment {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackageAssignments",
+        [string]$TableName = "BusinessRoleAssignments",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -113,10 +113,10 @@ function Sync-FGAccessPackageAssignment {
     $defaultAttributes = @(
         # Identity
         'id'
-        'accessPackageId'
+        'businessRoleId'
 
         # Target - we'll extract targetId from the expanded target object
-        'targetId'  # This is not a direct property, we'll extract it
+        'principalId'  # This is not a direct property, we'll extract it
 
         # State
         'assignmentStatus'
@@ -136,9 +136,9 @@ function Sync-FGAccessPackageAssignment {
             $Attributes = @('id') + $Attributes
             Write-Verbose "Added 'id' to attributes (required for primary key)"
         }
-        if ($Attributes -notcontains 'targetId') {
-            $Attributes += 'targetId'
-            Write-Verbose "Added 'targetId' to attributes (required for relationship)"
+        if ($Attributes -notcontains 'principalId') {
+            $Attributes += 'principalId'
+            Write-Verbose "Added 'principalId' to attributes (required for relationship)"
         }
     }
     else {
@@ -160,8 +160,8 @@ function Sync-FGAccessPackageAssignment {
     # Map Graph attribute types to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'UNIQUEIDENTIFIER'
-        'accessPackageId' = 'UNIQUEIDENTIFIER'
-        'targetId' = 'UNIQUEIDENTIFIER'
+        'businessRoleId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
         'assignmentState' = 'NVARCHAR(50)'
         'assignmentStatus' = 'NVARCHAR(50)'
         'schedule' = 'NVARCHAR(MAX)'  # JSON representation
@@ -301,7 +301,8 @@ function Sync-FGAccessPackageAssignment {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $valueResolvers = @{
-        'targetId' = { param($obj) $obj.target.id }
+        'businessRoleId' = { param($obj) $obj.accessPackageId }
+        'principalId' = { param($obj) $obj.target.id }
         'schedule' = { param($obj) if ($obj.schedule) { $obj.schedule | ConvertTo-Json -Compress -Depth 10 } else { $null } }
     }
 

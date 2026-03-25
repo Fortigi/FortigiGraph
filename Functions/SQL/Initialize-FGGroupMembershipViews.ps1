@@ -90,7 +90,7 @@ SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$DirectMembersTable') THEN 1 ELSE 0 END AS DirectExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$EligibleMembersTable') THEN 1 ELSE 0 END AS EligibleExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$OwnersTable') THEN 1 ELSE 0 END AS OwnersExists,
-    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaAccessPackage') THEN 1 ELSE 0 END AS SollViewExists
+    CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaBusinessRole') THEN 1 ELSE 0 END AS SollViewExists
 "@
         $reader = $checkTablesCmd.ExecuteReader()
         $reader.Read()
@@ -101,7 +101,7 @@ SELECT
         $reader.Close()
 
         if (-not $sollViewExists) {
-            Write-Warning "View 'vw_UserPermissionAssignmentViaAccessPackage' does not exist. Run Initialize-FGAccessPackageViews for managedByAccessPackage column (optional)."
+            Write-Warning "View 'vw_UserPermissionAssignmentViaBusinessRole' does not exist. Run Initialize-FGAccessPackageViews for managedByAccessPackage column (optional)."
         }
 
         if (-not $directExists) {
@@ -295,7 +295,7 @@ SELECT
             $createView2SQL += @"
 
     CAST(CASE WHEN EXISTS (
-        SELECT 1 FROM dbo.vw_UserPermissionAssignmentViaAccessPackage ap
+        SELECT 1 FROM dbo.vw_UserPermissionAssignmentViaBusinessRole ap
         WHERE ap.userId = a.memberId AND ap.groupId = a.groupId
     ) THEN 1 ELSE 0 END AS BIT) AS managedByAccessPackage
 FROM AllAssignments a;
@@ -332,7 +332,7 @@ FROM AllAssignments a;
         Write-Host "  - Single query to get complete membership picture" -ForegroundColor Gray
         Write-Host "  - Columns: groupId, memberId, memberType, membershipType, ValidFrom, ValidTo, managedByAccessPackage" -ForegroundColor Gray
         if ($sollViewExists) {
-            Write-Host "  - managedByAccessPackage: Checks against vw_UserPermissionAssignmentViaAccessPackage (SOLL)" -ForegroundColor Gray
+            Write-Host "  - managedByAccessPackage: Checks against vw_UserPermissionAssignmentViaBusinessRole (SOLL)" -ForegroundColor Gray
         }
         else {
             Write-Host "  - managedByAccessPackage: Always 0 (run Initialize-FGAccessPackageViews first, then re-run this)" -ForegroundColor Yellow

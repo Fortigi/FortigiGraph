@@ -14,7 +14,7 @@ function Sync-FGAccessPackageResourceRoleScope {
     - Enables analysis: "Which groups does a user get from access package X?"
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphAccessPackageResourceRoleScopes"
+    Name of the SQL table to create/sync to. Default: "BusinessRoleResources"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -45,7 +45,7 @@ function Sync-FGAccessPackageResourceRoleScope {
     [Alias("Sync-AccessPackageResourceRoleScope")]
     Param(
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphAccessPackageResourceRoleScopes",
+        [string]$TableName = "BusinessRoleResources",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -76,7 +76,7 @@ function Sync-FGAccessPackageResourceRoleScope {
     # These represent the flattened structure we'll store
     $Attributes = @(
         'id'                          # Composite ID (e.g., "guid1_guid2")
-        'accessPackageId'             # Which access package this belongs to
+        'businessRoleId'             # Which access package this belongs to
         'roleId'                      # Role ID from accessPackageResourceRole.id
         'roleDisplayName'             # Role display name (Member, Owner)
         'roleDescription'             # Role description
@@ -98,7 +98,7 @@ function Sync-FGAccessPackageResourceRoleScope {
     # Map attributes to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'NVARCHAR(255)'              # Composite ID, not a GUID
-        'accessPackageId' = 'UNIQUEIDENTIFIER'
+        'businessRoleId' = 'UNIQUEIDENTIFIER'
         'roleId' = 'NVARCHAR(100)'          # Can be GUID or other format
         'roleDisplayName' = 'NVARCHAR(255)'
         'roleDescription' = 'NVARCHAR(1024)'
@@ -123,7 +123,7 @@ function Sync-FGAccessPackageResourceRoleScope {
 
     # Check if table exists and handle schema
     try {
-        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable -CompositePrimaryKey @('accessPackageId', 'id')
+        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable -CompositePrimaryKey @('businessRoleId', 'id')
         if ($tableReady -eq $false) { return }
     }
     catch {
@@ -209,7 +209,7 @@ function Sync-FGAccessPackageResourceRoleScope {
 
                         $flatScope = [PSCustomObject]@{
                             id = $scope.id
-                            accessPackageId = $package.id
+                            businessRoleId = $package.id
                             roleId = $normalizedRoleId
                             roleDisplayName = $scope.accessPackageResourceRole.displayName
                             roleDescription = $scope.accessPackageResourceRole.description
@@ -307,7 +307,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('accessPackageId', 'id')
+                -KeyColumns @('businessRoleId', 'id')
 
             $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
@@ -323,7 +323,7 @@ function Sync-FGAccessPackageResourceRoleScope {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('accessPackageId', 'id')
+                -KeyColumns @('businessRoleId', 'id')
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount scopes that no longer exist in Graph" -ForegroundColor Yellow

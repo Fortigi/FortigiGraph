@@ -1,29 +1,32 @@
 function Sync-FGGroup {
     <#
     .SYNOPSIS
-    Syncs Microsoft Graph groups to Azure SQL with automatic schema detection and temporal versioning.
+    Syncs Microsoft Graph groups to the Resources table in Azure SQL with temporal versioning.
 
     .DESCRIPTION
-    This function makes syncing Graph groups to SQL incredibly easy:
-    - Specify the group attributes you want to sync
+    This function syncs Entra ID groups to the universal resource model:
+    - Writes to the Resources table with resourceType='EntraGroup'
+    - Core group attributes map to fixed Resources columns
+    - All remaining group-specific attributes go into extendedAttributes JSON
     - Automatically creates the SQL table on first run
-    - Auto-detects SQL data types from Graph schema
     - Uses temporal tables for automatic change tracking
     - Syncs all groups or filtered groups to SQL
     - Does NOT sync members (use Sync-FGGroupMember for that)
 
     .PARAMETER Attributes
-    Array of group attribute names to sync. If not specified, uses default set of common attributes.
+    Array of group attribute names to fetch from Graph. If not specified, uses default set of common attributes.
     To add to defaults, use -AdditionalAttributes instead.
+    All fetched attributes beyond the core Resources columns are stored in extendedAttributes JSON.
 
     .PARAMETER AdditionalAttributes
-    Array of additional attributes to sync on top of the defaults.
+    Array of additional attributes to fetch from Graph on top of the defaults.
+    These are included in the extendedAttributes JSON column.
 
     .PARAMETER Filter
     Optional OData filter to limit which groups to sync (e.g., "securityEnabled eq true")
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphGroups"
+    Name of the SQL table to create/sync to. Default: "Resources"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -34,17 +37,17 @@ function Sync-FGGroup {
     .EXAMPLE
     Sync-FGGroup
 
-    Syncs all groups with default attributes (id, displayName, description, mail, etc.)
+    Syncs all groups with default attributes to the Resources table
 
     .EXAMPLE
-    Sync-FGGroup -AdditionalAttributes @('classification', 'visibility')
+    Sync-FGGroup -AdditionalAttributes @('classification', 'preferredLanguage')
 
-    Syncs groups with default attributes PLUS the additional ones specified
+    Syncs groups with default attributes PLUS additional ones (stored in extendedAttributes JSON)
 
     .EXAMPLE
-    Sync-FGGroup -Filter "securityEnabled eq true" -TableName "SecurityGroups"
+    Sync-FGGroup -Filter "securityEnabled eq true"
 
-    Syncs only security groups to a custom table name
+    Syncs only security groups to the Resources table
 
     .NOTES
     Requires:
@@ -66,7 +69,7 @@ function Sync-FGGroup {
         [string]$Filter,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphGroups",
+        [string]$TableName = "Resources",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable,
@@ -93,7 +96,15 @@ function Sync-FGGroup {
 
     try {
 
-    # Define default attributes
+    # Resolve SystemId for EntraID
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resolving system ID for EntraID..." -ForegroundColor Cyan
+    $SystemId = Sync-FGSystem -SystemType 'EntraID' -DisplayName 'Entra ID' -TenantId $Global:TenantId
+    if (-not $SystemId) {
+        throw "Could not find or create a system record for EntraID. Please run Initialize-FGSystemTables first."
+    }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using system ID: $SystemId" -ForegroundColor Green
+
+    # Define default Graph attributes to fetch
     $defaultAttributes = @(
         # Identity
         'id'
@@ -129,7 +140,7 @@ function Sync-FGGroup {
         'onPremisesDomainName'
     )
 
-    # Determine which attributes to use
+    # Determine which Graph attributes to fetch
     if ($PSCmdlet.ParameterSetName -eq 'Custom') {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using custom attributes: $($Attributes.Count) attributes" -ForegroundColor Cyan
 
@@ -155,54 +166,23 @@ function Sync-FGGroup {
         }
     }
 
-    # Map Graph attribute types to SQL types
-    $graphToSqlTypeMap = @{
-        'id' = 'UNIQUEIDENTIFIER'
-        'displayName' = 'NVARCHAR(255)'
-        'description' = 'NVARCHAR(1024)'
-        'mail' = 'NVARCHAR(255)'
-        'mailNickname' = 'NVARCHAR(255)'
-        'mailEnabled' = 'BIT'
-        'securityEnabled' = 'BIT'
-        'groupTypes' = 'NVARCHAR(500)'  # Array stored as comma-separated
-        'visibility' = 'NVARCHAR(50)'
-        'createdDateTime' = 'DATETIME2'
-        'renewedDateTime' = 'DATETIME2'
-        'expirationDateTime' = 'DATETIME2'
-        'deletedDateTime' = 'DATETIME2'
-        'isAssignableToRole' = 'BIT'
-        'membershipRule' = 'NVARCHAR(MAX)'
-        'membershipRuleProcessingState' = 'NVARCHAR(50)'
-        'resourceProvisioningOptions' = 'NVARCHAR(500)'
-        'classification' = 'NVARCHAR(255)'
-        'preferredDataLocation' = 'NVARCHAR(50)'
-        'preferredLanguage' = 'NVARCHAR(50)'
-        'theme' = 'NVARCHAR(50)'
-        'onPremisesSamAccountName' = 'NVARCHAR(255)'
-        'onPremisesSyncEnabled' = 'BIT'
-        'onPremisesSecurityIdentifier' = 'NVARCHAR(255)'
-        'onPremisesNetBiosName' = 'NVARCHAR(255)'
-        'onPremisesDomainName' = 'NVARCHAR(255)'
-        'onPremisesProvisioningErrors' = 'NVARCHAR(MAX)'
-        'proxyAddresses' = 'NVARCHAR(MAX)'
+    # Fixed Resources table columns (not driven by Graph attributes)
+    $columns = @{
+        'id'                 = 'UNIQUEIDENTIFIER'
+        'systemId'           = 'INT'
+        'displayName'        = 'NVARCHAR(500)'
+        'description'        = 'NVARCHAR(MAX)'
+        'resourceType'       = 'NVARCHAR(50)'
+        'createdDateTime'    = 'DATETIME2'
+        'mail'               = 'NVARCHAR(500)'
+        'visibility'         = 'NVARCHAR(50)'
+        'enabled'            = 'BIT'
+        'externalId'         = 'NVARCHAR(500)'
+        'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
-    # Add calculated fields (not Graph attributes, computed during sync)
-    $calculatedFields = @('groupTypeCalculated', 'administrativeUnits')
-
-    # Build column definitions
-    $columns = @{}
-    foreach ($attr in $Attributes) {
-        $sqlType = $graphToSqlTypeMap[$attr]
-        if (-not $sqlType) {
-            $sqlType = 'NVARCHAR(MAX)'
-            Write-Warning "Unknown attribute '$attr', using NVARCHAR(MAX). Consider adding to type map."
-        }
-        $columns[$attr] = $sqlType
-    }
-    # Add calculated columns
-    $columns['groupTypeCalculated'] = 'NVARCHAR(100)'
-    $columns['administrativeUnits'] = 'NVARCHAR(MAX)'
+    # Core columns that map directly from Graph attributes (not put into extendedAttributes)
+    $coreColumnNames = @('id', 'displayName', 'description', 'createdDateTime', 'mail', 'visibility')
 
     # Check if table exists and handle schema
     try {
@@ -277,7 +257,7 @@ function Sync-FGGroup {
         }
     }
     catch {
-        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch administrative units: $_. The 'administrativeUnits' column will be empty."
+        Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Failed to fetch administrative units: $_. The administrativeUnits extended attribute will be empty."
     }
 
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
@@ -286,13 +266,49 @@ function Sync-FGGroup {
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    # Include calculated fields in the attribute list for DataTable creation
-    $allColumns = $Attributes + $calculatedFields
+    # The DataTable attributes are the Resources column names
+    $dataTableAttributes = @($columns.Keys)
 
-    # Define resolvers for the calculated fields
+    # Build the list of all Graph attributes that should go into extendedAttributes
+    # (everything fetched from Graph that isn't a core Resources column)
+    $extendedAttributeNames = @($graphAttributes | Where-Object { $_ -notin $coreColumnNames })
+
+    # Define value resolvers for columns that don't map directly from Graph
     $valueResolvers = @{
-        'groupTypeCalculated' = {
+        'systemId' = {
             param($obj)
+            $SystemId
+        }
+        'resourceType' = {
+            param($obj)
+            'EntraGroup'
+        }
+        'enabled' = {
+            param($obj)
+            $true
+        }
+        'externalId' = {
+            param($obj)
+            $null
+        }
+        'extendedAttributes' = {
+            param($obj)
+            $extended = @{}
+
+            # Add all non-core Graph attributes to extendedAttributes
+            foreach ($attrName in $extendedAttributeNames) {
+                $val = $obj.$attrName
+                if ($null -ne $val -and $val -ne '') {
+                    $extended[$attrName] = $val
+                }
+            }
+
+            # Add administrative units
+            if ($auMemberMap.ContainsKey($obj.id)) {
+                $extended['administrativeUnits'] = ($auMemberMap[$obj.id] -join ', ')
+            }
+
+            # Compute groupTypeCalculated
             $groupTypesValue = $obj.groupTypes
             $isUnified = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'Unified'
             $hasTeam = $obj.resourceProvisioningOptions -is [Array] -and $obj.resourceProvisioningOptions -contains 'Team'
@@ -304,18 +320,14 @@ function Sync-FGGroup {
             elseif (-not $obj.mailEnabled) { $baseType = 'Security Group' }
             else { $baseType = 'Mail Enabled Security Group' }
 
-            if ($isDynamic) { "Dynamic $baseType" } else { $baseType }
-        }
-        'administrativeUnits' = {
-            param($obj)
-            if ($auMemberMap.ContainsKey($obj.id)) {
-                return ($auMemberMap[$obj.id] -join ', ')
-            }
-            return $null
+            if ($isDynamic) { $groupType = "Dynamic $baseType" } else { $groupType = $baseType }
+            $extended['groupTypeCalculated'] = $groupType
+
+            if ($extended.Count -gt 0) { $extended | ConvertTo-Json -Compress -Depth 10 } else { $null }
         }
     }
 
-    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allGroups -Columns $columns -Attributes $allColumns -ValueResolvers $valueResolvers
+    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allGroups -Columns $columns -Attributes $dataTableAttributes -ValueResolvers $valueResolvers
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -403,7 +415,8 @@ function Sync-FGGroup {
     Write-Host "Synced:          $syncedCount" -ForegroundColor White
     Write-Host "Deleted:         $deletedCount" -ForegroundColor White
     Write-Host "Errors:          $errorCount" -ForegroundColor White
-    Write-Host "Attributes:      $($Attributes.Count)" -ForegroundColor White
+    Write-Host "Resource Type:   EntraGroup" -ForegroundColor White
+    Write-Host "System ID:       $SystemId" -ForegroundColor White
     Write-Host "`nAll changes are automatically tracked in ${TableName}History" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
 

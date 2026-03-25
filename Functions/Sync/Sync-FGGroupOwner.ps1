@@ -4,9 +4,11 @@ function Sync-FGGroupOwner {
     Syncs Microsoft Graph group ownership relationships to Azure SQL with temporal versioning.
 
     .DESCRIPTION
-    This function syncs the many-to-many relationship between groups and their owners:
-    - Creates a table with groupId and ownerId columns
-    - Uses composite primary key (groupId, ownerId)
+    This function syncs the many-to-many relationship between groups and their owners
+    to the universal ResourceAssignments table:
+    - Creates a table with resourceId, principalId, principalType, and assignmentType columns
+    - Uses composite primary key (resourceId, principalId, assignmentType)
+    - assignmentType is set to 'Owner' and principalType to 'user' for all rows
     - Automatically creates temporal table for change tracking
     - Iterates through all groups and fetches owners for each
     - Handles all owner types (typically users)
@@ -19,7 +21,7 @@ function Sync-FGGroupOwner {
     Optional array of specific group IDs to sync. If not specified, syncs all groups.
 
     .PARAMETER TableName
-    Name of the SQL table to create/sync to. Default: "GraphGroupOwners"
+    Name of the SQL table to create/sync to. Default: "ResourceAssignments"
 
     .PARAMETER RecreateTable
     If specified, drops and recreates the table (WARNING: loses all history!)
@@ -56,7 +58,7 @@ function Sync-FGGroupOwner {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [string]$TableName = "GraphGroupOwners",
+        [string]$TableName = "ResourceAssignments",
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
@@ -83,12 +85,14 @@ function Sync-FGGroupOwner {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting group ownership sync..." -ForegroundColor Cyan
 
     # Define attributes for the ownership table
-    $attributes = @('groupId', 'ownerId')
+    $attributes = @('resourceId', 'principalId', 'principalType', 'assignmentType')
 
     # Map to SQL types
     $graphToSqlTypeMap = @{
-        'groupId' = 'UNIQUEIDENTIFIER'
-        'ownerId' = 'UNIQUEIDENTIFIER'
+        'resourceId' = 'UNIQUEIDENTIFIER'
+        'principalId' = 'UNIQUEIDENTIFIER'
+        'principalType' = 'NVARCHAR(100)'
+        'assignmentType' = 'NVARCHAR(50)'  # 'Owner'
     }
 
     # Build column definitions
@@ -120,7 +124,7 @@ function Sync-FGGroupOwner {
         $tableStillExists = Test-FGSQLTableExists -TableName $TableName
 
         if (-not $tableStillExists -or $RecreateTable) {
-            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('groupId', 'ownerId') -DropIfExists:$RecreateTable
+            Initialize-FGSQLTable -TableName $TableName -Columns $columns -PrimaryKey @('resourceId', 'principalId', 'assignmentType') -DropIfExists:$RecreateTable
         }
     }
     catch {
@@ -186,8 +190,10 @@ function Sync-FGGroupOwner {
             # Add each owner to the collection
             foreach ($owner in $owners) {
                 $ownership = [PSCustomObject]@{
-                    groupId = $group.id
-                    ownerId = $owner.id
+                    resourceId = $group.id
+                    principalId = $owner.id
+                    principalType = 'user'
+                    assignmentType = 'Owner'
                 }
                 $allOwnerships += $ownership
             }
@@ -211,13 +217,17 @@ function Sync-FGGroupOwner {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $dataTable = New-Object System.Data.DataTable
-    $dataTable.Columns.Add("groupId", [guid]) | Out-Null
-    $dataTable.Columns.Add("ownerId", [guid]) | Out-Null
+    $dataTable.Columns.Add("resourceId", [guid]) | Out-Null
+    $dataTable.Columns.Add("principalId", [guid]) | Out-Null
+    $dataTable.Columns.Add("principalType", [string]) | Out-Null
+    $dataTable.Columns.Add("assignmentType", [string]) | Out-Null
 
     foreach ($ownership in $allOwnerships) {
         $row = $dataTable.NewRow()
-        $row["groupId"] = [guid]$ownership.groupId
-        $row["ownerId"] = [guid]$ownership.ownerId
+        $row["resourceId"] = [guid]$ownership.resourceId
+        $row["principalId"] = [guid]$ownership.principalId
+        $row["principalType"] = $ownership.principalType
+        $row["assignmentType"] = $ownership.assignmentType
         $dataTable.Rows.Add($row)
     }
 
@@ -244,7 +254,7 @@ function Sync-FGGroupOwner {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('groupId', 'ownerId')
+                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
             $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
@@ -260,7 +270,7 @@ function Sync-FGGroupOwner {
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('groupId', 'ownerId')
+                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow
@@ -323,7 +333,7 @@ function Sync-FGGroupOwner {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "GroupOwners" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
+        Write-FGSyncLog -SyncType "GroupOwners (Owner)" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName $TableName
     }
 
     return @{
