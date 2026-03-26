@@ -165,8 +165,12 @@ function Sync-FGAccessPackageAccessReview {
         $guidPattern = "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 
         if ($definition.scope) {
-            # Primary: Check scope.query directly (accessReviewQueryScope with accessPackageId eq 'GUID')
+            # Primary: Check scope.query for accessPackageId eq 'GUID'
             if ($definition.scope.query -match "accessPackageId\s+eq\s+'$guidPattern'") {
+                $definitionAccessPackageId = $Matches[1]
+            }
+            # Also match: accessPackage/id eq 'GUID' (v1.0 entitlement management format)
+            if (-not $definitionAccessPackageId -and $definition.scope.query -match "accessPackage/id\s+eq\s+'$guidPattern'") {
                 $definitionAccessPackageId = $Matches[1]
             }
             # Fallback: Check resourceScopes for query path containing accessPackages/{id}
