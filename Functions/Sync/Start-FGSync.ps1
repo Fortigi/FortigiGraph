@@ -380,30 +380,34 @@ function Write-SyncError {
     #endregion
 
     #region Azure Connection
-    Write-SyncHeader "Connecting to Azure"
+    # Skip when a SQL connection is already pre-established (e.g. local Docker) and
+    # server validation is being bypassed — no Azure context needed in that case.
+    if (-not ($SkipServerValidation -and $Global:FGSQLConnectionString)) {
+        Write-SyncHeader "Connecting to Azure"
 
-    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+        $azContext = Get-AzContext -ErrorAction SilentlyContinue
 
-    if (-not $azContext) {
-        Write-SyncStep "Connecting to Azure..."
-        Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId | Out-Null
-        $azContext = Get-AzContext
-    } else {
-        $correctTenant = $azContext.Tenant.Id -eq $azureTenantId
-        $correctSubscription = $azContext.Subscription.Id -eq $config.Azure.SubscriptionId
-
-        if (-not $correctTenant -or -not $correctSubscription) {
-            Write-SyncStep "Switching Azure context..."
-            try {
-                Set-AzContext -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId -ErrorAction Stop | Out-Null
-            } catch {
-                Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId | Out-Null
-            }
+        if (-not $azContext) {
+            Write-SyncStep "Connecting to Azure..."
+            Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId | Out-Null
             $azContext = Get-AzContext
-        }
-    }
+        } else {
+            $correctTenant = $azContext.Tenant.Id -eq $azureTenantId
+            $correctSubscription = $azContext.Subscription.Id -eq $config.Azure.SubscriptionId
 
-    Write-SyncSuccess "Connected to Azure: $($azContext.Subscription.Name) ($($azContext.Account.Id))"
+            if (-not $correctTenant -or -not $correctSubscription) {
+                Write-SyncStep "Switching Azure context..."
+                try {
+                    Set-AzContext -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId -ErrorAction Stop | Out-Null
+                } catch {
+                    Connect-AzAccount -TenantId $azureTenantId -SubscriptionId $config.Azure.SubscriptionId | Out-Null
+                }
+                $azContext = Get-AzContext
+            }
+        }
+
+        Write-SyncSuccess "Connected to Azure: $($azContext.Subscription.Name) ($($azContext.Account.Id))"
+    }
     #endregion
 
     #region SQL Server Validation
@@ -450,14 +454,17 @@ function Write-SyncError {
     } else {
         Write-SyncStep "Skipping server validation (assuming server exists)"
 
-        # Still need to connect
-        Connect-FGSQLServer `
-            -SubscriptionId $config.Azure.SubscriptionId `
-            -ResourceGroupName $config.Azure.ResourceGroupName `
-            -ServerName $config.Azure.SQLServerName `
-            -DatabaseName $config.Azure.DatabaseName `
-            -AdminUsername $config.Azure.AdminUsername `
-            -AdminPassword $SecurePassword 
+        if ($Global:FGSQLConnectionString) {
+            Write-SyncStep "Using pre-established SQL connection"
+        } else {
+            Connect-FGSQLServer `
+                -SubscriptionId $config.Azure.SubscriptionId `
+                -ResourceGroupName $config.Azure.ResourceGroupName `
+                -ServerName $config.Azure.SQLServerName `
+                -DatabaseName $config.Azure.DatabaseName `
+                -AdminUsername $config.Azure.AdminUsername `
+                -AdminPassword $SecurePassword
+        }
 
         Write-SyncSuccess "Connected to SQL Server"
     }

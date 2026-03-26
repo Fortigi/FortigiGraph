@@ -1,0 +1,57 @@
+services:
+
+  # ── SQL Server 2022 ──────────────────────────────────────────────────────────
+  sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "FortigiGraph_Local1!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"   # Exposed to host so PowerShell sync can connect via localhost,1433
+    volumes:
+      - sql_data:/var/opt/mssql
+    healthcheck:
+      test: >
+        /opt/mssql-tools18/bin/sqlcmd
+        -S localhost -U sa -P "FortigiGraph_Local1!"
+        -Q "SELECT 1" -b -No
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ── One-time database creation ───────────────────────────────────────────────
+  sql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sql:
+        condition: service_healthy
+    command: >
+      /opt/mssql-tools18/bin/sqlcmd -S sql -U sa -P "FortigiGraph_Local1!" -b -No
+      -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'GraphData') CREATE DATABASE [GraphData];"
+    restart: "no"
+
+  # ── Backend (serves built frontend + API) ────────────────────────────────────
+  backend:
+    build:
+      context: ./UI
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      USE_SQL: "true"
+      SQL_SERVER: sql          # Docker service name resolves inside the network
+      SQL_DATABASE: GraphData
+      SQL_USER: sa
+      SQL_PASSWORD: "FortigiGraph_Local1!"
+      SQL_TRUST_SERVER_CERT: "true"   # Required for SQL Server's self-signed cert
+      AUTH_ENABLED: "false"
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+
+volumes:
+  sql_data:

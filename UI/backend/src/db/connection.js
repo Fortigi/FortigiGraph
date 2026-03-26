@@ -10,7 +10,7 @@ const config = {
   requestTimeout: 120000,  // 2 min – recursive CTE views can be slow on large datasets
   options: {
     encrypt: true,
-    trustServerCertificate: false
+    trustServerCertificate: process.env.SQL_TRUST_SERVER_CERT === 'true'
   },
   pool: {
     max: 10,
