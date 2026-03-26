@@ -100,6 +100,9 @@ router.get('/resources', async (req, res) => {
     if (resourceType) {
       where += ` AND r.resourceType = @resourceType`;
       request.input('resourceType', resourceType);
+    } else {
+      // Exclude BusinessRole from the general resources list — they have their own dedicated tab
+      where += ` AND (r.resourceType IS NULL OR r.resourceType <> 'BusinessRole')`;
     }
     if (systemId && UUID_RE.test(systemId)) {
       where += ` AND r.systemId = @systemId`;
@@ -235,10 +238,10 @@ router.get('/resources/:id', async (req, res) => {
       const r = await timedRequest(pool, 'resource-ap-count', res)
         .input('id', resourceId)
         .query(`
-          SELECT COUNT(DISTINCT rrs.businessRoleId) AS cnt
-          FROM BusinessRoleResources rrs
-          WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
-            AND rrs.scopeOriginSystem = 'AadGroup'
+          SELECT COUNT(DISTINCT rrs.parentResourceId) AS cnt
+          FROM ResourceRelationships rrs
+          WHERE UPPER(rrs.childResourceId) = UPPER(@id)
+            AND rrs.relationshipType = 'Contains'
         `);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }

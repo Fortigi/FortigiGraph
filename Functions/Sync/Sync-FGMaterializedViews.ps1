@@ -79,9 +79,9 @@ function Sync-FGMaterializedViews {
         $checkCmd.CommandText = @"
 SELECT
     CASE WHEN EXISTS (SELECT 1 FROM sys.views WHERE name = 'vw_UserPermissionAssignmentViaBusinessRole') THEN 1 ELSE 0 END AS ApViewExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupMembers') THEN 1 ELSE 0 END AS DirectMembersExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupOwners') THEN 1 ELSE 0 END AS OwnersExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphGroupEligibleMembers') THEN 1 ELSE 0 END AS EligibleExists
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceAssignments') THEN 1 ELSE 0 END AS DirectMembersExists,
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceAssignments') THEN 1 ELSE 0 END AS OwnersExists,
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceAssignments') THEN 1 ELSE 0 END AS EligibleExists
 "@
         $reader = $checkCmd.ExecuteReader()
         $reader.Read()
@@ -155,30 +155,32 @@ CREATE NONCLUSTERED INDEX IX_mat_UPAVBR_businessRoleId
 IF OBJECT_ID('tempdb..#RecursiveMemberships') IS NOT NULL DROP TABLE #RecursiveMemberships;
 
 ;WITH RecursiveMemberships AS (
-    -- Anchor: Direct memberships
+    -- Anchor: Direct assignments from ResourceAssignments
     SELECT
-        gm.groupId,
-        gm.memberId,
-        gm.memberType,
+        ra.resourceId AS groupId,
+        ra.principalId AS memberId,
+        ra.principalType AS memberType,
         CAST('Direct' AS NVARCHAR(20)) AS membershipType,
         1 AS depth
-    FROM dbo.GraphGroupMembers gm
-    WHERE gm.ValidTo = '9999-12-31 23:59:59.9999999'
+    FROM dbo.ResourceAssignments ra
+    WHERE ra.ValidTo = '9999-12-31 23:59:59.9999999'
+      AND ra.assignmentType = 'Direct'
 
     UNION ALL
 
     -- Recursive: Indirect memberships through nested groups
     SELECT
         rm.groupId,
-        gm2.memberId,
-        gm2.memberType,
+        ra2.principalId AS memberId,
+        ra2.principalType AS memberType,
         CAST('Indirect' AS NVARCHAR(20)) AS membershipType,
         rm.depth + 1
     FROM RecursiveMemberships rm
-    INNER JOIN dbo.GraphGroupMembers gm2
-        ON rm.memberId = gm2.groupId
-        AND gm2.ValidTo = '9999-12-31 23:59:59.9999999'
-    WHERE rm.memberType = '#microsoft.graph.group'
+    INNER JOIN dbo.ResourceAssignments ra2
+        ON rm.memberId = ra2.resourceId
+        AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
+        AND ra2.assignmentType = 'Direct'
+    WHERE rm.memberType LIKE '%group%'
         AND rm.depth < 10
 )
 SELECT groupId, memberId, memberType, membershipType
@@ -216,15 +218,15 @@ OPTION (MAXRECURSION 100);
 
                     if ($ownersExists) {
                         $unionParts += @"
-SELECT groupId, ownerId AS memberId, 'user' AS memberType, 'Owner' AS membershipType
-FROM dbo.GraphGroupOwners WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+SELECT resourceId AS groupId, principalId AS memberId, principalType AS memberType, 'Owner' AS membershipType
+FROM dbo.ResourceAssignments WHERE assignmentType = 'Owner' AND ValidTo = '9999-12-31 23:59:59.9999999'
 "@
                     }
 
                     if ($eligibleExists) {
                         $unionParts += @"
-SELECT groupId, memberId, memberType, 'Eligible' AS membershipType
-FROM dbo.GraphGroupEligibleMembers WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+SELECT resourceId AS groupId, principalId AS memberId, principalType AS memberType, 'Eligible' AS membershipType
+FROM dbo.ResourceAssignments WHERE assignmentType = 'Eligible' AND ValidTo = '9999-12-31 23:59:59.9999999'
 "@
                     }
 

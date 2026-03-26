@@ -5,9 +5,9 @@ function Sync-FGCSVBusinessRole {
 
     .DESCRIPTION
     Loads AssignmentPolicies.csv and extracts three entity types into separate SQL tables:
-    - BusinessRoles — unique business roles from distinct AP_ID values
-    - BusinessRolePolicies — one per unique (AP_ID, CONTEXTNAME) combination
-    - BusinessRoleResources — one per unique (AP_ID, RESOURCEUID) combination
+    - Resources (resourceType='BusinessRole') — unique business roles from distinct AP_ID values
+    - AssignmentPolicies — one per unique (AP_ID, CONTEXTNAME) combination
+    - ResourceRelationships (relationshipType='Contains') — one per unique (AP_ID, RESOURCEUID) combination
 
     Uses deterministic GUIDs based on composite keys to ensure idempotent syncs.
     Uses the global $FGCSVSystemLookup hashtable for system ID resolution.
@@ -66,12 +66,13 @@ function Sync-FGCSVBusinessRole {
         'id'                 = 'UNIQUEIDENTIFIER'
         'systemId'           = 'INT'
         'displayName'        = 'NVARCHAR(500)'
+        'resourceType'       = 'NVARCHAR(50)'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
     $brpColumns = @{
         'id'                 = 'UNIQUEIDENTIFIER'
-        'businessRoleId'     = 'UNIQUEIDENTIFIER'
+        'resourceId'         = 'UNIQUEIDENTIFIER'
         'displayName'        = 'NVARCHAR(500)'
         'policyConditions'   = 'NVARCHAR(MAX)'
         'allowedTargetScope' = 'NVARCHAR(500)'
@@ -80,20 +81,21 @@ function Sync-FGCSVBusinessRole {
 
     $brrColumns = @{
         'id'                 = 'NVARCHAR(500)'
-        'businessRoleId'     = 'UNIQUEIDENTIFIER'
-        'resourceId'         = 'UNIQUEIDENTIFIER'
+        'parentResourceId'   = 'UNIQUEIDENTIFIER'
+        'childResourceId'    = 'UNIQUEIDENTIFIER'
+        'relationshipType'   = 'NVARCHAR(50)'
         'roleName'           = 'NVARCHAR(500)'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
     # Ensure tables exist
-    $tableReady1 = Initialize-FGSyncTable -TableName "BusinessRoles" -Columns $brColumns -PrimaryKey 'id'
+    $tableReady1 = Initialize-FGSyncTable -TableName "Resources" -Columns $brColumns -PrimaryKey 'id'
     if ($tableReady1 -eq $false) { return }
 
-    $tableReady2 = Initialize-FGSyncTable -TableName "BusinessRolePolicies" -Columns $brpColumns -PrimaryKey 'id'
+    $tableReady2 = Initialize-FGSyncTable -TableName "AssignmentPolicies" -Columns $brpColumns -PrimaryKey 'id'
     if ($tableReady2 -eq $false) { return }
 
-    $tableReady3 = Initialize-FGSyncTable -TableName "BusinessRoleResources" -Columns $brrColumns -PrimaryKey 'id'
+    $tableReady3 = Initialize-FGSyncTable -TableName "ResourceRelationships" -Columns $brrColumns -PrimaryKey 'id'
     if ($tableReady3 -eq $false) { return }
 
     # Load CSV
@@ -113,7 +115,7 @@ function Sync-FGCSVBusinessRole {
         return
     }
 
-    # --- Extract BusinessRoles (unique AP_ID) ---
+    # --- Extract BusinessRoles as Resources (unique AP_ID) ---
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Extracting BusinessRoles from CSV..." -ForegroundColor Cyan
 
     $brGrouped = $csvData | Group-Object -Property AP_ID
@@ -141,17 +143,18 @@ function Sync-FGCSVBusinessRole {
             id                 = New-DeterministicGuid -InputString "businessrole:$apId"
             systemId           = $systemId
             displayName        = $firstRow.NAME
+            resourceType       = 'BusinessRole'
             extendedAttributes = if ($extendedAttrs.Count -gt 0) { $extendedAttrs | ConvertTo-Json -Depth 10 -Compress } else { $null }
         }
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extracted $($businessRoles.Count) unique BusinessRoles" -ForegroundColor Green
 
-    # --- Extract BusinessRolePolicies (unique AP_ID + CONTEXTNAME) ---
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Extracting BusinessRolePolicies from CSV..." -ForegroundColor Cyan
+    # --- Extract AssignmentPolicies (unique AP_ID + CONTEXTNAME) ---
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Extracting AssignmentPolicies from CSV..." -ForegroundColor Cyan
 
     $brpGrouped = $csvData | Group-Object -Property { "$($_.AP_ID)|$($_.CONTEXTNAME)" }
-    $businessRolePolicies = @()
+    $assignmentPolicies = @()
 
     foreach ($group in $brpGrouped) {
         $firstRow = $group.Group[0]
@@ -167,9 +170,9 @@ function Sync-FGCSVBusinessRole {
         if ($firstRow.PSObject.Properties.Name -contains 'AP_ONLYDIRECTCTXASSN' -and $firstRow.AP_ONLYDIRECTCTXASSN) { $extendedAttrs['AP_ONLYDIRECTCTXASSN'] = $firstRow.AP_ONLYDIRECTCTXASSN }
         if ($firstRow.PSObject.Properties.Name -contains 'AP_IDENTITYVIEW' -and $firstRow.AP_IDENTITYVIEW) { $extendedAttrs['AP_IDENTITYVIEW'] = $firstRow.AP_IDENTITYVIEW }
 
-        $businessRolePolicies += [PSCustomObject]@{
+        $assignmentPolicies += [PSCustomObject]@{
             id                 = New-DeterministicGuid -InputString "policy:${apId}:${contextName}"
-            businessRoleId     = New-DeterministicGuid -InputString "businessrole:$apId"
+            resourceId         = New-DeterministicGuid -InputString "businessrole:$apId"
             displayName        = $firstRow.NAME
             policyConditions   = $policyConditions
             allowedTargetScope = $firstRow.AP_NAME
@@ -177,13 +180,13 @@ function Sync-FGCSVBusinessRole {
         }
     }
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extracted $($businessRolePolicies.Count) unique BusinessRolePolicies" -ForegroundColor Green
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extracted $($assignmentPolicies.Count) unique AssignmentPolicies" -ForegroundColor Green
 
-    # --- Extract BusinessRoleResources (unique AP_ID + RESOURCEUID) ---
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Extracting BusinessRoleResources from CSV..." -ForegroundColor Cyan
+    # --- Extract ResourceRelationships (unique AP_ID + RESOURCEUID) ---
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Extracting ResourceRelationships from CSV..." -ForegroundColor Cyan
 
     $brrGrouped = $csvData | Group-Object -Property { "$($_.AP_ID)|$($_.RESOURCEUID)" }
-    $businessRoleResources = @()
+    $resourceRelationships = @()
 
     foreach ($group in $brrGrouped) {
         $firstRow = $group.Group[0]
@@ -191,12 +194,12 @@ function Sync-FGCSVBusinessRole {
         $resourceUid = $firstRow.RESOURCEUID
 
         # Try to cast RESOURCEUID as GUID; if invalid, generate deterministic
-        $resourceId = $null
+        $childResId = $null
         try {
-            $resourceId = [guid]$resourceUid
+            $childResId = [guid]$resourceUid
         }
         catch {
-            $resourceId = New-DeterministicGuid -InputString "resource:$resourceUid"
+            $childResId = New-DeterministicGuid -InputString "resource:$resourceUid"
         }
 
         $extendedAttrs = @{
@@ -204,31 +207,32 @@ function Sync-FGCSVBusinessRole {
             CONTEXTUID  = $firstRow.CONTEXTUID
         }
 
-        $businessRoleResources += [PSCustomObject]@{
+        $resourceRelationships += [PSCustomObject]@{
             id                 = "$($apId)_$($resourceUid)"
-            businessRoleId     = New-DeterministicGuid -InputString "businessrole:$apId"
-            resourceId         = $resourceId
+            parentResourceId   = New-DeterministicGuid -InputString "businessrole:$apId"
+            childResourceId    = $childResId
+            relationshipType   = 'Contains'
             roleName           = $firstRow.RESOURCENAME
             extendedAttributes = $extendedAttrs | ConvertTo-Json -Depth 10 -Compress
         }
     }
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extracted $($businessRoleResources.Count) unique BusinessRoleResources" -ForegroundColor Green
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Extracted $($resourceRelationships.Count) unique ResourceRelationships" -ForegroundColor Green
 
     # --- Build DataTables ---
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Cyan
 
-    $brAttributes = @('id', 'systemId', 'displayName', 'extendedAttributes')
+    $brAttributes = @('id', 'systemId', 'displayName', 'resourceType', 'extendedAttributes')
     $brDataTable = New-FGDataTableFromGraphObjects -GraphObjects $businessRoles -Columns $brColumns -Attributes $brAttributes
 
-    $brpAttributes = @('id', 'businessRoleId', 'displayName', 'policyConditions', 'allowedTargetScope', 'extendedAttributes')
-    $brpDataTable = New-FGDataTableFromGraphObjects -GraphObjects $businessRolePolicies -Columns $brpColumns -Attributes $brpAttributes
+    $brpAttributes = @('id', 'resourceId', 'displayName', 'policyConditions', 'allowedTargetScope', 'extendedAttributes')
+    $brpDataTable = New-FGDataTableFromGraphObjects -GraphObjects $assignmentPolicies -Columns $brpColumns -Attributes $brpAttributes
 
-    $brrAttributes = @('id', 'businessRoleId', 'resourceId', 'roleName', 'extendedAttributes')
-    $brrDataTable = New-FGDataTableFromGraphObjects -GraphObjects $businessRoleResources -Columns $brrColumns -Attributes $brrAttributes
+    $brrAttributes = @('id', 'parentResourceId', 'childResourceId', 'relationshipType', 'roleName', 'extendedAttributes')
+    $brrDataTable = New-FGDataTableFromGraphObjects -GraphObjects $resourceRelationships -Columns $brrColumns -Attributes $brrAttributes
 
     # --- Sync all three tables ---
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing BusinessRoles to SQL Server..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing BusinessRoles to Resources table..." -ForegroundColor Cyan
 
     $brResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -236,12 +240,12 @@ function Sync-FGCSVBusinessRole {
         $transaction = $connection.BeginTransaction()
 
         try {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brDataTable.Rows.Count) BusinessRoles..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brDataTable.Rows.Count) BusinessRoles into Resources..." -ForegroundColor Cyan
 
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRoles" `
+                -TargetTableName "Resources" `
                 -DataTable $brDataTable `
                 -KeyColumns @('id')
 
@@ -250,12 +254,12 @@ function Sync-FGCSVBusinessRole {
             $deletedCount = Invoke-FGSQLBulkDelete `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRoles" `
+                -TargetTableName "Resources" `
                 -DataTable $brDataTable `
                 -KeyColumns @('id')
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRoles" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRole resources" -ForegroundColor Yellow
             }
 
             $transaction.Commit()
@@ -277,7 +281,7 @@ function Sync-FGCSVBusinessRole {
         }
     }
 
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing BusinessRolePolicies to SQL Server..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing AssignmentPolicies to SQL Server..." -ForegroundColor Cyan
 
     $brpResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -285,26 +289,26 @@ function Sync-FGCSVBusinessRole {
         $transaction = $connection.BeginTransaction()
 
         try {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brpDataTable.Rows.Count) BusinessRolePolicies..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brpDataTable.Rows.Count) AssignmentPolicies..." -ForegroundColor Cyan
 
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRolePolicies" `
+                -TargetTableName "AssignmentPolicies" `
                 -DataTable $brpDataTable `
                 -KeyColumns @('id')
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] BusinessRolePolicies: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AssignmentPolicies: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
             $deletedCount = Invoke-FGSQLBulkDelete `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRolePolicies" `
+                -TargetTableName "AssignmentPolicies" `
                 -DataTable $brpDataTable `
                 -KeyColumns @('id')
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRolePolicies" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale AssignmentPolicies" -ForegroundColor Yellow
             }
 
             $transaction.Commit()
@@ -317,7 +321,7 @@ function Sync-FGCSVBusinessRole {
             }
         }
         catch {
-            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during BusinessRolePolicies sync: $_"
+            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during AssignmentPolicies sync: $_"
             if ($transaction) {
                 $transaction.Rollback()
                 $transaction.Dispose()
@@ -326,7 +330,7 @@ function Sync-FGCSVBusinessRole {
         }
     }
 
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing BusinessRoleResources to SQL Server..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing ResourceRelationships to SQL Server..." -ForegroundColor Cyan
 
     $brrResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -334,26 +338,26 @@ function Sync-FGCSVBusinessRole {
         $transaction = $connection.BeginTransaction()
 
         try {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brrDataTable.Rows.Count) BusinessRoleResources..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($brrDataTable.Rows.Count) ResourceRelationships..." -ForegroundColor Cyan
 
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRoleResources" `
+                -TargetTableName "ResourceRelationships" `
                 -DataTable $brrDataTable `
                 -KeyColumns @('id')
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] BusinessRoleResources: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ResourceRelationships: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
             $deletedCount = Invoke-FGSQLBulkDelete `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "BusinessRoleResources" `
+                -TargetTableName "ResourceRelationships" `
                 -DataTable $brrDataTable `
                 -KeyColumns @('id')
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRoleResources" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale ResourceRelationships" -ForegroundColor Yellow
             }
 
             $transaction.Commit()
@@ -366,7 +370,7 @@ function Sync-FGCSVBusinessRole {
             }
         }
         catch {
-            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during BusinessRoleResources sync: $_"
+            Write-Error "[$(Get-Date -Format 'HH:mm:ss')] Failed during ResourceRelationships sync: $_"
             if ($transaction) {
                 $transaction.Rollback()
                 $transaction.Dispose()
@@ -381,9 +385,9 @@ function Sync-FGCSVBusinessRole {
     Write-Host "CSV Business Role Sync Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "CSV Rows:                  $($csvData.Count)" -ForegroundColor White
-    Write-Host "BusinessRoles:             $($businessRoles.Count) (I:$($brResult.Inserted) U:$($brResult.Updated) D:$($brResult.Deleted))" -ForegroundColor White
-    Write-Host "BusinessRolePolicies:      $($businessRolePolicies.Count) (I:$($brpResult.Inserted) U:$($brpResult.Updated) D:$($brpResult.Deleted))" -ForegroundColor White
-    Write-Host "BusinessRoleResources:     $($businessRoleResources.Count) (I:$($brrResult.Inserted) U:$($brrResult.Updated) D:$($brrResult.Deleted))" -ForegroundColor White
+    Write-Host "Resources (BusinessRole):  $($businessRoles.Count) (I:$($brResult.Inserted) U:$($brResult.Updated) D:$($brResult.Deleted))" -ForegroundColor White
+    Write-Host "AssignmentPolicies:        $($assignmentPolicies.Count) (I:$($brpResult.Inserted) U:$($brpResult.Updated) D:$($brpResult.Deleted))" -ForegroundColor White
+    Write-Host "ResourceRelationships:     $($resourceRelationships.Count) (I:$($brrResult.Inserted) U:$($brrResult.Updated) D:$($brrResult.Deleted))" -ForegroundColor White
     Write-Host "`nAll changes tracked in temporal history tables" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Green
 
@@ -392,8 +396,8 @@ function Sync-FGCSVBusinessRole {
     return @{
         TotalCSVRows           = $csvData.Count
         BusinessRoles          = $brResult
-        BusinessRolePolicies   = $brpResult
-        BusinessRoleResources  = $brrResult
+        AssignmentPolicies     = $brpResult
+        ResourceRelationships  = $brrResult
     }
 
     } # End try
@@ -404,6 +408,6 @@ function Sync-FGCSVBusinessRole {
     }
     finally {
         # Write sync log entry
-        Write-FGSyncLog -SyncType "CSVBusinessRoles" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "BusinessRoles"
+        Write-FGSyncLog -SyncType "CSVBusinessRoles" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "Resources"
     }
 }

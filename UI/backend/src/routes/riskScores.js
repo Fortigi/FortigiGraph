@@ -1,12 +1,16 @@
 // ─── Risk Scores API Routes ───────────────────────────────────────────
 //
-// Reads pre-computed risk scores from SQL columns on GraphUsers and GraphGroups.
+// Reads pre-computed risk scores from the dedicated RiskScores table.
 // Scores are computed by the PowerShell cmdlet Invoke-FGRiskScoring (batch process).
 // This route does NO computation — it's a simple SELECT.
 //
 // GET    /api/risk-scores                    - Summary + top entities by score
-// GET    /api/risk-scores/groups             - Paginated group scores
-// GET    /api/risk-scores/users              - Paginated user scores
+// GET    /api/risk-scores/users              - Paginated user (Principal) risk scores
+// GET    /api/risk-scores/groups             - Paginated resource risk scores
+// GET    /api/risk-scores/business-roles     - Paginated business role risk scores
+// GET    /api/risk-scores/org-units          - Paginated org unit risk scores
+// GET    /api/risk-scores/identities         - Paginated identity risk scores
+// GET    /api/risk-scores/:type/:id          - Single entity risk score
 // PUT    /api/risk-scores/:type/:id/override - Set analyst override (+/- adjustment)
 // DELETE /api/risk-scores/:type/:id/override - Remove analyst override
 
@@ -21,7 +25,48 @@ if (useSql) {
   db = await import('../db/connection.js');
 }
 
-// Parse JSON columns from SQL row
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const VALID_TYPES = new Set(['users', 'groups', 'resources', 'business-roles', 'org-units', 'identities']);
+
+// Map URL path type to RiskScores.entityType
+function mapEntityType(urlType) {
+  switch (urlType) {
+    case 'users':          return 'Principal';
+    case 'groups':
+    case 'resources':      return 'Resource';
+    case 'business-roles': return 'BusinessRole';
+    case 'org-units':      return 'OrgUnit';
+    case 'identities':     return 'Identity';
+    default:               return null;
+  }
+}
+
+// Cached check for RiskScores table existence
+let _riskTableExists = null;
+let _riskTableCheckedAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function riskTableExists(pool, res) {
+  const now = Date.now();
+  if (_riskTableExists !== null && (now - _riskTableCheckedAt) < CACHE_TTL_MS) {
+    return _riskTableExists;
+  }
+  try {
+    const result = await timedRequest(pool, 'risk-table-check', res).query(`
+      SELECT OBJECT_ID('dbo.RiskScores', 'U') AS tbl
+    `);
+    _riskTableExists = result.recordset[0].tbl != null;
+  } catch {
+    _riskTableExists = false;
+  }
+  _riskTableCheckedAt = now;
+  return _riskTableExists;
+}
+
+// Parse JSON columns and compute effective score
 function parseJsonColumns(row) {
   const r = { ...row };
   try { r.classifierMatches = r.riskClassifierMatches ? JSON.parse(r.riskClassifierMatches) : []; }
@@ -32,7 +77,6 @@ function parseJsonColumns(row) {
   catch { r.explanation = null; }
   delete r.riskExplanation;
 
-  // Compute effective score (computed + analyst override, clamped 0-100)
   r.riskOverride = r.riskOverride ?? null;
   r.riskOverrideReason = r.riskOverrideReason ?? null;
   r.effectiveScore = r.riskOverride != null
@@ -42,66 +86,18 @@ function parseJsonColumns(row) {
   return r;
 }
 
-// Check if risk score columns exist
-const ALLOWED_RISK_TABLES = new Set(['GraphUsers', 'GraphGroups', 'Resources', 'Principals']);
-
-async function hasRiskColumns(pool, tableName, res) {
-  if (!ALLOWED_RISK_TABLES.has(tableName)) return false;
-  try {
-    const result = await timedRequest(pool, `risk-col-check-${tableName}`, res)
-      .input('tableName', tableName)
-      .query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
-      `);
-    return result.recordset.length > 0;
-  } catch {
-    return false;
-  }
+// Compute tier label from numeric score
+function computeTier(score) {
+  if (score >= 80) return 'Critical';
+  if (score >= 60) return 'High';
+  if (score >= 40) return 'Medium';
+  if (score >= 20) return 'Low';
+  if (score >= 1)  return 'Minimal';
+  return 'None';
 }
 
-// Determine the best table for resource/group risk scores (Resources preferred over GraphGroups)
-async function getResourceRiskSource(pool, res) {
-  const hasResources = await hasRiskColumns(pool, 'Resources', res);
-  if (hasResources) return 'Resources';
-  const hasGroups = await hasRiskColumns(pool, 'GraphGroups', res);
-  if (hasGroups) return 'GraphGroups';
-  return null;
-}
-
-// Determine the best table for user risk scores (Principals preferred over GraphUsers)
-async function getUserRiskSource(pool, res) {
-  const hasPrincipals = await hasRiskColumns(pool, 'Principals', res);
-  if (hasPrincipals) return 'Principals';
-  const hasUsers = await hasRiskColumns(pool, 'GraphUsers', res);
-  if (hasUsers) return 'GraphUsers';
-  return null;
-}
-
-// Select columns shared across queries
-const GROUP_COLS = `id, displayName, description, groupTypeCalculated,
-  riskScore, riskTier,
-  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
-  riskClassifierMatches, riskExplanation, riskScoredAt,
-  riskOverride, riskOverrideReason`;
-
-const RESOURCE_COLS = `id, displayName, description, resourceType,
-  riskScore, riskTier,
-  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
-  riskClassifierMatches, riskExplanation, riskScoredAt,
-  riskOverride, riskOverrideReason`;
-
-const USER_COLS_GRAPH = `id, displayName, userPrincipalName, department, jobTitle,
-  riskScore, riskTier,
-  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
-  riskClassifierMatches, riskExplanation, riskScoredAt,
-  riskOverride, riskOverrideReason`;
-
-const USER_COLS_PRINCIPALS = `id, displayName, email AS userPrincipalName, department, jobTitle,
-  riskScore, riskTier,
-  riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore,
-  riskClassifierMatches, riskExplanation, riskScoredAt,
-  riskOverride, riskOverrideReason`;
+// Temporal table filter for JOINed entity tables
+const TEMPORAL_FILTER = "ValidTo = '9999-12-31 23:59:59.9999999'";
 
 // ─── GET /api/risk-scores ─────────────────────────────────────────────
 router.get('/risk-scores', async (req, res) => {
@@ -111,119 +107,102 @@ router.get('/risk-scores', async (req, res) => {
     }
 
     const p = await db.getPool();
-
-    // Check if scoring has been run — prefer Resources table over GraphGroups, Principals over GraphUsers
-    const resourceSource = await getResourceRiskSource(p, res);
-    const userSource = await getUserRiskSource(p, res);
-
-    if (!resourceSource && !userSource) {
+    if (!await riskTableExists(p, res)) {
       return res.json({ available: false, message: 'Risk scores not yet computed. Run Invoke-FGRiskScoring in PowerShell.' });
     }
 
-    const hasUsers = !!userSource;
-    const usePrincipals = userSource === 'Principals';
-    const userTable = userSource || 'GraphUsers';
-    const USER_COLS = usePrincipals ? USER_COLS_PRINCIPALS : USER_COLS_GRAPH;
-    const userSearchCol = usePrincipals ? 'email' : 'userPrincipalName';
+    // Tier distribution by entity type
+    const tierResult = await timedRequest(p, 'risk-tier-distribution', res).query(`
+      SELECT entityType, riskTier, COUNT(*) AS count
+      FROM dbo.RiskScores
+      GROUP BY entityType, riskTier
+    `);
 
-    const useResources = resourceSource === 'Resources';
-    const groupTable = resourceSource || 'GraphGroups';
-    const groupCols = useResources ? RESOURCE_COLS : GROUP_COLS;
+    // Top 10 principals by score
+    const topUsers = await timedRequest(p, 'risk-top-users', res).query(`
+      SELECT TOP 10 rs.*, p.displayName, p.email AS userPrincipalName, p.department
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
+      WHERE rs.entityType = 'Principal'
+      ORDER BY rs.riskScore DESC
+    `);
 
-    // Summary: tier distribution
-    const groupTiers = resourceSource ? await timedRequest(p, 'risk-group-tiers', res).query(`
-      SELECT riskTier, COUNT(*) as count
-      FROM dbo.${groupTable}
-      WHERE riskScore IS NOT NULL
-      GROUP BY riskTier
-    `) : { recordset: [] };
+    // Top 10 resources by score
+    const topResources = await timedRequest(p, 'risk-top-resources', res).query(`
+      SELECT TOP 10 rs.*, r.displayName, r.resourceType, r.description
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+      WHERE rs.entityType = 'Resource'
+      ORDER BY rs.riskScore DESC
+    `);
 
-    const userTiers = hasUsers ? await timedRequest(p, 'risk-user-tiers', res).query(`
-      SELECT riskTier, COUNT(*) as count
-      FROM dbo.${userTable}
-      WHERE riskScore IS NOT NULL
-      GROUP BY riskTier
-    `) : { recordset: [] };
+    // Totals and override counts
+    const totals = await timedRequest(p, 'risk-totals', res).query(`
+      SELECT
+        entityType,
+        COUNT(*) AS total,
+        SUM(CASE WHEN riskOverride IS NOT NULL THEN 1 ELSE 0 END) AS overrides
+      FROM dbo.RiskScores
+      GROUP BY entityType
+    `);
 
-    // Top 10 groups/resources by score (use effective score: computed + override)
-    const topGroups = resourceSource ? await timedRequest(p, 'risk-top-groups', res).query(`
-      SELECT TOP 10 ${groupCols}
-      FROM dbo.${groupTable}
-      WHERE riskScore IS NOT NULL
-      ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
-    `) : { recordset: [] };
+    // Most recent scored-at timestamp
+    const tsResult = await timedRequest(p, 'risk-scored-at', res).query(`
+      SELECT TOP 1 riskScoredAt FROM dbo.RiskScores
+      WHERE riskScoredAt IS NOT NULL
+      ORDER BY riskScoredAt DESC
+    `);
 
-    // Top 10 users by score
-    const topUsers = hasUsers ? await timedRequest(p, 'risk-top-users', res).query(`
-      SELECT TOP 10 ${USER_COLS}
-      FROM dbo.${userTable}
-      WHERE riskScore IS NOT NULL
-      ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
-    `) : { recordset: [] };
-
-    // Totals
-    const totalGroups = resourceSource ? await timedRequest(p, 'risk-total-groups', res).query(`
-      SELECT COUNT(*) as total FROM dbo.${groupTable} WHERE riskScore IS NOT NULL
-    `) : { recordset: [{ total: 0 }] };
-
-    const totalUsers = hasUsers ? await timedRequest(p, 'risk-total-users', res).query(`
-      SELECT COUNT(*) as total FROM dbo.${userTable} WHERE riskScore IS NOT NULL
-    `) : { recordset: [{ total: 0 }] };
-
-    // Override counts
-    const groupOverrides = resourceSource ? await timedRequest(p, 'risk-group-overrides', res).query(`
-      SELECT COUNT(*) as count FROM dbo.${groupTable} WHERE riskOverride IS NOT NULL
-    `) : { recordset: [{ count: 0 }] };
-
-    const userOverrides = hasUsers ? await timedRequest(p, 'risk-user-overrides', res).query(`
-      SELECT COUNT(*) as count FROM dbo.${userTable} WHERE riskOverride IS NOT NULL
-    `) : { recordset: [{ count: 0 }] };
-
-    // Scored timestamp (most recent)
-    let scoredAt = null;
-    if (resourceSource) {
-      const ts = await timedRequest(p, 'risk-scored-at', res).query(`
-        SELECT TOP 1 riskScoredAt FROM dbo.${groupTable} WHERE riskScoredAt IS NOT NULL ORDER BY riskScoredAt DESC
-      `);
-      if (ts.recordset.length > 0) scoredAt = ts.recordset[0].riskScoredAt;
-    }
-
-    // Resource type breakdown (Resources table only)
+    // Resource type breakdown
     let resourceTypeBreakdown = null;
-    if (useResources) {
-      try {
-        const typeResult = await timedRequest(p, 'risk-resource-types', res).query(`
-          SELECT resourceType, COUNT(*) as count, AVG(CAST(riskScore AS FLOAT)) as avgScore
-          FROM dbo.Resources
-          WHERE riskScore IS NOT NULL
-          GROUP BY resourceType
-          ORDER BY AVG(CAST(riskScore AS FLOAT)) DESC
-        `);
-        resourceTypeBreakdown = typeResult.recordset;
-      } catch { resourceTypeBreakdown = null; }
+    try {
+      const typeResult = await timedRequest(p, 'risk-resource-types', res).query(`
+        SELECT r.resourceType, COUNT(*) AS count, AVG(CAST(rs.riskScore AS FLOAT)) AS avgScore
+        FROM dbo.RiskScores rs
+        INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+        WHERE rs.entityType = 'Resource'
+        GROUP BY r.resourceType
+        ORDER BY AVG(CAST(rs.riskScore AS FLOAT)) DESC
+      `);
+      resourceTypeBreakdown = typeResult.recordset;
+    } catch { resourceTypeBreakdown = null; }
+
+    // Build tier summary objects per entity type
+    const tiersByEntityType = {};
+    for (const row of tierResult.recordset) {
+      const tier = row.riskTier || 'None';
+      if (!tiersByEntityType[row.entityType]) tiersByEntityType[row.entityType] = {};
+      tiersByEntityType[row.entityType][tier] = (tiersByEntityType[row.entityType][tier] || 0) + row.count;
     }
 
-    // Build tier summary objects
-    const groupsByTier = {};
-    const usersByTier = {};
-    for (const row of groupTiers.recordset) groupsByTier[row.riskTier || 'None'] = row.count;
-    for (const row of userTiers.recordset) usersByTier[row.riskTier || 'None'] = row.count;
+    // Build totals lookup
+    const totalsByType = {};
+    for (const row of totals.recordset) totalsByType[row.entityType] = row;
 
     return res.json({
       available: true,
-      useResources,
+      useResources: true,
       summary: {
-        totalGroups: totalGroups.recordset[0].total,
-        totalUsers: totalUsers.recordset[0].total,
-        groupOverrides: groupOverrides.recordset[0].count,
-        userOverrides: userOverrides.recordset[0].count,
-        groupsByTier,
-        usersByTier,
-        topGroups: topGroups.recordset.map(parseJsonColumns),
+        totalGroups: totalsByType['Resource']?.total || 0,
+        totalUsers: totalsByType['Principal']?.total || 0,
+        totalBusinessRoles: totalsByType['BusinessRole']?.total || 0,
+        totalOrgUnits: totalsByType['OrgUnit']?.total || 0,
+        totalIdentities: totalsByType['Identity']?.total || 0,
+        groupOverrides: totalsByType['Resource']?.overrides || 0,
+        userOverrides: totalsByType['Principal']?.overrides || 0,
+        businessRoleOverrides: totalsByType['BusinessRole']?.overrides || 0,
+        orgUnitOverrides: totalsByType['OrgUnit']?.overrides || 0,
+        identityOverrides: totalsByType['Identity']?.overrides || 0,
+        groupsByTier: tiersByEntityType['Resource'] || {},
+        usersByTier: tiersByEntityType['Principal'] || {},
+        businessRolesByTier: tiersByEntityType['BusinessRole'] || {},
+        orgUnitsByTier: tiersByEntityType['OrgUnit'] || {},
+        identitiesByTier: tiersByEntityType['Identity'] || {},
+        topGroups: topResources.recordset.map(parseJsonColumns),
         topUsers: topUsers.recordset.map(parseJsonColumns),
         resourceTypeBreakdown,
       },
-      scoredAt,
+      scoredAt: tsResult.recordset[0]?.riskScoredAt || null,
     });
   } catch (err) {
     console.error('Risk scores summary failed:', err.message);
@@ -231,130 +210,61 @@ router.get('/risk-scores', async (req, res) => {
   }
 });
 
-// ─── GET /api/risk-scores/groups ──────────────────────────────────────
-router.get('/risk-scores/groups', async (req, res) => {
-  try {
-    if (!useSql) {
-      return res.json({ data: [], total: 0, available: false });
-    }
-
-    const p = await db.getPool();
-    const resourceSource = await getResourceRiskSource(p, res);
-    if (!resourceSource) {
-      return res.json({ data: [], total: 0, available: false });
-    }
-
-    const useResources = resourceSource === 'Resources';
-    const groupTable = resourceSource;
-    const groupCols = useResources ? RESOURCE_COLS : GROUP_COLS;
-
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
-    const offset = parseInt(req.query.offset) || 0;
-    const tier = req.query.tier || '';
-    const search = req.query.search || '';
-    const resourceType = req.query.resourceType || '';
-    const overridesOnly = req.query.overridesOnly === 'true';
-
-    let whereClause = 'WHERE riskScore IS NOT NULL';
-    const request = timedRequest(p, 'risk-groups-list', res);
-
-    if (tier) {
-      whereClause += ' AND riskTier = @tier';
-      request.input('tier', tier);
-    }
-    if (search) {
-      whereClause += ' AND (displayName LIKE @search OR description LIKE @search)';
-      request.input('search', `%${search}%`);
-    }
-    if (resourceType && useResources) {
-      whereClause += ' AND resourceType = @resourceType';
-      request.input('resourceType', resourceType);
-    }
-    if (overridesOnly) {
-      whereClause += ' AND riskOverride IS NOT NULL';
-    }
-
-    request.input('offset', offset);
-    request.input('limit', limit);
-    const result = await request.query(`
-      SELECT ${groupCols}
-      FROM dbo.${groupTable}
-      ${whereClause}
-      ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
-
-    const countReq = timedRequest(p, 'risk-groups-count', res);
-    if (tier) countReq.input('tier', tier);
-    if (search) countReq.input('search', `%${search}%`);
-    if (resourceType && useResources) countReq.input('resourceType', resourceType);
-    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.${groupTable} ${whereClause}`);
-
-    return res.json({
-      data: result.recordset.map(parseJsonColumns),
-      total: countResult.recordset[0].total,
-      available: true,
-      useResources,
-    });
-  } catch (err) {
-    console.error('Risk groups query failed:', err.message);
-    return res.status(500).json({ error: 'Failed to load risk scores' });
-  }
-});
-
 // ─── GET /api/risk-scores/users ───────────────────────────────────────
 router.get('/risk-scores/users', async (req, res) => {
   try {
-    if (!useSql) {
-      return res.json({ data: [], total: 0, available: false });
-    }
+    if (!useSql) return res.json({ data: [], total: 0, available: false });
 
     const p = await db.getPool();
-    const userSource = await getUserRiskSource(p, res);
-    if (!userSource) {
-      return res.json({ data: [], total: 0, available: false });
-    }
+    if (!await riskTableExists(p, res)) return res.json({ data: [], total: 0, available: false });
 
-    const usePrincipalsForList = userSource === 'Principals';
-    const userTableForList = userSource;
-    const userColsForList = usePrincipalsForList ? USER_COLS_PRINCIPALS : USER_COLS_GRAPH;
-    const searchCol = usePrincipalsForList ? 'email' : 'userPrincipalName';
-
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
     const tier = req.query.tier || '';
     const search = req.query.search || '';
+    const department = req.query.department || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = 'WHERE riskScore IS NOT NULL';
+    let whereClause = `WHERE rs.entityType = 'Principal'`;
     const request = timedRequest(p, 'risk-users-list', res);
 
     if (tier) {
-      whereClause += ' AND riskTier = @tier';
+      whereClause += ' AND rs.riskTier = @tier';
       request.input('tier', tier);
     }
     if (search) {
-      whereClause += ` AND (displayName LIKE @search OR ${searchCol} LIKE @search OR department LIKE @search)`;
+      whereClause += ' AND (p.displayName LIKE @search OR p.email LIKE @search OR p.department LIKE @search)';
       request.input('search', `%${search}%`);
     }
+    if (department) {
+      whereClause += ' AND p.department = @department';
+      request.input('department', department);
+    }
     if (overridesOnly) {
-      whereClause += ' AND riskOverride IS NOT NULL';
+      whereClause += ' AND rs.riskOverride IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT ${userColsForList}
-      FROM dbo.${userTableForList}
+      SELECT rs.*, p.displayName, p.email AS userPrincipalName, p.department, p.jobTitle, p.companyName
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY COALESCE(riskScore + COALESCE(riskOverride, 0), riskScore) DESC
+      ORDER BY rs.riskScore DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
     const countReq = timedRequest(p, 'risk-users-count', res);
     if (tier) countReq.input('tier', tier);
     if (search) countReq.input('search', `%${search}%`);
-    const countResult = await countReq.query(`SELECT COUNT(*) as total FROM dbo.${userTableForList} ${whereClause}`);
+    if (department) countReq.input('department', department);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
+      ${whereClause}
+    `);
 
     return res.json({
       data: result.recordset.map(parseJsonColumns),
@@ -367,23 +277,336 @@ router.get('/risk-scores/users', async (req, res) => {
   }
 });
 
+// ─── GET /api/risk-scores/groups ──────────────────────────────────────
+router.get('/risk-scores/groups', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ data: [], total: 0, available: false });
+
+    const p = await db.getPool();
+    if (!await riskTableExists(p, res)) return res.json({ data: [], total: 0, available: false });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const tier = req.query.tier || '';
+    const search = req.query.search || '';
+    const resourceType = req.query.resourceType || '';
+    const overridesOnly = req.query.overridesOnly === 'true';
+
+    let whereClause = `WHERE rs.entityType = 'Resource'`;
+    const request = timedRequest(p, 'risk-groups-list', res);
+
+    if (tier) {
+      whereClause += ' AND rs.riskTier = @tier';
+      request.input('tier', tier);
+    }
+    if (search) {
+      whereClause += ' AND (r.displayName LIKE @search OR r.description LIKE @search)';
+      request.input('search', `%${search}%`);
+    }
+    if (resourceType) {
+      whereClause += ' AND r.resourceType = @resourceType';
+      request.input('resourceType', resourceType);
+    }
+    if (overridesOnly) {
+      whereClause += ' AND rs.riskOverride IS NOT NULL';
+    }
+
+    request.input('offset', offset);
+    request.input('limit', limit);
+    const result = await request.query(`
+      SELECT rs.*, r.displayName, r.description, r.resourceType, r.mail
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+      ${whereClause}
+      ORDER BY rs.riskScore DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const countReq = timedRequest(p, 'risk-groups-count', res);
+    if (tier) countReq.input('tier', tier);
+    if (search) countReq.input('search', `%${search}%`);
+    if (resourceType) countReq.input('resourceType', resourceType);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+      ${whereClause}
+    `);
+
+    return res.json({
+      data: result.recordset.map(parseJsonColumns),
+      total: countResult.recordset[0].total,
+      available: true,
+      useResources: true,
+    });
+  } catch (err) {
+    console.error('Risk groups query failed:', err.message);
+    return res.status(500).json({ error: 'Failed to load risk scores' });
+  }
+});
+
+// ─── GET /api/risk-scores/business-roles ─────────────────────────────
+router.get('/risk-scores/business-roles', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ data: [], total: 0, available: false });
+
+    const p = await db.getPool();
+    if (!await riskTableExists(p, res)) return res.json({ data: [], total: 0, available: false });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const tier = req.query.tier || '';
+    const search = req.query.search || '';
+    const overridesOnly = req.query.overridesOnly === 'true';
+
+    let whereClause = `WHERE rs.entityType = 'BusinessRole'`;
+    const request = timedRequest(p, 'risk-business-roles-list', res);
+
+    if (tier) {
+      whereClause += ' AND rs.riskTier = @tier';
+      request.input('tier', tier);
+    }
+    if (search) {
+      whereClause += ' AND (br.displayName LIKE @search OR br.description LIKE @search)';
+      request.input('search', `%${search}%`);
+    }
+    if (overridesOnly) {
+      whereClause += ' AND rs.riskOverride IS NOT NULL';
+    }
+
+    request.input('offset', offset);
+    request.input('limit', limit);
+    const result = await request.query(`
+      SELECT rs.*, br.displayName, br.description, br.catalogId,
+             c.displayName AS catalogName
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Resources br ON rs.entityId = br.id AND br.resourceType = 'BusinessRole' AND br.${TEMPORAL_FILTER}
+      LEFT JOIN dbo.GovernanceCatalogs c ON br.catalogId = c.id AND c.${TEMPORAL_FILTER}
+      ${whereClause}
+      ORDER BY rs.riskScore DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const countReq = timedRequest(p, 'risk-business-roles-count', res);
+    if (tier) countReq.input('tier', tier);
+    if (search) countReq.input('search', `%${search}%`);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Resources br ON rs.entityId = br.id AND br.resourceType = 'BusinessRole' AND br.${TEMPORAL_FILTER}
+      LEFT JOIN dbo.GovernanceCatalogs c ON br.catalogId = c.id AND c.${TEMPORAL_FILTER}
+      ${whereClause}
+    `);
+
+    return res.json({
+      data: result.recordset.map(parseJsonColumns),
+      total: countResult.recordset[0].total,
+      available: true,
+    });
+  } catch (err) {
+    console.error('Risk business-roles query failed:', err.message);
+    return res.status(500).json({ error: 'Failed to load risk scores' });
+  }
+});
+
+// ─── GET /api/risk-scores/org-units ─────────────────────────────────
+router.get('/risk-scores/org-units', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ data: [], total: 0, available: false });
+
+    const p = await db.getPool();
+    if (!await riskTableExists(p, res)) return res.json({ data: [], total: 0, available: false });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const tier = req.query.tier || '';
+    const search = req.query.search || '';
+    const overridesOnly = req.query.overridesOnly === 'true';
+
+    let whereClause = `WHERE rs.entityType = 'OrgUnit'`;
+    const request = timedRequest(p, 'risk-org-units-list', res);
+
+    if (tier) {
+      whereClause += ' AND rs.riskTier = @tier';
+      request.input('tier', tier);
+    }
+    if (search) {
+      whereClause += ' AND (ou.displayName LIKE @search OR ou.department LIKE @search)';
+      request.input('search', `%${search}%`);
+    }
+    if (overridesOnly) {
+      whereClause += ' AND rs.riskOverride IS NOT NULL';
+    }
+
+    request.input('offset', offset);
+    request.input('limit', limit);
+    const result = await request.query(`
+      SELECT rs.*, ou.displayName, ou.department, ou.memberCount, ou.managerId,
+             p.displayName AS managerName
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.OrgUnits ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
+      LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
+      ${whereClause}
+      ORDER BY rs.riskScore DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const countReq = timedRequest(p, 'risk-org-units-count', res);
+    if (tier) countReq.input('tier', tier);
+    if (search) countReq.input('search', `%${search}%`);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.OrgUnits ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
+      LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
+      ${whereClause}
+    `);
+
+    return res.json({
+      data: result.recordset.map(parseJsonColumns),
+      total: countResult.recordset[0].total,
+      available: true,
+    });
+  } catch (err) {
+    console.error('Risk org-units query failed:', err.message);
+    return res.status(500).json({ error: 'Failed to load risk scores' });
+  }
+});
+
+// ─── GET /api/risk-scores/identities ────────────────────────────────
+router.get('/risk-scores/identities', async (req, res) => {
+  try {
+    if (!useSql) return res.json({ data: [], total: 0, available: false });
+
+    const p = await db.getPool();
+    if (!await riskTableExists(p, res)) return res.json({ data: [], total: 0, available: false });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const tier = req.query.tier || '';
+    const search = req.query.search || '';
+    const overridesOnly = req.query.overridesOnly === 'true';
+
+    let whereClause = `WHERE rs.entityType = 'Identity'`;
+    const request = timedRequest(p, 'risk-identities-list', res);
+
+    if (tier) {
+      whereClause += ' AND rs.riskTier = @tier';
+      request.input('tier', tier);
+    }
+    if (search) {
+      whereClause += ' AND (i.displayName LIKE @search OR i.department LIKE @search OR i.email LIKE @search)';
+      request.input('search', `%${search}%`);
+    }
+    if (overridesOnly) {
+      whereClause += ' AND rs.riskOverride IS NOT NULL';
+    }
+
+    request.input('offset', offset);
+    request.input('limit', limit);
+    const result = await request.query(`
+      SELECT rs.*, i.displayName, i.accountCount, i.correlationConfidence, i.department,
+             i.jobTitle, i.email
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Identities i ON rs.entityId = i.id AND i.${TEMPORAL_FILTER}
+      ${whereClause}
+      ORDER BY rs.riskScore DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const countReq = timedRequest(p, 'risk-identities-count', res);
+    if (tier) countReq.input('tier', tier);
+    if (search) countReq.input('search', `%${search}%`);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.RiskScores rs
+      INNER JOIN dbo.Identities i ON rs.entityId = i.id AND i.${TEMPORAL_FILTER}
+      ${whereClause}
+    `);
+
+    return res.json({
+      data: result.recordset.map(parseJsonColumns),
+      total: countResult.recordset[0].total,
+      available: true,
+    });
+  } catch (err) {
+    console.error('Risk identities query failed:', err.message);
+    return res.status(500).json({ error: 'Failed to load risk scores' });
+  }
+});
+
+// ─── GET /api/risk-scores/:type/:id ──────────────────────────────────
+router.get('/risk-scores/:type/:id', async (req, res) => {
+  try {
+    if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
+
+    const { type, id } = req.params;
+    if (!VALID_TYPES.has(type)) {
+      return res.status(400).json({ error: `Type must be one of: ${[...VALID_TYPES].join(', ')}` });
+    }
+    if (!UUID_RE.test(id)) {
+      return res.status(400).json({ error: 'Invalid entity ID format' });
+    }
+
+    const entityType = mapEntityType(type);
+    const p = await db.getPool();
+    if (!await riskTableExists(p, res)) {
+      return res.status(404).json({ error: 'Risk scores not available' });
+    }
+
+    const request = timedRequest(p, 'risk-score-single', res);
+    request.input('id', id);
+    request.input('entityType', entityType);
+    const result = await request.query(`
+      SELECT rs.*
+      FROM dbo.RiskScores rs
+      WHERE rs.entityId = @id AND rs.entityType = @entityType
+    `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: 'Risk score not found for this entity' });
+    }
+
+    const riskData = parseJsonColumns(result.recordset[0]);
+
+    // Fetch entity display name
+    let displayName = null;
+    const entityTableMap = {
+      Principal: 'Principals',
+      Resource: 'Resources',
+      BusinessRole: 'Resources',
+      OrgUnit: 'OrgUnits',
+      Identity: 'Identities',
+    };
+    const tableName = entityTableMap[entityType];
+    if (tableName) {
+      try {
+        const ent = await timedRequest(p, 'risk-score-entity-name', res)
+          .input('id', id)
+          .query(`SELECT displayName FROM dbo.[${tableName}] WHERE id = @id AND ${TEMPORAL_FILTER}`);
+        displayName = ent.recordset[0]?.displayName || null;
+      } catch { /* entity table may not exist */ }
+    }
+
+    return res.json({ ...riskData, displayName });
+  } catch (err) {
+    console.error('Risk score lookup failed:', err.message);
+    return res.status(500).json({ error: 'Failed to load risk score' });
+  }
+});
+
 // ─── PUT /api/risk-scores/:type/:id/override ─────────────────────────
-// Set an analyst override on a user or group risk score.
+// Set an analyst override on a risk score.
 // Body: { adjustment: number (-50 to +50), reason: string (required) }
 router.put('/risk-scores/:type/:id/override', async (req, res) => {
   try {
-    if (!useSql) {
-      return res.status(400).json({ error: 'SQL mode required' });
-    }
+    if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
 
     const { type, id } = req.params;
-    if (type !== 'groups' && type !== 'users' && type !== 'resources') {
-      return res.status(400).json({ error: 'Type must be "groups", "users", or "resources"' });
+    if (!VALID_TYPES.has(type)) {
+      return res.status(400).json({ error: `Type must be one of: ${[...VALID_TYPES].join(', ')}` });
     }
-
-    // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
+    if (!UUID_RE.test(id)) {
       return res.status(400).json({ error: 'Invalid entity ID format' });
     }
 
@@ -398,36 +621,65 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
       return res.status(400).json({ error: 'Reason must be 500 characters or fewer' });
     }
 
+    const entityType = mapEntityType(type);
+    const assignedBy = req.user?.preferred_username || req.user?.name || 'Unknown';
     const p = await db.getPool();
 
-    // For groups/resources, determine the best table
-    let tableName;
-    if (type === 'users') {
-      const userSrc = await getUserRiskSource(p, res);
-      tableName = userSrc || 'GraphUsers';
-    } else if (type === 'resources') {
-      tableName = 'Resources';
-    } else {
-      const resourceSource = await getResourceRiskSource(p, res);
-      tableName = resourceSource || 'GraphGroups';
+    if (!await riskTableExists(p, res)) {
+      return res.status(404).json({ error: 'Risk scores not available' });
     }
 
-    const request = timedRequest(p, `risk-override-set-${type}`, res);
-    request.input('id', id);
-    request.input('adjustment', adjustment);
-    request.input('reason', reason.trim());
+    // Read current component scores
+    const current = await timedRequest(p, 'risk-override-read', res)
+      .input('id', id)
+      .input('entityType', entityType)
+      .query(`
+        SELECT riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore
+        FROM dbo.RiskScores
+        WHERE entityId = @id AND entityType = @entityType
+      `);
 
-    const result = await request.query(`
-      UPDATE dbo.${tableName}
-      SET riskOverride = @adjustment, riskOverrideReason = @reason
-      WHERE id = @id AND riskScore IS NOT NULL
-    `);
-
-    if (result.rowsAffected[0] === 0) {
+    if (current.recordset.length === 0) {
       return res.status(404).json({ error: 'Entity not found or not yet scored' });
     }
 
-    return res.json({ success: true, adjustment, reason: reason.trim() });
+    const row = current.recordset[0];
+    const baseScore = (row.riskDirectScore || 0) + (row.riskMembershipScore || 0)
+      + (row.riskStructuralScore || 0) + (row.riskPropagatedScore || 0);
+    const newScore = Math.max(0, Math.min(100, baseScore + adjustment));
+    const newTier = computeTier(newScore);
+
+    // Update RiskScores table
+    await timedRequest(p, 'risk-override-set', res)
+      .input('id', id)
+      .input('entityType', entityType)
+      .input('adjustment', adjustment)
+      .input('reason', reason.trim())
+      .input('newScore', newScore)
+      .input('newTier', newTier)
+      .query(`
+        UPDATE dbo.RiskScores
+        SET riskOverride = @adjustment,
+            riskOverrideReason = @reason,
+            riskScore = @newScore,
+            riskTier = @newTier
+        WHERE entityId = @id AND entityType = @entityType
+      `);
+
+    // Denormalize to entity table
+    try {
+      if (entityType === 'Principal') {
+        await timedRequest(p, 'risk-override-denorm', res)
+          .input('id', id).input('newScore', newScore).input('newTier', newTier)
+          .query(`UPDATE dbo.Principals SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+      } else if (entityType === 'Resource') {
+        await timedRequest(p, 'risk-override-denorm', res)
+          .input('id', id).input('newScore', newScore).input('newTier', newTier)
+          .query(`UPDATE dbo.Resources SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+      }
+    } catch { /* entity table may not have risk columns yet */ }
+
+    return res.json({ success: true, adjustment, reason: reason.trim(), riskScore: newScore, riskTier: newTier, assignedBy });
   } catch (err) {
     console.error('Risk override set failed:', err.message);
     return res.status(500).json({ error: 'Failed to set override' });
@@ -435,47 +687,75 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
 });
 
 // ─── DELETE /api/risk-scores/:type/:id/override ──────────────────────
-// Remove an analyst override from a user or group.
+// Remove an analyst override from an entity.
 router.delete('/risk-scores/:type/:id/override', async (req, res) => {
   try {
-    if (!useSql) {
-      return res.status(400).json({ error: 'SQL mode required' });
-    }
+    if (!useSql) return res.status(400).json({ error: 'SQL mode required' });
 
     const { type, id } = req.params;
-    if (type !== 'groups' && type !== 'users' && type !== 'resources') {
-      return res.status(400).json({ error: 'Type must be "groups", "users", or "resources"' });
+    if (!VALID_TYPES.has(type)) {
+      return res.status(400).json({ error: `Type must be one of: ${[...VALID_TYPES].join(', ')}` });
     }
-
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
+    if (!UUID_RE.test(id)) {
       return res.status(400).json({ error: 'Invalid entity ID format' });
     }
 
+    const entityType = mapEntityType(type);
     const p = await db.getPool();
 
-    // For groups/resources, determine the best table
-    let tableName;
-    if (type === 'users') {
-      const userSrc = await getUserRiskSource(p, res);
-      tableName = userSrc || 'GraphUsers';
-    } else if (type === 'resources') {
-      tableName = 'Resources';
-    } else {
-      const resourceSource = await getResourceRiskSource(p, res);
-      tableName = resourceSource || 'GraphGroups';
+    if (!await riskTableExists(p, res)) {
+      return res.status(404).json({ error: 'Risk scores not available' });
     }
 
-    const request = timedRequest(p, `risk-override-clear-${type}`, res);
-    request.input('id', id);
+    // Read current component scores
+    const current = await timedRequest(p, 'risk-override-read', res)
+      .input('id', id)
+      .input('entityType', entityType)
+      .query(`
+        SELECT riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore
+        FROM dbo.RiskScores
+        WHERE entityId = @id AND entityType = @entityType
+      `);
 
-    await request.query(`
-      UPDATE dbo.${tableName}
-      SET riskOverride = NULL, riskOverrideReason = NULL
-      WHERE id = @id
-    `);
+    if (current.recordset.length === 0) {
+      return res.status(404).json({ error: 'Entity not found or not yet scored' });
+    }
 
-    return res.json({ success: true });
+    const row = current.recordset[0];
+    const newScore = Math.max(0, Math.min(100,
+      (row.riskDirectScore || 0) + (row.riskMembershipScore || 0)
+      + (row.riskStructuralScore || 0) + (row.riskPropagatedScore || 0)));
+    const newTier = computeTier(newScore);
+
+    // Clear override in RiskScores table
+    await timedRequest(p, 'risk-override-clear', res)
+      .input('id', id)
+      .input('entityType', entityType)
+      .input('newScore', newScore)
+      .input('newTier', newTier)
+      .query(`
+        UPDATE dbo.RiskScores
+        SET riskOverride = 0,
+            riskOverrideReason = NULL,
+            riskScore = @newScore,
+            riskTier = @newTier
+        WHERE entityId = @id AND entityType = @entityType
+      `);
+
+    // Denormalize to entity table
+    try {
+      if (entityType === 'Principal') {
+        await timedRequest(p, 'risk-override-denorm', res)
+          .input('id', id).input('newScore', newScore).input('newTier', newTier)
+          .query(`UPDATE dbo.Principals SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+      } else if (entityType === 'Resource') {
+        await timedRequest(p, 'risk-override-denorm', res)
+          .input('id', id).input('newScore', newScore).input('newTier', newTier)
+          .query(`UPDATE dbo.Resources SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+      }
+    } catch { /* entity table may not have risk columns yet */ }
+
+    return res.json({ success: true, riskScore: newScore, riskTier: newTier });
   } catch (err) {
     console.error('Risk override clear failed:', err.message);
     return res.status(500).json({ error: 'Failed to clear override' });

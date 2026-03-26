@@ -157,14 +157,14 @@ function Import-FGCuratedData {
 
                 foreach ($apAssign in $cat.assignments) {
                     $checkCmd = $conn.CreateCommand()
-                    $checkCmd.CommandText = "SELECT COUNT(*) FROM dbo.GovernanceCategoryAssignments WHERE categoryId = @catId AND businessRoleId = @apId"
+                    $checkCmd.CommandText = "SELECT COUNT(*) FROM dbo.GovernanceCategoryAssignments WHERE categoryId = @catId AND resourceId = @apId"
                     $checkCmd.Parameters.AddWithValue("@catId", $catId) | Out-Null
                     $checkCmd.Parameters.AddWithValue("@apId", $apAssign.accessPackageId) | Out-Null
                     $exists = [int]$checkCmd.ExecuteScalar()
 
                     if ($exists -eq 0) {
                         $insertCmd = $conn.CreateCommand()
-                        $insertCmd.CommandText = "INSERT INTO dbo.GovernanceCategoryAssignments (categoryId, businessRoleId) VALUES (@catId, @apId)"
+                        $insertCmd.CommandText = "INSERT INTO dbo.GovernanceCategoryAssignments (categoryId, resourceId) VALUES (@catId, @apId)"
                         $insertCmd.Parameters.AddWithValue("@catId", $catId) | Out-Null
                         $insertCmd.Parameters.AddWithValue("@apId", $apAssign.accessPackageId) | Out-Null
                         $insertCmd.ExecuteNonQuery() | Out-Null

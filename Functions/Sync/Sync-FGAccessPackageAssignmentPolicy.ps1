@@ -78,7 +78,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
     try {
 
-    $TableName = "BusinessRolePolicies"
+    $TableName = "AssignmentPolicies"
 
     # Define default attributes
     # NOTE: Uses v1.0 Graph endpoint (not beta) because automaticRequestSettings
@@ -92,7 +92,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'description'
 
         # Relationships (derived from $expand=accessPackage)
-        'businessRoleId'
+        'resourceId'
 
         # v1.0 policy scope
         'allowedTargetScope'
@@ -150,7 +150,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
         'id' = 'UNIQUEIDENTIFIER'
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
-        'businessRoleId' = 'UNIQUEIDENTIFIER'
+        'resourceId' = 'UNIQUEIDENTIFIER'
         'allowedTargetScope' = 'NVARCHAR(255)'
         'automaticRequestSettings' = 'NVARCHAR(MAX)'
         'hasAutoAddRule' = 'BIT'
@@ -186,7 +186,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
 
     # Exclude derived attributes from $select (they're computed client-side, not Graph properties)
     # accessPackageId is derived from expanded accessPackage navigation property in v1.0
-    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'hasAccessReview', 'businessRoleId')
+    $derivedAttributes = @('hasAutoAddRule', 'hasAutoRemoveRule', 'hasAccessReview', 'resourceId')
     $graphAttributes = $Attributes | Where-Object { $_ -notin $derivedAttributes }
     $selectProperties = $graphAttributes -join ','
     # Use v1.0 endpoint — automaticRequestSettings only exists in v1.0, not beta
@@ -224,7 +224,7 @@ function Sync-FGAccessPackageAssignmentPolicy {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $valueResolvers = @{
-        'businessRoleId' = { param($obj) if ($obj.accessPackage -and $obj.accessPackage.id) { $obj.accessPackage.id } elseif ($obj.accessPackageId) { $obj.accessPackageId } else { $null } }
+        'resourceId' = { param($obj) if ($obj.accessPackage -and $obj.accessPackage.id) { $obj.accessPackage.id } elseif ($obj.accessPackageId) { $obj.accessPackageId } else { $null } }
         'automaticRequestSettings' = { param($obj) if ($obj.automaticRequestSettings) { $obj.automaticRequestSettings | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'hasAutoAddRule' = {
             param($obj)

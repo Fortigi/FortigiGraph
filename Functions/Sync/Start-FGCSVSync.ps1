@@ -6,7 +6,7 @@ function Start-FGCSVSync {
     .DESCRIPTION
     Loads all CSVs from a folder in dependency order and syncs them to the FortigiGraph
     universal data model tables (Systems, Resources, Principals, Identities, ResourceAssignments,
-    BusinessRoles, CertificationDecisions).
+    AssignmentPolicies, ResourceRelationships, CertificationDecisions).
 
     CSVs are expected to use semicolon (;) delimiter and UTF-8 encoding.
 
@@ -73,7 +73,7 @@ function Start-FGCSVSync {
         Principals = $null
         Identities = $null
         ResourceAssignments = $null
-        BusinessRoles = $null
+        BusinessRolesAndPolicies = $null
         Certifications = $null
         Errors = @()
     }
@@ -96,7 +96,7 @@ function Start-FGCSVSync {
         Principals          = Join-Path $FolderPath "Users.csv"
         Identities          = Join-Path $FolderPath "Identities.csv"
         ResourceAssignments = Join-Path $FolderPath "Account-Permission.csv"
-        BusinessRoles       = Join-Path $FolderPath "AssignmentPolicies.csv"
+        BusinessRolesAndPolicies = Join-Path $FolderPath "AssignmentPolicies.csv"
         Certifications      = Join-Path $FolderPath "CRAs.csv"
     }
 
@@ -204,15 +204,15 @@ function Start-FGCSVSync {
         }
 
         # 6. Business Roles (assignment policies)
-        if (Test-Path $csvFiles.BusinessRoles) {
+        if (Test-Path $csvFiles.BusinessRolesAndPolicies) {
             Write-Host "`n=== Syncing Business Roles ===" -ForegroundColor Yellow
             try {
-                $syncStats.BusinessRoles = Sync-FGCSVBusinessRole -Path $csvFiles.BusinessRoles
+                $syncStats.BusinessRolesAndPolicies = Sync-FGCSVBusinessRole -Path $csvFiles.BusinessRolesAndPolicies
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Business Roles sync complete" -ForegroundColor Green
             }
             catch {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Business Roles sync failed: $_" -ForegroundColor Red
-                $syncStats.Errors += [PSCustomObject]@{ Entity = "BusinessRoles"; Message = $_.Exception.Message; Timestamp = Get-Date }
+                $syncStats.Errors += [PSCustomObject]@{ Entity = "BusinessRolesAndPolicies"; Message = $_.Exception.Message; Timestamp = Get-Date }
             }
         }
 
@@ -249,7 +249,7 @@ function Start-FGCSVSync {
     Write-Host "Duration:  $([math]::Round($elapsed.TotalMinutes, 1)) minutes" -ForegroundColor White
     Write-Host "System:    $SystemDisplayName (ID: $parentSystemId)" -ForegroundColor White
 
-    $entities = @('Systems', 'Resources', 'Principals', 'Identities', 'ResourceAssignments', 'BusinessRoles', 'Certifications')
+    $entities = @('Systems', 'Resources', 'Principals', 'Identities', 'ResourceAssignments', 'BusinessRolesAndPolicies', 'Certifications')
     foreach ($entity in $entities) {
         $result = $syncStats[$entity]
         if ($null -ne $result) {

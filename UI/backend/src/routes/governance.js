@@ -23,7 +23,7 @@ const LAST_REVIEW_CTE = `
 WITH LatestInstance AS (
   -- Find the most recent review instance per access package
   SELECT
-    businessRoleId,
+    resourceId,
     MAX(reviewInstanceId) AS reviewInstanceId,
     MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime,
     MAX(reviewInstanceStartDateTime) AS reviewInstanceStartDateTime,
@@ -32,14 +32,14 @@ WITH LatestInstance AS (
   WHERE reviewInstanceEndDateTime = (
     SELECT MAX(r2.reviewInstanceEndDateTime)
     FROM CertificationDecisions r2
-    WHERE r2.businessRoleId = CertificationDecisions.businessRoleId
+    WHERE r2.resourceId = CertificationDecisions.resourceId
   )
-  GROUP BY businessRoleId
+  GROUP BY resourceId
 ),
 LastReviewPerAP AS (
   -- Summarize decisions within the latest instance only
   SELECT
-    li.businessRoleId,
+    li.resourceId,
     li.reviewInstanceEndDateTime AS deadline,
     li.reviewInstanceStartDateTime AS reviewStart,
     li.reviewInstanceStatus,
@@ -72,9 +72,9 @@ LastReviewPerAP AS (
     END AS daysOverdue
   FROM LatestInstance li
     INNER JOIN CertificationDecisions d
-      ON d.businessRoleId = li.businessRoleId
+      ON d.resourceId = li.resourceId
       AND d.reviewInstanceId = li.reviewInstanceId
-  GROUP BY li.businessRoleId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
+  GROUP BY li.resourceId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
 )`;
 
 // ────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ router.get('/governance/review-compliance', async (req, res) => {
     const result = await request.query(
       `${LAST_REVIEW_CTE}
       SELECT
-        ap.id AS businessRoleId,
+        ap.id AS resourceId,
         ap.displayName AS accessPackageName,
         c.displayName AS catalogName,
         cat.name AS categoryName,
@@ -163,9 +163,9 @@ router.get('/governance/review-compliance', async (req, res) => {
         lr.lastReviewedBy,
         lr.reviewInstanceStatus
       FROM LastReviewPerAP lr
-        INNER JOIN BusinessRoles ap ON lr.businessRoleId = ap.id
+        INNER JOIN Resources ap ON lr.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
         LEFT JOIN GovernanceCatalogs c ON ap.catalogId = c.id
-        LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.businessRoleId
+        LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
         LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
       WHERE 1=1 ${filterClause} ${categoryClause}
       ORDER BY

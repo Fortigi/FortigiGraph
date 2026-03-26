@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import RiskScoreSection from './RiskScoreSection';
 
 const HEADER_FIELDS = ['catalogName', 'catalogId', 'description'];
 const HIDDEN_FIELDS = new Set(['displayName', ...HEADER_FIELDS, 'ValidFrom', 'ValidTo']);
@@ -118,6 +119,18 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState(cachedData?.history || null);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [riskData, setRiskData] = useState(null);
+
+  // Fetch risk score data
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch(`/api/risk-scores/business-roles/${accessPackageId}`);
+        if (res.ok) setRiskData(await res.json());
+      } catch { /* risk data optional */ }
+    })();
+  }, [authFetch, accessPackageId]);
 
   // Fetch core data
   useEffect(() => {
@@ -349,6 +362,9 @@ export default function AccessPackageDetailPage({ accessPackageId, cachedData, o
           </svg>
         </button>
       </div>
+
+      {/* Risk Score */}
+      {riskData && <RiskScoreSection attributes={riskData} entityType="business-roles" entityId={accessPackageId} authFetch={authFetch} />}
 
       {/* Attributes */}
       <Section title="Attributes" count={otherAttributes.length}>

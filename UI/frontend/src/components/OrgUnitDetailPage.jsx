@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
+import RiskScoreSection from './RiskScoreSection';
 
 // ─── OrgUnit Detail Page ─────────────────────────────────────────────────────
 // Shows details for a single OrgUnit: attributes, members, sub-units.
@@ -30,7 +31,18 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
   const [members, setMembers] = useState([]);
   const [memberTotal, setMemberTotal] = useState(0);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [riskData, setRiskData] = useState(null);
   const PAGE_SIZE = 50;
+
+  // ─── Fetch risk score data ──────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch(`/api/risk-scores/org-units/${orgUnitId}`);
+        if (res.ok) setRiskData(await res.json());
+      } catch { /* risk data optional */ }
+    })();
+  }, [authFetch, orgUnitId]);
 
   // ─── Fetch OrgUnit detail ──────────────────────────────────────────
   const fetchDetail = useCallback(async () => {
@@ -148,6 +160,9 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
           </button>
         </div>
       </div>
+
+      {/* Risk Score */}
+      {riskData && <RiskScoreSection attributes={riskData} entityType="org-units" entityId={orgUnitId} authFetch={authFetch} />}
 
       {/* Attributes */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">

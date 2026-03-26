@@ -61,49 +61,29 @@ function Sync-FGAccessPackageResourceRoleScope {
 
     try {
 
-    $TableName = "BusinessRoleResources"
+    $TableName = "ResourceRelationships"
 
-    # Define fixed attributes for resource role scopes
+    # Define fixed attributes for resource relationships
     # These represent the flattened structure we'll store
     $Attributes = @(
-        'id'                          # Composite ID (e.g., "guid1_guid2")
-        'businessRoleId'             # Which access package this belongs to
-        'roleId'                      # Role ID from accessPackageResourceRole.id
-        'roleDisplayName'             # Role display name (Member, Owner)
-        'roleDescription'             # Role description
+        'parentResourceId'            # Which access package (business role) this belongs to
+        'childResourceId'             # The actual group/resource ID (scope origin ID, normalized to uppercase)
+        'relationshipType'            # Fixed value: 'Contains'
+        'roleName'                    # Role display name (Member, Owner)
         'roleOriginSystem'            # Role origin (AadGroup, AadApplication)
-        'roleOriginId'                # Role origin ID (e.g., "Member_guid")
-        'scopeId'                     # Scope ID from accessPackageResourceScope.id
-        'scopeDisplayName'            # Scope display name
-        'scopeOriginId'               # Scope origin ID - THE ACTUAL GROUP/RESOURCE ID
-        'scopeOriginSystem'           # Scope origin system (AadGroup, AadApplication)
-        'scopeIsRootScope'            # Whether this is root scope
-        'createdBy'                   # Who created this scope
-        'createdDateTime'             # When this was added to the access package
-        'modifiedBy'                  # Who last modified
-        'modifiedDateTime'            # When last modified
+        'extendedAttributes'          # JSON with remaining rich data (roleId, roleOriginId, scopeId, etc.)
     )
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using fixed attributes: $($Attributes.Count) attributes" -ForegroundColor Cyan
 
     # Map attributes to SQL types
     $graphToSqlTypeMap = @{
-        'id' = 'NVARCHAR(255)'              # Composite ID, not a GUID
-        'businessRoleId' = 'UNIQUEIDENTIFIER'
-        'roleId' = 'NVARCHAR(100)'          # Can be GUID or other format
-        'roleDisplayName' = 'NVARCHAR(255)'
-        'roleDescription' = 'NVARCHAR(1024)'
+        'parentResourceId' = 'UNIQUEIDENTIFIER'
+        'childResourceId' = 'UNIQUEIDENTIFIER'
+        'relationshipType' = 'NVARCHAR(50)'
+        'roleName' = 'NVARCHAR(255)'
         'roleOriginSystem' = 'NVARCHAR(100)'
-        'roleOriginId' = 'NVARCHAR(255)'
-        'scopeId' = 'NVARCHAR(100)'         # Can be GUID or other format
-        'scopeDisplayName' = 'NVARCHAR(255)'
-        'scopeOriginId' = 'NVARCHAR(255)'   # The actual group/resource GUID
-        'scopeOriginSystem' = 'NVARCHAR(100)'
-        'scopeIsRootScope' = 'BIT'
-        'createdBy' = 'NVARCHAR(255)'
-        'createdDateTime' = 'DATETIME2'
-        'modifiedBy' = 'NVARCHAR(255)'
-        'modifiedDateTime' = 'DATETIME2'
+        'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
     # Build column definitions
@@ -114,7 +94,7 @@ function Sync-FGAccessPackageResourceRoleScope {
 
     # Check if table exists and handle schema
     try {
-        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable -CompositePrimaryKey @('businessRoleId', 'id')
+        $tableReady = Initialize-FGSyncTable -TableName $TableName -Columns $columns -RecreateTable:$RecreateTable -CompositePrimaryKey @('parentResourceId', 'childResourceId', 'relationshipType')
         if ($tableReady -eq $false) { return }
     }
     catch {
@@ -198,23 +178,30 @@ function Sync-FGAccessPackageResourceRoleScope {
                             $scope.accessPackageResourceRole.id.ToUpper()
                         } else { $null }
 
-                        $flatScope = [PSCustomObject]@{
-                            id = $scope.id
-                            businessRoleId = $package.id
+                        # Build extended attributes JSON with remaining rich data
+                        $extAttrs = @{
+                            originalId = $scope.id
                             roleId = $normalizedRoleId
-                            roleDisplayName = $scope.accessPackageResourceRole.displayName
                             roleDescription = $scope.accessPackageResourceRole.description
-                            roleOriginSystem = $scope.accessPackageResourceRole.originSystem
                             roleOriginId = $scope.accessPackageResourceRole.originId
                             scopeId = $normalizedScopeId
                             scopeDisplayName = $scope.accessPackageResourceScope.displayName
-                            scopeOriginId = $normalizedScopeOriginId
                             scopeOriginSystem = $scope.accessPackageResourceScope.originSystem
                             scopeIsRootScope = $scope.accessPackageResourceScope.isRootScope
                             createdBy = $scope.createdBy
-                            createdDateTime = $scope.createdDateTime
                             modifiedBy = $scope.modifiedBy
+                            createdDateTime = $scope.createdDateTime
                             modifiedDateTime = $scope.modifiedDateTime
+                        }
+                        $extAttrsJson = $extAttrs | ConvertTo-Json -Compress -Depth 10
+
+                        $flatScope = [PSCustomObject]@{
+                            parentResourceId = $package.id
+                            childResourceId = $normalizedScopeOriginId
+                            relationshipType = 'Contains'
+                            roleName = $scope.accessPackageResourceRole.displayName
+                            roleOriginSystem = $scope.accessPackageResourceRole.originSystem
+                            extendedAttributes = $extAttrsJson
                         }
                         $allResourceRoleScopes += $flatScope
                     }
@@ -266,6 +253,40 @@ function Sync-FGAccessPackageResourceRoleScope {
         return
     }
 
+    # Deduplicate by composite key (parentResourceId + childResourceId + relationshipType)
+    # The same AP can grant the same resource with different roles (e.g., Member + Owner).
+    # ResourceRelationships PK is (parentResourceId, childResourceId, relationshipType) so we must merge.
+    # Combine multiple role names into comma-separated list and merge extendedAttributes.
+    $compositeGrouped = $allResourceRoleScopes | Group-Object -Property { "$($_.parentResourceId)|$($_.childResourceId)" }
+    $compositedupes = $compositeGrouped | Where-Object { $_.Count -gt 1 }
+    if ($compositedupes) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Merging $($compositedupes.Count) multi-role resource grants (e.g., Member+Owner on same group)" -ForegroundColor Cyan
+        $allResourceRoleScopes = $compositeGrouped | ForEach-Object {
+            if ($_.Count -eq 1) {
+                $_.Group[0]
+            } else {
+                # Merge: combine role names, keep first scope's other data, merge extendedAttributes
+                $first = $_.Group[0]
+                $roleNames = ($_.Group | ForEach-Object { $_.roleName }) -join ', '
+                $roleOriginSystems = ($_.Group | Select-Object -ExpandProperty roleOriginSystem -Unique) -join ', '
+                # Merge all extended attributes into an array
+                $allExtAttrs = $_.Group | ForEach-Object {
+                    if ($_.extendedAttributes) { $_.extendedAttributes | ConvertFrom-Json } else { @{} }
+                }
+                $mergedExt = @{ roles = $allExtAttrs } | ConvertTo-Json -Compress -Depth 10
+                [PSCustomObject]@{
+                    parentResourceId = $first.parentResourceId
+                    childResourceId = $first.childResourceId
+                    relationshipType = $first.relationshipType
+                    roleName = $roleNames
+                    roleOriginSystem = $roleOriginSystems
+                    extendedAttributes = $mergedExt
+                }
+            }
+        }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] After merge: $($allResourceRoleScopes.Count) unique resource relationships" -ForegroundColor Green
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing resource role scopes to SQL Server..." -ForegroundColor Cyan
 
@@ -292,13 +313,13 @@ function Sync-FGAccessPackageResourceRoleScope {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) resource role scopes..." -ForegroundColor Cyan
 
             # Use bulk MERGE operation - much faster than row-by-row
-            # CRITICAL: Must use composite PRIMARY KEY (accessPackageId, id) to match correctly
+            # CRITICAL: Must use composite PRIMARY KEY to match correctly
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
                 -TargetTableName $TableName `
                 -DataTable $dataTable `
-                -KeyColumns @('businessRoleId', 'id')
+                -KeyColumns @('parentResourceId', 'childResourceId', 'relationshipType')
 
             $syncedCount = $mergeResult.Inserted + $mergeResult.Updated
 
@@ -306,15 +327,39 @@ function Sync-FGAccessPackageResourceRoleScope {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate scopes/sec)" -ForegroundColor Green
 
-            # Handle deletions using bulk delete (avoids massive IN clause)
+            # Scoped delete: only remove Contains relationships that no longer exist in Graph
+            # Cannot use Invoke-FGSQLBulkDelete because it would delete ALL non-matching ResourceRelationships (GrantsAccessTo, etc.)
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted resource role scopes..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('businessRoleId', 'id')
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            # Create temp table with source composite keys
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceKeys (parentResourceId UNIQUEIDENTIFIER, childResourceId UNIQUEIDENTIFIER, relationshipType NVARCHAR(50), PRIMARY KEY (parentResourceId, childResourceId, relationshipType))"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            # Bulk copy source keys to temp table
+            $keyTable = New-Object System.Data.DataTable
+            [void]$keyTable.Columns.Add("parentResourceId", [System.Guid])
+            [void]$keyTable.Columns.Add("childResourceId", [System.Guid])
+            [void]$keyTable.Columns.Add("relationshipType", [System.String])
+            foreach ($row in $dataTable.Rows) {
+                [void]$keyTable.Rows.Add($row["parentResourceId"], $row["childResourceId"], $row["relationshipType"])
+            }
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceKeys"
+            $bulkCopy.WriteToServer($keyTable)
+            $bulkCopy.Close()
+            # Delete relationships of type Contains that aren't in source
+            $deleteCmd.CommandText = @"
+DELETE t FROM dbo.[$TableName] t
+LEFT JOIN #SyncSourceKeys s ON t.parentResourceId = s.parentResourceId AND t.childResourceId = s.childResourceId AND t.relationshipType = s.relationshipType
+WHERE s.parentResourceId IS NULL AND t.relationshipType = 'Contains'
+"@
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceKeys"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $keyTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount scopes that no longer exist in Graph" -ForegroundColor Yellow

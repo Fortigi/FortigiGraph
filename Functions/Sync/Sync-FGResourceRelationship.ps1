@@ -201,13 +201,38 @@ WHERE ra.ValidTo = '9999-12-31 23:59:59.9999999'
 
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Merge: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
-            # Delete stale relationships
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName "ResourceRelationships" `
-                -DataTable $dataTable `
-                -KeyColumns @('parentResourceId', 'childResourceId', 'relationshipType')
+            # Scoped delete: only remove relationships discovered by THIS sync (group nesting + app role grants)
+            # Do NOT delete Contains rows where parent is a BusinessRole — those come from Sync-FGAccessPackageResourceRoleScope
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceRelIds (parentResourceId UNIQUEIDENTIFIER, childResourceId UNIQUEIDENTIFIER, relationshipType NVARCHAR(50), PRIMARY KEY (parentResourceId, childResourceId, relationshipType))"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("parentResourceId", [System.Guid])
+            [void]$idTable.Columns.Add("childResourceId", [System.Guid])
+            [void]$idTable.Columns.Add("relationshipType", [string])
+            foreach ($row in $dataTable.Rows) {
+                [void]$idTable.Rows.Add($row["parentResourceId"], $row["childResourceId"], $row["relationshipType"])
+            }
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceRelIds"
+            $bulkCopy.WriteToServer($idTable)
+            $bulkCopy.Close()
+            # Delete only non-BusinessRole parent relationships that aren't in source
+            $deleteCmd.CommandText = @"
+DELETE t FROM dbo.ResourceRelationships t
+LEFT JOIN #SyncSourceRelIds s ON t.parentResourceId = s.parentResourceId AND t.childResourceId = s.childResourceId AND t.relationshipType = s.relationshipType
+LEFT JOIN dbo.Resources r ON t.parentResourceId = r.id
+WHERE s.parentResourceId IS NULL
+  AND (r.resourceType IS NULL OR r.resourceType <> 'BusinessRole')
+  AND t.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceRelIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale relationships" -ForegroundColor Yellow

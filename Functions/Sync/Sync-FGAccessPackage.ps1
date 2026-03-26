@@ -69,7 +69,7 @@ function Sync-FGAccessPackage {
     )
 
     # Hardcoded table name
-    $TableName = "BusinessRoles"
+    $TableName = "Resources"
 
     # Track sync timing for logging
     $syncStartTime = Get-Date
@@ -95,6 +95,9 @@ function Sync-FGAccessPackage {
         'id'
         'displayName'
         'description'
+
+        # Resource type (fixed value for access packages)
+        'resourceType'
 
         # Relationships
         'catalogId'
@@ -139,6 +142,7 @@ function Sync-FGAccessPackage {
         'id' = 'UNIQUEIDENTIFIER'
         'displayName' = 'NVARCHAR(255)'
         'description' = 'NVARCHAR(1024)'
+        'resourceType' = 'NVARCHAR(50)'
         'catalogId' = 'UNIQUEIDENTIFIER'
         'isHidden' = 'BIT'
         'isRoleScopesVisible' = 'BIT'
@@ -169,7 +173,10 @@ function Sync-FGAccessPackage {
     # Build Graph API request
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching access packages from Microsoft Graph..." -ForegroundColor Cyan
 
-    $selectProperties = $Attributes -join ','
+    # Exclude local-only attributes from Graph API $select (resourceType is set locally, not a Graph property)
+    $localOnlyAttributes = @('resourceType')
+    $graphAttributes = $Attributes | Where-Object { $_ -notin $localOnlyAttributes }
+    $selectProperties = $graphAttributes -join ','
     $uri = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages?`$select=$selectProperties"
 
     if ($Filter) {
@@ -203,7 +210,11 @@ function Sync-FGAccessPackage {
     # Build DataTable for bulk operations
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
-    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPackages -Columns $columns -Attributes $Attributes
+    $valueResolvers = @{
+        'resourceType' = { param($obj) 'BusinessRole' }
+    }
+
+    $dataTable = New-FGDataTableFromGraphObjects -GraphObjects $allPackages -Columns $columns -Attributes $Attributes -ValueResolvers $valueResolvers
 
     $syncResult = Invoke-FGSQLCommand -ScriptBlock {
         param($connection)
@@ -236,15 +247,33 @@ function Sync-FGAccessPackage {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate packages/sec)" -ForegroundColor Green
 
-            # Handle deletions using bulk delete (avoids massive IN clause)
+            # Scoped delete: only remove BusinessRole resources that no longer exist in Graph
+            # Cannot use Invoke-FGSQLBulkDelete because it would delete ALL non-matching Resources (groups, roles, etc.)
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted access packages..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('id')
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            # Create temp table with source IDs
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            # Bulk copy source IDs to temp table
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("id", [System.Guid])
+            foreach ($row in $dataTable.Rows) {
+                [void]$idTable.Rows.Add($row["id"])
+            }
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceIds"
+            $bulkCopy.WriteToServer($idTable)
+            $bulkCopy.Close()
+            # Delete resources of type BusinessRole that aren't in source
+            $deleteCmd.CommandText = "DELETE FROM dbo.[$TableName] WHERE resourceType = 'BusinessRole' AND id NOT IN (SELECT id FROM #SyncSourceIds)"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount access packages that no longer exist in Graph" -ForegroundColor Yellow

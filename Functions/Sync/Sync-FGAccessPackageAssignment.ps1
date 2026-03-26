@@ -103,20 +103,23 @@ function Sync-FGAccessPackageAssignment {
 
     try {
 
-    $tableName = "BusinessRoleAssignments"
+    $tableName = "ResourceAssignments"
 
     # Define default attributes
     $defaultAttributes = @(
         # Identity
         'id'
-        'businessRoleId'
+        'resourceId'
 
         # Target - we'll extract targetId from the expanded target object
         'principalId'  # This is not a direct property, we'll extract it
 
+        # Assignment type (fixed value for governed assignments)
+        'assignmentType'
+
         # State
         'assignmentStatus'
-        'assignmentState'
+        'state'
 
         # Schedule
         'schedule'  # Complex object with startDateTime, expiration, recurrence
@@ -156,9 +159,10 @@ function Sync-FGAccessPackageAssignment {
     # Map Graph attribute types to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'UNIQUEIDENTIFIER'
-        'businessRoleId' = 'UNIQUEIDENTIFIER'
+        'resourceId' = 'UNIQUEIDENTIFIER'
         'principalId' = 'UNIQUEIDENTIFIER'
-        'assignmentState' = 'NVARCHAR(50)'
+        'assignmentType' = 'NVARCHAR(50)'
+        'state' = 'NVARCHAR(50)'
         'assignmentStatus' = 'NVARCHAR(50)'
         'schedule' = 'NVARCHAR(MAX)'  # JSON representation
         'createdDateTime' = 'DATETIME2'
@@ -290,6 +294,21 @@ function Sync-FGAccessPackageAssignment {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] After deduplication: $($allAssignments.Count) unique assignments" -ForegroundColor Green
     }
 
+    # Deduplicate by composite key (resourceId + principalId + assignmentType)
+    # A user can have multiple assignments to the same access package via different policies.
+    # ResourceAssignments PK is (resourceId, principalId, assignmentType), so keep only one per combo.
+    # Prefer 'delivered' state, then most recent.
+    $compositeGrouped = $allAssignments | Group-Object -Property { "$($_.accessPackageId)|$($_.target.id)" }
+    $compositedupes = $compositeGrouped | Where-Object { $_.Count -gt 1 }
+    if ($compositedupes) {
+        Write-Warning "Found $($compositedupes.Count) user-resource pairs with multiple assignments (different policies)"
+        Write-Warning "Keeping one per (resourceId, principalId) pair — preferring 'delivered' state"
+        $allAssignments = $compositeGrouped | ForEach-Object {
+            $_.Group | Sort-Object -Property @{Expression = { if ($_.assignmentState -eq 'delivered') { 0 } else { 1 } }}, @{Expression = 'createdDateTime'; Descending = $true} | Select-Object -First 1
+        }
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] After composite dedup: $($allAssignments.Count) unique assignments" -ForegroundColor Green
+    }
+
     # Sync to SQL using bulk operations (HIGH PERFORMANCE)
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing access package assignments to SQL Server..." -ForegroundColor Cyan
 
@@ -297,7 +316,9 @@ function Sync-FGAccessPackageAssignment {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Preparing data for bulk sync..." -ForegroundColor Gray
 
     $valueResolvers = @{
-        'businessRoleId' = { param($obj) $obj.accessPackageId }
+        'resourceId' = { param($obj) $obj.accessPackageId }
+        'assignmentType' = { param($obj) 'Governed' }
+        'state' = { param($obj) $obj.assignmentState }
         'principalId' = { param($obj) $obj.target.id }
         'schedule' = { param($obj) if ($obj.schedule) { $obj.schedule | ConvertTo-Json -Compress -Depth 10 } else { $null } }
     }
@@ -335,15 +356,33 @@ function Sync-FGAccessPackageAssignment {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate assignments/sec)" -ForegroundColor Green
 
-            # Handle deletions using bulk delete (avoids massive IN clause)
+            # Scoped delete: only remove Governed assignments that no longer exist in Graph
+            # Cannot use Invoke-FGSQLBulkDelete because it would delete ALL non-matching ResourceAssignments (Direct, Eligible, etc.)
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted assignments..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $tableName `
-                -DataTable $dataTable `
-                -KeyColumns @('id')
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            # Create temp table with source IDs
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            # Bulk copy source IDs to temp table
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("id", [System.Guid])
+            foreach ($row in $dataTable.Rows) {
+                [void]$idTable.Rows.Add($row["id"])
+            }
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceIds"
+            $bulkCopy.WriteToServer($idTable)
+            $bulkCopy.Close()
+            # Delete assignments of type Governed that aren't in source
+            $deleteCmd.CommandText = "DELETE FROM dbo.[$tableName] WHERE assignmentType = 'Governed' AND id IS NOT NULL AND id NOT IN (SELECT id FROM #SyncSourceIds)"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount assignments that no longer exist in Graph" -ForegroundColor Yellow

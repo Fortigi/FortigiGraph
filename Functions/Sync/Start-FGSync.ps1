@@ -556,6 +556,17 @@ function Write-SyncError {
     }
     #endregion
 
+    #region Risk Score Tables
+    # Always ensure risk score tables exist (needed by risk scoring and UI)
+    try {
+        Write-SyncStep "Ensuring risk score tables exist..."
+        Initialize-FGRiskScoreTables
+        Write-SyncSuccess "Risk score tables ready"
+    } catch {
+        Write-SyncError "Failed to initialize risk score tables" $_.Exception.Message
+    }
+    #endregion
+
     #region Resource Model Migration (deprecated)
     if ($MigrateResourceModel) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource model migration is no longer needed — sync functions now write directly to universal tables." -ForegroundColor Yellow
@@ -616,11 +627,11 @@ function Write-SyncError {
     $groupEligibleMembersTableName = "ResourceAssignments"
     $groupOwnersTableName = "ResourceAssignments"
     $catalogsTableName = "GovernanceCatalogs"
-    $accessPackagesTableName = "BusinessRoles"
-    $accessPackageAssignmentsTableName = "BusinessRoleAssignments"
-    $accessPackageResourceRoleScopesTableName = "BusinessRoleResources"
-    $accessPackageAssignmentPoliciesTableName = "BusinessRolePolicies"
-    $accessPackageAssignmentRequestsTableName = "BusinessRoleRequests"
+    $accessPackagesTableName = "Resources"
+    $accessPackageAssignmentsTableName = "ResourceAssignments"
+    $accessPackageResourceRoleScopesTableName = "ResourceRelationships"
+    $accessPackageAssignmentPoliciesTableName = "AssignmentPolicies"
+    $accessPackageAssignmentRequestsTableName = "AssignmentRequests"
     $accessPackageAccessReviewsTableName = "CertificationDecisions"
 
     if ($ParallelExecution) {
@@ -699,17 +710,17 @@ function Write-SyncError {
                     }
                     "AccessPackages" {
                         $null = Sync-FGAccessPackage
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'BusinessRole'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignments" {
                         $null = Sync-FGAccessPackageAssignment
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceAssignments WHERE assignmentType = 'Governed'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageResourceRoleScopes" {
                         $null = Sync-FGAccessPackageResourceRoleScope
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$TableName" -AsScalar
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceRelationships WHERE relationshipType = 'Contains'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "AccessPackageAssignmentPolicies" {
@@ -1408,7 +1419,7 @@ function Write-SyncError {
             try {
                 Sync-FGAccessPackage
 
-                $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackagesTableName" -AsScalar
+                $packageCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'BusinessRole'" -AsScalar
                 $script:SyncStats.AccessPackages = $packageCount
                 Write-SyncSuccess "Access packages synced: $packageCount (table: $accessPackagesTableName)"
             } catch {
@@ -1422,7 +1433,7 @@ function Write-SyncError {
             try {
                 Sync-FGAccessPackageAssignment
 
-                $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageAssignmentsTableName" -AsScalar
+                $assignmentCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceAssignments WHERE assignmentType = 'Governed'" -AsScalar
                 $script:SyncStats.AccessPackageAssignments = $assignmentCount
                 Write-SyncSuccess "Access package assignments synced: $assignmentCount (table: $accessPackageAssignmentsTableName)"
             } catch {
@@ -1436,7 +1447,7 @@ function Write-SyncError {
             try {
                 Sync-FGAccessPackageResourceRoleScope
 
-                $scopeCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.$accessPackageResourceRoleScopesTableName" -AsScalar
+                $scopeCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.ResourceRelationships WHERE relationshipType = 'Contains'" -AsScalar
                 $script:SyncStats.AccessPackageResourceRoleScopes = $scopeCount
                 Write-SyncSuccess "Access package resource role scopes synced: $scopeCount (table: $accessPackageResourceRoleScopesTableName)"
             } catch {

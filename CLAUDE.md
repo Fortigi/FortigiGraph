@@ -17,7 +17,7 @@ FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
 - **Distribution:** PowerShell Gallery
-- **Current Version:** 3.0.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
+- **Current Version:** 3.1.yyyyMMdd.HHmm (run `_Build/CreatePSD.ps1` to update)
 
 ---
 
@@ -103,10 +103,11 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **ConfigFile Support**: All SQL functions support config files
 
 ### 4. Identity Governance & Compliance Sync
-- **Complete Access Package Sync**: Catalogs, packages, assignments, policies (with `reviewSettings` and derived `hasAccessReview`/`hasAutoAddRule`/`hasAutoRemoveRule` flags), requests, reviews
+- **Complete Access Package Sync**: Catalogs → GovernanceCatalogs, packages → Resources (`resourceType='BusinessRole'`), assignments → ResourceAssignments (`assignmentType='Governed'`), resource scopes → ResourceRelationships (`relationshipType='Contains'`), policies → AssignmentPolicies, requests → AssignmentRequests, reviews → CertificationDecisions
 - **Group Membership Sync**: Direct, transitive, eligible (PIM), and owner relationships
-- **Orchestrated Sync**: `Start-FGSync` orchestrates all operations from config file
+- **Orchestrated Sync**: `Start-FGSync` orchestrates all Entra ID operations; `Start-FGCSVSync` orchestrates CSV-based imports for external systems
 - **Parallel Execution**: Up to 6 entity types concurrently via runspace pool
+- **CSV Import**: `Sync-FGCSV*` functions import data from any system via CSV files (systems, principals, resources, assignments, identities, business roles, certifications)
 - **Analytical Views**: 12+ SQL views for IST vs SOLL analysis, approval metrics, access reviews
 
 ### 5. Azure Automation
@@ -148,9 +149,9 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Data Privacy**: Only Phase 1 contacts LLM (public org context only); all identity scoring runs locally
 - **LLM Providers**: Supports Anthropic Claude (default: claude-sonnet-4-20250514) and OpenAI (default: gpt-4o)
 
-### 8. Universal Data Model (v3.0)
+### 8. Universal Data Model (v3.1)
 
-The data model supports importing authorization data from any system, not just Entra ID.
+The data model supports importing authorization data from any system, not just Entra ID. In v3.1, the Resources/ResourceAssignments/ResourceRelationships tables are also used for governance data (business roles, governed assignments, resource grants), creating a unified model.
 
 ```
                                     ┌──────────┐
@@ -175,9 +176,9 @@ The data model supports importing authorization data from any system, not just E
 
 **Tables:**
 - **Systems** — Connected authorization sources (EntraID, SharePoint, AzureRM, DevOps, etc.)
-- **Resources** — Any permission-granting resource (groups, directory roles, app roles, sites) with `resourceType` and `extendedAttributes` JSON
-- **ResourceAssignments** — Who has access to what (`resourceId` + `principalId` + `assignmentType`)
-- **ResourceRelationships** — Resource-to-resource links (Contains, GrantsAccessTo)
+- **Resources** — Any permission-granting resource (groups, directory roles, app roles, sites) **and** business roles (`resourceType='BusinessRole'`) with `extendedAttributes` JSON. Governance columns: `catalogId`, `isHidden`
+- **ResourceAssignments** — Who has access to what (`resourceId` + `principalId` + `assignmentType`). Includes governed assignments (`assignmentType='Governed'`) with governance columns: `policyId`, `state`, `assignmentStatus`, `expirationDateTime`
+- **ResourceRelationships** — Resource-to-resource links (Contains, GrantsAccessTo). Includes business role resource grants (`relationshipType='Contains'`) with governance columns: `roleName`, `roleOriginSystem`
 - **Principals** — User accounts from any system with `principalType` and `extendedAttributes` JSON
 - **OrgUnits** — Organizational units (departments, teams) calculated from data or synced from HR
 - **Identities** — Real persons aggregated from multiple accounts (from account correlation)
@@ -185,56 +186,60 @@ The data model supports importing authorization data from any system, not just E
 
 **Core + JSON pattern:** Both Resources and Principals use frequently-queried attributes as real SQL columns (displayName, department, resourceType) and system-specific attributes in `extendedAttributes` JSON column. This enables SQL indexing on hot columns while keeping the schema extensible.
 
+**Unified resource model (v3.1):** Business roles are stored in the same Resources table as groups and other resources, distinguished by `resourceType='BusinessRole'`. This means business roles participate in the same views, risk scoring, and clustering as any other resource. Similarly, governed assignments and resource grants reuse ResourceAssignments and ResourceRelationships with specific `assignmentType` and `relationshipType` values.
+
 **Backward compatibility:** All queries prefer new tables (Resources, Principals) with automatic fallback to legacy tables (GraphGroups, GraphUsers).
 
-### 9. Universal Governance Model
+### 9. Universal Governance Model (v3.1 — Unified)
 
-The governance model supports business roles, certifications, and access policies from any IGA platform — not just Entra ID Access Packages.
+The governance model supports business roles, certifications, and access policies from any IGA platform — not just Entra ID Access Packages. In v3.1, the model was unified with the resource model: business roles, their assignments, and their resource grants are stored in the shared Resources, ResourceAssignments, and ResourceRelationships tables. Only governance-specific tables remain separate.
 
 ```
-                         ┌──────────────────┐
-                         │GovernanceCatalogs │
-                         └────────┬─────────┘
-                                  │
-                         ┌────────▼─────────┐
-                         │  BusinessRoles    │
-                         └────────┬─────────┘
-              ┌──────────┬────────┼────────┬──────────┐
-              │          │        │        │          │
-     ┌────────▼───┐ ┌────▼────┐ ┌▼──────┐ ▼────────┐ │
-     │BusinessRole│ │Business │ │Busines│ │Business │ │
-     │Resources   │ │RoleAssig│ │sRole  │ │Role     │ │
-     │            │ │nments   │ │Policie│ │Requests │ │
-     └────────────┘ └─────────┘ │s      │ └─────────┘ │
-                                └───────┘              │
-                                              ┌────────▼──────┐
-                                              │Certification  │
-                                              │Decisions      │
-                                              └───────────────┘
+                    ┌──────────────────┐
+                    │GovernanceCatalogs │
+                    └────────┬─────────┘
+                             │ catalogId
+                    ┌────────▼─────────┐
+                    │    Resources     │  (resourceType='BusinessRole')
+                    └────────┬─────────┘
+         ┌───────────┬───────┼───────┬───────────┐
+         │           │       │       │           │
+    ┌────▼──────┐ ┌──▼───┐ ┌▼─────┐ ▼────────┐  │
+    │Resource   │ │Resour│ │Assign│ │Assignme│  │
+    │Relation-  │ │ceAssi│ │ment  │ │nt      │  │
+    │ships      │ │gnment│ │Polici│ │Requests│  │
+    │(Contains) │ │s     │ │es    │ └────────┘  │
+    └───────────┘ │(Gove-│ └──────┘             │
+                  │rned) │           ┌──────────▼──┐
+                  └──────┘           │Certification│
+                                     │Decisions    │
+                                     └─────────────┘
 ```
 
-**Tables:**
+**Shared tables** (created by `Initialize-FGSystemTables`, extended by `Initialize-FGGovernanceTables`):
+- **Resources** (`resourceType='BusinessRole'`) — Business roles stored alongside groups, directory roles, app roles, etc. Extra governance columns: `catalogId`, `isHidden`
+- **ResourceAssignments** (`assignmentType='Governed'`) — Business role assignments stored alongside direct/eligible assignments. Extra governance columns: `policyId`, `state`, `assignmentStatus`, `expirationDateTime`
+- **ResourceRelationships** (`relationshipType='Contains'`) — Business role resource grants stored alongside other resource links. Extra governance columns: `roleName`, `roleOriginSystem`
+
+**Governance-specific tables** (created by `Initialize-FGGovernanceTables`):
 - **GovernanceCatalogs** — Containers for business roles (Entra: Catalogs, Omada: Policy groups)
-- **BusinessRoles** — Named entitlement bundles (Entra: Access Packages, Omada: Business Roles, SailPoint: Access Profiles)
-- **BusinessRoleResources** — Which resources a business role grants (Entra: Resource Role Scopes)
-- **BusinessRoleAssignments** — Who currently holds a business role, with `complianceState`
-- **BusinessRolePolicies** — Assignment rules with `policyConditions` JSON for ABAC (Entra: Assignment Policies, Omada: Context rules)
-- **BusinessRoleRequests** — Request/approval workflow history
-- **CertificationDecisions** — Review/certification results with `certificationScopeType` (BusinessRole or ResourceAssignment)
+- **AssignmentPolicies** — Assignment rules with `policyConditions` JSON for ABAC (Entra: Assignment Policies, Omada: Context rules). References `resourceId` (the business role)
+- **AssignmentRequests** — Request/approval workflow history. References `resourceId` (the business role)
+- **CertificationDecisions** — Review/certification results with `certificationScopeType` (BusinessRole or ResourceAssignment). References `resourceId`
 
 **IGA platform mapping:**
 
-| Universal | Entra ID | Omada | SailPoint |
-|-----------|----------|-------|-----------|
-| GovernanceCatalog | Catalog | — | Source |
-| BusinessRole | Access Package | Business Role | Access Profile |
-| BusinessRoleResources | Resource Role Scopes | Role Entitlements | Entitlements |
-| BusinessRoleAssignment | AP Assignment | Role Assignment | Access Request Result |
-| BusinessRolePolicy | AP Assignment Policy | Assignment Policy | Access Request Config |
-| BusinessRoleRequest | AP Assignment Request | — | Access Request |
-| CertificationDecision | AP Access Review | CRA | Certification |
+| Table | Column Filter | Entra ID | Omada | SailPoint |
+|-------|---------------|----------|-------|-----------|
+| GovernanceCatalogs | — | Catalog | — | Source |
+| Resources | `resourceType='BusinessRole'` | Access Package | Business Role | Access Profile |
+| ResourceRelationships | `relationshipType='Contains'` | Resource Role Scopes | Role Entitlements | Entitlements |
+| ResourceAssignments | `assignmentType='Governed'` | AP Assignment | Role Assignment | Access Request Result |
+| AssignmentPolicies | — | AP Assignment Policy | Assignment Policy | Access Request Config |
+| AssignmentRequests | — | AP Assignment Request | — | Access Request |
+| CertificationDecisions | — | AP Access Review | CRA | Certification |
 
-**Breaking change:** The governance model replaces the legacy `GraphAccessPackage*` tables. Existing deployments must re-sync to populate the new tables. Tags/categories can be exported from the old setup and imported into the new one.
+**Breaking change (v3.0 → v3.1):** The old governance model had 7 separate tables (GovernanceCatalogs, BusinessRoles, BusinessRoleResources, BusinessRoleAssignments, BusinessRolePolicies, BusinessRoleRequests, CertificationDecisions). In v3.1, three tables were absorbed into the shared resource model: BusinessRoles → Resources, BusinessRoleAssignments → ResourceAssignments, BusinessRoleResources → ResourceRelationships. Two tables were renamed: BusinessRolePolicies → AssignmentPolicies, BusinessRoleRequests → AssignmentRequests (with `businessRoleId` → `resourceId`). Existing v3.0 deployments must re-sync to populate the unified tables. Tags/categories can be exported from the old setup and imported into the new one.
 
 ## Repository Structure
 
@@ -259,10 +264,11 @@ FortigiGraph/
 │   │   ├── Add-FG*.ps1         # Add operations (members, resources)
 │   │   └── Remove-FG*.ps1      # Delete/remove operations
 │   │
-│   ├── Sync/                   # High-performance data sync operations (24)
-│   │   ├── Start-FGSync.ps1              # Orchestrates all sync operations
+│   ├── Sync/                   # High-performance data sync operations (32)
+│   │   ├── Start-FGSync.ps1              # Orchestrates all Entra ID sync operations
+│   │   ├── Start-FGCSVSync.ps1           # Orchestrates CSV-based sync for external systems
 │   │   ├── Sync-FGUser.ps1               # Sync users to GraphUsers (legacy)
-│   │   ├── Sync-FGPrincipal.ps1          # Sync users to Principals (v3.0)
+│   │   ├── Sync-FGPrincipal.ps1          # Sync users to Principals
 │   │   ├── Sync-FGGroup.ps1              # Sync groups to GraphGroups (legacy)
 │   │   ├── Sync-FGGroupMember.ps1        # Sync direct group memberships
 │   │   ├── Sync-FGGroupEligibleMember.ps1
@@ -272,30 +278,39 @@ FortigiGraph/
 │   │   ├── Sync-FGResourceRelationship.ps1   # Sync resource-to-resource links
 │   │   ├── Sync-FGSystem.ps1             # Ensure system record exists
 │   │   ├── Sync-FGOrgUnit.ps1            # Calculate OrgUnits from Principals
-│   │   ├── Sync-FGAccessPackage.ps1
-│   │   ├── Sync-FGAccessPackageAssignment.ps1
-│   │   ├── Sync-FGAccessPackageResourceRoleScope.ps1
-│   │   ├── Sync-FGAccessPackageAssignmentPolicy.ps1
-│   │   ├── Sync-FGAccessPackageAssignmentRequest.ps1
-│   │   ├── Sync-FGAccessPackageAccessReview.ps1
-│   │   ├── Sync-FGCatalog.ps1
+│   │   ├── Sync-FGAccessPackage.ps1      # Sync access packages → Resources (resourceType='BusinessRole')
+│   │   ├── Sync-FGAccessPackageAssignment.ps1  # Sync AP assignments → ResourceAssignments (assignmentType='Governed')
+│   │   ├── Sync-FGAccessPackageResourceRoleScope.ps1  # Sync AP resource scopes → ResourceRelationships (relationshipType='Contains')
+│   │   ├── Sync-FGAccessPackageAssignmentPolicy.ps1   # Sync AP policies → AssignmentPolicies
+│   │   ├── Sync-FGAccessPackageAssignmentRequest.ps1  # Sync AP requests → AssignmentRequests
+│   │   ├── Sync-FGAccessPackageAccessReview.ps1       # Sync AP reviews → CertificationDecisions
+│   │   ├── Sync-FGCatalog.ps1            # Sync catalogs → GovernanceCatalogs
+│   │   ├── Sync-FGMaterializedViews.ps1  # Refresh materialized SQL views
+│   │   ├── Sync-FGCSVSystem.ps1          # Sync systems from CSV
+│   │   ├── Sync-FGCSVPrincipal.ps1       # Sync principals from CSV
+│   │   ├── Sync-FGCSVResource.ps1        # Sync resources from CSV
+│   │   ├── Sync-FGCSVResourceAssignment.ps1  # Sync resource assignments from CSV
+│   │   ├── Sync-FGCSVIdentity.ps1        # Sync identities from CSV
+│   │   ├── Sync-FGCSVBusinessRole.ps1    # Sync business roles from CSV → Resources
+│   │   ├── Sync-FGCSVCertification.ps1   # Sync certifications from CSV
 │   │   ├── Invoke-FGPrincipalMigration.ps1    # Migrate GraphUsers → Principals
 │   │   ├── Invoke-FGResourceModelMigration.ps1 # Migrate GraphGroups → Resources
 │   │   ├── Initialize-FGSyncTable.ps1           # Shared table lifecycle helper
 │   │   └── New-FGDataTableFromGraphObjects.ps1  # Shared DataTable builder
 │   │
-│   ├── SQL/                    # Azure SQL operations (28)
+│   ├── SQL/                    # Azure SQL operations (31)
 │   │   ├── Invoke-FGSQLCommand.ps1       # Helper for connection lifecycle
 │   │   ├── Connect-FGSQLServer.ps1       # Connect with firewall & ConfigFile
 │   │   ├── Initialize-FGSQLTable.ps1     # Create temporal tables
 │   │   ├── Initialize-FGSystemTables.ps1 # Create Systems, Resources, Principals, OrgUnits, Identities tables
-│   │   ├── Initialize-FGResourceViews.ps1     # Resource-based permission views (v3.0)
-│   │   ├── Initialize-FGResourceIndexes.ps1   # Resource-based indexes (v3.0)
-│   │   ├── Initialize-FGGovernanceTables.ps1  # Create governance model tables (BusinessRoles, etc.)
+│   │   ├── Initialize-FGResourceViews.ps1     # Resource-based permission views (v3.1)
+│   │   ├── Initialize-FGResourceIndexes.ps1   # Resource-based indexes (v3.1)
+│   │   ├── Initialize-FGGovernanceTables.ps1  # Create 4 governance tables + ensure governance columns on 3 shared tables
+│   │   ├── Initialize-FGRiskScoreTables.ps1   # Create risk score tables
 │   │   ├── Initialize-FGAccessPackageViews.ps1
 │   │   ├── Initialize-FGGroupMembershipViews.ps1  # Legacy group views (backward compat)
 │   │   ├── Initialize-FGGroupMembershipIndexes.ps1 # Legacy group indexes
-│   │   └── ...                           # Query, bulk ops, server management
+│   │   └── ...                           # Query, bulk ops, server management, export/import
 │   │
 │   ├── Specific/               # Higher-level helper functions (9)
 │   │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation
@@ -310,7 +325,7 @@ FortigiGraph/
 │   │   ├── Remove-FGUI.ps1              # Remove UI resources
 │   │   └── Set-FGUI.ps1                 # Scale App Service + SQL together
 │   │
-│   └── RiskScoring/            # Identity risk scoring engine (13)
+│   └── RiskScoring/            # Identity risk scoring engine (17)
 │       ├── New-FGRiskProfile.ps1         # LLM-assisted org context discovery
 │       ├── New-FGRiskClassifiers.ps1     # Generate risk detection classifiers
 │       ├── Invoke-FGRiskScoring.ps1      # 4-layer batch scoring engine
@@ -323,7 +338,11 @@ FortigiGraph/
 │       ├── Export-FGRiskProfile.ps1      # Export profile to JSON file
 │       ├── Export-FGRiskClassifiers.ps1  # Export classifiers to JSON file
 │       ├── Import-FGRiskProfile.ps1      # Import profile from JSON file
-│       └── Import-FGRiskClassifiers.ps1  # Import classifiers from JSON file
+│       ├── Import-FGRiskClassifiers.ps1  # Import classifiers from JSON file
+│       ├── Invoke-FGAccountCorrelation.ps1  # Cross-system account correlation
+│       ├── New-FGCorrelationRuleset.ps1     # Generate correlation rules via LLM
+│       ├── Save-FGCorrelationRuleset.ps1    # Persist correlation rules to SQL
+│       └── Get-FGCorrelationRuleset.ps1     # Read correlation rules from SQL
 │
 ├── Config/                 # Configuration templates
 │   └── tenantname.json.template
@@ -398,14 +417,14 @@ FortigiGraph/
 
 | Category | Count | Purpose |
 |----------|-------|---------|
-| **Base** | 21 | Authentication, HTTP operations, setup wizard, token management |
+| **Base** | 22 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
-| **Sync** | 24 | High-performance data sync (Start-FGSync + entity syncs + migration + helpers) |
-| **SQL** | 29 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables, governance tables) |
+| **Sync** | 32 | High-performance data sync (Start-FGSync + CSV sync + entity syncs + migration + helpers) |
+| **SQL** | 31 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables, governance tables) |
 | **Automation** | 8 | Azure Automation Account & UI management |
 | **Specific** | 9 | High-level idempotent helpers |
-| **RiskScoring** | 13 | LLM-assisted risk profiling, batch scoring, cluster analysis |
-| **Total** | **165 functions** | |
+| **RiskScoring** | 17 | LLM-assisted risk profiling, batch scoring, cluster analysis, account correlation |
+| **Total** | **168 functions** | |
 
 ## Architecture & Design Patterns
 

@@ -1,20 +1,24 @@
 function Initialize-FGGovernanceTables {
     <#
     .SYNOPSIS
-    Creates all tables for the universal governance model (GovernanceCatalogs, BusinessRoles, BusinessRoleResources, BusinessRoleAssignments, BusinessRolePolicies, BusinessRoleRequests, CertificationDecisions).
+    Creates governance model tables (GovernanceCatalogs, AssignmentPolicies, AssignmentRequests, CertificationDecisions)
+    and ensures governance columns exist on Resources, ResourceAssignments, and ResourceRelationships.
 
     .DESCRIPTION
-    Creates the governance tables for the universal data model:
-    - GovernanceCatalogs: Containers for business roles (replaces GraphCatalogs)
-    - BusinessRoles: Named entitlement bundles (replaces GraphAccessPackages)
-    - BusinessRoleResources: Which resources a business role grants (replaces GraphAccessPackageResourceRoleScopes)
-    - BusinessRoleAssignments: Who currently holds a business role (replaces GraphAccessPackageAssignments)
-    - BusinessRolePolicies: Rules for how roles get assigned (replaces GraphAccessPackageAssignmentPolicies)
-    - BusinessRoleRequests: Request/approval workflow history (replaces GraphAccessPackageAssignmentRequests)
-    - CertificationDecisions: Periodic review/certification results (replaces GraphAccessPackageAccessReviewDecisions)
+    In the unified data model (v3.1), business roles are stored as Resources with resourceType='BusinessRole',
+    their resource grants are stored as ResourceRelationships with relationshipType='Contains',
+    and their assignments are stored as ResourceAssignments with assignmentType='Governed'.
 
-    All tables use temporal versioning, systemId FK to Systems, and extendedAttributes JSON
-    for system-specific data.
+    This function creates the remaining governance-specific tables:
+    - GovernanceCatalogs: Containers for business roles (Entra: Catalogs, Omada: Policy groups)
+    - AssignmentPolicies: Rules for how roles get assigned (auto-add, approval, reviews)
+    - AssignmentRequests: Request/approval workflow history
+    - CertificationDecisions: Periodic review/certification results
+
+    It also ensures governance columns exist on the shared tables:
+    - Resources: catalogId, isHidden
+    - ResourceAssignments: policyId, state, assignmentStatus, expirationDateTime, extendedAttributes
+    - ResourceRelationships: roleName, roleOriginSystem, extendedAttributes
 
     Tables are only created if they do not already exist, unless -DropIfExists is specified.
 
@@ -34,6 +38,7 @@ function Initialize-FGGovernanceTables {
     .NOTES
     Requires:
     - Connect-FGSQLServer to be called first
+    - Initialize-FGSystemTables should be called first (creates Resources, ResourceAssignments, ResourceRelationships)
     #>
 
     [CmdletBinding()]
@@ -48,9 +53,9 @@ function Initialize-FGGovernanceTables {
         throw "Not connected to SQL Server. Please run Connect-FGSQLServer first."
     }
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Initializing universal governance model tables..." -ForegroundColor Cyan
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Initializing governance model tables (unified v3.1)..." -ForegroundColor Cyan
 
-    # 1. GovernanceCatalogs table (temporal, UNIQUEIDENTIFIER PK)
+    # 1. GovernanceCatalogs table (temporal, UNIQUEIDENTIFIER PK) - unchanged
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: GovernanceCatalogs" -ForegroundColor Cyan
 
     $catalogColumns = @{
@@ -72,84 +77,20 @@ function Initialize-FGGovernanceTables {
         Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] GovernanceCatalogs table creation cancelled" -ForegroundColor Yellow
     }
 
-    # 2. BusinessRoles table (temporal, UNIQUEIDENTIFIER PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: BusinessRoles" -ForegroundColor Cyan
-
-    $roleColumns = @{
-        'id'                 = 'UNIQUEIDENTIFIER'
-        'systemId'           = 'INT'
-        'externalId'         = 'NVARCHAR(500)'
-        'catalogId'          = 'UNIQUEIDENTIFIER'
-        'displayName'        = 'NVARCHAR(500)'
-        'description'        = 'NVARCHAR(MAX)'
-        'isHidden'           = 'BIT'
-        'createdDateTime'    = 'DATETIME2'
-        'modifiedDateTime'   = 'DATETIME2'
-        'extendedAttributes' = 'NVARCHAR(MAX)'
-    }
-
-    $tableReady = Initialize-FGSyncTable -TableName "BusinessRoles" -Columns $roleColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
-    if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] BusinessRoles table creation cancelled" -ForegroundColor Yellow
-    }
-
-    # 3. BusinessRoleResources table (temporal, composite PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: BusinessRoleResources" -ForegroundColor Cyan
-
-    $roleResourceColumns = @{
-        'id'                  = 'NVARCHAR(255)'
-        'systemId'            = 'INT'
-        'businessRoleId'      = 'UNIQUEIDENTIFIER'
-        'resourceId'          = 'UNIQUEIDENTIFIER'
-        'externalResourceId'  = 'NVARCHAR(500)'
-        'roleName'            = 'NVARCHAR(255)'
-        'roleDescription'     = 'NVARCHAR(1024)'
-        'originSystem'        = 'NVARCHAR(100)'
-        'createdDateTime'     = 'DATETIME2'
-        'modifiedDateTime'    = 'DATETIME2'
-        'extendedAttributes'  = 'NVARCHAR(MAX)'
-    }
-
-    $tableReady = Initialize-FGSyncTable -TableName "BusinessRoleResources" -Columns $roleResourceColumns -CompositePrimaryKey @('businessRoleId', 'id') -RecreateTable:$DropIfExists
-    if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] BusinessRoleResources table creation cancelled" -ForegroundColor Yellow
-    }
-
-    # 4. BusinessRoleAssignments table (temporal, UNIQUEIDENTIFIER PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: BusinessRoleAssignments" -ForegroundColor Cyan
-
-    $assignmentColumns = @{
-        'id'                 = 'UNIQUEIDENTIFIER'
-        'systemId'           = 'INT'
-        'businessRoleId'     = 'UNIQUEIDENTIFIER'
-        'principalId'        = 'UNIQUEIDENTIFIER'
-        'policyId'           = 'UNIQUEIDENTIFIER'
-        'state'              = 'NVARCHAR(50)'
-        'complianceState'    = 'NVARCHAR(100)'
-        'assignmentStatus'   = 'NVARCHAR(50)'
-        'expirationDateTime' = 'DATETIME2'
-        'createdDateTime'    = 'DATETIME2'
-        'extendedAttributes' = 'NVARCHAR(MAX)'
-    }
-
-    $tableReady = Initialize-FGSyncTable -TableName "BusinessRoleAssignments" -Columns $assignmentColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
-    if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] BusinessRoleAssignments table creation cancelled" -ForegroundColor Yellow
-    }
-
-    # 5. BusinessRolePolicies table (temporal, UNIQUEIDENTIFIER PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: BusinessRolePolicies" -ForegroundColor Cyan
+    # 2. AssignmentPolicies table (renamed from BusinessRolePolicies; FK: resourceId instead of businessRoleId)
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: AssignmentPolicies" -ForegroundColor Cyan
 
     $policyColumns = @{
         'id'                   = 'UNIQUEIDENTIFIER'
         'systemId'             = 'INT'
-        'businessRoleId'       = 'UNIQUEIDENTIFIER'
+        'resourceId'           = 'UNIQUEIDENTIFIER'
         'displayName'          = 'NVARCHAR(255)'
         'description'          = 'NVARCHAR(1024)'
         'allowedTargetScope'   = 'NVARCHAR(255)'
         'hasAutoAddRule'       = 'BIT'
         'hasAutoRemoveRule'    = 'BIT'
         'hasAccessReview'      = 'BIT'
+        'automaticRequestSettings' = 'NVARCHAR(MAX)'
         'policyConditions'     = 'NVARCHAR(MAX)'
         'reviewSettings'       = 'NVARCHAR(MAX)'
         'createdDateTime'      = 'DATETIME2'
@@ -157,56 +98,62 @@ function Initialize-FGGovernanceTables {
         'extendedAttributes'   = 'NVARCHAR(MAX)'
     }
 
-    $tableReady = Initialize-FGSyncTable -TableName "BusinessRolePolicies" -Columns $policyColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
+    $tableReady = Initialize-FGSyncTable -TableName "AssignmentPolicies" -Columns $policyColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
     if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] BusinessRolePolicies table creation cancelled" -ForegroundColor Yellow
+        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] AssignmentPolicies table creation cancelled" -ForegroundColor Yellow
     }
 
-    # 6. BusinessRoleRequests table (temporal, UNIQUEIDENTIFIER PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: BusinessRoleRequests" -ForegroundColor Cyan
+    # 3. AssignmentRequests table (renamed from BusinessRoleRequests; FK: resourceId instead of businessRoleId)
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: AssignmentRequests" -ForegroundColor Cyan
 
     $requestColumns = @{
         'id'                 = 'UNIQUEIDENTIFIER'
         'systemId'           = 'INT'
-        'businessRoleId'     = 'UNIQUEIDENTIFIER'
+        'resourceId'         = 'UNIQUEIDENTIFIER'
         'requestorId'        = 'UNIQUEIDENTIFIER'
         'requestType'        = 'NVARCHAR(50)'
         'requestState'       = 'NVARCHAR(50)'
         'requestStatus'      = 'NVARCHAR(100)'
+        'isValidationOnly'   = 'BIT'
         'justification'      = 'NVARCHAR(MAX)'
+        'accessPackage'      = 'NVARCHAR(MAX)'
+        'requestor'          = 'NVARCHAR(MAX)'
+        'schedule'           = 'NVARCHAR(MAX)'
         'createdDateTime'    = 'DATETIME2'
         'completedDateTime'  = 'DATETIME2'
+        'syncBatchId'        = 'UNIQUEIDENTIFIER'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
-    $tableReady = Initialize-FGSyncTable -TableName "BusinessRoleRequests" -Columns $requestColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
+    $tableReady = Initialize-FGSyncTable -TableName "AssignmentRequests" -Columns $requestColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
     if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] BusinessRoleRequests table creation cancelled" -ForegroundColor Yellow
+        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] AssignmentRequests table creation cancelled" -ForegroundColor Yellow
     }
 
-    # 7. CertificationDecisions table (temporal, UNIQUEIDENTIFIER PK)
+    # 4. CertificationDecisions table (temporal, UNIQUEIDENTIFIER PK)
+    # Column renamed: businessRoleId -> resourceId
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: CertificationDecisions" -ForegroundColor Cyan
 
     $certColumns = @{
-        'id'                      = 'UNIQUEIDENTIFIER'
-        'systemId'                = 'INT'
-        'businessRoleId'          = 'UNIQUEIDENTIFIER'
-        'resourceId'              = 'UNIQUEIDENTIFIER'
-        'certificationScopeType'  = 'NVARCHAR(50)'
-        'principalId'             = 'UNIQUEIDENTIFIER'
-        'principalDisplayName'    = 'NVARCHAR(255)'
-        'reviewedById'            = 'UNIQUEIDENTIFIER'
-        'reviewedByDisplayName'   = 'NVARCHAR(255)'
-        'reviewedDateTime'        = 'DATETIME2'
-        'decision'                = 'NVARCHAR(50)'
-        'justification'           = 'NVARCHAR(MAX)'
-        'recommendation'          = 'NVARCHAR(50)'
-        'reviewInstanceId'        = 'UNIQUEIDENTIFIER'
-        'reviewDefinitionId'      = 'UNIQUEIDENTIFIER'
-        'instanceStartDateTime'   = 'DATETIME2'
-        'instanceEndDateTime'     = 'DATETIME2'
-        'instanceStatus'          = 'NVARCHAR(50)'
-        'extendedAttributes'      = 'NVARCHAR(MAX)'
+        'id'                           = 'UNIQUEIDENTIFIER'
+        'systemId'                     = 'INT'
+        'resourceId'                   = 'UNIQUEIDENTIFIER'
+        'reviewInstanceId'             = 'UNIQUEIDENTIFIER'
+        'reviewDefinitionId'           = 'UNIQUEIDENTIFIER'
+        'principalId'                  = 'UNIQUEIDENTIFIER'
+        'principalDisplayName'         = 'NVARCHAR(255)'
+        'reviewedResourceId'           = 'UNIQUEIDENTIFIER'
+        'reviewedResourceDisplayName'  = 'NVARCHAR(500)'
+        'reviewedBy'                   = 'UNIQUEIDENTIFIER'
+        'reviewedByDisplayName'        = 'NVARCHAR(255)'
+        'reviewedDateTime'             = 'DATETIME2'
+        'decision'                     = 'NVARCHAR(50)'
+        'justification'                = 'NVARCHAR(MAX)'
+        'recommendation'               = 'NVARCHAR(50)'
+        'reviewInstanceStartDateTime'  = 'DATETIME2'
+        'reviewInstanceEndDateTime'    = 'DATETIME2'
+        'reviewInstanceStatus'         = 'NVARCHAR(50)'
+        'extendedAttributes'           = 'NVARCHAR(MAX)'
     }
 
     $tableReady = Initialize-FGSyncTable -TableName "CertificationDecisions" -Columns $certColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
@@ -214,52 +161,68 @@ function Initialize-FGGovernanceTables {
         Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] CertificationDecisions table creation cancelled" -ForegroundColor Yellow
     }
 
-    # Add complianceState to ResourceAssignments if not present
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Ensuring complianceState column on ResourceAssignments..." -ForegroundColor Cyan
+    # 5. Ensure governance columns exist on shared tables (Resources, ResourceAssignments, ResourceRelationships)
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Ensuring governance columns on shared tables..." -ForegroundColor Cyan
 
-    Invoke-FGSQLCommand -ScriptBlock {
-        param($connection)
+    $governanceColumnAdditions = @(
+        @{ Table = 'Resources'; Columns = @{ 'catalogId' = 'UNIQUEIDENTIFIER'; 'isHidden' = 'BIT'; 'modifiedDateTime' = 'DATETIME2' } }
+        @{ Table = 'ResourceAssignments'; Columns = @{ 'policyId' = 'UNIQUEIDENTIFIER'; 'state' = 'NVARCHAR(50)'; 'assignmentStatus' = 'NVARCHAR(50)'; 'expirationDateTime' = 'DATETIME2'; 'extendedAttributes' = 'NVARCHAR(MAX)'; 'complianceState' = 'NVARCHAR(100)' } }
+        @{ Table = 'ResourceRelationships'; Columns = @{ 'roleName' = 'NVARCHAR(255)'; 'roleOriginSystem' = 'NVARCHAR(100)'; 'extendedAttributes' = 'NVARCHAR(MAX)' } }
+    )
 
-        $checkCmd = $connection.CreateCommand()
-        $checkCmd.CommandText = @"
-SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ResourceAssignments'
-"@
-        $tableExists = $checkCmd.ExecuteScalar() -gt 0
+    foreach ($addition in $governanceColumnAdditions) {
+        $tableName = $addition.Table
+        $columnsToAdd = $addition.Columns
 
-        if ($tableExists) {
-            $colCmd = $connection.CreateCommand()
-            $colCmd.CommandText = @"
-SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ResourceAssignments' AND COLUMN_NAME = 'complianceState'
-"@
-            $colExists = $colCmd.ExecuteScalar() -gt 0
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
 
-            if (-not $colExists) {
-                Add-FGSQLTableColumn -TableName "ResourceAssignments" -Columns @{ 'complianceState' = 'NVARCHAR(100)' }
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Added complianceState column to ResourceAssignments" -ForegroundColor Green
+            $checkCmd = $connection.CreateCommand()
+            $checkCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = '$tableName'"
+            $tableExists = $checkCmd.ExecuteScalar() -gt 0
+            $checkCmd.Dispose()
+
+            if (-not $tableExists) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] $tableName table not yet created (columns will be added when table is initialized)" -ForegroundColor Yellow
+                return
+            }
+
+            # Check which columns are missing
+            $missingColumns = @{}
+            foreach ($colName in $columnsToAdd.Keys) {
+                $colCheckCmd = $connection.CreateCommand()
+                $colCheckCmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = '$tableName' AND COLUMN_NAME = '$colName'"
+                $colExists = $colCheckCmd.ExecuteScalar() -gt 0
+                $colCheckCmd.Dispose()
+
+                if (-not $colExists) {
+                    $missingColumns[$colName] = $columnsToAdd[$colName]
+                }
+            }
+
+            if ($missingColumns.Count -gt 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Adding $($missingColumns.Count) column(s) to $tableName : $($missingColumns.Keys -join ', ')" -ForegroundColor Cyan
+                Add-FGSQLTableColumn -TableName $tableName -Columns $missingColumns
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Columns added to $tableName" -ForegroundColor Green
             }
             else {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] complianceState column already exists on ResourceAssignments" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] All governance columns already exist on $tableName" -ForegroundColor Yellow
             }
-        }
-        else {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] ResourceAssignments table not yet created (will be added when table is initialized)" -ForegroundColor Yellow
         }
     }
 
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "Universal Governance Model Tables Ready!" -ForegroundColor Green
+    Write-Host "Governance Model Tables Ready! (Unified v3.1)" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "Tables:" -ForegroundColor White
+    Write-Host "Governance tables:" -ForegroundColor White
     Write-Host "  - GovernanceCatalogs (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
-    Write-Host "  - BusinessRoles (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
-    Write-Host "  - BusinessRoleResources (temporal, composite PK)" -ForegroundColor Gray
-    Write-Host "  - BusinessRoleAssignments (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
-    Write-Host "  - BusinessRolePolicies (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
-    Write-Host "  - BusinessRoleRequests (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
+    Write-Host "  - AssignmentPolicies (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
+    Write-Host "  - AssignmentRequests (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
     Write-Host "  - CertificationDecisions (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
-    Write-Host "  - ResourceAssignments.complianceState (added column)" -ForegroundColor Gray
+    Write-Host "Unified tables (with governance columns):" -ForegroundColor White
+    Write-Host "  - Resources: +catalogId, +isHidden (BusinessRoles -> resourceType='BusinessRole')" -ForegroundColor Gray
+    Write-Host "  - ResourceAssignments: +policyId, +state, +expirationDateTime (BusinessRoleAssignments -> assignmentType='Governed')" -ForegroundColor Gray
+    Write-Host "  - ResourceRelationships: +roleName, +roleOriginSystem (BusinessRoleResources -> relationshipType='Contains')" -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Green
 
     return $true

@@ -56,20 +56,18 @@ function Initialize-FGAccessPackageViews {
         [switch]$DropIfExists
     )
 
-    # Fixed table names (v3.0 universal governance model)
+    # Fixed table names (v3.0 unified data model - business roles as Resources)
     $GovernanceCatalogsTable = "GovernanceCatalogs"
-    $BusinessRolesTable = "BusinessRoles"
-    $BusinessRoleAssignmentsTable = "BusinessRoleAssignments"
-    $BusinessRoleResourcesTable = "BusinessRoleResources"
     $UsersTable = "Principals"
     $GroupsTable = "Resources"
     $GroupMembersTable = "ResourceAssignments"
     $GroupOwnersTable = "ResourceAssignments"
-    $BusinessRoleRequestsTable = "BusinessRoleRequests"
-    $BusinessRolePoliciesTable = "BusinessRolePolicies"
+    $AssignmentPoliciesTable = "AssignmentPolicies"
+    $AssignmentRequestsTable = "AssignmentRequests"
     $CertificationDecisionsTable = "CertificationDecisions"
     $ResourcesTable = "Resources"
     $ResourceAssignmentsTable = "ResourceAssignments"
+    $ResourceRelationshipsTable = "ResourceRelationships"
 
     # Check SQL connection
     if (-not $global:FGSQLConnectionString) {
@@ -119,17 +117,18 @@ SELECT
     ap.id AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
-    UPPER(rrs.scopeOriginId) AS groupId,
+    rrs.childResourceId AS groupId,
     r.displayName AS groupName,
-    rrs.scopeOriginSystem AS resourceType,
-    rrs.roleDisplayName AS roleName
-FROM dbo.$BusinessRoleAssignmentsTable a
+    rrs.roleOriginSystem AS resourceType,
+    rrs.roleName AS roleName
+FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON a.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    INNER JOIN dbo.$BusinessRoleResourcesTable rrs ON ap.id = rrs.businessRoleId
-    LEFT JOIN dbo.$ResourcesTable r ON UPPER(rrs.scopeOriginId) = r.id
-WHERE a.assignmentState = 'delivered'  -- Only active assignments
+    INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
+    LEFT JOIN dbo.$ResourcesTable r ON rrs.childResourceId = r.id
+WHERE a.assignmentType = 'Governed'
+  AND a.state = 'delivered'  -- Only active assignments
 "@
         }
         else {
@@ -145,17 +144,18 @@ SELECT
     ap.id AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
-    UPPER(rrs.scopeOriginId) AS groupId,
+    rrs.childResourceId AS groupId,
     g.displayName AS groupName,
-    rrs.scopeOriginSystem AS resourceType,
-    rrs.roleDisplayName AS roleName
-FROM dbo.$BusinessRoleAssignmentsTable a
+    rrs.roleOriginSystem AS resourceType,
+    rrs.roleName AS roleName
+FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON a.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    INNER JOIN dbo.$BusinessRoleResourcesTable rrs ON ap.id = rrs.businessRoleId
-    LEFT JOIN dbo.$GroupsTable g ON UPPER(rrs.scopeOriginId) = g.id
-WHERE a.assignmentState = 'delivered'  -- Only active assignments
+    INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
+    LEFT JOIN dbo.$GroupsTable g ON rrs.childResourceId = g.id
+WHERE a.assignmentType = 'Governed'
+  AND a.state = 'delivered'  -- Only active assignments
 "@
         }
 
@@ -326,7 +326,7 @@ FROM dbo.vw_DirectGroupOwnerships
         $hasAutoAddColumn = $false
         try {
             $checkCmd = $connection.CreateCommand()
-            $checkCmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$BusinessRolePoliciesTable' AND COLUMN_NAME = 'hasAutoAddRule'"
+            $checkCmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '$AssignmentPoliciesTable' AND COLUMN_NAME = 'hasAutoAddRule'"
             $result = $checkCmd.ExecuteScalar()
             $checkCmd.Dispose()
             $hasAutoAddColumn = ($null -ne $result)
@@ -345,21 +345,21 @@ FROM dbo.vw_DirectGroupOwnerships
 CREATE VIEW dbo.$view5Name AS
 WITH BRPolicyType AS (
     SELECT
-        businessRoleId,
+        resourceId,
         COUNT(*) AS totalPolicies,
         SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddPolicies
-    FROM dbo.$BusinessRolePoliciesTable
-    GROUP BY businessRoleId
+    FROM dbo.$AssignmentPoliciesTable
+    GROUP BY resourceId
 )
 SELECT
     a.id AS assignmentId,
     a.principalId AS userId,
     u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
-    a.businessRoleId,
+    a.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
-    a.assignmentState AS assignmentState,
+    a.state AS assignmentState,
     COALESCE(req.requestType, 'Unknown') AS requestType,
     COALESCE(req.requestState, 'Unknown') AS requestState,
     COALESCE(req.requestStatus, 'Unknown') AS requestStatus,
@@ -376,18 +376,19 @@ SELECT
         WHEN bpt.totalPolicies > 0 AND bpt.autoAddPolicies > 0 AND bpt.autoAddPolicies < bpt.totalPolicies THEN 'Unknown (Mixed Policies)'
         ELSE 'Unknown'
     END AS assignmentMethod
-FROM dbo.$BusinessRoleAssignmentsTable a
+FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON a.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    LEFT JOIN dbo.$BusinessRoleRequestsTable req
-        ON a.businessRoleId = req.businessRoleId
+    LEFT JOIN dbo.$AssignmentRequestsTable req
+        ON a.resourceId = req.resourceId
         AND a.principalId = req.requestorId
         AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
         AND req.requestState = 'Delivered'
     LEFT JOIN BRPolicyType bpt
-        ON a.businessRoleId = bpt.businessRoleId
-WHERE a.assignmentState = 'delivered'
+        ON a.resourceId = bpt.resourceId
+WHERE a.assignmentType = 'Governed'
+  AND a.state = 'delivered'
 "@
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using enhanced assignment method detection (policy-based fallback)" -ForegroundColor Cyan
         }
@@ -396,17 +397,17 @@ WHERE a.assignmentState = 'delivered'
             $view5Sql = @"
 -- Business Role Assignment Details View
 -- Shows how each business role assignment was granted (automatic, user-requested, or admin-assigned)
--- NOTE: Re-sync business role policies to enable policy-based inference
+-- NOTE: Re-sync assignment policies to enable policy-based inference
 CREATE VIEW dbo.$view5Name AS
 SELECT
     a.id AS assignmentId,
     a.principalId AS userId,
     u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
-    a.businessRoleId,
+    a.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
-    a.assignmentState AS assignmentState,
+    a.state AS assignmentState,
     COALESCE(req.requestType, 'Unknown') AS requestType,
     COALESCE(req.requestState, 'Unknown') AS requestState,
     COALESCE(req.requestStatus, 'Unknown') AS requestStatus,
@@ -419,16 +420,17 @@ SELECT
         WHEN req.requestType = 'AdminAdd' THEN 'Admin Assigned'
         ELSE 'Unknown'
     END AS assignmentMethod
-FROM dbo.$BusinessRoleAssignmentsTable a
+FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON a.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    LEFT JOIN dbo.$BusinessRoleRequestsTable req
-        ON a.businessRoleId = req.businessRoleId
+    LEFT JOIN dbo.$AssignmentRequestsTable req
+        ON a.resourceId = req.resourceId
         AND a.principalId = req.requestorId
         AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
         AND req.requestState = 'Delivered'
-WHERE a.assignmentState = 'delivered'
+WHERE a.assignmentType = 'Governed'
+  AND a.state = 'delivered'
 "@
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using basic assignment method detection (re-sync policies to enable policy-based inference)" -ForegroundColor Yellow
         }
@@ -442,7 +444,7 @@ WHERE a.assignmentState = 'delivered'
 CREATE VIEW dbo.$view6Name AS
 WITH LatestReviews AS (
     SELECT
-        r.businessRoleId,
+        r.resourceId,
         r.reviewedBy,
         r.reviewedByDisplayName,
         r.reviewedDateTime,
@@ -450,7 +452,7 @@ WITH LatestReviews AS (
         r.justification,
         r.reviewInstanceStatus,
         ROW_NUMBER() OVER (
-            PARTITION BY r.businessRoleId
+            PARTITION BY r.resourceId
             ORDER BY r.reviewedDateTime DESC
         ) AS rn
     FROM dbo.$CertificationDecisionsTable r
@@ -460,7 +462,7 @@ WITH LatestReviews AS (
         AND r.decision != 'NotReviewed'  -- Exclude non-decisions
 )
 SELECT
-    lr.businessRoleId,
+    lr.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
     lr.reviewedBy AS lastReviewedBy,
@@ -471,7 +473,7 @@ SELECT
     lr.reviewInstanceStatus,
     DATEDIFF(day, lr.reviewedDateTime, GETDATE()) AS daysSinceLastReview
 FROM LatestReviews lr
-    INNER JOIN dbo.$BusinessRolesTable ap ON lr.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON lr.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
 WHERE lr.rn = 1  -- Only the most recent review
 "@
@@ -488,7 +490,7 @@ SELECT
     req.requestorId AS userId,
     u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
-    req.businessRoleId,
+    req.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
     req.requestType,
@@ -508,9 +510,9 @@ SELECT
         WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 14 THEN '1-2 weeks'
         ELSE 'Over 2 weeks'
     END AS responseTimeBucket
-FROM dbo.$BusinessRoleRequestsTable req
+FROM dbo.$AssignmentRequestsTable req
     INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON req.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON req.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
 WHERE req.requestState = 'Delivered'
     AND req.completedDateTime IS NOT NULL
@@ -529,7 +531,7 @@ SELECT
     req.requestorId AS userId,
     u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
-    req.businessRoleId,
+    req.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
     req.requestType,
@@ -549,9 +551,9 @@ SELECT
         WHEN DATEDIFF(day, req.createdDateTime, req.completedDateTime) < 14 THEN '1-2 weeks'
         ELSE 'Over 2 weeks'
     END AS responseTimeBucket
-FROM dbo.$BusinessRoleRequestsTable req
+FROM dbo.$AssignmentRequestsTable req
     INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON req.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON req.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
 WHERE req.requestState = 'Denied'
     AND req.completedDateTime IS NOT NULL
@@ -569,7 +571,7 @@ SELECT
     req.requestorId AS userId,
     u.email AS userPrincipalName,
     u.displayName AS userDisplayName,
-    req.businessRoleId,
+    req.resourceId AS businessRoleId,
     ap.displayName AS businessRoleName,
     c.displayName AS catalogName,
     req.requestType,
@@ -590,9 +592,9 @@ SELECT
         WHEN DATEDIFF(day, req.createdDateTime, GETDATE()) > 7 THEN 1
         ELSE 0
     END AS isOverdue
-FROM dbo.$BusinessRoleRequestsTable req
+FROM dbo.$AssignmentRequestsTable req
     INNER JOIN dbo.$UsersTable u ON req.requestorId = u.id
-    INNER JOIN dbo.$BusinessRolesTable ap ON req.businessRoleId = ap.id
+    INNER JOIN dbo.$ResourcesTable ap ON req.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
     INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
 WHERE req.requestState IN ('PendingApproval', 'Submitted', 'Accepted')
     AND req.completedDateTime IS NULL
@@ -607,15 +609,15 @@ WHERE req.requestState IN ('PendingApproval', 'Submitted', 'Accepted')
 CREATE VIEW dbo.$view10Name AS
 WITH RequestMetrics AS (
     SELECT
-        req.businessRoleId,
+        req.resourceId AS businessRoleId,
         ap.displayName AS businessRoleName,
         c.id AS catalogId,
         c.displayName AS catalogName,
         req.requestState,
         DATEDIFF(hour, req.createdDateTime, req.completedDateTime) AS responseHours,
         DATEDIFF(day, req.createdDateTime, req.completedDateTime) AS responseDays
-    FROM dbo.$BusinessRoleRequestsTable req
-        INNER JOIN dbo.$BusinessRolesTable ap ON req.businessRoleId = ap.id
+    FROM dbo.$AssignmentRequestsTable req
+        INNER JOIN dbo.$ResourcesTable ap ON req.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
         INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
     WHERE req.completedDateTime IS NOT NULL
         AND req.requestType IN ('UserAdd', 'AdminAdd')

@@ -459,37 +459,38 @@ async function accessPackageResourcesHandler(req, res) {
       try { await ensureCategoryTables(p); } catch { /* category tables optional */ }
       const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
-          rrs.businessRoleId,
-          rrs.businessRoleId AS accessPackageId,
+          rrs.parentResourceId AS businessRoleId,
+          rrs.parentResourceId AS accessPackageId,
           ap.displayName AS accessPackageName,
           c.displayName  AS catalogName,
-          UPPER(rrs.scopeOriginId) AS resourceId,
-          UPPER(rrs.scopeOriginId) AS groupId,
+          UPPER(rrs.childResourceId) AS resourceId,
+          UPPER(rrs.childResourceId) AS groupId,
           r.displayName  AS resourceName,
           r.displayName  AS groupName,
           r.resourceType,
           r.systemId,
-          rrs.roleDisplayName AS roleName,
+          rrs.roleName,
           ISNULL(ac.cnt, 0) AS totalAssignments,
           cat.id AS categoryId,
           cat.name AS categoryName,
           cat.color AS categoryColor
-        FROM dbo.BusinessRoleResources rrs
-        INNER JOIN dbo.BusinessRoles ap ON rrs.businessRoleId = ap.id
+        FROM dbo.ResourceRelationships rrs
+        INNER JOIN dbo.Resources ap ON rrs.parentResourceId = ap.id
+                   AND ap.resourceType = 'BusinessRole'
                    AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
         INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
                    AND c.ValidTo = '9999-12-31 23:59:59.9999999'
-        LEFT  JOIN dbo.Resources r ON UPPER(rrs.scopeOriginId) = r.id
+        LEFT  JOIN dbo.Resources r ON UPPER(rrs.childResourceId) = r.id
                    AND r.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN (
-          SELECT businessRoleId, COUNT(*) AS cnt
-          FROM dbo.BusinessRoleAssignments
-          WHERE assignmentState = 'delivered'
-          GROUP BY businessRoleId
-        ) ac ON rrs.businessRoleId = ac.businessRoleId
-        LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.businessRoleId) = ca.businessRoleId
+          SELECT resourceId, COUNT(*) AS cnt
+          FROM dbo.ResourceAssignments
+          WHERE state = 'delivered' AND assignmentType = 'Governed'
+          GROUP BY resourceId
+        ) ac ON rrs.parentResourceId = ac.resourceId
+        LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.parentResourceId) = ca.resourceId
         LEFT  JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-        WHERE rrs.scopeOriginSystem = 'AadGroup'
+        WHERE rrs.relationshipType = 'Contains'
           AND rrs.ValidTo = '9999-12-31 23:59:59.9999999'
       `);
       return res.json(result.recordset);
@@ -536,11 +537,11 @@ router.get('/sync-log', async (req, res) => {
       { type: 'GroupEligibleMembers', table: 'GraphGroupEligibleMembers', records: 156 },
       { type: 'GroupOwners', table: 'GraphGroupOwners', records: 412 },
       { type: 'Catalogs', table: 'GovernanceCatalogs', records: 12 },
-      { type: 'AccessPackages', table: 'BusinessRoles', records: 67 },
-      { type: 'AccessPackageAssignments', table: 'BusinessRoleAssignments', records: 834 },
-      { type: 'AccessPackageResourceRoleScopes', table: 'BusinessRoleResources', records: 203 },
-      { type: 'AccessPackageAssignmentPolicies', table: 'BusinessRolePolicies', records: 71 },
-      { type: 'AccessPackageAssignmentRequests', table: 'BusinessRoleRequests', records: 2103 },
+      { type: 'AccessPackages', table: 'Resources (BusinessRole)', records: 67 },
+      { type: 'AccessPackageAssignments', table: 'ResourceAssignments (Governed)', records: 834 },
+      { type: 'AccessPackageResourceRoleScopes', table: 'ResourceRelationships (Contains)', records: 203 },
+      { type: 'AccessPackageAssignmentPolicies', table: 'AssignmentPolicies', records: 71 },
+      { type: 'AccessPackageAssignmentRequests', table: 'AssignmentRequests', records: 2103 },
       { type: 'AccessPackageAccessReviews', table: 'CertificationDecisions', records: 45 },
       { type: 'MaterializedViews', table: 'mat_UserPermissionAssignments', records: 0 },
       { type: 'RiskScoring', table: 'GraphUsers,GraphGroups', records: 1636 },

@@ -42,7 +42,8 @@ function OverrideControl({ entity, entityType, authFetch, onOverrideChange }) {
   const [reason, setReason] = useState(entity.riskOverrideReason || '');
   const [saving, setSaving] = useState(false);
 
-  const type = entityType === 'user' ? 'users' : 'groups';
+  const typeMap = { user: 'users', group: 'groups', 'business-role': 'business-roles', 'org-unit': 'org-units', identity: 'identities' };
+  const type = typeMap[entityType] || 'groups';
 
   const handleSave = async () => {
     if (!reason.trim() || reason.trim().length < 3) return;
@@ -192,7 +193,7 @@ function ScoreBreakdown({ entity, entityType, authFetch, onClose, onOverrideChan
           <div>
             <h3 className="text-lg font-semibold text-gray-900">{entity.displayName}</h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              {entity.userPrincipalName || entity.department || entity.description || ''}
+              {entity.userPrincipalName || entity.catalogName || entity.managerName || entity.department || entity.description || ''}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -339,14 +340,43 @@ function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
     return <div className="py-8 text-center text-gray-400">No entities match the current filters</div>;
   }
 
+  // Define extra columns per entity type
+  const extraColumns = {
+    user: [
+      { key: 'department', label: 'Department', render: e => e.department || '\u2014' },
+      { key: 'jobTitle', label: 'Title', render: e => e.jobTitle || '\u2014' },
+    ],
+    group: [],
+    'business-role': [
+      { key: 'catalogName', label: 'Catalog', render: e => e.catalogName || '\u2014' },
+    ],
+    'org-unit': [
+      { key: 'department', label: 'Department', render: e => e.department || '\u2014' },
+      { key: 'memberCount', label: 'Members', render: e => e.memberCount ?? '\u2014' },
+      { key: 'managerName', label: 'Manager', render: e => e.managerName || '\u2014' },
+    ],
+    identity: [
+      { key: 'accountCount', label: 'Accounts', render: e => e.accountCount ?? '\u2014' },
+      { key: 'department', label: 'Department', render: e => e.department || '\u2014' },
+      { key: 'correlationConfidence', label: 'Confidence', render: e => e.correlationConfidence != null ? `${Math.round(e.correlationConfidence * 100)}%` : '\u2014' },
+    ],
+  };
+
+  const cols = extraColumns[entityType] || [];
+
+  // Map entity type to detail page type for drill-through
+  const detailTypeMap = { user: 'user', group: 'group', 'business-role': 'access-package', 'org-unit': 'org-unit', identity: 'identity' };
+  const detailType = detailTypeMap[entityType] || entityType;
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200">
             <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-            {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Department</th>}
-            {entityType === 'user' && <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Title</th>}
+            {cols.map(c => (
+              <th key={c.key} className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">{c.label}</th>
+            ))}
             <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-20">Score</th>
             <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-24">Tier</th>
             <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase w-16">Direct</th>
@@ -368,17 +398,18 @@ function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
                   className="text-blue-600 hover:underline text-left font-medium"
                   onClick={e => {
                     e.stopPropagation();
-                    if (onOpenDetail) onOpenDetail(entityType, entity.id, entity.displayName);
+                    if (onOpenDetail) onOpenDetail(detailType, entity.id, entity.displayName);
                   }}
                 >
                   {entity.displayName}
                 </button>
-                {entityType === 'group' && entity.description && (
+                {(entityType === 'group' || entityType === 'business-role') && entity.description && (
                   <p className="text-xs text-gray-400 truncate max-w-xs">{entity.description}</p>
                 )}
               </td>
-              {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.department || '\u2014'}</td>}
-              {entityType === 'user' && <td className="py-2 px-3 text-gray-600">{entity.jobTitle || '\u2014'}</td>}
+              {cols.map(c => (
+                <td key={c.key} className="py-2 px-3 text-gray-600">{c.render(entity)}</td>
+              ))}
               <td className="py-2 px-3">
                 <ScoreBar score={entity.effectiveScore ?? entity.riskScore} />
               </td>
@@ -933,7 +964,17 @@ export default function RiskScoringPage({ onOpenDetail }) {
   const tiers = ['Critical', 'High', 'Medium', 'Low', 'Minimal', 'None'];
   const activeTotal = view === 'clusters' ? (clusterData.total || 0) : (entityData.total || 0);
   const totalPages = Math.ceil(activeTotal / PAGE_SIZE);
-  const totalOverrides = (s?.groupOverrides || 0) + (s?.userOverrides || 0);
+  const totalOverrides = (s?.groupOverrides || 0) + (s?.userOverrides || 0)
+    + (s?.businessRoleOverrides || 0) + (s?.orgUnitOverrides || 0) + (s?.identityOverrides || 0);
+
+  // Map view values to entity types for EntityTable
+  const viewToEntityType = {
+    groups: 'group',
+    users: 'user',
+    'business-roles': 'business-role',
+    'org-units': 'org-unit',
+    identities: 'identity',
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -958,46 +999,58 @@ export default function RiskScoringPage({ onOpenDetail }) {
       </div>
 
       {/* Summary Cards */}
-      {s && (
-        <div className={`grid gap-4 ${clusterSummary?.available ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          <DistributionChart label="Groups" byTier={s.groupsByTier} total={s.totalGroups} />
-          <DistributionChart label="Users" byTier={s.usersByTier} total={s.totalUsers} />
-          {clusterSummary?.available && (
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-1">Resource Clusters</h3>
-              <p className="text-xs text-gray-400 mb-3">{clusterSummary.total} clusters</p>
-              <div className="space-y-2">
-                {['Critical', 'High', 'Medium', 'Low', 'Minimal'].map(tier => {
-                  const count = clusterSummary.byTier?.[tier] || 0;
-                  if (count === 0) return null;
-                  const pct = clusterSummary.total > 0 ? (count / clusterSummary.total) * 100 : 0;
-                  const st = TIER_STYLES[tier];
-                  return (
-                    <div key={tier} className="flex items-center gap-2">
-                      <span className={`w-16 text-xs font-medium ${st.text}`}>{tier}</span>
-                      <div className="flex-1 h-5 bg-gray-50 rounded overflow-hidden">
-                        <div className={`h-full ${st.dot} rounded`} style={{ width: `${pct}%` }} />
+      {s && (() => {
+        const distCharts = [];
+        if (s.totalGroups > 0) distCharts.push({ label: 'Resources', byTier: s.groupsByTier, total: s.totalGroups });
+        if (s.totalUsers > 0) distCharts.push({ label: 'Users', byTier: s.usersByTier, total: s.totalUsers });
+        if (s.totalBusinessRoles > 0) distCharts.push({ label: 'Business Roles', byTier: s.businessRolesByTier, total: s.totalBusinessRoles });
+        if (s.totalOrgUnits > 0) distCharts.push({ label: 'Org Units', byTier: s.orgUnitsByTier, total: s.totalOrgUnits });
+        if (s.totalIdentities > 0) distCharts.push({ label: 'Identities', byTier: s.identitiesByTier, total: s.totalIdentities });
+        const hasCluster = clusterSummary?.available;
+        const colCount = distCharts.length + (hasCluster ? 1 : 0);
+        const gridCols = colCount <= 2 ? 'grid-cols-2' : colCount <= 3 ? 'grid-cols-3' : colCount <= 4 ? 'grid-cols-4' : 'grid-cols-5';
+        return (
+          <div className={`grid gap-4 ${gridCols}`}>
+            {distCharts.map(c => (
+              <DistributionChart key={c.label} label={c.label} byTier={c.byTier} total={c.total} />
+            ))}
+            {hasCluster && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">Resource Clusters</h3>
+                <p className="text-xs text-gray-400 mb-3">{clusterSummary.total} clusters</p>
+                <div className="space-y-2">
+                  {['Critical', 'High', 'Medium', 'Low', 'Minimal'].map(tier => {
+                    const count = clusterSummary.byTier?.[tier] || 0;
+                    if (count === 0) return null;
+                    const pct = clusterSummary.total > 0 ? (count / clusterSummary.total) * 100 : 0;
+                    const st = TIER_STYLES[tier];
+                    return (
+                      <div key={tier} className="flex items-center gap-2">
+                        <span className={`w-16 text-xs font-medium ${st.text}`}>{tier}</span>
+                        <div className="flex-1 h-5 bg-gray-50 rounded overflow-hidden">
+                          <div className={`h-full ${st.dot} rounded`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="w-8 text-xs text-gray-500 text-right">{count}</span>
                       </div>
-                      <span className="w-8 text-xs text-gray-500 text-right">{count}</span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {clusterSummary.unowned > 0 && (
+                  <p className="text-[10px] text-amber-600 mt-2">
+                    {clusterSummary.unowned} cluster{clusterSummary.unowned !== 1 ? 's' : ''} without owner
+                  </p>
+                )}
               </div>
-              {clusterSummary.unowned > 0 && (
-                <p className="text-[10px] text-amber-600 mt-2">
-                  {clusterSummary.unowned} cluster{clusterSummary.unowned !== 1 ? 's' : ''} without owner
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
 
       {/* Top Risks */}
       {s && (
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Risk Groups</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Risk Resources</h3>
             <div className="space-y-2">
               {(s.topGroups || []).slice(0, 5).map(g => (
                 <div key={g.id} className="flex items-center justify-between">
@@ -1040,7 +1093,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
       {/* Entity Tables */}
       <div className="bg-white rounded-lg border border-gray-200">
         <div className="border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setView('clusters')}
               className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
@@ -1055,22 +1108,56 @@ export default function RiskScoringPage({ onOpenDetail }) {
               )}
             </button>
             <span className="w-px h-5 bg-gray-200" />
-            <button
-              onClick={() => setView('groups')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                view === 'groups' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              Groups
-            </button>
-            <button
-              onClick={() => setView('users')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                view === 'users' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              Users
-            </button>
+            {(s?.totalGroups > 0 || !s) && (
+              <button
+                onClick={() => setView('groups')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  view === 'groups' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Resources
+              </button>
+            )}
+            {(s?.totalUsers > 0 || !s) && (
+              <button
+                onClick={() => setView('users')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  view === 'users' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Users
+              </button>
+            )}
+            {s?.totalBusinessRoles > 0 && (
+              <button
+                onClick={() => setView('business-roles')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  view === 'business-roles' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Business Roles
+              </button>
+            )}
+            {s?.totalOrgUnits > 0 && (
+              <button
+                onClick={() => setView('org-units')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  view === 'org-units' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Org Units
+              </button>
+            )}
+            {s?.totalIdentities > 0 && (
+              <button
+                onClick={() => setView('identities')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  view === 'identities' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Identities
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -1097,7 +1184,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
 
             <input
               type="text"
-              placeholder={`Search ${view}...`}
+              placeholder={`Search ${({ clusters: 'clusters', groups: 'resources', users: 'users', 'business-roles': 'business roles', 'org-units': 'org units', identities: 'identities' })[view] || view}...`}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-52 placeholder-gray-400"
@@ -1117,7 +1204,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
           ) : (
             <EntityTable
               entities={entityData.data}
-              entityType={view === 'groups' ? 'group' : 'user'}
+              entityType={viewToEntityType[view] || 'group'}
               onSelect={setSelectedEntity}
               onOpenDetail={onOpenDetail}
             />
@@ -1143,7 +1230,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
       {selectedEntity && (
         <ScoreBreakdown
           entity={selectedEntity}
-          entityType={view === 'groups' ? 'group' : 'user'}
+          entityType={viewToEntityType[view] || 'group'}
           authFetch={authFetch}
           onClose={() => setSelectedEntity(null)}
           onOverrideChange={handleOverrideChange}

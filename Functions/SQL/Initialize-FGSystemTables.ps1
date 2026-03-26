@@ -149,10 +149,13 @@ CREATE TABLE dbo.SystemOwners (
         'description'        = 'NVARCHAR(MAX)'
         'resourceType'       = 'NVARCHAR(50)'
         'createdDateTime'    = 'DATETIME2'
+        'modifiedDateTime'   = 'DATETIME2'
         'mail'               = 'NVARCHAR(500)'
         'visibility'         = 'NVARCHAR(50)'
         'enabled'            = 'BIT'
         'externalId'         = 'NVARCHAR(500)'
+        'catalogId'          = 'UNIQUEIDENTIFIER'
+        'isHidden'           = 'BIT'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
@@ -165,11 +168,16 @@ CREATE TABLE dbo.SystemOwners (
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: ResourceAssignments" -ForegroundColor Cyan
 
     $assignmentColumns = @{
-        'resourceId'      = 'UNIQUEIDENTIFIER'
-        'principalId'     = 'UNIQUEIDENTIFIER'
-        'principalType'   = 'NVARCHAR(100)'
-        'assignmentType'  = 'NVARCHAR(50)'
-        'complianceState' = 'NVARCHAR(100)'
+        'resourceId'          = 'UNIQUEIDENTIFIER'
+        'principalId'         = 'UNIQUEIDENTIFIER'
+        'principalType'       = 'NVARCHAR(100)'
+        'assignmentType'      = 'NVARCHAR(50)'
+        'complianceState'     = 'NVARCHAR(100)'
+        'policyId'            = 'UNIQUEIDENTIFIER'
+        'state'               = 'NVARCHAR(50)'
+        'assignmentStatus'    = 'NVARCHAR(50)'
+        'expirationDateTime'  = 'DATETIME2'
+        'extendedAttributes'  = 'NVARCHAR(MAX)'
     }
 
     $tableReady = Initialize-FGSyncTable -TableName "ResourceAssignments" -Columns $assignmentColumns -CompositePrimaryKey @('resourceId', 'principalId', 'assignmentType') -RecreateTable:$DropIfExists
@@ -184,6 +192,9 @@ CREATE TABLE dbo.SystemOwners (
         'parentResourceId'  = 'UNIQUEIDENTIFIER'
         'childResourceId'   = 'UNIQUEIDENTIFIER'
         'relationshipType'  = 'NVARCHAR(50)'
+        'roleName'          = 'NVARCHAR(255)'
+        'roleOriginSystem'  = 'NVARCHAR(100)'
+        'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
     $tableReady = Initialize-FGSyncTable -TableName "ResourceRelationships" -Columns $relationshipColumns -CompositePrimaryKey @('parentResourceId', 'childResourceId', 'relationshipType') -RecreateTable:$DropIfExists

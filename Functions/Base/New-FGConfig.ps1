@@ -620,11 +620,11 @@ function New-FGConfig {
         GroupEligibleMembers = @{ Enabled = $true }
         GroupOwners = @{ Enabled = $true; TableName = "ResourceAssignments" }
         Catalogs = @{ Enabled = $true; TableName = "GovernanceCatalogs" }
-        AccessPackages = @{ Enabled = $true; TableName = "BusinessRoles" }
-        AccessPackageAssignments = @{ Enabled = $true; TableName = "BusinessRoleAssignments" }
-        AccessPackageResourceRoleScopes = @{ Enabled = $true; TableName = "BusinessRoleResources" }
-        AccessPackageAssignmentPolicies = @{ Enabled = $true; TableName = "BusinessRolePolicies" }
-        AccessPackageAssignmentRequests = @{ Enabled = $true; TableName = "BusinessRoleRequests" }
+        AccessPackages = @{ Enabled = $true; TableName = "Resources" }
+        AccessPackageAssignments = @{ Enabled = $true; TableName = "ResourceAssignments" }
+        AccessPackageResourceRoleScopes = @{ Enabled = $true; TableName = "ResourceRelationships" }
+        AccessPackageAssignmentPolicies = @{ Enabled = $true; TableName = "AssignmentPolicies" }
+        AccessPackageAssignmentRequests = @{ Enabled = $true; TableName = "AssignmentRequests" }
         AccessPackageAccessReviews = @{ Enabled = $true; TableName = "CertificationDecisions" }
         Views = @{ Enabled = $true }
         ParallelExecution = $true

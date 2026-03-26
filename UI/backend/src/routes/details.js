@@ -105,8 +105,8 @@ router.get('/user/:id', async (req, res) => {
       const r = await timedRequest(pool, 'user-ap-count', res)
         .input('id', userId)
         .query(`
-        SELECT COUNT(DISTINCT businessRoleId) AS cnt
-        FROM BusinessRoleAssignments WHERE principalId = @id
+        SELECT COUNT(DISTINCT resourceId) AS cnt
+        FROM ResourceAssignments WHERE principalId = @id AND assignmentType = 'Governed'
       `);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -191,13 +191,13 @@ router.get('/user/:id/access-packages', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT DISTINCT
-        a.businessRoleId,
+        a.resourceId,
         ap.displayName AS accessPackageName,
-        a.assignmentState AS state,
+        a.state,
         a.assignedDateTime
-      FROM BusinessRoleAssignments a
-      LEFT JOIN BusinessRoles ap ON a.businessRoleId = ap.id
-      WHERE a.principalId = @id
+      FROM ResourceAssignments a
+      LEFT JOIN Resources ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
+      WHERE a.principalId = @id AND a.assignmentType = 'Governed'
       ORDER BY ap.displayName
     `);
     res.json(r.recordset);
@@ -315,10 +315,10 @@ router.get('/group/:id', async (req, res) => {
       const r = await timedRequest(pool, 'group-ap-count', res)
         .input('id', groupId)
         .query(`
-        SELECT COUNT(DISTINCT rrs.businessRoleId) AS cnt
-        FROM BusinessRoleResources rrs
-        WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
-          AND rrs.scopeOriginSystem = 'AadGroup'
+        SELECT COUNT(DISTINCT rrs.parentResourceId) AS cnt
+        FROM ResourceRelationships rrs
+        WHERE UPPER(rrs.childResourceId) = UPPER(@id)
+          AND rrs.relationshipType = 'Contains'
       `);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -398,13 +398,13 @@ router.get('/group/:id/access-packages', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT DISTINCT
-        rrs.businessRoleId,
+        rrs.parentResourceId AS resourceId,
         ap.displayName AS accessPackageName,
-        rrs.roleDisplayName AS roleName
-      FROM BusinessRoleResources rrs
-      LEFT JOIN BusinessRoles ap ON rrs.businessRoleId = ap.id
-      WHERE UPPER(rrs.scopeOriginId) = UPPER(@id)
-        AND rrs.scopeOriginSystem = 'AadGroup'
+        rrs.roleName
+      FROM ResourceRelationships rrs
+      LEFT JOIN Resources ap ON rrs.parentResourceId = ap.id AND ap.resourceType = 'BusinessRole'
+      WHERE UPPER(rrs.childResourceId) = UPPER(@id)
+        AND rrs.relationshipType = 'Contains'
       ORDER BY ap.displayName
     `);
     res.json(r.recordset);
@@ -465,15 +465,15 @@ router.get('/access-package/:id', async (req, res) => {
         .input('id', apId)
         .query(`
         SELECT ap.*, c.displayName AS catalogName
-        FROM BusinessRoles ap
+        FROM Resources ap
         LEFT JOIN GovernanceCatalogs c ON ap.catalogId = c.id
-        WHERE ap.id = @id
+        WHERE ap.id = @id AND ap.resourceType = 'BusinessRole'
       `);
     } catch {
       // GovernanceCatalogs may not exist — fall back to AP-only query
       apResult = await timedRequest(pool, 'ap-attributes', res)
         .input('id', apId)
-        .query('SELECT * FROM BusinessRoles WHERE id = @id');
+        .query(`SELECT * FROM Resources WHERE id = @id AND resourceType = 'BusinessRole'`);
     }
 
     if (apResult.recordset.length === 0) {
@@ -487,7 +487,7 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-assignment-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM BusinessRoleAssignments WHERE businessRoleId = @id
+        SELECT COUNT(*) AS cnt FROM ResourceAssignments WHERE resourceId = @id AND assignmentType = 'Governed'
       `);
       assignmentCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -498,9 +498,9 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-group-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(DISTINCT scopeOriginId) AS cnt
-        FROM BusinessRoleResources
-        WHERE businessRoleId = @id AND scopeOriginSystem = 'AadGroup'
+        SELECT COUNT(DISTINCT childResourceId) AS cnt
+        FROM ResourceRelationships
+        WHERE parentResourceId = @id AND relationshipType = 'Contains'
       `);
       groupCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -511,7 +511,7 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-review-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM CertificationDecisions WHERE businessRoleId = @id
+        SELECT COUNT(*) AS cnt FROM CertificationDecisions WHERE resourceId = @id
       `);
       reviewCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -529,7 +529,7 @@ router.get('/access-package/:id', async (req, res) => {
         .query(`
         SELECT TOP 1 reviewedDateTime, reviewedByDisplayName
         FROM CertificationDecisions
-        WHERE businessRoleId = @id AND decision IS NOT NULL AND decision <> 'NotReviewed'
+        WHERE resourceId = @id AND decision IS NOT NULL AND decision <> 'NotReviewed'
         ORDER BY reviewedDateTime DESC
       `);
       lastReviewDate = r.recordset[0]?.reviewedDateTime || null;
@@ -548,8 +548,8 @@ router.get('/access-package/:id', async (req, res) => {
           COUNT(*) AS total,
           SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAdd,
           SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnly
-        FROM BusinessRolePolicies
-        WHERE businessRoleId = @id
+        FROM AssignmentPolicies
+        WHERE resourceId = @id
       `);
       policyCount = r.recordset[0].total;
       autoAddPolicyCount = r.recordset[0].autoAdd;
@@ -582,7 +582,7 @@ router.get('/access-package/:id', async (req, res) => {
         SELECT cat.id, cat.name, cat.color
         FROM dbo.GovernanceCategoryAssignments ca
         INNER JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-        WHERE ca.businessRoleId = LOWER(@id)
+        WHERE ca.resourceId = LOWER(@id)
       `);
       if (r.recordset.length > 0) {
         category = r.recordset[0];
@@ -595,8 +595,8 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-history-check', res)
         .input('id', apId)
         .query(`
-        SELECT TOP 1 1 AS found FROM BusinessRoles_History
-        WHERE id = @id
+        SELECT TOP 1 1 AS found FROM Resources FOR SYSTEM_TIME ALL
+        WHERE id = @id AND resourceType = 'BusinessRole' AND ValidTo != '9999-12-31 23:59:59.9999999'
       `);
       hasHistory = r.recordset.length > 0;
     } catch {
@@ -625,14 +625,15 @@ router.get('/access-package/:id/assignments', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          a.id, a.principalId, a.assignmentState, a.assignmentStatus,
+          a.id, a.principalId, a.state, a.status AS assignmentStatus,
           u.displayName AS targetDisplayName,
           u.email AS targetUPN,
           a.ValidFrom AS assignedDate
-        FROM BusinessRoleAssignments a
+        FROM ResourceAssignments a
         LEFT JOIN Principals u ON a.principalId = u.id
-        WHERE a.businessRoleId = @id
-          AND a.assignmentState = 'Delivered'
+        WHERE a.resourceId = @id
+          AND a.assignmentType = 'Governed'
+          AND a.state = 'Delivered'
         ORDER BY u.displayName
       `);
     } catch {
@@ -641,14 +642,15 @@ router.get('/access-package/:id/assignments', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          a.id, a.principalId, a.assignmentState, a.assignmentStatus,
+          a.id, a.principalId, a.state, a.status AS assignmentStatus,
           u.displayName AS targetDisplayName,
           u.userPrincipalName AS targetUPN,
           a.ValidFrom AS assignedDate
-        FROM BusinessRoleAssignments a
+        FROM ResourceAssignments a
         LEFT JOIN GraphUsers u ON a.principalId = u.id
-        WHERE a.businessRoleId = @id
-          AND a.assignmentState = 'Delivered'
+        WHERE a.resourceId = @id
+          AND a.assignmentType = 'Governed'
+          AND a.state = 'Delivered'
         ORDER BY u.displayName
       `);
     }
@@ -670,19 +672,19 @@ router.get('/access-package/:id/resource-roles', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT
-        rrs.id, rrs.roleDisplayName, rrs.roleOriginSystem,
-        rrs.scopeDisplayName, rrs.scopeOriginId, rrs.scopeOriginSystem,
+        rrs.id, rrs.roleName, rrs.roleOriginSystem,
+        r.displayName AS scopeDisplayName, rrs.childResourceId, rrs.roleOriginSystem AS scopeOriginSystem,
         rrs.createdDateTime,
         COALESCE(r.displayName, g.displayName) AS groupDisplayName,
         COALESCE(r.displayName, g.displayName) AS resourceDisplayName,
         r.resourceType, r.systemId
-      FROM BusinessRoleResources rrs
-      LEFT JOIN Resources r ON UPPER(rrs.scopeOriginId) = UPPER(r.id)
+      FROM ResourceRelationships rrs
+      LEFT JOIN Resources r ON UPPER(rrs.childResourceId) = UPPER(r.id)
         AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-      LEFT JOIN GraphGroups g ON UPPER(rrs.scopeOriginId) = UPPER(g.id)
+      LEFT JOIN GraphGroups g ON UPPER(rrs.childResourceId) = UPPER(g.id)
         AND r.id IS NULL
-      WHERE rrs.businessRoleId = @id
-      ORDER BY COALESCE(r.displayName, g.displayName), rrs.roleDisplayName
+      WHERE rrs.parentResourceId = @id AND rrs.relationshipType = 'Contains'
+      ORDER BY COALESCE(r.displayName, g.displayName), rrs.roleName
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -709,7 +711,7 @@ router.get('/access-package/:id/reviews', async (req, res) => {
         reviewInstanceStartDateTime, reviewInstanceEndDateTime,
         reviewInstanceStatus
       FROM CertificationDecisions
-      WHERE businessRoleId = @id
+      WHERE resourceId = @id
       ORDER BY reviewedDateTime DESC
     `);
     res.json(r.recordset);
@@ -736,9 +738,9 @@ router.get('/access-package/:id/requests', async (req, res) => {
           req.id, req.requestType, req.requestState, req.requestStatus,
           req.justification, req.createdDateTime, req.completedDateTime,
           u.displayName AS requestorDisplayName, u.email AS requestorUPN
-        FROM BusinessRoleRequests req
+        FROM AssignmentRequests req
         LEFT JOIN Principals u ON req.requestorId = u.id
-        WHERE req.businessRoleId = @id
+        WHERE req.resourceId = @id
           AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
         ORDER BY req.createdDateTime DESC
       `);
@@ -751,9 +753,9 @@ router.get('/access-package/:id/requests', async (req, res) => {
           req.id, req.requestType, req.requestState, req.requestStatus,
           req.justification, req.createdDateTime, req.completedDateTime,
           u.displayName AS requestorDisplayName, u.userPrincipalName AS requestorUPN
-        FROM BusinessRoleRequests req
+        FROM AssignmentRequests req
         LEFT JOIN GraphUsers u ON req.requestorId = u.id
-        WHERE req.businessRoleId = @id
+        WHERE req.resourceId = @id
           AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
         ORDER BY req.createdDateTime DESC
       `);
@@ -775,8 +777,8 @@ router.get('/access-package/:id/history', async (req, res) => {
     const r = await timedRequest(pool, 'ap-history', res)
       .input('id', req.params.id)
       .query(`
-      SELECT * FROM BusinessRoles FOR SYSTEM_TIME ALL
-      WHERE id = @id
+      SELECT * FROM Resources FOR SYSTEM_TIME ALL
+      WHERE id = @id AND resourceType = 'BusinessRole'
       ORDER BY ValidFrom DESC
     `);
     res.json(r.recordset.map(cleanRow));
@@ -801,8 +803,8 @@ router.get('/access-package/:id/policies', async (req, res) => {
              ISNULL(hasAutoRemoveRule, CAST(0 AS BIT)) AS hasAutoRemoveRule,
              JSON_VALUE(automaticRequestSettings, '$.filter.rule') AS autoAssignmentFilter,
              createdDateTime, modifiedDateTime
-      FROM BusinessRolePolicies
-      WHERE businessRoleId = @id
+      FROM AssignmentPolicies
+      WHERE resourceId = @id
       ORDER BY displayName
     `);
     res.json(r.recordset);

@@ -259,15 +259,35 @@ function Sync-FGGroupOwner {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate ownerships/sec)" -ForegroundColor Green
 
-            # Handle deletions using bulk delete (avoids massive VALUES clause)
+            # Scoped delete: only remove Owner assignments not in source
+            # Cannot use Invoke-FGSQLBulkDelete — it deletes ALL non-matching rows regardless of assignmentType
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for removed ownership relationships..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceOwnerIds (resourceId UNIQUEIDENTIFIER, principalId UNIQUEIDENTIFIER, PRIMARY KEY (resourceId, principalId))"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("resourceId", [System.Guid])
+            [void]$idTable.Columns.Add("principalId", [System.Guid])
+            foreach ($row in $dataTable.Rows) {
+                [void]$idTable.Rows.Add($row["resourceId"], $row["principalId"])
+            }
+
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceOwnerIds"
+            $bulkCopy.WriteToServer($idTable)
+            $bulkCopy.Close()
+
+            $deleteCmd.CommandText = "DELETE t FROM dbo.[$TableName] t LEFT JOIN #SyncSourceOwnerIds s ON t.resourceId = s.resourceId AND t.principalId = s.principalId WHERE s.resourceId IS NULL AND t.assignmentType = 'Owner'"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceOwnerIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount ownership relationship(s) that no longer exist in Graph" -ForegroundColor Yellow

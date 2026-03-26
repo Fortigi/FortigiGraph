@@ -454,7 +454,7 @@ export default function IdentitiesPage({ onOpenDetail }) {
   const [available, setAvailable] = useState(true);
   const [hasHrColumns, setHasHrColumns] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
+  // expandedId removed — identities now open as detail tabs
 
   // Filters
   const [search, setSearch] = useState('');
@@ -659,70 +659,49 @@ export default function IdentitiesPage({ onOpenDetail }) {
       ) : (
         <div className="space-y-2">
           {data.map(identity => (
-            <div key={identity.id}>
-              {/* Identity row */}
-              <div
-                className={`bg-white rounded-lg border border-gray-200 px-4 py-3 cursor-pointer hover:border-blue-300 transition-colors ${
-                  expandedId === identity.id ? 'border-blue-400 ring-1 ring-blue-100' : ''
-                }`}
-                onClick={() => setExpandedId(expandedId === identity.id ? null : identity.id)}
-              >
-                <div className="flex items-center gap-4">
-                  {/* Expand icon */}
-                  <svg
-                    className={`w-4 h-4 text-gray-400 transition-transform ${expandedId === identity.id ? 'rotate-90' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-
-                  {/* Name + account count */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900">{identity.displayName}</span>
-                      <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                        {identity.accountCount} account{identity.accountCount !== 1 ? 's' : ''}
-                      </span>
-                      <VerifiedBadge verified={identity.analystVerified} />
-                      <HrBadge isHrAnchored={identity.isHrAnchored} />
-                      <OrphanBadge status={identity.orphanStatus} />
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {identity.primaryAccountUpn}
-                      {identity.department && ` · ${identity.department}`}
-                      {identity.jobTitle && ` · ${identity.jobTitle}`}
-                    </div>
+            <div
+              key={identity.id}
+              className="bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 transition-colors"
+            >
+              <div className="flex items-center gap-4">
+                {/* Name + account count — clickable to open detail tab */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onOpenDetail('identity', identity.id, identity.displayName)}
+                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline text-left"
+                    >
+                      {identity.displayName}
+                    </button>
+                    <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                      {identity.accountCount} account{identity.accountCount !== 1 ? 's' : ''}
+                    </span>
+                    <VerifiedBadge verified={identity.analystVerified} />
+                    <HrBadge isHrAnchored={identity.isHrAnchored} />
+                    <OrphanBadge status={identity.orphanStatus} />
                   </div>
-
-                  {/* Account type badges */}
-                  <div className="flex gap-1">
-                    {identity.accountTypes?.split(',').map(t => (
-                      <AccountTypeBadge key={t} type={t.trim()} />
-                    ))}
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {identity.primaryAccountUpn}
+                    {identity.department && ` · ${identity.department}`}
+                    {identity.jobTitle && ` · ${identity.jobTitle}`}
                   </div>
+                </div>
 
-                  {/* Confidence */}
-                  <ConfidenceBar confidence={identity.correlationConfidence} />
+                {/* Account type badges */}
+                <div className="flex gap-1">
+                  {identity.accountTypes?.split(',').map(t => (
+                    <AccountTypeBadge key={t} type={t.trim()} />
+                  ))}
+                </div>
 
-                  {/* Signals */}
-                  <div className="text-xs text-gray-400 w-32 truncate" title={identity.correlationSignals}>
-                    {identity.correlationSignals || '—'}
-                  </div>
+                {/* Confidence */}
+                <ConfidenceBar confidence={identity.correlationConfidence} />
+
+                {/* Signals */}
+                <div className="text-xs text-gray-400 w-32 truncate" title={identity.correlationSignals}>
+                  {identity.correlationSignals || '-'}
                 </div>
               </div>
-
-              {/* Expanded detail */}
-              {expandedId === identity.id && (
-                <div className="mt-1 ml-8">
-                  <IdentityDetail
-                    identityId={identity.id}
-                    authFetch={authFetch}
-                    onClose={() => setExpandedId(null)}
-                    onOpenDetail={onOpenDetail}
-                    onRefresh={fetchData}
-                  />
-                </div>
-              )}
             </div>
           ))}
         </div>

@@ -106,7 +106,7 @@ function Sync-FGAccessPackageAssignmentRequest {
 
     try {
 
-    $TableName = "BusinessRoleRequests"
+    $TableName = "AssignmentRequests"
 
     $syncMode = if ($UseBatching) { "batched (low memory)" } else { "bulk (high performance)" }
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting assignment request sync ($syncMode)..." -ForegroundColor Cyan
@@ -117,7 +117,7 @@ function Sync-FGAccessPackageAssignmentRequest {
         'id'
 
         # Relationships
-        'businessRoleId'
+        'resourceId'
         'accessPackage'
         'requestor'
         'requestorId'  # We'll extract from expanded requestor object
@@ -172,7 +172,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Map Graph attribute types to SQL types
     $graphToSqlTypeMap = @{
         'id' = 'UNIQUEIDENTIFIER'
-        'businessRoleId' = 'UNIQUEIDENTIFIER'
+        'resourceId' = 'UNIQUEIDENTIFIER'
         'assignmentPolicyId' = 'UNIQUEIDENTIFIER'
         'requestorId' = 'UNIQUEIDENTIFIER'
         'requestType' = 'NVARCHAR(50)'
@@ -211,7 +211,7 @@ function Sync-FGAccessPackageAssignmentRequest {
     # Value resolvers for special attributes
     $valueResolvers = @{
         'requestorId' = { param($obj) $obj.requestor.id }
-        'businessRoleId' = { param($obj) $obj.accessPackage.id }
+        'resourceId' = { param($obj) $obj.accessPackage.id }
         'schedule' = { param($obj) if ($obj.schedule) { $obj.schedule | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'accessPackage' = { param($obj) if ($obj.accessPackage) { $obj.accessPackage | ConvertTo-Json -Compress -Depth 10 } else { $null } }
         'requestor' = { param($obj) if ($obj.requestor) { $obj.requestor | ConvertTo-Json -Compress -Depth 10 } else { $null } }
@@ -539,17 +539,17 @@ function Sync-FGAccessPackageAssignmentRequest {
             return
         }
 
-        # Analyze requests with null businessRoleId by requestType
-        $nullBusinessRoleRequests = $allRequests | Where-Object { $null -eq $_.accessPackage -or [string]::IsNullOrWhiteSpace($_.accessPackage.id) }
-        if ($nullBusinessRoleRequests.Count -gt 0) {
-            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Analysis: Found $($nullBusinessRoleRequests.Count) requests with null/empty businessRoleId:" -ForegroundColor Cyan
-            $byRequestType = $nullBusinessRoleRequests | Group-Object -Property requestType | Sort-Object Count -Descending
+        # Analyze requests with null resourceId by requestType
+        $nullResourceIdRequests = $allRequests | Where-Object { $null -eq $_.accessPackage -or [string]::IsNullOrWhiteSpace($_.accessPackage.id) }
+        if ($nullResourceIdRequests.Count -gt 0) {
+            Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Analysis: Found $($nullResourceIdRequests.Count) requests with null/empty resourceId:" -ForegroundColor Cyan
+            $byRequestType = $nullResourceIdRequests | Group-Object -Property requestType | Sort-Object Count -Descending
             foreach ($group in $byRequestType) {
-                $percentage = [math]::Round(($group.Count / $nullBusinessRoleRequests.Count) * 100, 1)
+                $percentage = [math]::Round(($group.Count / $nullResourceIdRequests.Count) * 100, 1)
                 Write-Host "  $($group.Name): $($group.Count) requests ($percentage%)" -ForegroundColor Gray
             }
             Write-Host "  This is normal for removal requests (UserRemove/AdminRemove/SystemRemove)" -ForegroundColor Gray
-            Write-Host "  These will sync with businessRoleId = NULL in SQL" -ForegroundColor Gray
+            Write-Host "  These will sync with resourceId = NULL in SQL" -ForegroundColor Gray
         }
 
         # Check for NULL or duplicate IDs in source data

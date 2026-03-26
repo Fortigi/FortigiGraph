@@ -231,13 +231,14 @@ router.get('/admin/export/curated', async (req, res) => {
     let categories = [];
     if (await tableExists(pool, 'GovernanceCategories')) {
       const catRows = await pool.request().query(`
-        SELECT c.id, c.name, c.color, ca.businessRoleId, ap.displayName AS businessRoleDisplayName
+        SELECT c.id, c.name, c.color, ca.resourceId, ap.displayName AS businessRoleDisplayName
         FROM dbo.GovernanceCategories c
         LEFT JOIN dbo.GovernanceCategoryAssignments ca ON ca.categoryId = c.id
-        LEFT JOIN dbo.BusinessRoles ap
-          ON LOWER(ap.id) = ca.businessRoleId
+        LEFT JOIN dbo.Resources ap
+          ON LOWER(ap.id) = ca.resourceId
+          AND ap.resourceType = 'BusinessRole'
           AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
-        ORDER BY c.name, ca.businessRoleId
+        ORDER BY c.name, ca.resourceId
       `);
 
       const byCatId = new Map();
@@ -246,9 +247,9 @@ router.get('/admin/export/curated', async (req, res) => {
         if (!byCatId.has(key)) {
           byCatId.set(key, { name: row.name, color: row.color, assignments: [] });
         }
-        if (row.businessRoleId) {
+        if (row.resourceId) {
           byCatId.get(key).assignments.push({
-            accessPackageId:          row.businessRoleId,
+            accessPackageId:          row.resourceId,
             accessPackageDisplayName: row.businessRoleDisplayName || null,
           });
         }
@@ -467,8 +468,9 @@ router.post('/admin/import/curated', async (req, res) => {
           const r = await pool.request()
             .input('apId', a.accessPackageId.toLowerCase())
             .query(`SELECT TOP 1 LOWER(CAST(id AS NVARCHAR(36))) AS id
-                    FROM dbo.BusinessRoles
+                    FROM dbo.Resources
                     WHERE LOWER(CAST(id AS NVARCHAR(36))) = @apId
+                      AND resourceType = 'BusinessRole'
                       AND ValidTo = '9999-12-31 23:59:59.9999999'`);
           if (r.recordset.length > 0) apId = r.recordset[0].id;
         } catch { /* ignore */ }
@@ -480,8 +482,9 @@ router.post('/admin/import/curated', async (req, res) => {
             const r = await pool.request()
               .input('displayName', a.accessPackageDisplayName)
               .query(`SELECT TOP 1 LOWER(CAST(id AS NVARCHAR(36))) AS id
-                      FROM dbo.BusinessRoles
+                      FROM dbo.Resources
                       WHERE displayName = @displayName
+                        AND resourceType = 'BusinessRole'
                         AND ValidTo = '9999-12-31 23:59:59.9999999'`);
             if (r.recordset.length > 0) { apId = r.recordset[0].id; softMatched = true; }
           } catch { /* ignore */ }
@@ -492,7 +495,7 @@ router.post('/admin/import/curated', async (req, res) => {
         // Insert or skip (AP can only have one category — MERGE replaces)
         const existing = await pool.request()
           .input('apId', apId)
-          .query(`SELECT categoryId FROM dbo.GovernanceCategoryAssignments WHERE businessRoleId = @apId`);
+          .query(`SELECT categoryId FROM dbo.GovernanceCategoryAssignments WHERE resourceId = @apId`);
 
         if (existing.recordset.length > 0) {
           stats.catAssignSkipped++;
@@ -500,7 +503,7 @@ router.post('/admin/import/curated', async (req, res) => {
           await pool.request()
             .input('catId', catId)
             .input('apId', apId)
-            .query(`INSERT INTO dbo.GovernanceCategoryAssignments (businessRoleId, categoryId) VALUES (@apId, @catId)`);
+            .query(`INSERT INTO dbo.GovernanceCategoryAssignments (resourceId, categoryId) VALUES (@apId, @catId)`);
           stats.catAssignInserted++;
           if (softMatched) stats.catAssignSoftMatched++;
         }

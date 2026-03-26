@@ -101,13 +101,13 @@ ORDER BY t.entityType, t.name, ta.entityId
         $cmd.CommandText = @"
 SELECT
     c.id, c.name, c.color,
-    ca.businessRoleId AS accessPackageId,
+    ca.resourceId AS accessPackageId,
     ap.displayName AS accessPackageDisplayName
 FROM dbo.GovernanceCategories c
 LEFT JOIN dbo.GovernanceCategoryAssignments ca ON ca.categoryId = c.id
-LEFT JOIN dbo.BusinessRoles ap
-    ON ap.id = ca.businessRoleId AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
-ORDER BY c.name, ca.businessRoleId
+LEFT JOIN dbo.Resources ap
+    ON ap.id = ca.resourceId AND ap.resourceType = 'BusinessRole' AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
+ORDER BY c.name, ca.resourceId
 "@
         $reader = $cmd.ExecuteReader()
         $catById = @{}

@@ -29,7 +29,7 @@ function Initialize-FGGroupMembershipIndexes {
     Name of the table containing group ownership relationships. Default: "GraphGroupOwners"
 
     .PARAMETER RequestsTable
-    Name of the table containing access package assignment requests. Default: "BusinessRoleRequests"
+    Name of the table containing access package assignment requests. Default: "AssignmentRequests"
 
     .PARAMETER DropIfExists
     If specified, drops existing indexes before recreating them.
@@ -65,7 +65,7 @@ function Initialize-FGGroupMembershipIndexes {
         [string]$OwnersTable = "GraphGroupOwners",
 
         [Parameter(Mandatory = $false)]
-        [string]$RequestsTable = "BusinessRoleRequests",
+        [string]$RequestsTable = "AssignmentRequests",
 
         [Parameter(Mandatory = $false)]
         [switch]$DropIfExists
@@ -174,7 +174,7 @@ SELECT
             $indexes += @{
                 Table = $RequestsTable
                 Name = "IX_APRequests_PackageState"
-                Columns = "accessPackageId, requestState"
+                Columns = "resourceId, requestState"
                 Include = $null
                 Description = "Optimizes pending request lookups by access package"
             }

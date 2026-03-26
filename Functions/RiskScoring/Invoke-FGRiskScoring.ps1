@@ -6,14 +6,16 @@ function Invoke-FGRiskScoring {
     .DESCRIPTION
         Phase 2 of the Identity Risk Scoring architecture. This is a batch process that:
 
-        1. Reads users, groups, and memberships from SQL (GraphUsers, GraphGroups, etc.)
+        1. Reads users, groups, and memberships from SQL (Principals, Resources, etc.)
         2. Loads the classifier ruleset (universal + customer-specific)
-        3. Runs the 4-layer scoring engine:
+        3. Runs the 4-layer scoring engine on Principals and Resources:
            - Layer 1: Direct classifier match (regex patterns against names/descriptions/titles)
            - Layer 2: Membership/relationship analysis (PIM, high-risk groups, outlier detection)
            - Layer 3: Structural/hygiene signals (no description, no owner, stale accounts)
            - Layer 4: Cross-entity risk propagation (group→user 30%, user→group 25%)
-        4. Writes risk scores back to SQL as columns on GraphUsers and GraphGroups
+        4. Writes risk scores to the RiskScores table and denormalizes riskScore+riskTier to entity tables
+        5. Scores additional entity types (BusinessRoles, OrgUnits, Identities) using
+           pre-computed Principal/Resource scores for aggregate calculations
 
         Designed for batch execution after Start-FGSync. Handles 5,000+ users and 10,000+ groups.
 
@@ -207,114 +209,32 @@ function Invoke-FGRiskScoring {
     Write-Host "  Classifiers: $($groupClassifiers.Count) group, $($userClassifiers.Count) user rules" -ForegroundColor Gray
 
     # ================================================================
-    # Ensure risk score columns exist on GraphUsers and GraphGroups
+    # Ensure RiskScores table exists + denormalized columns on entity tables
     # ================================================================
 
     Write-Host ""
     Write-Host "--- Preparing SQL Schema ---" -ForegroundColor Cyan
 
-    $riskColumns = @{
-        'riskScore'               = 'INT'
-        'riskTier'                = 'NVARCHAR(20)'
-        'riskDirectScore'         = 'INT'
-        'riskMembershipScore'     = 'INT'
-        'riskStructuralScore'     = 'INT'
-        'riskPropagatedScore'     = 'INT'
-        'riskClassifierMatches'   = 'NVARCHAR(MAX)'
-        'riskExplanation'         = 'NVARCHAR(MAX)'
-        'riskScoredAt'            = 'DATETIME2'
-        'riskOverride'            = 'INT'
-        'riskOverrideReason'      = 'NVARCHAR(500)'
-    }
+    # Create or verify RiskScores table
+    Initialize-FGRiskScoreTables
 
-    foreach ($tableName in @('GraphUsers', 'GraphGroups', 'Resources', 'Principals')) {
-        # Check if the table exists first (Resources and Principals are optional)
-        $tableExists = $false
+    # Ensure denormalized riskScore + riskTier columns exist on entity tables for fast filtering
+    $denormColumns = @{ 'riskScore' = 'INT'; 'riskTier' = 'NVARCHAR(20)' }
+    foreach ($entityTable in @('Principals', 'Resources')) {
         try {
-            $tableExists = Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'"
-                $cmd.Parameters.AddWithValue("@tableName", $tableName) | Out-Null
-                return [int]$cmd.ExecuteScalar() -gt 0
+            $existingCols = Get-FGSQLTableSchema -TableName $entityTable
+            $missing = @{}
+            foreach ($col in $denormColumns.Keys) {
+                if ($existingCols -notcontains $col) { $missing[$col] = $denormColumns[$col] }
             }
-        } catch { }
-
-        if (-not $tableExists) {
-            if ($tableName -in @('Resources', 'Principals')) {
-                Write-Host "  $($tableName): table not present (optional)" -ForegroundColor Gray
-                continue
+            if ($missing.Count -gt 0) {
+                Write-Host "  Adding denormalized risk columns to $entityTable..." -ForegroundColor Gray
+                Add-FGSQLTableColumn -TableName $entityTable -Columns $missing
+            } else {
+                Write-Host "  $($entityTable): denormalized risk columns exist" -ForegroundColor Gray
             }
-            Write-Host "  Table $tableName does not exist yet. Run Start-FGSync first." -ForegroundColor Yellow
-            throw "Table $tableName not found. Sync your data before running risk scoring."
-        }
-
-        # Check which columns already exist
-        $existingCols = @()
-        try {
-            $existingCols = @(Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'"
-                $cmd.Parameters.AddWithValue("@tableName", $tableName) | Out-Null
-                $reader = $cmd.ExecuteReader()
-                $cols = @()
-                while ($reader.Read()) { $cols += $reader.GetString(0) }
-                $reader.Close()
-                return $cols
-            })
         } catch {
-            Write-Host "  Table $tableName does not exist yet. Run Start-FGSync first." -ForegroundColor Yellow
-            throw "Table $tableName not found. Sync your data before running risk scoring."
-        }
-
-        $missingCols = @{}
-        foreach ($colName in $riskColumns.Keys) {
-            if ($colName -notin $existingCols) {
-                $missingCols[$colName] = $riskColumns[$colName]
-            }
-        }
-
-        if ($missingCols.Count -gt 0) {
-            Write-Host "  Adding $($missingCols.Count) risk score column(s) to $tableName..." -ForegroundColor Gray
-            Add-FGSQLTableColumn -TableName $tableName -Columns $missingCols
-        } else {
-            Write-Host "  $($tableName): risk score columns already exist" -ForegroundColor Gray
-        }
-    }
-
-    # Add hierarchy-specific columns (users only — managers/reports don't apply to groups)
-    $hierarchyColumns = @{
-        'riskHierarchyDirectReports' = 'INT'
-        'riskHierarchyTotalReports'  = 'INT'
-    }
-    foreach ($userTableName in @('GraphUsers', 'Principals')) {
-        $existingUserCols = @()
-        try {
-            $existingUserCols = @(Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'"
-                $cmd.Parameters.AddWithValue("@tableName", $userTableName) | Out-Null
-                $reader = $cmd.ExecuteReader()
-                $cols = @()
-                while ($reader.Read()) { $cols += $reader.GetString(0) }
-                $reader.Close()
-                return $cols
-            })
-        } catch { }
-
-        if ($existingUserCols.Count -eq 0) { continue }  # Table doesn't exist
-
-        $missingHierarchy = @{}
-        foreach ($colName in $hierarchyColumns.Keys) {
-            if ($colName -notin $existingUserCols) {
-                $missingHierarchy[$colName] = $hierarchyColumns[$colName]
-            }
-        }
-        if ($missingHierarchy.Count -gt 0) {
-            Write-Host "  Adding $($missingHierarchy.Count) hierarchy column(s) to $userTableName..." -ForegroundColor Gray
-            Add-FGSQLTableColumn -TableName $userTableName -Columns $missingHierarchy
+            Write-Host "  $($entityTable): table not present (optional)" -ForegroundColor Gray
         }
     }
 
@@ -1271,190 +1191,808 @@ SELECT
     Write-MemoryUsage "after scoring"
 
     Write-Host ""
-    Write-Host "--- Writing Scores to SQL ---" -ForegroundColor Cyan
+    Write-Host "--- Writing Scores to RiskScores Table ---" -ForegroundColor Cyan
 
-    # Batch update groups
     $batchSize = 100
-    $updated = 0
+    $scoredAt = [DateTime]::UtcNow
 
+    # Helper: write a batch of scores to the RiskScores table using MERGE
+    function Write-RiskScoreBatch {
+        param($batch, [string]$entityType)
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            foreach ($item in $batch) {
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandTimeout = 120
+                $cmd.CommandText = @"
+MERGE dbo.RiskScores AS target
+USING (SELECT @entityId AS entityId, @entityType AS entityType) AS source
+ON target.entityId = source.entityId AND target.entityType = source.entityType
+WHEN MATCHED THEN UPDATE SET
+    riskScore = @riskScore, riskTier = @riskTier,
+    riskDirectScore = @riskDirectScore, riskMembershipScore = @riskMembershipScore,
+    riskStructuralScore = @riskStructuralScore, riskPropagatedScore = @riskPropagatedScore,
+    riskClassifierMatches = @riskClassifierMatches, riskExplanation = @riskExplanation,
+    riskScoredAt = @riskScoredAt
+WHEN NOT MATCHED THEN INSERT
+    (entityId, entityType, riskScore, riskTier, riskDirectScore, riskMembershipScore,
+     riskStructuralScore, riskPropagatedScore, riskClassifierMatches, riskExplanation, riskScoredAt)
+VALUES
+    (@entityId, @entityType, @riskScore, @riskTier, @riskDirectScore, @riskMembershipScore,
+     @riskStructuralScore, @riskPropagatedScore, @riskClassifierMatches, @riskExplanation, @riskScoredAt);
+"@
+                $cmd.Parameters.AddWithValue("@entityId", [Guid]$item.id) | Out-Null
+                $cmd.Parameters.AddWithValue("@entityType", $entityType) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
+                $cmd.Parameters.AddWithValue("@riskScoredAt", $scoredAt) | Out-Null
+                $cmd.ExecuteNonQuery() | Out-Null
+            }
+        }
+    }
+
+    # Write resource scores to RiskScores
+    $updated = 0
     for ($i = 0; $i -lt $groupUpdates.Count; $i += $batchSize) {
         $batch = $groupUpdates[$i..[Math]::Min($i + $batchSize - 1, $groupUpdates.Count - 1)]
-
-        Invoke-FGSQLCommand -ScriptBlock {
-            param($connection)
-            foreach ($item in $batch) {
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandTimeout = 120
-                $cmd.CommandText = @"
-UPDATE dbo.GraphGroups SET
-    riskScore = @riskScore,
-    riskTier = @riskTier,
-    riskDirectScore = @riskDirectScore,
-    riskMembershipScore = @riskMembershipScore,
-    riskStructuralScore = @riskStructuralScore,
-    riskPropagatedScore = @riskPropagatedScore,
-    riskClassifierMatches = @riskClassifierMatches,
-    riskExplanation = @riskExplanation,
-    riskScoredAt = @riskScoredAt
-WHERE id = @id
-"@
-                $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
-                $cmd.ExecuteNonQuery() | Out-Null
-            }
-        }
+        Write-RiskScoreBatch -batch $batch -entityType 'Resource'
         $updated += $batch.Count
         if ($updated % 500 -eq 0 -or $updated -eq $groupUpdates.Count) {
-            Write-Host "  Groups: $updated / $($groupUpdates.Count)" -ForegroundColor Gray
+            Write-Host "  Resources: $updated / $($groupUpdates.Count)" -ForegroundColor Gray
         }
     }
 
-    # Also write scores to Resources table (if it exists)
-    if ($useResourceModel) {
-        Write-Host "  Writing scores to Resources table..." -ForegroundColor Gray
-        $resUpdated = 0
-        for ($i = 0; $i -lt $groupUpdates.Count; $i += $batchSize) {
-            $batch = $groupUpdates[$i..[Math]::Min($i + $batchSize - 1, $groupUpdates.Count - 1)]
-            Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                foreach ($item in $batch) {
-                    $cmd = $connection.CreateCommand()
-                    $cmd.CommandTimeout = 120
-                    $cmd.CommandText = @"
-UPDATE dbo.Resources SET
-    riskScore = @riskScore,
-    riskTier = @riskTier,
-    riskDirectScore = @riskDirectScore,
-    riskMembershipScore = @riskMembershipScore,
-    riskStructuralScore = @riskStructuralScore,
-    riskPropagatedScore = @riskPropagatedScore,
-    riskClassifierMatches = @riskClassifierMatches,
-    riskExplanation = @riskExplanation,
-    riskScoredAt = @riskScoredAt
-WHERE id = @id
-"@
-                    $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
-                    $cmd.ExecuteNonQuery() | Out-Null
-                }
-            }
-            $resUpdated += $batch.Count
-        }
-        Write-Host "  Resources: $resUpdated / $($groupUpdates.Count)" -ForegroundColor Gray
-    }
-
-    # Batch update users
+    # Write principal scores to RiskScores
     $updated = 0
-
     for ($i = 0; $i -lt $userUpdates.Count; $i += $batchSize) {
         $batch = $userUpdates[$i..[Math]::Min($i + $batchSize - 1, $userUpdates.Count - 1)]
-
-        Invoke-FGSQLCommand -ScriptBlock {
-            param($connection)
-            foreach ($item in $batch) {
-                $cmd = $connection.CreateCommand()
-                $cmd.CommandTimeout = 120
-                $cmd.CommandText = @"
-UPDATE dbo.GraphUsers SET
-    riskScore = @riskScore,
-    riskTier = @riskTier,
-    riskDirectScore = @riskDirectScore,
-    riskMembershipScore = @riskMembershipScore,
-    riskStructuralScore = @riskStructuralScore,
-    riskPropagatedScore = @riskPropagatedScore,
-    riskClassifierMatches = @riskClassifierMatches,
-    riskExplanation = @riskExplanation,
-    riskScoredAt = @riskScoredAt,
-    riskHierarchyDirectReports = @riskHierarchyDirectReports,
-    riskHierarchyTotalReports = @riskHierarchyTotalReports
-WHERE id = @id
-"@
-                $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskHierarchyDirectReports", $item.riskHierarchyDirectReports) | Out-Null
-                $cmd.Parameters.AddWithValue("@riskHierarchyTotalReports", $item.riskHierarchyTotalReports) | Out-Null
-                $cmd.ExecuteNonQuery() | Out-Null
-            }
-        }
+        Write-RiskScoreBatch -batch $batch -entityType 'Principal'
         $updated += $batch.Count
         if ($updated % 500 -eq 0 -or $updated -eq $userUpdates.Count) {
-            Write-Host "  Users:  $updated / $($userUpdates.Count)" -ForegroundColor Gray
+            Write-Host "  Principals: $updated / $($userUpdates.Count)" -ForegroundColor Gray
         }
     }
 
-    # Also write user scores to Principals table (if it exists)
-    if ($usePrincipals) {
-        Write-Host "  Writing user scores to Principals table..." -ForegroundColor Gray
-        $princUpdated = 0
-        for ($i = 0; $i -lt $userUpdates.Count; $i += $batchSize) {
-            $batch = $userUpdates[$i..[Math]::Min($i + $batchSize - 1, $userUpdates.Count - 1)]
-            Invoke-FGSQLCommand -ScriptBlock {
-                param($connection)
-                foreach ($item in $batch) {
-                    $cmd = $connection.CreateCommand()
-                    $cmd.CommandTimeout = 120
-                    $cmd.CommandText = @"
-UPDATE dbo.Principals SET
-    riskScore = @riskScore,
-    riskTier = @riskTier,
-    riskDirectScore = @riskDirectScore,
-    riskMembershipScore = @riskMembershipScore,
-    riskStructuralScore = @riskStructuralScore,
-    riskPropagatedScore = @riskPropagatedScore,
-    riskClassifierMatches = @riskClassifierMatches,
-    riskExplanation = @riskExplanation,
-    riskScoredAt = @riskScoredAt,
-    riskHierarchyDirectReports = @riskHierarchyDirectReports,
-    riskHierarchyTotalReports = @riskHierarchyTotalReports
-WHERE id = @id
+    # Denormalize riskScore + riskTier to entity tables for fast filtering
+    Write-Host "  Denormalizing scores to entity tables..." -ForegroundColor Gray
+    try {
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = @"
+UPDATE p SET p.riskScore = r.riskScore, p.riskTier = r.riskTier
+FROM dbo.Principals p
+INNER JOIN dbo.RiskScores r ON r.entityId = p.id AND r.entityType = 'Principal'
+WHERE r.riskScoredAt = @scoredAt;
+
+UPDATE res SET res.riskScore = r.riskScore, res.riskTier = r.riskTier
+FROM dbo.Resources res
+INNER JOIN dbo.RiskScores r ON r.entityId = res.id AND r.entityType = 'Resource'
+WHERE r.riskScoredAt = @scoredAt;
 "@
-                    $cmd.Parameters.AddWithValue("@id", [Guid]$item.id) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskScore", $item.riskScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskTier", $item.riskTier) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskDirectScore", $item.riskDirectScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskMembershipScore", $item.riskMembershipScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskStructuralScore", $item.riskStructuralScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskPropagatedScore", $item.riskPropagatedScore) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskClassifierMatches", $item.riskClassifierMatches) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskExplanation", $item.riskExplanation) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskScoredAt", [DateTime]::UtcNow) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskHierarchyDirectReports", $item.riskHierarchyDirectReports) | Out-Null
-                    $cmd.Parameters.AddWithValue("@riskHierarchyTotalReports", $item.riskHierarchyTotalReports) | Out-Null
-                    $cmd.ExecuteNonQuery() | Out-Null
-                }
-            }
-            $princUpdated += $batch.Count
+            $cmd.Parameters.AddWithValue("@scoredAt", $scoredAt) | Out-Null
+            $cmd.ExecuteNonQuery() | Out-Null
         }
-        Write-Host "  Principals: $princUpdated / $($userUpdates.Count)" -ForegroundColor Gray
+        Write-Host "  Denormalization complete" -ForegroundColor Green
+    } catch {
+        Write-Host "  WARNING: Denormalization failed: $_" -ForegroundColor Yellow
     }
 
     # Collect memory
     [System.GC]::Collect()
     Write-MemoryUsage "after SQL write"
+
+    # ================================================================
+    # Scoring Additional Entity Types
+    # ================================================================
+
+    Write-Host ""
+    Write-Host "--- Scoring Additional Entity Types ---" -ForegroundColor Cyan
+
+    # Open a dedicated connection for additional entity scoring
+    $entityScoringConnection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
+    $entityScoringConnection.Open()
+
+    try {
+
+    # Load pre-existing Principal and Resource scores (just written) for aggregate calculations
+    $principalRiskScores = @{}
+    $resourceRiskScores = @{}
+    try {
+        $cmd = $entityScoringConnection.CreateCommand()
+        $cmd.CommandTimeout = 120
+        $cmd.CommandText = "SELECT entityId, riskScore, riskTier FROM dbo.RiskScores WHERE entityType = 'Principal'"
+        $reader = $cmd.ExecuteReader()
+        while ($reader.Read()) {
+            $eId = "$($reader['entityId'])"
+            $principalRiskScores[$eId] = @{ riskScore = [int]$reader['riskScore']; riskTier = "$($reader['riskTier'])" }
+        }
+        $reader.Close()
+
+        $cmd2 = $entityScoringConnection.CreateCommand()
+        $cmd2.CommandTimeout = 120
+        $cmd2.CommandText = "SELECT entityId, riskScore, riskTier FROM dbo.RiskScores WHERE entityType = 'Resource'"
+        $reader2 = $cmd2.ExecuteReader()
+        while ($reader2.Read()) {
+            $eId = "$($reader2['entityId'])"
+            $resourceRiskScores[$eId] = @{ riskScore = [int]$reader2['riskScore']; riskTier = "$($reader2['riskTier'])" }
+        }
+        $reader2.Close()
+        Write-Host "  Loaded $($principalRiskScores.Count) principal scores, $($resourceRiskScores.Count) resource scores for aggregation" -ForegroundColor Gray
+    } catch {
+        Write-Host "  WARNING: Could not load existing scores for aggregation: $_" -ForegroundColor Yellow
+    }
+
+    # ------------------------------------------------------------------
+    # 1. BusinessRole Scoring
+    # ------------------------------------------------------------------
+
+    $brUpdates = @()
+    try {
+        # Check if Resources table exists and has BusinessRole rows
+        $brExists = $false
+        $cmd = $entityScoringConnection.CreateCommand()
+        $cmd.CommandText = "SELECT COUNT(*) FROM dbo.Resources WHERE resourceType = 'BusinessRole' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+        try {
+            $result = $cmd.ExecuteScalar()
+            if ($null -ne $result -and $result -isnot [DBNull] -and [int]$result -gt 0) {
+                $brExists = $true
+            }
+        } catch {
+            # Resources table doesn't exist
+            $brExists = $false
+        }
+
+        if ($brExists) {
+            Write-Host ""
+            Write-Host "  Scoring BusinessRoles..." -ForegroundColor Cyan
+
+            # Load BusinessRoles
+            $businessRoles = @()
+            $brAssignmentCounts = @{}    # brId -> assignee count
+            $brResourceCounts = @{}      # brId -> resource count
+            $brPolicyCounts = @{}        # brId -> policy count
+            $brHasCertification = @{}    # brId -> $true/$false
+            $brAssigneeIds = @{}         # brId -> @(principalId, ...)
+            $brResourceIds = @{}         # brId -> @(scopeOriginId, ...)
+
+            # Load BusinessRoles from Resources table
+            $cmd = $entityScoringConnection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = "SELECT id, displayName, description, catalogId FROM dbo.Resources WHERE resourceType = 'BusinessRole' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                $businessRoles += @{
+                    id = "$($reader['id'])"
+                    displayName = if ($reader['displayName'] -is [DBNull]) { "" } else { "$($reader['displayName'])" }
+                    description = if ($reader['description'] -is [DBNull]) { "" } else { "$($reader['description'])" }
+                    catalogId = if ($reader['catalogId'] -is [DBNull]) { "" } else { "$($reader['catalogId'])" }
+                }
+            }
+            $reader.Close()
+
+            # Load assignment counts and assignee IDs per BR
+            $cmd2 = $entityScoringConnection.CreateCommand()
+            $cmd2.CommandTimeout = 120
+            $cmd2.CommandText = "SELECT resourceId AS businessRoleId, principalId FROM dbo.ResourceAssignments WHERE assignmentType = 'Governed' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader2 = $cmd2.ExecuteReader()
+            while ($reader2.Read()) {
+                $brId = "$($reader2['businessRoleId'])"
+                $assigneePrincipalId = "$($reader2['principalId'])"
+                if (-not $brAssignmentCounts.ContainsKey($brId)) { $brAssignmentCounts[$brId] = 0; $brAssigneeIds[$brId] = @() }
+                $brAssignmentCounts[$brId]++
+                $brAssigneeIds[$brId] += $assigneePrincipalId
+            }
+            $reader2.Close()
+
+            # Load resource counts and resource IDs per BR
+            $cmd3 = $entityScoringConnection.CreateCommand()
+            $cmd3.CommandTimeout = 120
+            $cmd3.CommandText = "SELECT parentResourceId AS businessRoleId, childResourceId AS scopeOriginId FROM dbo.ResourceRelationships WHERE relationshipType = 'Contains' AND ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader3 = $cmd3.ExecuteReader()
+            while ($reader3.Read()) {
+                $brId = "$($reader3['businessRoleId'])"
+                $resId = if ($reader3['scopeOriginId'] -is [DBNull]) { "" } else { "$($reader3['scopeOriginId'])" }
+                if (-not $brResourceCounts.ContainsKey($brId)) { $brResourceCounts[$brId] = 0; $brResourceIds[$brId] = @() }
+                $brResourceCounts[$brId]++
+                if ($resId -ne "") { $brResourceIds[$brId] += $resId }
+            }
+            $reader3.Close()
+
+            # Load policy counts per BR
+            $cmd4 = $entityScoringConnection.CreateCommand()
+            $cmd4.CommandTimeout = 120
+            $cmd4.CommandText = "SELECT resourceId AS businessRoleId, COUNT(*) AS cnt FROM dbo.AssignmentPolicies WHERE ValidTo = '9999-12-31 23:59:59.9999999' GROUP BY resourceId"
+            $reader4 = $cmd4.ExecuteReader()
+            while ($reader4.Read()) {
+                $brPolicyCounts["$($reader4['businessRoleId'])"] = [int]$reader4['cnt']
+            }
+            $reader4.Close()
+
+            # Load which BRs have certification decisions
+            $cmd5 = $entityScoringConnection.CreateCommand()
+            $cmd5.CommandTimeout = 120
+            $cmd5.CommandText = "SELECT DISTINCT resourceId AS businessRoleId FROM dbo.CertificationDecisions WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader5 = $cmd5.ExecuteReader()
+            while ($reader5.Read()) {
+                $brHasCertification["$($reader5['businessRoleId'])"] = $true
+            }
+            $reader5.Close()
+
+            Write-Host "    Loaded $($businessRoles.Count) business roles" -ForegroundColor Gray
+
+            if ($businessRoles.Count -gt 0) {
+                foreach ($br in $businessRoles) {
+                    $brId = $br.id
+                    $name = $br.displayName
+                    $desc = $br.description
+
+                    # --- Direct (50%): Classifier matches on displayName/description ---
+                    $bestScore = 0
+                    $classifierHits = @()
+                    $directReasons = @()
+
+                    foreach ($c in $groupClassifiers) {
+                        $nameMatch = Test-PatternMatch -Text $name -Patterns $c.name_patterns
+                        $descMatch = Test-PatternMatch -Text $desc -Patterns $c.description_patterns
+                        if ($nameMatch -or $descMatch) {
+                            $classifierHits += @{ id = $c.id; category = $c.category; score = [int]$c.base_score; rationale = $c.rationale }
+                            $matchedOn = @()
+                            if ($nameMatch) { $matchedOn += "name" }
+                            if ($descMatch) { $matchedOn += "description" }
+                            $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') [+$($c.base_score)]"
+                            if ([int]$c.base_score -gt $bestScore) { $bestScore = [int]$c.base_score }
+                        }
+                    }
+                    $directScore = $bestScore
+
+                    # --- Membership (20%): High-risk assignee density + count ---
+                    $membershipScore = 0
+                    $membershipReasons = @()
+                    $assigneeCount = if ($brAssignmentCounts.ContainsKey($brId)) { $brAssignmentCounts[$brId] } else { 0 }
+                    if ($assigneeCount -gt 0 -and $brAssigneeIds.ContainsKey($brId)) {
+                        $highRiskCount = 0
+                        foreach ($assigneePrincipalId in $brAssigneeIds[$brId]) {
+                            if ($principalRiskScores.ContainsKey($assigneePrincipalId)) {
+                                $pTier = $principalRiskScores[$assigneePrincipalId].riskTier
+                                if ($pTier -eq 'Critical' -or $pTier -eq 'High') { $highRiskCount++ }
+                            }
+                        }
+                        $highRiskPct = [Math]::Round(($highRiskCount / $assigneeCount) * 100, 1)
+                        if ($highRiskPct -ge 50) {
+                            $membershipScore += 40
+                            $membershipReasons += "High-risk assignee density: $highRiskPct% ($highRiskCount/$assigneeCount) [+40]"
+                        } elseif ($highRiskPct -ge 25) {
+                            $membershipScore += 25
+                            $membershipReasons += "Moderate high-risk assignee density: $highRiskPct% ($highRiskCount/$assigneeCount) [+25]"
+                        } elseif ($highRiskPct -ge 10) {
+                            $membershipScore += 15
+                            $membershipReasons += "Some high-risk assignees: $highRiskPct% ($highRiskCount/$assigneeCount) [+15]"
+                        }
+
+                        # Exposure from assignee count
+                        if ($assigneeCount -ge 100) {
+                            $membershipScore += 20
+                            $membershipReasons += "Large assignment base: $assigneeCount assignees [+20]"
+                        } elseif ($assigneeCount -ge 50) {
+                            $membershipScore += 10
+                            $membershipReasons += "Moderate assignment base: $assigneeCount assignees [+10]"
+                        } elseif ($assigneeCount -ge 20) {
+                            $membershipScore += 5
+                            $membershipReasons += "Notable assignment base: $assigneeCount assignees [+5]"
+                        }
+                    }
+                    $membershipScore = [Math]::Min(100, $membershipScore)
+
+                    # --- Structural (10%): Governance hygiene ---
+                    $structuralScore = 0
+                    $structuralReasons = @()
+                    $resCount = if ($brResourceCounts.ContainsKey($brId)) { $brResourceCounts[$brId] } else { 0 }
+
+                    if (-not $brHasCertification.ContainsKey($brId)) {
+                        $structuralScore += 15
+                        $structuralReasons += "No certification/review configured [+15]"
+                    }
+                    if ($resCount -ge 20) {
+                        $structuralScore += 15
+                        $structuralReasons += "High resource count: $resCount resources granted [+15]"
+                    } elseif ($resCount -ge 10) {
+                        $structuralScore += 8
+                        $structuralReasons += "Moderate resource count: $resCount resources granted [+8]"
+                    }
+                    $polCount = if ($brPolicyCounts.ContainsKey($brId)) { $brPolicyCounts[$brId] } else { 0 }
+                    if ($polCount -eq 0) {
+                        $structuralScore += 10
+                        $structuralReasons += "No assignment policy defined [+10]"
+                    }
+                    $structuralScore = [Math]::Min(100, $structuralScore)
+
+                    # --- Propagated (20%): Aggregate risk from granted resources ---
+                    $propagatedScore = 0
+                    $propagatedReasons = @()
+                    if ($brResourceIds.ContainsKey($brId) -and $brResourceIds[$brId].Count -gt 0) {
+                        $resScores = @()
+                        foreach ($rId in $brResourceIds[$brId]) {
+                            if ($resourceRiskScores.ContainsKey($rId)) {
+                                $resScores += $resourceRiskScores[$rId].riskScore
+                            }
+                        }
+                        if ($resScores.Count -gt 0) {
+                            $maxResScore = ($resScores | Measure-Object -Maximum).Maximum
+                            $avgResScore = [Math]::Round(($resScores | Measure-Object -Average).Average, 1)
+                            $propagatedScore = [int]([Math]::Max($maxResScore * 0.5, $avgResScore * 0.7))
+                            $propagatedReasons += "Resource risk propagation: max=$maxResScore, avg=$avgResScore from $($resScores.Count) resources [+$propagatedScore]"
+                        }
+                    }
+                    $propagatedScore = [Math]::Min(100, $propagatedScore)
+
+                    # --- Final score ---
+                    $final = [Math]::Min(100, [int]($wDirect * $directScore + $wMembership * $membershipScore + $wStructural * $structuralScore + $wPropagated * $propagatedScore))
+                    $tier = Get-RiskTier -Score $final
+                    $matchJson = ($classifierHits | ConvertTo-Json -Depth 100 -Compress)
+                    if ($classifierHits.Count -eq 0) { $matchJson = "[]" }
+                    $explanation = @{
+                        direct = $directReasons
+                        membership = $membershipReasons
+                        structural = $structuralReasons
+                        propagated = $propagatedReasons
+                    }
+                    $explainJson = ($explanation | ConvertTo-Json -Depth 100 -Compress)
+
+                    $brUpdates += @{
+                        id = $brId
+                        riskScore = $final
+                        riskTier = $tier
+                        riskDirectScore = $directScore
+                        riskMembershipScore = $membershipScore
+                        riskStructuralScore = $structuralScore
+                        riskPropagatedScore = $propagatedScore
+                        riskClassifierMatches = $matchJson
+                        riskExplanation = $explainJson
+                    }
+                }
+
+                # Write BusinessRole scores
+                $updated = 0
+                for ($i = 0; $i -lt $brUpdates.Count; $i += $batchSize) {
+                    $batch = $brUpdates[$i..[Math]::Min($i + $batchSize - 1, $brUpdates.Count - 1)]
+                    Write-RiskScoreBatch -batch $batch -entityType 'BusinessRole'
+                    $updated += $batch.Count
+                    if ($updated % 500 -eq 0 -or $updated -eq $brUpdates.Count) {
+                        Write-Host "    BusinessRoles: $updated / $($brUpdates.Count)" -ForegroundColor Gray
+                    }
+                }
+                Write-Host "    BusinessRoles scored: $($brUpdates.Count)" -ForegroundColor Green
+            } else {
+                Write-Host "    No business roles found — skipping" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  No BusinessRole resources found — skipping" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  WARNING: BusinessRole scoring failed: $_" -ForegroundColor Yellow
+    }
+
+    # ------------------------------------------------------------------
+    # 2. OrgUnit Scoring
+    # ------------------------------------------------------------------
+
+    $ouUpdates = @()
+    try {
+        $ouExists = $false
+        $cmd = $entityScoringConnection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.OrgUnits', 'U')"
+        $result = $cmd.ExecuteScalar()
+        if ($null -ne $result -and $result -isnot [DBNull]) {
+            $ouExists = $true
+        }
+
+        if ($ouExists) {
+            Write-Host ""
+            Write-Host "  Scoring OrgUnits..." -ForegroundColor Cyan
+
+            $orgUnits = @()
+            $ouMemberPrincipalScores = @{}  # ouId -> @(riskScore, ...)
+
+            # Load OrgUnits
+            $cmd = $entityScoringConnection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = "SELECT id, displayName, department, managerId, memberCount, totalMemberCount, parentOrgUnitId, officeLocation FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                $orgUnits += @{
+                    id = "$($reader['id'])"
+                    displayName = if ($reader['displayName'] -is [DBNull]) { "" } else { "$($reader['displayName'])" }
+                    department = if ($reader['department'] -is [DBNull]) { "" } else { "$($reader['department'])" }
+                    managerId = if ($reader['managerId'] -is [DBNull]) { "" } else { "$($reader['managerId'])" }
+                    memberCount = if ($reader['memberCount'] -is [DBNull]) { 0 } else { [int]$reader['memberCount'] }
+                    totalMemberCount = if ($reader['totalMemberCount'] -is [DBNull]) { 0 } else { [int]$reader['totalMemberCount'] }
+                    parentOrgUnitId = if ($reader['parentOrgUnitId'] -is [DBNull]) { "" } else { "$($reader['parentOrgUnitId'])" }
+                    officeLocation = if ($reader['officeLocation'] -is [DBNull]) { "" } else { "$($reader['officeLocation'])" }
+                }
+            }
+            $reader.Close()
+
+            # Load principal risk scores grouped by orgUnitId (batch query)
+            $cmd2 = $entityScoringConnection.CreateCommand()
+            $cmd2.CommandTimeout = 120
+            $cmd2.CommandText = @"
+SELECT p.orgUnitId, r.riskScore
+FROM dbo.Principals p
+INNER JOIN dbo.RiskScores r ON r.entityId = p.id AND r.entityType = 'Principal'
+WHERE p.orgUnitId IS NOT NULL AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+            $reader2 = $cmd2.ExecuteReader()
+            while ($reader2.Read()) {
+                $ouId = "$($reader2['orgUnitId'])"
+                if (-not $ouMemberPrincipalScores.ContainsKey($ouId)) { $ouMemberPrincipalScores[$ouId] = @() }
+                $ouMemberPrincipalScores[$ouId] += [int]$reader2['riskScore']
+            }
+            $reader2.Close()
+
+            Write-Host "    Loaded $($orgUnits.Count) org units" -ForegroundColor Gray
+
+            if ($orgUnits.Count -gt 0) {
+                # Build parent score lookup for propagation (two-pass: score first, propagate second)
+                $ouScoresById = @{}
+
+                foreach ($ou in $orgUnits) {
+                    $ouId = $ou.id
+                    $name = $ou.displayName
+                    $dept = $ou.department
+                    $memberCount = $ou.memberCount
+
+                    # --- Direct (50%): Classifier matches on displayName/department ---
+                    $bestScore = 0
+                    $classifierHits = @()
+                    $directReasons = @()
+
+                    foreach ($c in $userClassifiers) {
+                        $nameMatch = Test-PatternMatch -Text $name -Patterns $c.name_patterns
+                        $deptMatch = Test-PatternMatch -Text $dept -Patterns $c.name_patterns
+                        if ($nameMatch -or $deptMatch) {
+                            $classifierHits += @{ id = $c.id; category = $c.category; score = [int]$c.base_score; rationale = $c.rationale }
+                            $matchedOn = @()
+                            if ($nameMatch) { $matchedOn += "displayName" }
+                            if ($deptMatch) { $matchedOn += "department" }
+                            $directReasons += "Matched '$($c.id)' on $($matchedOn -join ' and ') [+$($c.base_score)]"
+                            if ([int]$c.base_score -gt $bestScore) { $bestScore = [int]$c.base_score }
+                        }
+                    }
+                    $directScore = $bestScore
+
+                    # Root OrgUnit bonus
+                    if ($ou.parentOrgUnitId -eq "") {
+                        $directScore = [Math]::Min(100, $directScore + 10)
+                        $directReasons += "Root OrgUnit (no parent) [+10]"
+                    }
+
+                    # --- Membership (20%): Aggregate principal risk ---
+                    $membershipScore = 0
+                    $membershipReasons = @()
+                    if ($ouMemberPrincipalScores.ContainsKey($ouId) -and $ouMemberPrincipalScores[$ouId].Count -gt 0) {
+                        $memberScores = $ouMemberPrincipalScores[$ouId]
+                        $avgScore = [Math]::Round(($memberScores | Measure-Object -Average).Average, 1)
+                        $membershipScore = [int]$avgScore
+                        $membershipReasons += "Average principal risk: $avgScore from $($memberScores.Count) members [+$membershipScore]"
+                    }
+                    $membershipScore = [Math]::Min(100, $membershipScore)
+
+                    # --- Structural (10%): Governance signals ---
+                    $structuralScore = 0
+                    $structuralReasons = @()
+                    if ($memberCount -lt 3 -and $memberCount -gt 0) {
+                        $structuralScore += 5
+                        $structuralReasons += "Very small unit ($memberCount members) — concentrated power [+5]"
+                    }
+                    if ($memberCount -gt 50) {
+                        $structuralScore += 3
+                        $structuralReasons += "Large unit ($memberCount members) — harder to govern [+3]"
+                    }
+                    if ($ou.managerId -eq "") {
+                        $structuralScore += 5
+                        $structuralReasons += "No manager assigned [+5]"
+                    }
+                    $structuralScore = [Math]::Min(100, $structuralScore)
+
+                    # --- Propagated (20%): Deferred until second pass ---
+                    $propagatedScore = 0
+                    $propagatedReasons = @()
+
+                    # Store intermediate score for propagation lookup
+                    $prePropagate = [int]($wDirect * $directScore + $wMembership * $membershipScore + $wStructural * $structuralScore)
+                    $ouScoresById[$ouId] = @{
+                        directScore = $directScore
+                        membershipScore = $membershipScore
+                        structuralScore = $structuralScore
+                        propagatedScore = 0
+                        propagatedReasons = @()
+                        classifierHits = $classifierHits
+                        directReasons = $directReasons
+                        membershipReasons = $membershipReasons
+                        structuralReasons = $structuralReasons
+                        prePropagate = $prePropagate
+                    }
+                }
+
+                # Second pass: propagate parent OrgUnit risk down
+                foreach ($ou in $orgUnits) {
+                    $ouId = $ou.id
+                    $parentId = $ou.parentOrgUnitId
+                    if ($parentId -ne "" -and $ouScoresById.ContainsKey($parentId)) {
+                        $parentPre = $ouScoresById[$parentId].prePropagate
+                        $inherited = [int]($parentPre * 0.20)
+                        if ($inherited -gt 0) {
+                            $ouScoresById[$ouId].propagatedScore = $inherited
+                            $ouScoresById[$ouId].propagatedReasons += "Inherited 20% from parent OrgUnit (score $parentPre) [+$inherited]"
+                        }
+                    }
+                }
+
+                # Build final updates
+                foreach ($ou in $orgUnits) {
+                    $ouId = $ou.id
+                    $s = $ouScoresById[$ouId]
+                    $final = [Math]::Min(100, [int]($wDirect * $s.directScore + $wMembership * $s.membershipScore + $wStructural * $s.structuralScore + $wPropagated * $s.propagatedScore))
+                    $tier = Get-RiskTier -Score $final
+                    $matchJson = ($s.classifierHits | ConvertTo-Json -Depth 100 -Compress)
+                    if ($s.classifierHits.Count -eq 0) { $matchJson = "[]" }
+                    $explanation = @{
+                        direct = $s.directReasons
+                        membership = $s.membershipReasons
+                        structural = $s.structuralReasons
+                        propagated = $s.propagatedReasons
+                    }
+                    $explainJson = ($explanation | ConvertTo-Json -Depth 100 -Compress)
+
+                    $ouUpdates += @{
+                        id = $ouId
+                        riskScore = $final
+                        riskTier = $tier
+                        riskDirectScore = $s.directScore
+                        riskMembershipScore = $s.membershipScore
+                        riskStructuralScore = $s.structuralScore
+                        riskPropagatedScore = $s.propagatedScore
+                        riskClassifierMatches = $matchJson
+                        riskExplanation = $explainJson
+                    }
+                }
+
+                # Write OrgUnit scores
+                $updated = 0
+                for ($i = 0; $i -lt $ouUpdates.Count; $i += $batchSize) {
+                    $batch = $ouUpdates[$i..[Math]::Min($i + $batchSize - 1, $ouUpdates.Count - 1)]
+                    Write-RiskScoreBatch -batch $batch -entityType 'OrgUnit'
+                    $updated += $batch.Count
+                    if ($updated % 500 -eq 0 -or $updated -eq $ouUpdates.Count) {
+                        Write-Host "    OrgUnits: $updated / $($ouUpdates.Count)" -ForegroundColor Gray
+                    }
+                }
+                Write-Host "    OrgUnits scored: $($ouUpdates.Count)" -ForegroundColor Green
+            } else {
+                Write-Host "    No org units found — skipping" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  OrgUnits table not found — skipping" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  WARNING: OrgUnit scoring failed: $_" -ForegroundColor Yellow
+    }
+
+    # ------------------------------------------------------------------
+    # 3. Identity Scoring
+    # ------------------------------------------------------------------
+
+    $idUpdates = @()
+    try {
+        $idExists = $false
+        $cmd = $entityScoringConnection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Identities', 'U')"
+        $result = $cmd.ExecuteScalar()
+        if ($null -ne $result -and $result -isnot [DBNull]) {
+            $idExists = $true
+        }
+
+        if ($idExists) {
+            Write-Host ""
+            Write-Host "  Scoring Identities..." -ForegroundColor Cyan
+
+            $identities = @()
+            $identityPrincipalIds = @{}  # identityId -> @(principalId, ...)
+            $identityPrincipalSystems = @{} # identityId -> @(systemId, ...)
+
+            # Load Identities
+            $cmd = $entityScoringConnection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = "SELECT id, displayName, accountCount, correlationConfidence, analystVerified, orphanStatus, accountTypes FROM dbo.Identities WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                $identities += @{
+                    id = "$($reader['id'])"
+                    displayName = if ($reader['displayName'] -is [DBNull]) { "" } else { "$($reader['displayName'])" }
+                    accountCount = if ($reader['accountCount'] -is [DBNull]) { 0 } else { [int]$reader['accountCount'] }
+                    correlationConfidence = if ($reader['correlationConfidence'] -is [DBNull]) { 1.0 } else { [double]$reader['correlationConfidence'] }
+                    analystVerified = if ($reader['analystVerified'] -is [DBNull]) { $false } else { [bool]$reader['analystVerified'] }
+                    orphanStatus = if ($reader['orphanStatus'] -is [DBNull]) { "" } else { "$($reader['orphanStatus'])" }
+                    accountTypes = if ($reader['accountTypes'] -is [DBNull]) { "" } else { "$($reader['accountTypes'])" }
+                }
+            }
+            $reader.Close()
+
+            # Load identity-to-principal links with systemId
+            $cmd2 = $entityScoringConnection.CreateCommand()
+            $cmd2.CommandTimeout = 120
+            $cmd2.CommandText = @"
+SELECT im.identityId, im.principalId, p.systemId
+FROM dbo.IdentityMembers im
+INNER JOIN dbo.Principals p ON p.id = im.principalId AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+WHERE im.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+            $reader2 = $cmd2.ExecuteReader()
+            while ($reader2.Read()) {
+                $iId = "$($reader2['identityId'])"
+                $linkedPrincipalId = "$($reader2['principalId'])"
+                $sId = if ($reader2['systemId'] -is [DBNull]) { "" } else { "$($reader2['systemId'])" }
+                if (-not $identityPrincipalIds.ContainsKey($iId)) { $identityPrincipalIds[$iId] = @(); $identityPrincipalSystems[$iId] = @() }
+                $identityPrincipalIds[$iId] += $linkedPrincipalId
+                if ($sId -ne "" -and $sId -notin $identityPrincipalSystems[$iId]) { $identityPrincipalSystems[$iId] += $sId }
+            }
+            $reader2.Close()
+
+            Write-Host "    Loaded $($identities.Count) identities" -ForegroundColor Gray
+
+            if ($identities.Count -gt 0) {
+                foreach ($identity in $identities) {
+                    $iId = $identity.id
+                    $acctCount = $identity.accountCount
+
+                    # --- Direct (50%): Account multiplicity + multi-system ---
+                    $directScore = 0
+                    $classifierHits = @()
+                    $directReasons = @()
+
+                    if ($acctCount -eq 2) {
+                        $directScore += 10
+                        $directReasons += "2 linked accounts [+10]"
+                    } elseif ($acctCount -eq 3) {
+                        $directScore += 20
+                        $directReasons += "3 linked accounts [+20]"
+                    } elseif ($acctCount -ge 4) {
+                        $directScore += 30
+                        $directReasons += "$acctCount linked accounts [+30]"
+                    }
+
+                    # Multi-system bonus
+                    $systemCount = if ($identityPrincipalSystems.ContainsKey($iId)) { $identityPrincipalSystems[$iId].Count } else { 0 }
+                    if ($systemCount -gt 1) {
+                        $extraSystems = $systemCount - 1
+                        $multiSystemBonus = $extraSystems * 15
+                        $directScore += $multiSystemBonus
+                        $directReasons += "Multi-system identity: $systemCount systems (+$multiSystemBonus for $extraSystems additional)"
+                    }
+                    $directScore = [Math]::Min(100, $directScore)
+
+                    # --- Membership (20%): Highest-risk principal drives identity risk ---
+                    $membershipScore = 0
+                    $membershipReasons = @()
+                    if ($identityPrincipalIds.ContainsKey($iId) -and $identityPrincipalIds[$iId].Count -gt 0) {
+                        $maxPrincipalScore = 0
+                        foreach ($linkedPrincipalId in $identityPrincipalIds[$iId]) {
+                            if ($principalRiskScores.ContainsKey($linkedPrincipalId)) {
+                                $pScore = $principalRiskScores[$linkedPrincipalId].riskScore
+                                if ($pScore -gt $maxPrincipalScore) { $maxPrincipalScore = $pScore }
+                            }
+                        }
+                        $membershipScore = $maxPrincipalScore
+                        if ($maxPrincipalScore -gt 0) {
+                            $membershipReasons += "Highest-risk linked principal: score $maxPrincipalScore [+$maxPrincipalScore]"
+                        }
+                    }
+                    $membershipScore = [Math]::Min(100, $membershipScore)
+
+                    # --- Structural (10%): Identity hygiene ---
+                    $structuralScore = 0
+                    $structuralReasons = @()
+                    if ($identity.orphanStatus -ne "") {
+                        $structuralScore += 15
+                        $structuralReasons += "Orphaned account (status: $($identity.orphanStatus)) [+15]"
+                    }
+                    if ($identity.correlationConfidence -lt 0.5) {
+                        $structuralScore += 10
+                        $structuralReasons += "Low correlation confidence: $($identity.correlationConfidence) [+10]"
+                    }
+                    if ($acctCount -gt 1 -and -not $identity.analystVerified) {
+                        $structuralScore += 5
+                        $structuralReasons += "Multi-account identity not analyst-verified [+5]"
+                    }
+                    $structuralScore = [Math]::Min(100, $structuralScore)
+
+                    # --- Propagated (20%): Critical/High principal risk propagation ---
+                    $propagatedScore = 0
+                    $propagatedReasons = @()
+                    if ($identityPrincipalIds.ContainsKey($iId)) {
+                        $maxCritHighScore = 0
+                        foreach ($linkedPrincipalId in $identityPrincipalIds[$iId]) {
+                            if ($principalRiskScores.ContainsKey($linkedPrincipalId)) {
+                                $pTier = $principalRiskScores[$linkedPrincipalId].riskTier
+                                $pScore = $principalRiskScores[$linkedPrincipalId].riskScore
+                                if (($pTier -eq 'Critical' -or $pTier -eq 'High') -and $pScore -gt $maxCritHighScore) {
+                                    $maxCritHighScore = $pScore
+                                }
+                            }
+                        }
+                        if ($maxCritHighScore -gt 0) {
+                            $propagatedScore = [int]($maxCritHighScore * 0.30)
+                            $propagatedReasons += "Propagated 30% from Critical/High principal (score $maxCritHighScore) [+$propagatedScore]"
+                        }
+                    }
+                    $propagatedScore = [Math]::Min(100, $propagatedScore)
+
+                    # --- Final score ---
+                    $final = [Math]::Min(100, [int]($wDirect * $directScore + $wMembership * $membershipScore + $wStructural * $structuralScore + $wPropagated * $propagatedScore))
+                    $tier = Get-RiskTier -Score $final
+                    $matchJson = ($classifierHits | ConvertTo-Json -Depth 100 -Compress)
+                    if ($classifierHits.Count -eq 0) { $matchJson = "[]" }
+                    $explanation = @{
+                        direct = $directReasons
+                        membership = $membershipReasons
+                        structural = $structuralReasons
+                        propagated = $propagatedReasons
+                    }
+                    $explainJson = ($explanation | ConvertTo-Json -Depth 100 -Compress)
+
+                    $idUpdates += @{
+                        id = $iId
+                        riskScore = $final
+                        riskTier = $tier
+                        riskDirectScore = $directScore
+                        riskMembershipScore = $membershipScore
+                        riskStructuralScore = $structuralScore
+                        riskPropagatedScore = $propagatedScore
+                        riskClassifierMatches = $matchJson
+                        riskExplanation = $explainJson
+                    }
+                }
+
+                # Write Identity scores
+                $updated = 0
+                for ($i = 0; $i -lt $idUpdates.Count; $i += $batchSize) {
+                    $batch = $idUpdates[$i..[Math]::Min($i + $batchSize - 1, $idUpdates.Count - 1)]
+                    Write-RiskScoreBatch -batch $batch -entityType 'Identity'
+                    $updated += $batch.Count
+                    if ($updated % 500 -eq 0 -or $updated -eq $idUpdates.Count) {
+                        Write-Host "    Identities: $updated / $($idUpdates.Count)" -ForegroundColor Gray
+                    }
+                }
+                Write-Host "    Identities scored: $($idUpdates.Count)" -ForegroundColor Green
+            } else {
+                Write-Host "    No identities found — skipping" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  Identities table not found — skipping" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  WARNING: Identity scoring failed: $_" -ForegroundColor Yellow
+    }
+
+    } finally {
+        # Close the dedicated entity scoring connection
+        if ($entityScoringConnection -and $entityScoringConnection.State -eq 'Open') {
+            $entityScoringConnection.Close()
+        }
+        if ($entityScoringConnection) { $entityScoringConnection.Dispose() }
+    }
+
+    # Collect memory after additional entity scoring
+    [System.GC]::Collect()
+    Write-MemoryUsage "after additional entity scoring"
 
     # ================================================================
     # Build Resource Clusters
@@ -1532,19 +2070,65 @@ WHERE id = @id
     }
 
     Write-Host ""
-    Write-Host "  Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
-    Write-Host "  Scored:   $($groupUpdates.Count) groups, $($userUpdates.Count) users" -ForegroundColor Gray
+    # Additional entity tier distributions
+    if ($brUpdates.Count -gt 0) {
+        $brTiers = @{}
+        foreach ($bu in $brUpdates) { $t = $bu.riskTier; if (-not $brTiers.ContainsKey($t)) { $brTiers[$t] = 0 }; $brTiers[$t]++ }
+        Write-Host ""
+        Write-Host "  BusinessRole Distribution:" -ForegroundColor Gray
+        foreach ($tier in @('Critical', 'High', 'Medium', 'Low', 'Minimal', 'None')) {
+            $count = if ($brTiers.ContainsKey($tier)) { $brTiers[$tier] } else { 0 }
+            if ($count -gt 0) {
+                $tierColor = switch ($tier) { 'Critical' { 'Red' } 'High' { 'Yellow' } 'Medium' { 'Yellow' } 'Low' { 'Cyan' } default { 'Gray' } }
+                Write-Host "    $($tier.PadRight(10)) $count" -ForegroundColor $tierColor
+            }
+        }
+    }
+
+    if ($ouUpdates.Count -gt 0) {
+        $ouTiers = @{}
+        foreach ($ou in $ouUpdates) { $t = $ou.riskTier; if (-not $ouTiers.ContainsKey($t)) { $ouTiers[$t] = 0 }; $ouTiers[$t]++ }
+        Write-Host ""
+        Write-Host "  OrgUnit Distribution:" -ForegroundColor Gray
+        foreach ($tier in @('Critical', 'High', 'Medium', 'Low', 'Minimal', 'None')) {
+            $count = if ($ouTiers.ContainsKey($tier)) { $ouTiers[$tier] } else { 0 }
+            if ($count -gt 0) {
+                $tierColor = switch ($tier) { 'Critical' { 'Red' } 'High' { 'Yellow' } 'Medium' { 'Yellow' } 'Low' { 'Cyan' } default { 'Gray' } }
+                Write-Host "    $($tier.PadRight(10)) $count" -ForegroundColor $tierColor
+            }
+        }
+    }
+
+    if ($idUpdates.Count -gt 0) {
+        $idTiers = @{}
+        foreach ($iu in $idUpdates) { $t = $iu.riskTier; if (-not $idTiers.ContainsKey($t)) { $idTiers[$t] = 0 }; $idTiers[$t]++ }
+        Write-Host ""
+        Write-Host "  Identity Distribution:" -ForegroundColor Gray
+        foreach ($tier in @('Critical', 'High', 'Medium', 'Low', 'Minimal', 'None')) {
+            $count = if ($idTiers.ContainsKey($tier)) { $idTiers[$tier] } else { 0 }
+            if ($count -gt 0) {
+                $tierColor = switch ($tier) { 'Critical' { 'Red' } 'High' { 'Yellow' } 'Medium' { 'Yellow' } 'Low' { 'Cyan' } default { 'Gray' } }
+                Write-Host "    $($tier.PadRight(10)) $count" -ForegroundColor $tierColor
+            }
+        }
+    }
+
     Write-Host ""
-    $persistedTo = @('GraphUsers', 'GraphGroups')
-    if ($usePrincipals) { $persistedTo += 'Principals' }
-    Write-Host "  Scores are persisted on $($persistedTo -join ', ') tables." -ForegroundColor Gray
-    Write-Host "  The UI Risk Scores tab reads these directly from SQL." -ForegroundColor Gray
+    Write-Host "  Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
+    $scoredParts = @("$($groupUpdates.Count) groups", "$($userUpdates.Count) users")
+    if ($brUpdates.Count -gt 0) { $scoredParts += "$($brUpdates.Count) business roles" }
+    if ($ouUpdates.Count -gt 0) { $scoredParts += "$($ouUpdates.Count) org units" }
+    if ($idUpdates.Count -gt 0) { $scoredParts += "$($idUpdates.Count) identities" }
+    Write-Host "  Scored:   $($scoredParts -join ', ')" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Scores persisted to RiskScores table (temporal, with history)." -ForegroundColor Gray
+    Write-Host "  Denormalized riskScore + riskTier on Principals and Resources for filtering." -ForegroundColor Gray
+    Write-Host "  The UI Risk Scores tab reads from RiskScores table." -ForegroundColor Gray
     Write-Host ""
 
     # Write sync log entry
-    $totalScored = $groupUpdates.Count + $userUpdates.Count
-    $scoredTablesList = @('GraphUsers', 'GraphGroups')
-    if ($useResourceModel) { $scoredTablesList += 'Resources' }
+    $totalScored = $groupUpdates.Count + $userUpdates.Count + $brUpdates.Count + $ouUpdates.Count + $idUpdates.Count
+    $scoredTablesList = @('RiskScores')
     if ($usePrincipals) { $scoredTablesList += 'Principals' }
     $scoredTables = $scoredTablesList -join ','
     Write-FGSyncLog -SyncType "RiskScoring" -StartTime $startTime -RecordCount $totalScored -Status "Success" -TableName $scoredTables

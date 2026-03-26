@@ -181,7 +181,7 @@ function Set-FGUI {
                     'GraphGroups',
                     'GraphGroupMembers',
                     'GraphGroupOwners',
-                    'BusinessRoleAssignments',
+                    'ResourceAssignments',
                     'mat_UserPermissionAssignments'
                 )
 
