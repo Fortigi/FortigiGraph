@@ -81,6 +81,7 @@ nav:
   - Role Mining UI:
       - Overview: ui/overview.md
       - Deployment: ui/deployment.md
+      - Local Development: ui/local-dev.md
   - API Reference:
       - Overview: api/index.md
       - Matrix & Permissions: api/matrix.md
