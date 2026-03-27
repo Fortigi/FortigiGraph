@@ -92,6 +92,14 @@ router.get('/permissions', async (req, res) => {
     if (useSql) {
       const p = await db.getPool();
 
+      // Return empty data when sync hasn't run yet (GraphUsers table doesn't exist)
+      const tableCheck = await p.request().query(
+        `SELECT OBJECT_ID('dbo.GraphUsers', 'U') AS graphUsersExists`
+      );
+      if (!tableCheck.recordset[0].graphUsersExists) {
+        return res.json({ data: [], totalUsers: 0, managedByPackages: [] });
+      }
+
       // Prefer materialized tables (fast) with view fallback (slow but always current)
       const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
