@@ -213,6 +213,52 @@ function Sync-FGCSVResource {
 
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resources: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
+            # Handle deletions — scoped to CSV systems only
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted resources (scoped to CSV systems)..." -ForegroundColor Cyan
+
+            $csvSystemIds = @()
+            if ($Global:FGCSVSystemLookup -and $Global:FGCSVSystemLookup.Count -gt 0) {
+                $csvSystemIds = @($Global:FGCSVSystemLookup.Values | Sort-Object -Unique)
+            }
+
+            $deletedCount = 0
+            if ($csvSystemIds.Count -eq 0) {
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No CSV system IDs found. Skipping delete step to avoid removing Entra resources."
+            }
+            else {
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.Transaction = $transaction
+                $deleteCmd.CommandTimeout = 120
+                $deleteCmd.CommandText = "CREATE TABLE #CSVResSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+                $deleteCmd.ExecuteNonQuery() | Out-Null
+                $idTable = New-Object System.Data.DataTable
+                [void]$idTable.Columns.Add("id", [System.Guid])
+                foreach ($row in $dataTable.Rows) { [void]$idTable.Rows.Add($row["id"]) }
+                $bc = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+                $bc.DestinationTableName = "#CSVResSourceIds"
+                $bc.WriteToServer($idTable)
+                $bc.Close()
+                # Only delete resources belonging to CSV systems that are not in the source data
+                $systemIdList = ($csvSystemIds | ForEach-Object { $_.ToString() }) -join ','
+                $deleteCmd.CommandText = @"
+DELETE r FROM dbo.Resources r
+LEFT JOIN #CSVResSourceIds s ON r.id = s.id
+WHERE r.systemId IN ($systemIdList) AND s.id IS NULL AND r.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+                $deletedCount = $deleteCmd.ExecuteNonQuery()
+                $deleteCmd.CommandText = "DROP TABLE #CSVResSourceIds"
+                $deleteCmd.ExecuteNonQuery() | Out-Null
+                $deleteCmd.Dispose()
+                $idTable.Dispose()
+            }
+
+            if ($deletedCount -gt 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount resources that no longer exist in CSV source (CSV systems only)" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted resources found" -ForegroundColor Green
+            }
+
             # Commit transaction
             $transaction.Commit()
             $transaction.Dispose()
@@ -220,6 +266,7 @@ function Sync-FGCSVResource {
             return @{
                 Inserted = $mergeResult.Inserted
                 Updated = $mergeResult.Updated
+                DeletedCount = $deletedCount
             }
         }
         catch {
@@ -240,6 +287,7 @@ function Sync-FGCSVResource {
     Write-Host "Total Resources:   $($csvRows.Count)" -ForegroundColor White
     Write-Host "  Inserted:        $($syncResult.Inserted)" -ForegroundColor White
     Write-Host "  Updated:         $($syncResult.Updated)" -ForegroundColor White
+    Write-Host "  Deleted:         $($syncResult.DeletedCount)" -ForegroundColor White
     if ($unmappedSystems.Count -gt 0) {
         Write-Host "  Unmapped Systems: $($unmappedSystems.Count)" -ForegroundColor Yellow
     }
@@ -251,6 +299,7 @@ function Sync-FGCSVResource {
         TotalRecords = $csvRows.Count
         Inserted = $syncResult.Inserted
         Updated = $syncResult.Updated
+        DeletedCount = $syncResult.DeletedCount
         UnmappedSystems = $unmappedSystems.Count
     }
 

@@ -356,7 +356,7 @@ router.get('/access-packages', async (req, res) => {
       WITH _assignmentCounts AS (
         SELECT resourceId, COUNT(*) AS cnt
         FROM dbo.ResourceAssignments
-        WHERE state = 'delivered' AND assignmentType = 'Governed'
+        WHERE (state = 'delivered' OR state IS NULL) AND assignmentType = 'Governed'
         GROUP BY resourceId
       ),
       _policyCounts AS (
@@ -406,7 +406,7 @@ router.get('/access-packages', async (req, res) => {
              ${reviewCols}
              ${hasReviewSettingsCol ? ', ri.reviewers AS reviewerInfo' : ', NULL AS reviewerInfo'}
       FROM dbo.Resources ap
-      INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+      LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
       LEFT JOIN _assignmentCounts ac ON ap.id = ac.resourceId
       LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
       LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
@@ -419,7 +419,7 @@ router.get('/access-packages', async (req, res) => {
 
       SELECT COUNT(*) AS total
       FROM dbo.Resources ap
-      INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+      LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
       LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
       LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
       WHERE ap.resourceType = 'BusinessRole' AND ${where};

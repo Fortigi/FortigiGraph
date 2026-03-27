@@ -128,7 +128,7 @@ FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
     LEFT JOIN dbo.$ResourcesTable r ON rrs.childResourceId = r.id
 WHERE a.assignmentType = 'Governed'
-  AND a.state = 'delivered'  -- Only active assignments
+  AND (a.state = 'delivered' OR a.state IS NULL)  -- Active: 'delivered' for Entra, NULL for derived
 "@
         }
         else {
@@ -155,7 +155,7 @@ FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
     LEFT JOIN dbo.$GroupsTable g ON rrs.childResourceId = g.id
 WHERE a.assignmentType = 'Governed'
-  AND a.state = 'delivered'  -- Only active assignments
+  AND (a.state = 'delivered' OR a.state IS NULL)  -- Active: 'delivered' for Entra, NULL for derived
 "@
         }
 
@@ -388,7 +388,7 @@ FROM dbo.$ResourceAssignmentsTable a
     LEFT JOIN BRPolicyType bpt
         ON a.resourceId = bpt.resourceId
 WHERE a.assignmentType = 'Governed'
-  AND a.state = 'delivered'
+  AND (a.state = 'delivered' OR a.state IS NULL)
 "@
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using enhanced assignment method detection (policy-based fallback)" -ForegroundColor Cyan
         }
@@ -430,7 +430,7 @@ FROM dbo.$ResourceAssignmentsTable a
         AND req.requestType IN ('SystemAdd', 'UserAdd', 'AdminAdd')
         AND req.requestState = 'Delivered'
 WHERE a.assignmentType = 'Governed'
-  AND a.state = 'delivered'
+  AND (a.state = 'delivered' OR a.state IS NULL)
 "@
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Using basic assignment method detection (re-sync policies to enable policy-based inference)" -ForegroundColor Yellow
         }

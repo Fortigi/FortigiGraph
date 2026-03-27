@@ -14,7 +14,7 @@ function arrayMove(arr, from, to) {
 }
 
 // Fields to exclude from filter (IDs, display names used as labels, not useful for filtering)
-const EXCLUDE_FIELDS = new Set(['groupId', 'resourceId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage']);
+const EXCLUDE_FIELDS = new Set(['groupId', 'resourceId', 'memberId', 'memberDisplayName', 'memberUPN', 'memberType', 'managedByAccessPackage', 'systemId', 'systemName', 'resourceDisplayName', 'groupDisplayName', 'resourceType', 'groupTypeCalculated', 'resourceDescription', 'groupDescription']);
 // Friendly labels for known fields
 const FIELD_LABELS = {
   // User columns
@@ -52,6 +52,7 @@ export default function MatrixView({
 }) {
   const [groupTypeFilter, setGroupTypeFilter] = useState(null); // null = all, Set = selected types
   const [groupTagFilter, setGroupTagFilter] = useState(null); // null = all, Set = selected tag names
+  const [systemNameFilter, setSystemNameFilter] = useState(null); // null = all, Set = selected system names
 
   // ─── Nested group expansion ─────────────────────────────────────
   const { authFetch } = useAuth();
@@ -270,6 +271,7 @@ export default function MatrixView({
           tags,
           description: d.resourceDescription || d.groupDescription || '',
           groupType: d.resourceType || d.groupTypeCalculated || '',
+          systemName: d.systemName || '',
         });
       }
 
@@ -287,6 +289,7 @@ export default function MatrixView({
             tags,
             description: d.resourceDescription || d.groupDescription || '',
             groupType: d.resourceType || d.groupTypeCalculated || '',
+            systemName: d.systemName || '',
           });
         }
       }
@@ -444,6 +447,13 @@ export default function MatrixView({
     return [...types].sort();
   }, [groups]);
 
+  // Unique system names for filter dropdown
+  const uniqueSystemNames = useMemo(() => {
+    const names = new Set();
+    groups.forEach(g => { if (g.systemName) names.add(g.systemName); });
+    return [...names].sort();
+  }, [groups]);
+
   // Unique group tags for filter dropdown (derived from groups which already have tags attached)
   const uniqueGroupTags = useMemo(() => {
     const tagMap = new Map(); // name -> { name, color }
@@ -510,7 +520,7 @@ export default function MatrixView({
     });
   }, [groups, accessPackages, apGroupMap]);
 
-  // Apply custom row order (drag), then filter by group type and tags
+  // Apply custom row order (drag), then filter by group type, tags, and system
   const orderedGroups = useMemo(() => {
     let result = rowOrderHook.getOrderedGroups(apSortedGroups);
     if (groupTypeFilter && groupTypeFilter.size > 0) {
@@ -524,8 +534,11 @@ export default function MatrixView({
         return tags.some(t => groupTagFilter.has(t.name));
       });
     }
+    if (systemNameFilter && systemNameFilter.size > 0) {
+      result = result.filter(g => systemNameFilter.has(g.systemName));
+    }
     return result;
-  }, [apSortedGroups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter]);
+  }, [apSortedGroups, rowOrderHook.getOrderedGroups, groupTypeFilter, groupTagFilter, systemNameFilter]);
 
   const groupIds = useMemo(() => orderedGroups.map(g => g.id), [orderedGroups]);
 
@@ -624,6 +637,7 @@ export default function MatrixView({
           displayName: ng.displayName || ng.resourceId || ng.groupId,
           groupType: ng.resourceType || ng.groupTypeCalculated || '',
           description: ng.description || '',
+          systemName: ng.systemName || '',
           tags: [],
           isNestedRow: true,
           nestLevel: level + 1,
@@ -742,8 +756,8 @@ export default function MatrixView({
     memberships: memberships.size,
   };
 
-  // Number of info columns (drag handle + category + group name)
-  const infoColumnCount = 3;
+  // Number of info columns (drag handle + system + tags + resource name)
+  const infoColumnCount = 4;
 
   // Shared column headers element (used by both sortable and static table)
   const columnHeaders = (
@@ -758,6 +772,9 @@ export default function MatrixView({
       uniqueGroupTags={uniqueGroupTags}
       groupTagFilter={groupTagFilter}
       onGroupTagFilterChange={setGroupTagFilter}
+      uniqueSystemNames={uniqueSystemNames}
+      systemNameFilter={systemNameFilter}
+      onSystemNameFilterChange={setSystemNameFilter}
       hasGroupsWithoutTags={hasGroupsWithoutTags}
       onOpenDetail={onOpenDetail}
     />

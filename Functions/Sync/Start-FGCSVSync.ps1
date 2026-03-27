@@ -73,7 +73,6 @@ function Start-FGCSVSync {
         Principals = $null
         Identities = $null
         ResourceAssignments = $null
-        BusinessRolesAndPolicies = $null
         Certifications = $null
         Errors = @()
     }
@@ -96,7 +95,6 @@ function Start-FGCSVSync {
         Principals          = Join-Path $FolderPath "Users.csv"
         Identities          = Join-Path $FolderPath "Identities.csv"
         ResourceAssignments = Join-Path $FolderPath "Account-Permission.csv"
-        BusinessRolesAndPolicies = Join-Path $FolderPath "AssignmentPolicies.csv"
         Certifications      = Join-Path $FolderPath "CRAs.csv"
     }
 
@@ -110,7 +108,7 @@ function Start-FGCSVSync {
     }
 
     if ($foundCount -eq 0) {
-        throw "No recognized CSV files found in $FolderPath. Expected: System.csv, ResourceSystem.csv, Users.csv, Identities.csv, Account-Permission.csv, AssignmentPolicies.csv, CRAs.csv"
+        throw "No recognized CSV files found in $FolderPath. Expected: System.csv, ResourceSystem.csv, Users.csv, Identities.csv, Account-Permission.csv, CRAs.csv"
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $foundCount CSV file(s)`n" -ForegroundColor Green
@@ -203,19 +201,6 @@ function Start-FGCSVSync {
             }
         }
 
-        # 6. Business Roles (assignment policies)
-        if (Test-Path $csvFiles.BusinessRolesAndPolicies) {
-            Write-Host "`n=== Syncing Business Roles ===" -ForegroundColor Yellow
-            try {
-                $syncStats.BusinessRolesAndPolicies = Sync-FGCSVBusinessRole -Path $csvFiles.BusinessRolesAndPolicies
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Business Roles sync complete" -ForegroundColor Green
-            }
-            catch {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Business Roles sync failed: $_" -ForegroundColor Red
-                $syncStats.Errors += [PSCustomObject]@{ Entity = "BusinessRolesAndPolicies"; Message = $_.Exception.Message; Timestamp = Get-Date }
-            }
-        }
-
         # 7. Certifications (CRAs - depends on resources + principals)
         if (Test-Path $csvFiles.Certifications) {
             Write-Host "`n=== Syncing Certifications ===" -ForegroundColor Yellow
@@ -249,7 +234,7 @@ function Start-FGCSVSync {
     Write-Host "Duration:  $([math]::Round($elapsed.TotalMinutes, 1)) minutes" -ForegroundColor White
     Write-Host "System:    $SystemDisplayName (ID: $parentSystemId)" -ForegroundColor White
 
-    $entities = @('Systems', 'Resources', 'Principals', 'Identities', 'ResourceAssignments', 'BusinessRolesAndPolicies', 'Certifications')
+    $entities = @('Systems', 'Resources', 'Principals', 'Identities', 'ResourceAssignments', 'Certifications')
     foreach ($entity in $entities) {
         $result = $syncStats[$entity]
         if ($null -ne $result) {

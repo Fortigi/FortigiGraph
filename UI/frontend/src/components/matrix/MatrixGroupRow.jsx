@@ -62,10 +62,18 @@ export default function MatrixGroupRow({
         )}
       </td>
 
+      {/* System column - sticky left */}
+      <td
+        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-1 py-0.5 text-[10px] text-gray-500 truncate`}
+        style={{ left: '24px', minWidth: '80px', maxWidth: '80px', zIndex: 10 }}
+        title={group.systemName || ''}
+      >
+        {group.systemName || ''}
+      </td>
       {/* Tags column - sticky left */}
       <td
         className={`sticky ${nestedBg} border-r border-b border-gray-200 px-1 py-0.5`}
-        style={{ left: '24px', minWidth: '100px', maxWidth: '100px', zIndex: 10 }}
+        style={{ left: '104px', minWidth: '100px', maxWidth: '100px', zIndex: 10 }}
       >
         <div className="flex flex-wrap gap-0.5">
           {(group.tags || []).map(t => (
@@ -82,7 +90,7 @@ export default function MatrixGroupRow({
       </td>
       <td
         className={`sticky ${nestedBg} border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium`}
-        style={{ left: '124px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
+        style={{ left: '204px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
         title={group.displayName}
       >
         <div className="flex items-center gap-0.5" style={{ paddingLeft: (group.nestLevel || 0) * 16 }}>

@@ -257,3 +257,8 @@ UI/frontend/src/utils/exportToExcel.js
 - Resources page no longer shows `BusinessRole` resources — they appear only on their dedicated Business Roles tab
 - Updated all UI backend routes, risk scoring, CSV sync, export/import, and config functions to use unified table and column names
 - Updated README.md and CLAUDE.md to document the v3.1 unified data model
+- Fixed: Business Roles page did not show CSV-imported business roles because the query used INNER JOIN to GovernanceCatalogs — CSV business roles without a catalogId were filtered out; changed to LEFT JOIN so all business roles appear regardless of catalog assignment
+- Fixed critical data loss bug: `Sync-FGCSVResourceAssignment` used unscoped `Invoke-FGSQLBulkDelete` on the shared ResourceAssignments table — CSV sync deleted Entra's Direct/Owner/Eligible/Governed assignments; replaced with scoped delete that only removes assignments where the principal belongs to the CSV system
+- Fixed: `Sync-FGCSVResource` had no delete step — resources removed from the CSV source were never cleaned up from SQL; added scoped delete that only removes resources belonging to CSV systems, leaving Entra-synced resources untouched
+- Removed AssignmentPolicies.csv import from `Start-FGCSVSync` — the CSV sync no longer imports business roles and policies from AssignmentPolicies.csv, and the governed assignment derivation step has been removed
+- Matrix view now shows a "System" column to the left of the resource name — displays the system display name (e.g. "Entra ID", "Omada Identity") for each resource, with a filterable dropdown to show/hide resources by system

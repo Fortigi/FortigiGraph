@@ -291,6 +291,7 @@ router.get('/permissions', async (req, res) => {
             r.description AS resourceDescription,
             r.description AS groupDescription,
             r.systemId,
+            sys.displayName AS systemName,
             p.${COL_PRINC} AS memberId,
             u.displayName AS memberDisplayName,
             ${upnCol} AS memberUPN,
@@ -301,6 +302,7 @@ router.get('/permissions', async (req, res) => {
           FROM ${permSource} p
           INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
           LEFT JOIN Resources r ON p.${COL_RES} = r.id
+          LEFT JOIN Systems sys ON r.systemId = sys.id
           ${groupTagJoin}
           WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
             AND p.${COL_PRINC} IN (
@@ -369,6 +371,7 @@ router.get('/permissions', async (req, res) => {
           r.description AS resourceDescription,
           r.description AS groupDescription,
           r.systemId,
+          sys.displayName AS systemName,
           p.${COL_PRINC} AS memberId,
           u.displayName AS memberDisplayName,
           ${upnCol} AS memberUPN,
@@ -379,6 +382,7 @@ router.get('/permissions', async (req, res) => {
         FROM ${permSource} p
         INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
         LEFT JOIN Resources r ON p.${COL_RES} = r.id
+        LEFT JOIN Systems sys ON r.systemId = sys.id
         ${userTagJoin}
         ${groupTagJoin}
         WHERE p.${COL_PTYPE} != '#microsoft.graph.group'

@@ -251,15 +251,28 @@ function Sync-FGCSVBusinessRole {
 
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] BusinessRoles: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName "Resources" `
-                -DataTable $brDataTable `
-                -KeyColumns @('id')
+            # Scoped delete: only remove BusinessRole resources from THIS system that aren't in source
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            $deleteCmd.CommandText = "CREATE TABLE #CSVBRSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("id", [System.Guid])
+            foreach ($row in $brDataTable.Rows) { [void]$idTable.Rows.Add($row["id"]) }
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bc.DestinationTableName = "#CSVBRSourceIds"
+            $bc.WriteToServer($idTable)
+            $bc.Close()
+            $deleteCmd.CommandText = "DELETE FROM dbo.Resources WHERE resourceType = 'BusinessRole' AND systemId = $systemId AND id NOT IN (SELECT id FROM #CSVBRSourceIds)"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #CSVBRSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRole resources" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale BusinessRole resources (system $systemId only)" -ForegroundColor Yellow
             }
 
             $transaction.Commit()
@@ -300,15 +313,28 @@ function Sync-FGCSVBusinessRole {
 
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] AssignmentPolicies: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName "AssignmentPolicies" `
-                -DataTable $brpDataTable `
-                -KeyColumns @('id')
+            # Scoped delete: only remove policies for THIS system's business roles
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            $deleteCmd.CommandText = "CREATE TABLE #CSVPolSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("id", [System.Guid])
+            foreach ($row in $brpDataTable.Rows) { [void]$idTable.Rows.Add($row["id"]) }
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bc.DestinationTableName = "#CSVPolSourceIds"
+            $bc.WriteToServer($idTable)
+            $bc.Close()
+            $deleteCmd.CommandText = "DELETE FROM dbo.AssignmentPolicies WHERE systemId = $systemId AND id NOT IN (SELECT id FROM #CSVPolSourceIds)"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #CSVPolSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale AssignmentPolicies" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale AssignmentPolicies (system $systemId only)" -ForegroundColor Yellow
             }
 
             $transaction.Commit()
@@ -349,15 +375,35 @@ function Sync-FGCSVBusinessRole {
 
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ResourceRelationships: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName "ResourceRelationships" `
-                -DataTable $brrDataTable `
-                -KeyColumns @('id')
+            # Scoped delete: only remove relationships where parent is a BusinessRole from THIS system
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            $deleteCmd.CommandText = "CREATE TABLE #CSVRelSourceIds (parentResourceId UNIQUEIDENTIFIER, childResourceId UNIQUEIDENTIFIER, relationshipType NVARCHAR(50), PRIMARY KEY (parentResourceId, childResourceId, relationshipType))"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("parentResourceId", [System.Guid])
+            [void]$idTable.Columns.Add("childResourceId", [System.Guid])
+            [void]$idTable.Columns.Add("relationshipType", [string])
+            foreach ($row in $brrDataTable.Rows) { [void]$idTable.Rows.Add($row["parentResourceId"], $row["childResourceId"], $row["relationshipType"]) }
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bc.DestinationTableName = "#CSVRelSourceIds"
+            $bc.WriteToServer($idTable)
+            $bc.Close()
+            $deleteCmd.CommandText = @"
+DELETE rr FROM dbo.ResourceRelationships rr
+INNER JOIN dbo.Resources r ON rr.parentResourceId = r.id AND r.resourceType = 'BusinessRole' AND r.systemId = $systemId
+LEFT JOIN #CSVRelSourceIds s ON rr.parentResourceId = s.parentResourceId AND rr.childResourceId = s.childResourceId AND rr.relationshipType = s.relationshipType
+WHERE s.parentResourceId IS NULL AND rr.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #CSVRelSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale ResourceRelationships" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount stale ResourceRelationships (system $systemId only)" -ForegroundColor Yellow
             }
 
             $transaction.Commit()

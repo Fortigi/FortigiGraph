@@ -147,7 +147,7 @@ CREATE TABLE dbo.SystemOwners (
         'systemId'           = 'INT'
         'displayName'        = 'NVARCHAR(500)'
         'description'        = 'NVARCHAR(MAX)'
-        'resourceType'       = 'NVARCHAR(50)'
+        'resourceType'       = 'NVARCHAR(255)'
         'createdDateTime'    = 'DATETIME2'
         'modifiedDateTime'   = 'DATETIME2'
         'mail'               = 'NVARCHAR(500)'

@@ -91,8 +91,24 @@ function Sync-FGCSVResourceAssignment {
     # Map CSV rows to ResourceAssignment objects, skipping rows without a matching principal
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Mapping CSV rows to ResourceAssignments..." -ForegroundColor Cyan
 
+    # Build a lookup of BusinessRole resource IDs so we can set assignmentType='Governed' for them
+    $businessRoleIds = @{}
+    Invoke-FGSQLCommand -ScriptBlock {
+        param($connection)
+        $cmd = $connection.CreateCommand()
+        $cmd.CommandText = "SELECT id FROM dbo.Resources WHERE resourceType = 'BusinessRole'"
+        $reader = $cmd.ExecuteReader()
+        while ($reader.Read()) {
+            $businessRoleIds[$reader.GetGuid(0).ToString("D").ToUpper()] = $true
+        }
+        $reader.Close()
+        $cmd.Dispose()
+    }
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $($businessRoleIds.Count) BusinessRole resources for assignment type detection" -ForegroundColor Gray
+
     $mappedRows = @()
     $skippedCount = 0
+    $governedCount = 0
 
     foreach ($row in $csvData) {
         # Look up principalId from Employee_ID
@@ -102,13 +118,22 @@ function Sync-FGCSVResourceAssignment {
             continue
         }
 
+        $resId = [guid]$row.ResouceUID
+        $isBusinessRole = $businessRoleIds.ContainsKey($resId.ToString("D").ToUpper())
+        $aType = if ($isBusinessRole) { 'Governed' } else { 'Direct' }
+        if ($isBusinessRole) { $governedCount++ }
+
         $mappedRows += [PSCustomObject]@{
-            resourceId      = [guid]$row.ResouceUID
+            resourceId      = $resId
             principalId     = $principalId
             principalType   = 'user'
-            assignmentType  = 'Direct'
+            assignmentType  = $aType
             complianceState = $row.ComplianceState
         }
+    }
+
+    if ($governedCount -gt 0) {
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Detected $governedCount governed (business role) assignments, $($mappedRows.Count - $governedCount) direct assignments" -ForegroundColor Cyan
     }
 
     if ($skippedCount -gt 0) {
@@ -164,18 +189,45 @@ function Sync-FGCSVResourceAssignment {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate records/sec)" -ForegroundColor Green
 
-            # Handle deletions
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted assignments..." -ForegroundColor Cyan
+            # Handle deletions — scoped to this CSV system only
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted assignments (scoped to CSV system)..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('resourceId', 'principalId', 'assignmentType')
+            $systemId = $Global:FGCSVHRSystemId
+            if (-not $systemId) {
+                Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] No CSV system ID found (`$Global:FGCSVHRSystemId). Skipping delete step to avoid removing Entra assignments."
+                $deletedCount = 0
+            }
+            else {
+                $deleteCmd = $connection.CreateCommand()
+                $deleteCmd.Transaction = $transaction
+                $deleteCmd.CommandTimeout = 120
+                $deleteCmd.CommandText = "CREATE TABLE #CSVRASourceIds (resourceId UNIQUEIDENTIFIER, principalId UNIQUEIDENTIFIER, assignmentType NVARCHAR(50), PRIMARY KEY (resourceId, principalId, assignmentType))"
+                $deleteCmd.ExecuteNonQuery() | Out-Null
+                $idTable = New-Object System.Data.DataTable
+                [void]$idTable.Columns.Add("resourceId", [System.Guid])
+                [void]$idTable.Columns.Add("principalId", [System.Guid])
+                [void]$idTable.Columns.Add("assignmentType", [string])
+                foreach ($row in $dataTable.Rows) { [void]$idTable.Rows.Add($row["resourceId"], $row["principalId"], $row["assignmentType"]) }
+                $bc = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+                $bc.DestinationTableName = "#CSVRASourceIds"
+                $bc.WriteToServer($idTable)
+                $bc.Close()
+                # Only delete assignments where the PRINCIPAL belongs to this CSV system
+                $deleteCmd.CommandText = @"
+DELETE ra FROM dbo.ResourceAssignments ra
+INNER JOIN dbo.Principals p ON ra.principalId = p.id AND p.systemId = $systemId
+LEFT JOIN #CSVRASourceIds s ON ra.resourceId = s.resourceId AND ra.principalId = s.principalId AND ra.assignmentType = s.assignmentType
+WHERE s.resourceId IS NULL AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+                $deletedCount = $deleteCmd.ExecuteNonQuery()
+                $deleteCmd.CommandText = "DROP TABLE #CSVRASourceIds"
+                $deleteCmd.ExecuteNonQuery() | Out-Null
+                $deleteCmd.Dispose()
+                $idTable.Dispose()
+            }
 
             if ($deletedCount -gt 0) {
-                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount assignments that no longer exist in source" -ForegroundColor Yellow
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount assignments that no longer exist in CSV source (system $systemId only)" -ForegroundColor Yellow
             }
             else {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted assignments found" -ForegroundColor Green
