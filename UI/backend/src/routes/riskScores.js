@@ -8,7 +8,7 @@
 // GET    /api/risk-scores/users              - Paginated user (Principal) risk scores
 // GET    /api/risk-scores/groups             - Paginated resource risk scores
 // GET    /api/risk-scores/business-roles     - Paginated business role risk scores
-// GET    /api/risk-scores/org-units          - Paginated org unit risk scores
+// GET    /api/risk-scores/contexts           - Paginated context risk scores
 // GET    /api/risk-scores/identities         - Paginated identity risk scores
 // GET    /api/risk-scores/:type/:id          - Single entity risk score
 // PUT    /api/risk-scores/:type/:id/override - Set analyst override (+/- adjustment)
@@ -29,7 +29,7 @@ if (useSql) {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const VALID_TYPES = new Set(['users', 'groups', 'resources', 'business-roles', 'org-units', 'identities']);
+const VALID_TYPES = new Set(['users', 'groups', 'resources', 'business-roles', 'contexts', 'identities']);
 
 // Map URL path type to RiskScores.entityType
 function mapEntityType(urlType) {
@@ -38,7 +38,7 @@ function mapEntityType(urlType) {
     case 'groups':
     case 'resources':      return 'Resource';
     case 'business-roles': return 'BusinessRole';
-    case 'org-units':      return 'OrgUnit';
+    case 'contexts':       return 'Context';
     case 'identities':     return 'Identity';
     default:               return null;
   }
@@ -186,17 +186,17 @@ router.get('/risk-scores', async (req, res) => {
         totalGroups: totalsByType['Resource']?.total || 0,
         totalUsers: totalsByType['Principal']?.total || 0,
         totalBusinessRoles: totalsByType['BusinessRole']?.total || 0,
-        totalOrgUnits: totalsByType['OrgUnit']?.total || 0,
+        totalContexts: totalsByType['Context']?.total || 0,
         totalIdentities: totalsByType['Identity']?.total || 0,
         groupOverrides: totalsByType['Resource']?.overrides || 0,
         userOverrides: totalsByType['Principal']?.overrides || 0,
         businessRoleOverrides: totalsByType['BusinessRole']?.overrides || 0,
-        orgUnitOverrides: totalsByType['OrgUnit']?.overrides || 0,
+        contextOverrides: totalsByType['Context']?.overrides || 0,
         identityOverrides: totalsByType['Identity']?.overrides || 0,
         groupsByTier: tiersByEntityType['Resource'] || {},
         usersByTier: tiersByEntityType['Principal'] || {},
         businessRolesByTier: tiersByEntityType['BusinessRole'] || {},
-        orgUnitsByTier: tiersByEntityType['OrgUnit'] || {},
+        contextsByTier: tiersByEntityType['Context'] || {},
         identitiesByTier: tiersByEntityType['Identity'] || {},
         topGroups: topResources.recordset.map(parseJsonColumns),
         topUsers: topUsers.recordset.map(parseJsonColumns),
@@ -409,8 +409,8 @@ router.get('/risk-scores/business-roles', async (req, res) => {
   }
 });
 
-// ─── GET /api/risk-scores/org-units ─────────────────────────────────
-router.get('/risk-scores/org-units', async (req, res) => {
+// ─── GET /api/risk-scores/contexts ──────────────────────────────────
+router.get('/risk-scores/contexts', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0, available: false });
 
@@ -423,8 +423,8 @@ router.get('/risk-scores/org-units', async (req, res) => {
     const search = req.query.search || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'OrgUnit'`;
-    const request = timedRequest(p, 'risk-org-units-list', res);
+    let whereClause = `WHERE rs.entityType = 'Context'`;
+    const request = timedRequest(p, 'risk-contexts-list', res);
 
     if (tier) {
       whereClause += ' AND rs.riskTier = @tier';
@@ -444,20 +444,20 @@ router.get('/risk-scores/org-units', async (req, res) => {
       SELECT rs.*, ou.displayName, ou.department, ou.memberCount, ou.managerId,
              p.displayName AS managerName
       FROM dbo.RiskScores rs
-      INNER JOIN dbo.OrgUnits ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
+      INNER JOIN dbo.Contexts ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
       LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
       ${whereClause}
       ORDER BY rs.riskScore DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
-    const countReq = timedRequest(p, 'risk-org-units-count', res);
+    const countReq = timedRequest(p, 'risk-contexts-count', res);
     if (tier) countReq.input('tier', tier);
     if (search) countReq.input('search', `%${search}%`);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
       FROM dbo.RiskScores rs
-      INNER JOIN dbo.OrgUnits ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
+      INNER JOIN dbo.Contexts ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
       LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
       ${whereClause}
     `);
@@ -468,7 +468,7 @@ router.get('/risk-scores/org-units', async (req, res) => {
       available: true,
     });
   } catch (err) {
-    console.error('Risk org-units query failed:', err.message);
+    console.error('Risk contexts query failed:', err.message);
     return res.status(500).json({ error: 'Failed to load risk scores' });
   }
 });
@@ -575,7 +575,7 @@ router.get('/risk-scores/:type/:id', async (req, res) => {
       Principal: 'Principals',
       Resource: 'Resources',
       BusinessRole: 'Resources',
-      OrgUnit: 'OrgUnits',
+      Context: 'Contexts',
       Identity: 'Identities',
     };
     const tableName = entityTableMap[entityType];

@@ -127,8 +127,8 @@ Sync-FGGroupOwner
 # Resource-to-resource nesting and grants → ResourceRelationships
 Sync-FGResourceRelationship
 
-# Calculate OrgUnits from department data in Principals
-Sync-FGOrgUnit
+# Calculate Contexts from department/org data in Identities
+Sync-FGContext
 ```
 
 ### Governance

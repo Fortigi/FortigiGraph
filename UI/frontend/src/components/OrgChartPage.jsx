@@ -87,17 +87,17 @@ function DeptBox({ node, isMatch, onClick, onDetails, hasChildren }) {
           isMatch ? 'ring-2 ring-blue-400' : ''
         }`}
         style={{
-          backgroundColor: node.isOrgUnit ? '#f0f9ff' : s.box,
-          borderColor: node.isOrgUnit ? '#bae6fd' : s.boxBorder,
+          backgroundColor: node.isContext ? '#f0f9ff' : s.box,
+          borderColor: node.isContext ? '#bae6fd' : s.boxBorder,
         }}
       >
         <div className="font-semibold text-sm text-gray-900 leading-tight">
           {node.department}
         </div>
-        {node.isOrgUnit && node.orgUnitType && (
-          <div className="text-[9px] text-sky-600 mt-0.5">{node.orgUnitType}</div>
+        {node.isContext && node.contextType && (
+          <div className="text-[9px] text-sky-600 mt-0.5">{node.contextType}</div>
         )}
-        {node.isOrgUnit && node.managerDisplayName && (
+        {node.isContext && node.managerDisplayName && (
           <div className="text-[10px] text-gray-500 mt-0.5 truncate">{node.managerDisplayName}</div>
         )}
         <div className="text-[10px] text-gray-500 mt-1">
@@ -264,28 +264,28 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
   const [expandedMap, setExpandedMap] = useState({});
   const initialExpandDone = useRef(false);
 
-  // ─── OrgUnit-based tree (preferred when available) ────────────────
-  const [orgUnitTree, setOrgUnitTree] = useState(null);
-  const [useOrgUnits, setUseOrgUnits] = useState(false);
+  // ─── Context-based tree (preferred when available) ────────────────
+  const [contextTree, setContextTree] = useState(null);
+  const [useContexts, setUseContexts] = useState(false);
 
   // ─── Fetch data ──────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Try OrgUnits tree first (faster, pre-built hierarchy)
+      // Try Contexts tree first (faster, pre-built hierarchy)
       try {
-        const ouRes = await authFetch('/api/org-units/tree');
-        if (ouRes.ok) {
-          const ouData = await ouRes.json();
-          if (ouData && ouData.length > 0) {
-            setOrgUnitTree(ouData);
-            setUseOrgUnits(true);
+        const ctxRes = await authFetch('/api/contexts/tree');
+        if (ctxRes.ok) {
+          const ctxData = await ctxRes.json();
+          if (ctxData && ctxData.length > 0) {
+            setContextTree(ctxData);
+            setUseContexts(true);
             setData({ available: true });
             return;
           }
         }
-      } catch { /* OrgUnits not available, fall through to user-based tree */ }
+      } catch { /* Contexts not available, fall through to user-based tree */ }
 
       // Fall back to user-based org chart
       const res = await authFetch('/api/org-chart');
@@ -318,29 +318,29 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
       return { rootNode: null, nodeMap: new Map(), totalUsers: 0, totalDepts: 0 };
     }
 
-    // ── OrgUnit-based tree (preferred) ──────────────────────────────
-    if (useOrgUnits && orgUnitTree && orgUnitTree.length > 0) {
+    // ── Context-based tree (preferred) ──────────────────────────────
+    if (useContexts && contextTree && contextTree.length > 0) {
       const nMap = new Map();
 
-      function convertOrgUnitNode(ou) {
+      function convertContextNode(ctx) {
         const node = {
-          id: ou.id,
-          department: ou.displayName,
-          orgUnitType: ou.orgUnitType,
-          managerDisplayName: ou.managerDisplayName,
+          id: ctx.id,
+          department: ctx.displayName,
+          contextType: ctx.contextType,
+          managerDisplayName: ctx.managerDisplayName,
           members: [], // members are loaded on-demand via detail page
-          children: (ou.children || []).map(convertOrgUnitNode),
-          risk: { maxTier: 'None', avgScore: 0, tierCounts: {}, totalPeople: ou.memberCount || 0 },
-          directCount: ou.memberCount || 0,
-          indirectCount: (ou.totalMemberCount || 0) - (ou.memberCount || 0),
-          subtreeCount: ou.totalMemberCount || ou.memberCount || 0,
-          isOrgUnit: true,
+          children: (ctx.children || []).map(convertContextNode),
+          risk: { maxTier: 'None', avgScore: 0, tierCounts: {}, totalPeople: ctx.memberCount || 0 },
+          directCount: ctx.memberCount || 0,
+          indirectCount: (ctx.totalMemberCount || 0) - (ctx.memberCount || 0),
+          subtreeCount: ctx.totalMemberCount || ctx.memberCount || 0,
+          isContext: true,
         };
         nMap.set(node.id, node);
         return node;
       }
 
-      const convertedRoots = orgUnitTree.map(convertOrgUnitNode);
+      const convertedRoots = contextTree.map(convertContextNode);
 
       // If multiple roots, wrap in a synthetic root
       let root;
@@ -349,7 +349,7 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
       } else {
         const totalMembers = convertedRoots.reduce((sum, r) => sum + (r.subtreeCount || 0), 0);
         root = {
-          id: 'orgunit-root',
+          id: 'context-root',
           department: 'Organization',
           members: [],
           children: convertedRoots,
@@ -357,7 +357,7 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
           directCount: 0,
           indirectCount: totalMembers,
           subtreeCount: totalMembers,
-          isOrgUnit: true,
+          isContext: true,
         };
         nMap.set(root.id, root);
       }
@@ -535,7 +535,7 @@ export default function OrgChartPage({ onOpenDetail, onCacheData }) {
       totalUsers: visited.size,
       totalDepts: deptCount,
     };
-  }, [data, useOrgUnits, orgUnitTree]);
+  }, [data, useContexts, contextTree]);
 
   // ─── Initial expand: only root ─────────────────────────────────
   useEffect(() => {

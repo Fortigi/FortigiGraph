@@ -68,7 +68,7 @@ SELECT
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceAssignments') THEN 1 ELSE 0 END AS AssignmentsExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ResourceRelationships') THEN 1 ELSE 0 END AS RelationshipsExists,
     CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Principals') THEN 1 ELSE 0 END AS PrincipalsExists,
-    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'OrgUnits') THEN 1 ELSE 0 END AS OrgUnitsExists
+    CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Contexts') THEN 1 ELSE 0 END AS ContextsExists
 "@
         $reader = $checkTablesCmd.ExecuteReader()
         $reader.Read()
@@ -76,7 +76,7 @@ SELECT
         $assignmentsExists = $reader.GetInt32(1) -eq 1
         $relationshipsExists = $reader.GetInt32(2) -eq 1
         $principalsExists = $reader.GetInt32(3) -eq 1
-        $orgUnitsExists = $reader.GetInt32(4) -eq 1
+        $contextsExists = $reader.GetInt32(4) -eq 1
         $reader.Close()
 
         if (-not $resourcesExists -and -not $assignmentsExists) {
@@ -196,33 +196,25 @@ SELECT
                 Where = $null
                 Description = "Optimizes department-based queries"
             }
-            $indexes += @{
-                Table = "Principals"
-                Name = "IX_Principals_OrgUnitId"
-                Columns = "orgUnitId"
-                Include = "displayName, department"
-                Where = $null
-                Description = "Optimizes org unit membership lookups"
-            }
         }
 
-        # Indexes for OrgUnits
-        if ($orgUnitsExists) {
+        # Indexes for Contexts
+        if ($contextsExists) {
             $indexes += @{
-                Table = "OrgUnits"
-                Name = "IX_OrgUnits_SystemId"
+                Table = "Contexts"
+                Name = "IX_Contexts_SystemId"
                 Columns = "systemId"
-                Include = "displayName, orgUnitType"
+                Include = "displayName, contextType"
                 Where = $null
                 Description = "Optimizes queries filtered by system"
             }
             $indexes += @{
-                Table = "OrgUnits"
-                Name = "IX_OrgUnits_ParentId"
-                Columns = "parentOrgUnitId"
-                Include = "displayName, orgUnitType, systemId"
+                Table = "Contexts"
+                Name = "IX_Contexts_ParentId"
+                Columns = "parentContextId"
+                Include = "displayName, contextType, systemId"
                 Where = $null
-                Description = "Optimizes org unit hierarchy lookups"
+                Description = "Optimizes context hierarchy lookups"
             }
         }
 

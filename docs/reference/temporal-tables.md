@@ -28,7 +28,7 @@ SQL Server manages these columns automatically. You never write to them directly
 | `Principals` | Yes |
 | `ResourceAssignments` | Yes |
 | `ResourceRelationships` | Yes |
-| `OrgUnits` | Yes |
+| `Contexts` | Yes |
 | `Identities` | Yes |
 | `IdentityMembers` | Yes |
 | `RiskScores` | Yes |

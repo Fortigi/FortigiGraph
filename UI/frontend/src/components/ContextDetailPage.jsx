@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthGate';
 import RiskScoreSection from './RiskScoreSection';
 
-// ─── OrgUnit Detail Page ─────────────────────────────────────────────────────
-// Shows details for a single OrgUnit: attributes, members, sub-units.
-// Loaded via /api/org-units/:id
+// ─── Context Detail Page ──────────────────────────────────────────────────────
+// Shows details for a single Context: attributes, members (via Identities), sub-contexts.
+// Loaded via /api/contexts/:id
 
 const SYSTEM_COLS = new Set(['SysStartTime', 'SysEndTime', 'ValidFrom', 'ValidTo']);
 
@@ -19,7 +19,7 @@ function cleanAttributes(attrs) {
   return clean;
 }
 
-export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, onClose, onOpenDetail }) {
+export default function ContextDetailPage({ contextId, cachedData, onCacheData, onClose, onOpenDetail }) {
   const { authFetch } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -38,29 +38,29 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
   useEffect(() => {
     (async () => {
       try {
-        const res = await authFetch(`/api/risk-scores/org-units/${orgUnitId}`);
+        const res = await authFetch(`/api/risk-scores/contexts/${contextId}`);
         if (res.ok) setRiskData(await res.json());
       } catch { /* risk data optional */ }
     })();
-  }, [authFetch, orgUnitId]);
+  }, [authFetch, contextId]);
 
-  // ─── Fetch OrgUnit detail ──────────────────────────────────────────
+  // ─── Fetch Context detail ──────────────────────────────────────────
   const fetchDetail = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await authFetch(`/api/org-units/${orgUnitId}`);
+      const res = await authFetch(`/api/contexts/${contextId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setDetail(data);
-      if (onCacheData) onCacheData(orgUnitId, 'orgunit', data);
+      if (onCacheData) onCacheData(contextId, 'context', data);
     } catch (err) {
-      console.error('Failed to load org unit detail:', err);
-      setError(err.message || 'Failed to load org unit details');
+      console.error('Failed to load context detail:', err);
+      setError(err.message || 'Failed to load context details');
     } finally {
       setLoading(false);
     }
-  }, [authFetch, orgUnitId, onCacheData]);
+  }, [authFetch, contextId, onCacheData]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
@@ -73,17 +73,17 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
         offset: String(memberPage * PAGE_SIZE),
       });
       if (memberSearch) params.set('search', memberSearch);
-      const res = await authFetch(`/api/org-units/${orgUnitId}/members?${params}`);
+      const res = await authFetch(`/api/contexts/${contextId}/members?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setMembers(data.data || []);
       setMemberTotal(data.total || 0);
     } catch (err) {
-      console.error('Failed to load org unit members:', err);
+      console.error('Failed to load context members:', err);
     } finally {
       setMembersLoading(false);
     }
-  }, [authFetch, orgUnitId, memberPage, memberSearch]);
+  }, [authFetch, contextId, memberPage, memberSearch]);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
 
@@ -95,7 +95,7 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading org unit details...</div>
+        <div className="text-gray-500">Loading context details...</div>
       </div>
     );
   }
@@ -103,7 +103,7 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
   if (error) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md mx-auto mt-12">
-        <h2 className="text-red-800 font-semibold text-lg">Failed to load org unit</h2>
+        <h2 className="text-red-800 font-semibold text-lg">Failed to load context</h2>
         <p className="text-red-600 mt-2 text-sm">{error}</p>
         <div className="flex gap-3 mt-3">
           <button onClick={fetchDetail} className="text-sm text-red-700 underline hover:text-red-900">Retry</button>
@@ -116,14 +116,14 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
   if (!detail || !detail.attributes) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-400 text-sm">
-        Org unit not found.
+        Context not found.
         <button onClick={onClose} className="ml-2 text-blue-500 underline hover:text-blue-700">Close</button>
       </div>
     );
   }
 
   const attrs = cleanAttributes(detail.attributes);
-  const subUnits = detail.subUnits || [];
+  const subContexts = detail.subContexts || [];
   const totalPages = Math.ceil(memberTotal / PAGE_SIZE);
 
   return (
@@ -134,13 +134,13 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
           <div>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-sm font-bold">
-                OU
+                CTX
               </div>
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">{attrs.displayName || orgUnitId}</h2>
-                {attrs.orgUnitType && (
+                <h2 className="text-xl font-semibold text-gray-900">{attrs.displayName || contextId}</h2>
+                {attrs.contextType && (
                   <span className="inline-block mt-0.5 text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded px-2 py-0.5">
-                    {attrs.orgUnitType}
+                    {attrs.contextType}
                   </span>
                 )}
               </div>
@@ -162,7 +162,7 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
       </div>
 
       {/* Risk Score */}
-      {riskData && <RiskScoreSection attributes={riskData} entityType="org-units" entityId={orgUnitId} authFetch={authFetch} />}
+      {riskData && <RiskScoreSection attributes={riskData} entityType="contexts" entityId={contextId} authFetch={authFetch} />}
 
       {/* Attributes */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -177,25 +177,25 @@ export default function OrgUnitDetailPage({ orgUnitId, cachedData, onCacheData, 
         </div>
       </div>
 
-      {/* Sub-units */}
-      {subUnits.length > 0 && (
+      {/* Sub-contexts */}
+      {subContexts.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            Sub-units ({subUnits.length})
+            Sub-contexts ({subContexts.length})
           </h3>
           <div className="space-y-1">
-            {subUnits.map(su => (
+            {subContexts.map(sc => (
               <button
-                key={su.id}
-                onClick={() => onOpenDetail('orgunit', su.id, su.displayName)}
+                key={sc.id}
+                onClick={() => onOpenDetail('context', sc.id, sc.displayName)}
                 className="w-full text-left flex items-center justify-between px-3 py-2 rounded hover:bg-sky-50 transition-colors group"
               >
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-sky-100 text-sky-700 text-[9px] font-bold">OU</span>
-                  <span className="text-sm text-gray-900 group-hover:text-sky-700">{su.displayName}</span>
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-sky-100 text-sky-700 text-[9px] font-bold">CTX</span>
+                  <span className="text-sm text-gray-900 group-hover:text-sky-700">{sc.displayName}</span>
                 </div>
-                {su.memberCount != null && (
-                  <span className="text-xs text-gray-400">{su.memberCount} members</span>
+                {sc.memberCount != null && (
+                  <span className="text-xs text-gray-400">{sc.memberCount} members</span>
                 )}
               </button>
             ))}

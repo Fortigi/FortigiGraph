@@ -54,7 +54,7 @@ Update-FGConfig -Path .\Config\mycompany.json
     "EntraDirectoryRoles": { "Enabled": true },
     "EntraAppRoleAssignments": { "Enabled": true },
     "ResourceRelationships": { "Enabled": true },
-    "OrgUnits": { "Enabled": true },
+    "Contexts": { "Enabled": true },
     "PrincipalActivity": { "Enabled": false },
     "AppRoleActivity": { "Enabled": false },
     "Views": { "Enabled": true },
@@ -184,7 +184,7 @@ Each entity type has at minimum an `Enabled` flag:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `OrgUnits.Enabled` | `true` | Calculate organizational units (departments) from `Principals` data and populate `OrgUnits`. |
+| `Contexts.Enabled` | `true` | Calculate organizational contexts (departments, teams, etc.) from `Identities` data and populate `Contexts`. |
 | `PrincipalActivity.Enabled` | `false` | Sync last sign-in timestamps for stale account detection (requires `AuditLog.Read.All`). Expensive for large tenants. |
 | `AppRoleActivity.Enabled` | `false` | Sync app role usage activity. Requires `AuditLog.Read.All`. |
 

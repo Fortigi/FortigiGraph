@@ -21,7 +21,7 @@ import identitiesRouter from './routes/identities.js';
 import preferencesRouter from './routes/preferences.js';
 import systemsRouter from './routes/systems.js';
 import resourcesRouter from './routes/resources.js';
-import orgUnitsRouter from './routes/orgUnits.js';
+import contextsRouter from './routes/contexts.js';
 import adminRouter from './routes/admin.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -149,7 +149,7 @@ app.use('/api', authMiddleware, identitiesRouter);
 app.use('/api', authMiddleware, preferencesRouter);
 app.use('/api', authMiddleware, systemsRouter);
 app.use('/api', authMiddleware, resourcesRouter);
-app.use('/api', authMiddleware, orgUnitsRouter);
+app.use('/api', authMiddleware, contextsRouter);
 app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit for import payloads
 app.use('/api', authMiddleware, adminRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled

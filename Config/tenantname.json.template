@@ -95,7 +95,7 @@
     "AccessPackageAccessReviews": {
       "Enabled": true
     },
-    "_V3_NOTE": "The following sync types are part of the v3.0 Universal Resource Model. They populate the Systems, Resources, Principals, OrgUnits tables alongside the legacy GraphUsers/GraphGroups tables.",
+    "_V3_NOTE": "The following sync types are part of the v3.2 Universal Resource Model. They populate the Systems, Resources, Principals, Contexts tables alongside the legacy GraphUsers/GraphGroups tables.",
     "Principals": {
       "Enabled": true,
       "_Comment": "Syncs Entra ID users to the Principals table (v3.0 universal model)",
@@ -132,9 +132,9 @@
         "Frequency": "Daily"
       }
     },
-    "OrgUnits": {
+    "Contexts": {
       "Enabled": true,
-      "_Comment": "Calculates organisational units (departments/teams) from Principals data",
+      "_Comment": "Calculates organizational contexts (departments, teams, cost centers) from Identities data",
       "Schedule": {
         "Enabled": true,
         "Time": "08:30",

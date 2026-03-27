@@ -257,7 +257,7 @@ function New-FGAzureAutomationAccount {
             "Sync-FGEntraAppRoleAssignments" = "EntraAppRoleAssignments"
             "Sync-FGResourceRelationships" = "ResourceRelationships"
             "Sync-FGPrincipals" = "Principals"
-            "Sync-FGOrgUnits" = "OrgUnits"
+            "Sync-FGContexts" = "Contexts"
             "Sync-FGMaterializedViews" = "MaterializedViews"
         }
 
@@ -1058,9 +1058,9 @@ function New-FGAzureAutomationAccount {
                     HasSyncConfig = $true
                 }
                 @{
-                    Name = "Sync-FGOrgUnits"
-                    Description = "Calculates and syncs organizational units from department data"
-                    SyncFunction = "Sync-FGOrgUnit"
+                    Name = "Sync-FGContexts"
+                    Description = "Calculates and syncs contexts (departments, teams) from department data"
+                    SyncFunction = "Sync-FGContext"
                 }
                 # Post-sync: Materialize views for UI performance
                 @{

@@ -114,7 +114,7 @@ Start-FGSync -ConfigFile '.\Config\mycompany.json'
 | Access package resource scopes | `ResourceRelationships` (`relationshipType='Contains'`) |
 | Assignment policies and requests | `AssignmentPolicies`, `AssignmentRequests` |
 | Access reviews | `CertificationDecisions` |
-| Organizational units | `OrgUnits` |
+| Organizational contexts | `Contexts` |
 | SQL views and materialized views | All `vw_*` views |
 
 **Optional sync targets:**

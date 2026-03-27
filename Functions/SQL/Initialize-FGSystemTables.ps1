@@ -13,6 +13,7 @@ function Initialize-FGSystemTables {
     - Principals: Universal principal table (users, service principals, etc.) with temporal versioning
     - Identities: Real-person identity records across systems with temporal versioning
     - IdentityMembers: Identity-to-principal mappings with temporal versioning
+    - Contexts: Organizational and other contextual groupings (departments, teams, projects) with temporal versioning
 
     Tables are only created if they do not already exist, unless -DropIfExists is specified.
 
@@ -221,7 +222,6 @@ CREATE TABLE dbo.SystemOwners (
         'employeeId'         = 'NVARCHAR(255)'
         'managerId'          = 'UNIQUEIDENTIFIER'
         'createdDateTime'    = 'DATETIME2'
-        'orgUnitId'          = 'UNIQUEIDENTIFIER'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
@@ -258,7 +258,7 @@ CREATE TABLE dbo.SystemOwners (
         'correlatedAt'            = 'DATETIME2'
         'analystVerified'         = 'BIT'
         'analystNotes'            = 'NVARCHAR(MAX)'
-        'orgUnitId'               = 'UNIQUEIDENTIFIER'
+        'contextId'               = 'UNIQUEIDENTIFIER'
     }
 
     $tableReady = Initialize-FGSyncTable -TableName "Identities" -Columns $identityColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
@@ -290,15 +290,15 @@ CREATE TABLE dbo.SystemOwners (
         Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] IdentityMembers table creation cancelled" -ForegroundColor Yellow
     }
 
-    # 9. OrgUnits table (temporal, UNIQUEIDENTIFIER PK)
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: OrgUnits" -ForegroundColor Cyan
+    # 9. Contexts table (temporal, UNIQUEIDENTIFIER PK)
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: Contexts" -ForegroundColor Cyan
 
-    $orgUnitColumns = @{
+    $contextColumns = @{
         'id'                 = 'UNIQUEIDENTIFIER'
         'systemId'           = 'INT'
         'displayName'        = 'NVARCHAR(500)'
-        'orgUnitType'        = 'NVARCHAR(50)'         # Department, Division, CostCenter, Team, Office
-        'parentOrgUnitId'    = 'UNIQUEIDENTIFIER'
+        'contextType'        = 'NVARCHAR(50)'          # Department, Division, CostCenter, Team, Office, Project, Location
+        'parentContextId'    = 'UNIQUEIDENTIFIER'
         'managerId'          = 'UNIQUEIDENTIFIER'      # FK to Principals
         'managerIdentityId'  = 'UNIQUEIDENTIFIER'      # FK to Identities
         'department'         = 'NVARCHAR(255)'
@@ -312,9 +312,9 @@ CREATE TABLE dbo.SystemOwners (
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
-    $tableReady = Initialize-FGSyncTable -TableName "OrgUnits" -Columns $orgUnitColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
+    $tableReady = Initialize-FGSyncTable -TableName "Contexts" -Columns $contextColumns -PrimaryKey 'id' -RecreateTable:$DropIfExists
     if ($tableReady -eq $false) {
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] OrgUnits table creation cancelled" -ForegroundColor Yellow
+        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Contexts table creation cancelled" -ForegroundColor Yellow
     }
 
     Write-Host "`n========================================" -ForegroundColor Green
@@ -329,7 +329,7 @@ CREATE TABLE dbo.SystemOwners (
     Write-Host "  - Principals (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
     Write-Host "  - Identities (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
     Write-Host "  - IdentityMembers (temporal, composite PK)" -ForegroundColor Gray
-    Write-Host "  - OrgUnits (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
+    Write-Host "  - Contexts (temporal, UNIQUEIDENTIFIER PK)" -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Green
 
     return $true

@@ -201,7 +201,7 @@ Command-line parameter overrides config file setting
     [bool]$SyncPrincipals = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncOrgUnits = $true,
+    [bool]$SyncContexts = $true,
 
     [Parameter(Mandatory = $false)]
     [bool]$SyncPrincipalActivity = $false,
@@ -240,7 +240,7 @@ Command-line parameter overrides config file setting
     EntraAppRoleAssignments = $null
     ResourceRelationships = $null
     Principals = $null
-    OrgUnits = $null
+    Contexts = $null
     PrincipalActivity = $null
     AppRoleActivity = $null
     ServicePrincipals = $null
@@ -418,8 +418,8 @@ function Write-SyncError {
         if ($PSBoundParameters.ContainsKey('SyncPrincipals') -eq $false -and $null -ne $config.Sync.Principals.Enabled) {
             $SyncPrincipals = $config.Sync.Principals.Enabled
         }
-        if ($PSBoundParameters.ContainsKey('SyncOrgUnits') -eq $false -and $null -ne $config.Sync.OrgUnits.Enabled) {
-            $SyncOrgUnits = $config.Sync.OrgUnits.Enabled
+        if ($PSBoundParameters.ContainsKey('SyncContexts') -eq $false -and $null -ne $config.Sync.Contexts.Enabled) {
+            $SyncContexts = $config.Sync.Contexts.Enabled
         }
         if ($PSBoundParameters.ContainsKey('SyncPrincipalActivity') -eq $false) {
             if ($null -ne $config.Sync.PrincipalActivity.Enabled) {
@@ -585,7 +585,7 @@ function Write-SyncError {
 
     #region Resource Model Tables
     # Always ensure system tables exist when any resource model sync is active
-    if ($SyncUsers -or $SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships -or $SyncServicePrincipals) {
+    if ($SyncUsers -or $SyncPrincipals -or $SyncContexts -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships -or $SyncServicePrincipals) {
         try {
             Write-SyncStep "Ensuring resource model tables exist..."
             Initialize-FGSystemTables
@@ -811,9 +811,9 @@ function Write-SyncError {
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Principals WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
-                    "OrgUnits" {
-                        $null = Sync-FGOrgUnit
-                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                    "Contexts" {
+                        $null = Sync-FGContext
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Contexts WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
                     "PrincipalActivity" {
@@ -1266,14 +1266,14 @@ function Write-SyncError {
             }
         }
 
-        # Create job for OrgUnits sync (depends on Principals data, but runs as parallel job)
-        if ($SyncOrgUnits) {
-            Write-SyncStep "Starting org units sync job..."
+        # Create job for Contexts sync (depends on Principals data, but runs as parallel job)
+        if ($SyncContexts) {
+            Write-SyncStep "Starting contexts sync job..."
             $ps = [PowerShell]::Create()
             $ps.RunspacePool = $runspacePool
             [void]$ps.AddScript($syncScriptBlock)
-            [void]$ps.AddParameter("SyncType", "OrgUnits")
-            [void]$ps.AddParameter("TableName", "OrgUnits")
+            [void]$ps.AddParameter("SyncType", "Contexts")
+            [void]$ps.AddParameter("TableName", "Contexts")
             [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
             [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
             [void]$ps.AddParameter("SqlServer", $sqlServerName)
@@ -1285,7 +1285,7 @@ function Write-SyncError {
             [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
 
             $jobs += @{
-                Name = "OrgUnits"
+                Name = "Contexts"
                 PowerShell = $ps
                 Handle = $ps.BeginInvoke()
             }
@@ -1431,9 +1431,9 @@ function Write-SyncError {
                             $script:SyncStats.Principals = $result.Count
                             Write-SyncSuccess "Principals synced: $($result.Count)"
                         }
-                        "OrgUnits" {
-                            $script:SyncStats.OrgUnits = $result.Count
-                            Write-SyncSuccess "OrgUnits synced: $($result.Count)"
+                        "Contexts" {
+                            $script:SyncStats.Contexts = $result.Count
+                            Write-SyncSuccess "Contexts synced: $($result.Count)"
                         }
                         "PrincipalActivity" {
                             $script:SyncStats.PrincipalActivity = $result.Count
@@ -1733,17 +1733,17 @@ function Write-SyncError {
             }
         }
 
-        # Sync OrgUnits (depends on Principals data)
-        if ($SyncOrgUnits) {
-            Write-SyncStep "Syncing org units..."
+        # Sync Contexts (depends on Principals data)
+        if ($SyncContexts) {
+            Write-SyncStep "Syncing contexts..."
             try {
-                Sync-FGOrgUnit
+                Sync-FGContext
 
-                $orgUnitCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
-                $script:SyncStats.OrgUnits = $orgUnitCount
-                Write-SyncSuccess "OrgUnits synced: $orgUnitCount"
+                $contextCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Contexts WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                $script:SyncStats.Contexts = $contextCount
+                Write-SyncSuccess "Contexts synced: $contextCount"
             } catch {
-                Write-SyncError "OrgUnit sync failed" $_.Exception.Message
+                Write-SyncError "Context sync failed" $_.Exception.Message
             }
         }
 
@@ -1882,8 +1882,8 @@ function Write-SyncError {
     if ($SyncServicePrincipals -and $null -ne $script:SyncStats.ServicePrincipals) {
         Write-Host "  Service Principals:      $($script:SyncStats.ServicePrincipals)" -ForegroundColor White
     }
-    if ($SyncOrgUnits -and $script:SyncStats.OrgUnits -ne $null) {
-        Write-Host "  OrgUnits:                $($script:SyncStats.OrgUnits)" -ForegroundColor White
+    if ($SyncContexts -and $script:SyncStats.Contexts -ne $null) {
+        Write-Host "  Contexts:                $($script:SyncStats.Contexts)" -ForegroundColor White
     }
 
     if ($script:SyncStats.Errors.Count -gt 0) {

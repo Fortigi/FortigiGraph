@@ -1,6 +1,6 @@
 # Data Model
 
-FortigiGraph uses a unified data model (v3.1) that stores all authorization entities — from any source system — in a consistent structure backed by SQL Server temporal tables.
+FortigiGraph uses a unified data model (v3.2) that stores all authorization entities — from any source system — in a consistent structure backed by SQL Server temporal tables.
 
 ---
 
@@ -22,10 +22,43 @@ Business roles are not stored in a separate table. They are `Resources` with `re
 
 ---
 
+## Conceptual Hierarchy
+
+The model is organized around real people, not system accounts:
+
+```
+Identities (real persons — the governance anchor)
+  └─ Principals (accounts in source systems, via IdentityMembers)
+       └─ ResourceAssignments (what access each account holds)
+            └─ Resources (what is being accessed)
+
+Identities
+  └─ Contexts (organizational/structural grouping — contextId lives on Identity)
+
+Systems (technical sync root — each Principal and Resource belongs to one System)
+```
+
+**Why Identity is the root:** A real person (Identity) may have multiple accounts (Principals) across different source systems. The organizational context — department, team, cost center — belongs to the *person*, not to each individual account. This means `contextId` lives on `Identities`, and only Identities that have been correlated from their Principals carry a context. Uncorrelated accounts have no context by design.
+
+**Why Systems are the sync root:** At ingestion time, every Principal and Resource must belong to a System. This enables multi-tenant and multi-system deployments without ambiguity.
+
+---
+
 ## Entity Relationship Diagram
 
 ```mermaid
 erDiagram
+    Identities {
+        guid id PK
+        string displayName
+        string department
+        guid contextId FK
+        decimal riskScore
+    }
+    IdentityMembers {
+        guid identityId FK
+        guid principalId FK
+    }
     Systems {
         int id PK
         string displayName
@@ -47,14 +80,14 @@ erDiagram
         string displayName
         string principalType
         string extendedAttributes
-        guid orgUnitId FK
         decimal riskScore
     }
-    OrgUnits {
+    Contexts {
         guid id PK
         int systemId FK
         string displayName
-        guid parentOrgUnitId FK
+        string contextType
+        guid parentContextId FK
     }
     ResourceAssignments {
         guid resourceId FK
@@ -77,15 +110,6 @@ erDiagram
         datetime lastActivityDateTime
         int activityCount
     }
-    Identities {
-        guid id PK
-        string displayName
-        decimal riskScore
-    }
-    IdentityMembers {
-        guid identityId FK
-        guid principalId FK
-    }
     RiskScores {
         guid entityId
         string entityType
@@ -94,23 +118,71 @@ erDiagram
         string classifierMatches
     }
 
+    Identities ||--o{ IdentityMembers : "aggregates"
+    Identities }o--o| Contexts : "belongs to"
+    Principals ||--o{ IdentityMembers : "linked via"
     Systems ||--o{ Resources : "hosts"
     Systems ||--o{ Principals : "hosts"
-    Systems ||--o{ OrgUnits : "has"
+    Systems ||--o{ Contexts : "has"
     Resources ||--o{ ResourceAssignments : "granted via"
     Principals ||--o{ ResourceAssignments : "receives"
     Resources ||--o{ ResourceRelationships : "parent in"
     Resources ||--o{ ResourceRelationships : "child in"
     Principals ||--o{ PrincipalActivity : "has activity"
     Resources ||--o{ PrincipalActivity : "accessed in"
-    Principals }o--o| OrgUnits : "belongs to"
-    Identities ||--o{ IdentityMembers : "aggregates"
-    Principals ||--o{ IdentityMembers : "linked via"
 ```
 
 ---
 
 ## Table Reference
+
+### Identities
+
+Real persons aggregated across multiple accounts and source systems. An Identity is the result of account correlation: one human may have an Entra ID user, a service account, and a privileged admin account — all linked to one Identity record.
+
+Identities carry the `contextId` because organizational context (department, team) belongs to the *person*, not to their individual accounts.
+
+| Property | Value |
+|---|---|
+| Primary Key | `id` GUID |
+| Temporal | Yes |
+| Created by | `Initialize-FGSystemTables` |
+
+Key columns: `displayName`, `contextId`, `riskScore`.
+
+---
+
+### IdentityMembers
+
+The join table between Identities and Principals. One identity links to one or more principals, potentially across different source systems.
+
+| Property | Value |
+|---|---|
+| Primary Key | Composite: `identityId` + `principalId` |
+| Temporal | Yes |
+| Created by | `Initialize-FGSystemTables` |
+
+---
+
+### Contexts
+
+Organizational and structural groupings that define access eligibility. A Context can represent a department, division, cost center, team, project, office location, or any other dimension that governs access. `contextType` discriminates between them.
+
+Context belongs to the Identity (the real person), not to individual Principals. Principals without a correlated Identity have no context — this is intentional.
+
+**Context and policy-driven access (Option B):** When an assignment is driven by an Identity's context (e.g., "all Finance employees get access to SharePoint Finance"), the governing rule is captured in `AssignmentPolicies.policyConditions` as a JSON condition referencing the `contextId`. The assignment row in `ResourceAssignments` records the *result*; the policy row records the *rule*. This keeps assignments clean while the "why" remains auditable through the policy chain.
+
+| Property | Value |
+|---|---|
+| Primary Key | `id` GUID |
+| Temporal | Yes |
+| Created by | `Initialize-FGSystemTables` |
+
+Key columns: `displayName`, `contextType`, `systemId`, `parentContextId` (self-referencing for hierarchy).
+
+**contextType values:** `Department`, `Division`, `CostCenter`, `Team`, `Office`, `Project`, `Location`, or any custom string.
+
+---
 
 ### Systems
 
@@ -178,7 +250,7 @@ All identity types from any system. The `principalType` column distinguishes hum
 | Temporal | Yes |
 | Created by | `Initialize-FGSystemTables` |
 
-Key columns: `displayName`, `principalType`, `systemId`, `orgUnitId`, `extendedAttributes` (JSON), `riskScore`.
+Key columns: `displayName`, `principalType`, `systemId`, `extendedAttributes` (JSON), `riskScore`.
 
 ---
 
@@ -196,49 +268,9 @@ Key columns: `activityType`, `lastActivityDateTime`, `activityCount`.
 
 ---
 
-### OrgUnits
-
-Organizational units such as departments or teams. Can be derived from `department` attributes in Principals (via `Sync-FGOrgUnit`) or loaded from an HR system via CSV.
-
-| Property | Value |
-|---|---|
-| Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
-
-Key columns: `displayName`, `systemId`, `parentOrgUnitId` (self-referencing for hierarchy).
-
----
-
-### Identities
-
-Real persons aggregated across multiple accounts and source systems. An identity is the result of account correlation: one human may have an Entra ID user, a service account, and a privileged admin account — all linked to one Identity record.
-
-| Property | Value |
-|---|---|
-| Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
-
-Key columns: `displayName`, `riskScore`.
-
----
-
-### IdentityMembers
-
-The join table between Identities and Principals. One identity links to one or more principals, potentially across different source systems.
-
-| Property | Value |
-|---|---|
-| Primary Key | Composite: `identityId` + `principalId` |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
-
----
-
 ### RiskScores
 
-Risk assessment results for any entity type (Principal, Resource, Identity, OrgUnit). Written by `Invoke-FGRiskScoring` and updated by analyst overrides.
+Risk assessment results for any entity type (Principal, Resource, Identity, Context). Written by `Invoke-FGRiskScoring` and updated by analyst overrides.
 
 | Property | Value |
 |---|---|

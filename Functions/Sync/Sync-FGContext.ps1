@@ -1,26 +1,29 @@
-function Sync-FGOrgUnit {
+function Sync-FGContext {
     <#
     .SYNOPSIS
-    Calculates organizational units from Principals data and syncs to the OrgUnits table.
+    Calculates contexts from Identities data and syncs to the Contexts table.
 
     .DESCRIPTION
-    Extracts unique departments from the Principals table and creates OrgUnit records.
-    For each department:
+    Extracts unique departments from the Principals table, creates Context records,
+    and links them to Identities. For each department:
     - Generates a deterministic GUID based on systemId + department name
     - Counts members (direct and total)
     - Identifies the department manager (principal with most direct reports in that department)
     - Infers parent-child relationships from manager chains
-    - Updates orgUnitId on Principals and Identities tables
+    - Updates contextId on Identities table
+
+    Context belongs to the Identity (the real person), not to individual Principals.
+    Principals that have not been correlated to an Identity will not have a context.
 
     .PARAMETER SystemId
     Optional system ID. If not provided, auto-detects from Systems table where systemType='EntraID'.
 
     .EXAMPLE
-    Sync-FGOrgUnit
+    Sync-FGContext
     #>
 
     [CmdletBinding()]
-    [Alias("Sync-OrgUnit")]
+    [Alias("Sync-Context")]
     Param(
         [Parameter(Mandatory = $false)]
         [int]$SystemId
@@ -44,13 +47,13 @@ function Sync-FGOrgUnit {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Using system ID: $SystemId" -ForegroundColor Green
     }
 
-    # Ensure OrgUnits table exists
-    $orgUnitColumns = @{
+    # Ensure Contexts table exists
+    $contextColumns = @{
         'id'                 = 'UNIQUEIDENTIFIER'
         'systemId'           = 'INT'
         'displayName'        = 'NVARCHAR(500)'
-        'orgUnitType'        = 'NVARCHAR(50)'
-        'parentOrgUnitId'    = 'UNIQUEIDENTIFIER'
+        'contextType'        = 'NVARCHAR(50)'
+        'parentContextId'    = 'UNIQUEIDENTIFIER'
         'managerId'          = 'UNIQUEIDENTIFIER'
         'managerIdentityId'  = 'UNIQUEIDENTIFIER'
         'department'         = 'NVARCHAR(255)'
@@ -63,9 +66,9 @@ function Sync-FGOrgUnit {
         'lastCalculatedAt'   = 'DATETIME2'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
-    Initialize-FGSyncTable -TableName "OrgUnits" -Columns $orgUnitColumns -PrimaryKey 'id'
+    Initialize-FGSyncTable -TableName "Contexts" -Columns $contextColumns -PrimaryKey 'id'
 
-    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Calculating organizational units from Principals..." -ForegroundColor Cyan
+    Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Calculating contexts from Principals..." -ForegroundColor Cyan
 
     # Use a direct connection for all data loading (avoids Invoke-FGSQLCommand pipeline issues)
     $dataConnection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
@@ -144,7 +147,7 @@ SELECT managerId, department FROM RankedManagers WHERE rn = 1
         }
         $reader.Close()
 
-        # Find manager departments (to infer parent-child OrgUnit relationships)
+        # Find manager departments (to infer parent-child Context relationships)
         $cmd = $dataConnection.CreateCommand()
         $cmd.CommandTimeout = 300
         $cmd.CommandText = @"
@@ -186,25 +189,25 @@ WHERE p.ValidTo = '9999-12-31 23:59:59.9999999'
         return [guid]$guidStr
     }
 
-    # Build OrgUnit records
-    $orgUnits = @()
+    # Build Context records
+    $contexts = @()
     $deptToGuid = @{}
     $now = [datetime]::UtcNow
 
     foreach ($dept in $departments) {
         $deptName = $dept.department
         $guidInput = "$SystemId|$deptName"
-        $orgUnitId = Get-DeterministicGuid $guidInput
-        $deptToGuid[$deptName] = $orgUnitId
+        $contextId = Get-DeterministicGuid $guidInput
+        $deptToGuid[$deptName] = $contextId
 
         $mgrId = if ($deptManagers.ContainsKey($deptName)) { [guid]$deptManagers[$deptName] } else { $null }
 
-        $orgUnits += [PSCustomObject]@{
-            id = $orgUnitId
+        $contexts += [PSCustomObject]@{
+            id = $contextId
             systemId = $SystemId
             displayName = $deptName
-            orgUnitType = 'Department'
-            parentOrgUnitId = $null
+            contextType = 'Department'
+            parentContextId = $null
             managerId = $mgrId
             managerIdentityId = $null
             department = $deptName
@@ -219,25 +222,25 @@ WHERE p.ValidTo = '9999-12-31 23:59:59.9999999'
         }
     }
 
-    # Set parent OrgUnit IDs based on manager department relationships
-    foreach ($ou in $orgUnits) {
-        if ($managerDepts.ContainsKey($ou.department)) {
-            $parentDept = $managerDepts[$ou.department]
+    # Set parent Context IDs based on manager department relationships
+    foreach ($ctx in $contexts) {
+        if ($managerDepts.ContainsKey($ctx.department)) {
+            $parentDept = $managerDepts[$ctx.department]
             if ($deptToGuid.ContainsKey($parentDept)) {
-                $ou.parentOrgUnitId = $deptToGuid[$parentDept]
+                $ctx.parentContextId = $deptToGuid[$parentDept]
             }
         }
     }
 
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Built $($orgUnits.Count) OrgUnit records" -ForegroundColor Green
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Built $($contexts.Count) Context records" -ForegroundColor Green
 
     # Build DataTable
     $dataTable = New-Object System.Data.DataTable
     $dataTable.Columns.Add("id", [guid]) | Out-Null
     $dataTable.Columns.Add("systemId", [int]) | Out-Null
     $dataTable.Columns.Add("displayName", [string]) | Out-Null
-    $dataTable.Columns.Add("orgUnitType", [string]) | Out-Null
-    $dataTable.Columns.Add("parentOrgUnitId", [guid]) | Out-Null
+    $dataTable.Columns.Add("contextType", [string]) | Out-Null
+    $dataTable.Columns.Add("parentContextId", [guid]) | Out-Null
     $dataTable.Columns.Add("managerId", [guid]) | Out-Null
     $dataTable.Columns.Add("managerIdentityId", [guid]) | Out-Null
     $dataTable.Columns.Add("department", [string]) | Out-Null
@@ -250,23 +253,23 @@ WHERE p.ValidTo = '9999-12-31 23:59:59.9999999'
     $dataTable.Columns.Add("lastCalculatedAt", [datetime]) | Out-Null
     $dataTable.Columns.Add("extendedAttributes", [string]) | Out-Null
 
-    foreach ($ou in $orgUnits) {
+    foreach ($ctx in $contexts) {
         $row = $dataTable.NewRow()
-        $row["id"] = $ou.id
-        $row["systemId"] = $ou.systemId
-        $row["displayName"] = $ou.displayName
-        $row["orgUnitType"] = $ou.orgUnitType
-        $row["parentOrgUnitId"] = if ($ou.parentOrgUnitId) { $ou.parentOrgUnitId } else { [DBNull]::Value }
-        $row["managerId"] = if ($ou.managerId) { $ou.managerId } else { [DBNull]::Value }
+        $row["id"] = $ctx.id
+        $row["systemId"] = $ctx.systemId
+        $row["displayName"] = $ctx.displayName
+        $row["contextType"] = $ctx.contextType
+        $row["parentContextId"] = if ($ctx.parentContextId) { $ctx.parentContextId } else { [DBNull]::Value }
+        $row["managerId"] = if ($ctx.managerId) { $ctx.managerId } else { [DBNull]::Value }
         $row["managerIdentityId"] = [DBNull]::Value
-        $row["department"] = if ($ou.department) { $ou.department } else { [DBNull]::Value }
-        $row["division"] = if ($ou.division) { $ou.division } else { [DBNull]::Value }
+        $row["department"] = if ($ctx.department) { $ctx.department } else { [DBNull]::Value }
+        $row["division"] = if ($ctx.division) { $ctx.division } else { [DBNull]::Value }
         $row["costCenter"] = [DBNull]::Value
         $row["officeLocation"] = [DBNull]::Value
-        $row["memberCount"] = $ou.memberCount
-        $row["totalMemberCount"] = $ou.totalMemberCount
-        $row["sourceType"] = $ou.sourceType
-        $row["lastCalculatedAt"] = $ou.lastCalculatedAt
+        $row["memberCount"] = $ctx.memberCount
+        $row["totalMemberCount"] = $ctx.totalMemberCount
+        $row["sourceType"] = $ctx.sourceType
+        $row["lastCalculatedAt"] = $ctx.lastCalculatedAt
         $row["extendedAttributes"] = [DBNull]::Value
         $dataTable.Rows.Add($row)
     }
@@ -276,52 +279,36 @@ WHERE p.ValidTo = '9999-12-31 23:59:59.9999999'
         param($connection)
         $transaction = $connection.BeginTransaction()
         try {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) OrgUnits..." -ForegroundColor Cyan
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merging $($dataTable.Rows.Count) Contexts..." -ForegroundColor Cyan
 
             $mergeResult = Invoke-FGSQLBulkMerge `
                 -Connection $connection `
                 -Transaction $transaction `
-                -TargetTableName "OrgUnits" `
+                -TargetTableName "Contexts" `
                 -DataTable $dataTable `
                 -KeyColumns @('id')
 
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OrgUnits: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Contexts: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated" -ForegroundColor Green
 
-            # Update Principals.orgUnitId based on department match
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updating Principals.orgUnitId..." -ForegroundColor Cyan
-            $updateCmd = $connection.CreateCommand()
-            $updateCmd.Transaction = $transaction
-            $updateCmd.CommandTimeout = 300
-            $updateCmd.CommandText = @"
-UPDATE p SET p.orgUnitId = ou.id
-FROM dbo.Principals p
-INNER JOIN dbo.OrgUnits ou ON p.department = ou.department AND ou.systemId = p.systemId
-WHERE p.ValidTo = '9999-12-31 23:59:59.9999999'
-  AND ou.ValidTo = '9999-12-31 23:59:59.9999999'
-  AND p.principalType = 'User'
-"@
-            $principalsUpdated = $updateCmd.ExecuteNonQuery()
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updated orgUnitId on $principalsUpdated principals" -ForegroundColor Green
-
-            # Update Identities.orgUnitId if Identities table has data
+            # Update Identities.contextId — context belongs to the real person, not to accounts
             $identitiesUpdated = 0
             try {
                 $identUpdateCmd = $connection.CreateCommand()
                 $identUpdateCmd.Transaction = $transaction
                 $identUpdateCmd.CommandTimeout = 300
                 $identUpdateCmd.CommandText = @"
-UPDATE i SET i.orgUnitId = ou.id
+UPDATE i SET i.contextId = ctx.id
 FROM dbo.Identities i
-INNER JOIN dbo.OrgUnits ou ON i.department = ou.department
+INNER JOIN dbo.Contexts ctx ON i.department = ctx.department
 WHERE i.ValidTo = '9999-12-31 23:59:59.9999999'
-  AND ou.ValidTo = '9999-12-31 23:59:59.9999999'
+  AND ctx.ValidTo = '9999-12-31 23:59:59.9999999'
 "@
                 $identitiesUpdated = $identUpdateCmd.ExecuteNonQuery()
                 if ($identitiesUpdated -gt 0) {
-                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updated orgUnitId on $identitiesUpdated identities" -ForegroundColor Green
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Updated contextId on $identitiesUpdated identities" -ForegroundColor Green
                 }
             } catch {
-                Write-Verbose "Could not update Identities.orgUnitId: $_"
+                Write-Verbose "Could not update Identities.contextId: $_"
             }
 
             $transaction.Commit()
@@ -330,7 +317,7 @@ WHERE i.ValidTo = '9999-12-31 23:59:59.9999999'
             return @{
                 Inserted = $mergeResult.Inserted
                 Updated = $mergeResult.Updated
-                PrincipalsUpdated = $principalsUpdated
+                IdentitiesUpdated = $identitiesUpdated
             }
         }
         catch {
@@ -339,16 +326,16 @@ WHERE i.ValidTo = '9999-12-31 23:59:59.9999999'
         }
     }
 
-    $syncRecordCount = $orgUnits.Count
+    $syncRecordCount = $contexts.Count
     $syncStatus = "Success"
 
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "OrgUnit Sync Complete!" -ForegroundColor Green
+    Write-Host "Context Sync Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "OrgUnits:           $($orgUnits.Count)" -ForegroundColor White
+    Write-Host "Contexts:           $($contexts.Count)" -ForegroundColor White
     Write-Host "  Inserted:         $($syncResult.Inserted)" -ForegroundColor White
     Write-Host "  Updated:          $($syncResult.Updated)" -ForegroundColor White
-    Write-Host "Principals updated: $($syncResult.PrincipalsUpdated)" -ForegroundColor White
+    Write-Host "Identities updated: $($syncResult.IdentitiesUpdated)" -ForegroundColor White
     Write-Host "========================================`n" -ForegroundColor Green
 
     } catch {
@@ -357,13 +344,13 @@ WHERE i.ValidTo = '9999-12-31 23:59:59.9999999'
         throw
     }
     finally {
-        Write-FGSyncLog -SyncType "OrgUnits" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "OrgUnits"
+        Write-FGSyncLog -SyncType "Contexts" -StartTime $syncStartTime -RecordCount $syncRecordCount -Status $syncStatus -ErrorMessage $syncErrorMessage -TableName "Contexts"
     }
 
     return @{
-        TotalOrgUnits = $orgUnits.Count
+        TotalContexts = $contexts.Count
         Inserted = $syncResult.Inserted
         Updated = $syncResult.Updated
-        PrincipalsUpdated = $syncResult.PrincipalsUpdated
+        IdentitiesUpdated = $syncResult.IdentitiesUpdated
     }
 }

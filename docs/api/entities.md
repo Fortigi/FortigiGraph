@@ -416,7 +416,7 @@ Temporal version history for the business role resource record. Same format as [
 
 ---
 
-## Systems & OrgUnits
+## Systems & Contexts
 
 ### Systems
 
@@ -450,28 +450,32 @@ Temporal version history for the business role resource record. Same format as [
 
 ---
 
-### OrgUnits
+### Contexts
+
+Contexts represent organizational and structural groupings (departments, divisions, cost centers, teams, etc.) that belong to Identities — the real persons — not to individual system accounts. The `contextType` column discriminates between context types.
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/org-units` | `GET` | Flat list of org units (departments/teams) with hierarchy pointers |
-| `/api/org-units/tree` | `GET` | Pre-built nested tree structure for the Org Chart page |
-| `/api/org-units/:id` | `GET` | OrgUnit detail with member count and sub-unit list |
-| `/api/org-units/:id/members` | `GET` | Paginated list of principals in this org unit |
+| `/api/contexts` | `GET` | Flat list of contexts with hierarchy pointers |
+| `/api/contexts/tree` | `GET` | Pre-built nested tree structure for the Org Chart page |
+| `/api/contexts/:id` | `GET` | Context detail with member count and sub-context list |
+| `/api/contexts/:id/members` | `GET` | Paginated list of identities (and their correlated principals) in this context |
 
-**GET /api/org-units/tree response excerpt:**
+**GET /api/contexts/tree response excerpt:**
 
 ```json
 {
   "tree": [
     {
-      "orgUnitId": "ou-001",
+      "id": "ctx-001",
       "displayName": "Finance",
+      "contextType": "Department",
       "memberCount": 142,
       "children": [
         {
-          "orgUnitId": "ou-007",
+          "id": "ctx-007",
           "displayName": "Finance - Controllers",
+          "contextType": "Team",
           "memberCount": 23,
           "children": []
         }
@@ -481,7 +485,7 @@ Temporal version history for the business role resource record. Same format as [
 }
 ```
 
-**Reads From:** `OrgUnits` + `Principals`
+**Reads From:** `Contexts` + `Identities` + `IdentityMembers`
 
 ---
 

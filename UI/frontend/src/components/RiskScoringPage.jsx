@@ -42,7 +42,7 @@ function OverrideControl({ entity, entityType, authFetch, onOverrideChange }) {
   const [reason, setReason] = useState(entity.riskOverrideReason || '');
   const [saving, setSaving] = useState(false);
 
-  const typeMap = { user: 'users', group: 'groups', 'business-role': 'business-roles', 'org-unit': 'org-units', identity: 'identities' };
+  const typeMap = { user: 'users', group: 'groups', 'business-role': 'business-roles', 'context': 'contexts', identity: 'identities' };
   const type = typeMap[entityType] || 'groups';
 
   const handleSave = async () => {
@@ -350,7 +350,7 @@ function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
     'business-role': [
       { key: 'catalogName', label: 'Catalog', render: e => e.catalogName || '\u2014' },
     ],
-    'org-unit': [
+    'context': [
       { key: 'department', label: 'Department', render: e => e.department || '\u2014' },
       { key: 'memberCount', label: 'Members', render: e => e.memberCount ?? '\u2014' },
       { key: 'managerName', label: 'Manager', render: e => e.managerName || '\u2014' },
@@ -365,7 +365,7 @@ function EntityTable({ entities, entityType, onSelect, onOpenDetail }) {
   const cols = extraColumns[entityType] || [];
 
   // Map entity type to detail page type for drill-through
-  const detailTypeMap = { user: 'user', group: 'group', 'business-role': 'access-package', 'org-unit': 'org-unit', identity: 'identity' };
+  const detailTypeMap = { user: 'user', group: 'group', 'business-role': 'access-package', 'context': 'context', identity: 'identity' };
   const detailType = detailTypeMap[entityType] || entityType;
 
   return (
@@ -965,14 +965,14 @@ export default function RiskScoringPage({ onOpenDetail }) {
   const activeTotal = view === 'clusters' ? (clusterData.total || 0) : (entityData.total || 0);
   const totalPages = Math.ceil(activeTotal / PAGE_SIZE);
   const totalOverrides = (s?.groupOverrides || 0) + (s?.userOverrides || 0)
-    + (s?.businessRoleOverrides || 0) + (s?.orgUnitOverrides || 0) + (s?.identityOverrides || 0);
+    + (s?.businessRoleOverrides || 0) + (s?.contextOverrides || 0) + (s?.identityOverrides || 0);
 
   // Map view values to entity types for EntityTable
   const viewToEntityType = {
     groups: 'group',
     users: 'user',
     'business-roles': 'business-role',
-    'org-units': 'org-unit',
+    'contexts': 'context',
     identities: 'identity',
   };
 
@@ -1004,7 +1004,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
         if (s.totalGroups > 0) distCharts.push({ label: 'Resources', byTier: s.groupsByTier, total: s.totalGroups });
         if (s.totalUsers > 0) distCharts.push({ label: 'Users', byTier: s.usersByTier, total: s.totalUsers });
         if (s.totalBusinessRoles > 0) distCharts.push({ label: 'Business Roles', byTier: s.businessRolesByTier, total: s.totalBusinessRoles });
-        if (s.totalOrgUnits > 0) distCharts.push({ label: 'Org Units', byTier: s.orgUnitsByTier, total: s.totalOrgUnits });
+        if (s.totalContexts > 0) distCharts.push({ label: 'Contexts', byTier: s.contextsByTier, total: s.totalContexts });
         if (s.totalIdentities > 0) distCharts.push({ label: 'Identities', byTier: s.identitiesByTier, total: s.totalIdentities });
         const hasCluster = clusterSummary?.available;
         const colCount = distCharts.length + (hasCluster ? 1 : 0);
@@ -1138,14 +1138,14 @@ export default function RiskScoringPage({ onOpenDetail }) {
                 Business Roles
               </button>
             )}
-            {s?.totalOrgUnits > 0 && (
+            {s?.totalContexts > 0 && (
               <button
-                onClick={() => setView('org-units')}
+                onClick={() => setView('contexts')}
                 className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                  view === 'org-units' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                  view === 'contexts' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Org Units
+                Contexts
               </button>
             )}
             {s?.totalIdentities > 0 && (
@@ -1184,7 +1184,7 @@ export default function RiskScoringPage({ onOpenDetail }) {
 
             <input
               type="text"
-              placeholder={`Search ${({ clusters: 'clusters', groups: 'resources', users: 'users', 'business-roles': 'business roles', 'org-units': 'org units', identities: 'identities' })[view] || view}...`}
+              placeholder={`Search ${({ clusters: 'clusters', groups: 'resources', users: 'users', 'business-roles': 'business roles', 'contexts': 'contexts', identities: 'identities' })[view] || view}...`}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-52 placeholder-gray-400"

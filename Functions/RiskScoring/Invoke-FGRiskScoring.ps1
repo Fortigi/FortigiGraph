@@ -14,7 +14,7 @@ function Invoke-FGRiskScoring {
            - Layer 3: Structural/hygiene signals (no description, no owner, stale accounts)
            - Layer 4: Cross-entity risk propagation (group→user 30%, user→group 25%)
         4. Writes risk scores to the RiskScores table and denormalizes riskScore+riskTier to entity tables
-        5. Scores additional entity types (BusinessRoles, OrgUnits, Identities) using
+        5. Scores additional entity types (BusinessRoles, Contexts, Identities) using
            pre-computed Principal/Resource scores for aggregate calculations
 
         Designed for batch execution after Start-FGSync. Handles 5,000+ users and 10,000+ groups.
@@ -1730,7 +1730,7 @@ WHERE r.riskScoredAt = @scoredAt;
     try {
         $ouExists = $false
         $cmd = $entityScoringConnection.CreateCommand()
-        $cmd.CommandText = "SELECT OBJECT_ID('dbo.OrgUnits', 'U')"
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.Contexts', 'U')"
         $result = $cmd.ExecuteScalar()
         if ($null -ne $result -and $result -isnot [DBNull]) {
             $ouExists = $true
@@ -1738,15 +1738,15 @@ WHERE r.riskScoredAt = @scoredAt;
 
         if ($ouExists) {
             Write-Host ""
-            Write-Host "  Scoring OrgUnits..." -ForegroundColor Cyan
+            Write-Host "  Scoring Contexts..." -ForegroundColor Cyan
 
             $orgUnits = @()
-            $ouMemberPrincipalScores = @{}  # ouId -> @(riskScore, ...)
+            $ouMemberPrincipalScores = @{}  # contextId -> @(riskScore, ...)
 
-            # Load OrgUnits
+            # Load Contexts
             $cmd = $entityScoringConnection.CreateCommand()
             $cmd.CommandTimeout = 120
-            $cmd.CommandText = "SELECT id, displayName, department, managerId, memberCount, totalMemberCount, parentOrgUnitId, officeLocation FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $cmd.CommandText = "SELECT id, displayName, department, managerId, memberCount, totalMemberCount, parentContextId, officeLocation FROM dbo.Contexts WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
             $reader = $cmd.ExecuteReader()
             while ($reader.Read()) {
                 $orgUnits += @{
@@ -1756,30 +1756,30 @@ WHERE r.riskScoredAt = @scoredAt;
                     managerId = if ($reader['managerId'] -is [DBNull]) { "" } else { "$($reader['managerId'])" }
                     memberCount = if ($reader['memberCount'] -is [DBNull]) { 0 } else { [int]$reader['memberCount'] }
                     totalMemberCount = if ($reader['totalMemberCount'] -is [DBNull]) { 0 } else { [int]$reader['totalMemberCount'] }
-                    parentOrgUnitId = if ($reader['parentOrgUnitId'] -is [DBNull]) { "" } else { "$($reader['parentOrgUnitId'])" }
+                    parentContextId = if ($reader['parentContextId'] -is [DBNull]) { "" } else { "$($reader['parentContextId'])" }
                     officeLocation = if ($reader['officeLocation'] -is [DBNull]) { "" } else { "$($reader['officeLocation'])" }
                 }
             }
             $reader.Close()
 
-            # Load principal risk scores grouped by orgUnitId (batch query)
+            # Load identity risk scores grouped by contextId — context belongs to Identity, not Principal
             $cmd2 = $entityScoringConnection.CreateCommand()
             $cmd2.CommandTimeout = 120
             $cmd2.CommandText = @"
-SELECT p.orgUnitId, r.riskScore
-FROM dbo.Principals p
-INNER JOIN dbo.RiskScores r ON r.entityId = p.id AND r.entityType = 'Principal'
-WHERE p.orgUnitId IS NOT NULL AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+SELECT i.contextId, r.riskScore
+FROM dbo.Identities i
+INNER JOIN dbo.RiskScores r ON r.entityId = i.id AND r.entityType = 'Identity'
+WHERE i.contextId IS NOT NULL AND i.ValidTo = '9999-12-31 23:59:59.9999999'
 "@
             $reader2 = $cmd2.ExecuteReader()
             while ($reader2.Read()) {
-                $ouId = "$($reader2['orgUnitId'])"
+                $ouId = "$($reader2['contextId'])"
                 if (-not $ouMemberPrincipalScores.ContainsKey($ouId)) { $ouMemberPrincipalScores[$ouId] = @() }
                 $ouMemberPrincipalScores[$ouId] += [int]$reader2['riskScore']
             }
             $reader2.Close()
 
-            Write-Host "    Loaded $($orgUnits.Count) org units" -ForegroundColor Gray
+            Write-Host "    Loaded $($orgUnits.Count) contexts" -ForegroundColor Gray
 
             if ($orgUnits.Count -gt 0) {
                 # Build parent score lookup for propagation (two-pass: score first, propagate second)
@@ -1810,10 +1810,10 @@ WHERE p.orgUnitId IS NOT NULL AND p.ValidTo = '9999-12-31 23:59:59.9999999'
                     }
                     $directScore = $bestScore
 
-                    # Root OrgUnit bonus
-                    if ($ou.parentOrgUnitId -eq "") {
+                    # Root context bonus
+                    if ($ou.parentContextId -eq "") {
                         $directScore = [Math]::Min(100, $directScore + 10)
-                        $directReasons += "Root OrgUnit (no parent) [+10]"
+                        $directReasons += "Root context (no parent) [+10]"
                     }
 
                     # --- Membership (20%): Aggregate principal risk ---
@@ -1864,16 +1864,16 @@ WHERE p.orgUnitId IS NOT NULL AND p.ValidTo = '9999-12-31 23:59:59.9999999'
                     }
                 }
 
-                # Second pass: propagate parent OrgUnit risk down
+                # Second pass: propagate parent context risk down
                 foreach ($ou in $orgUnits) {
                     $ouId = $ou.id
-                    $parentId = $ou.parentOrgUnitId
+                    $parentId = $ou.parentContextId
                     if ($parentId -ne "" -and $ouScoresById.ContainsKey($parentId)) {
                         $parentPre = $ouScoresById[$parentId].prePropagate
                         $inherited = [int]($parentPre * 0.20)
                         if ($inherited -gt 0) {
                             $ouScoresById[$ouId].propagatedScore = $inherited
-                            $ouScoresById[$ouId].propagatedReasons += "Inherited 20% from parent OrgUnit (score $parentPre) [+$inherited]"
+                            $ouScoresById[$ouId].propagatedReasons += "Inherited 20% from parent context (score $parentPre) [+$inherited]"
                         }
                     }
                 }
@@ -1907,25 +1907,25 @@ WHERE p.orgUnitId IS NOT NULL AND p.ValidTo = '9999-12-31 23:59:59.9999999'
                     }
                 }
 
-                # Write OrgUnit scores
+                # Write Context scores
                 $updated = 0
                 for ($i = 0; $i -lt $ouUpdates.Count; $i += $batchSize) {
                     $batch = $ouUpdates[$i..[Math]::Min($i + $batchSize - 1, $ouUpdates.Count - 1)]
-                    Write-RiskScoreBatch -batch $batch -entityType 'OrgUnit'
+                    Write-RiskScoreBatch -batch $batch -entityType 'Context'
                     $updated += $batch.Count
                     if ($updated % 500 -eq 0 -or $updated -eq $ouUpdates.Count) {
-                        Write-Host "    OrgUnits: $updated / $($ouUpdates.Count)" -ForegroundColor Gray
+                        Write-Host "    Contexts: $updated / $($ouUpdates.Count)" -ForegroundColor Gray
                     }
                 }
-                Write-Host "    OrgUnits scored: $($ouUpdates.Count)" -ForegroundColor Green
+                Write-Host "    Contexts scored: $($ouUpdates.Count)" -ForegroundColor Green
             } else {
-                Write-Host "    No org units found — skipping" -ForegroundColor Gray
+                Write-Host "    No contexts found — skipping" -ForegroundColor Gray
             }
         } else {
-            Write-Host "  OrgUnits table not found — skipping" -ForegroundColor Gray
+            Write-Host "  Contexts table not found — skipping" -ForegroundColor Gray
         }
     } catch {
-        Write-Host "  WARNING: OrgUnit scoring failed: $_" -ForegroundColor Yellow
+        Write-Host "  WARNING: Context scoring failed: $_" -ForegroundColor Yellow
     }
 
     # ------------------------------------------------------------------

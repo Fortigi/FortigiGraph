@@ -30,26 +30,26 @@ function isCacheValid() {
   return cachedUsers !== null && (Date.now() - cacheTimestamp) < CACHE_TTL_MS;
 }
 
-// ─── OrgUnits table detection ────────────────────────────────────────
-// When OrgUnits table exists, the frontend can use /api/org-units/tree
+// ─── Contexts table detection ─────────────────────────────────────────
+// When Contexts table exists, the frontend can use /api/contexts/tree
 // for faster tree building instead of loading all users.
 
-let hasOrgUnitsTable = null;
-let orgUnitsCheckTime = 0;
+let hasContextsTable = null;
+let contextsCheckTime = 0;
 
-async function checkOrgUnits(pool) {
+async function checkContexts(pool) {
   const now = Date.now();
-  if (hasOrgUnitsTable !== null && now - orgUnitsCheckTime < 300000) return hasOrgUnitsTable;
+  if (hasContextsTable !== null && now - contextsCheckTime < 300000) return hasContextsTable;
   try {
     const r = await pool.request().query(`
-      SELECT OBJECT_ID('dbo.OrgUnits', 'U') AS orgUnitsExists
+      SELECT OBJECT_ID('dbo.Contexts', 'U') AS contextsExists
     `);
-    hasOrgUnitsTable = !!r.recordset[0].orgUnitsExists;
-    orgUnitsCheckTime = now;
+    hasContextsTable = !!r.recordset[0].contextsExists;
+    contextsCheckTime = now;
   } catch {
-    hasOrgUnitsTable = false;
+    hasContextsTable = false;
   }
-  return hasOrgUnitsTable;
+  return hasContextsTable;
 }
 
 // ─── User table detection ────────────────────────────────────────────
@@ -260,8 +260,8 @@ router.get('/org-chart', async (req, res) => {
     cachedUsers = users;
     cacheTimestamp = Date.now();
 
-    const orgUnitsAvailable = await checkOrgUnits(p);
-    return res.json({ available: true, users, hasOrgUnits: orgUnitsAvailable });
+    const contextsAvailable = await checkContexts(p);
+    return res.json({ available: true, users, hasContexts: contextsAvailable });
   } catch (err) {
     console.error('Org chart query failed:', err.message);
     return res.status(500).json({ error: 'Failed to load org chart' });

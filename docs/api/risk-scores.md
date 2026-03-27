@@ -6,7 +6,7 @@ These endpoints expose identity risk scoring data produced by the FortigiGraph r
 
 ## Risk Score Overview
 
-The scoring engine assigns a numeric score (0–100) to every principal, resource, business role, org unit, and identity. Scores map to named tiers:
+The scoring engine assigns a numeric score (0–100) to every principal, resource, business role, context, and identity. Scores map to named tiers:
 
 | Tier | Score Range | Color |
 |---|---|---|
@@ -22,7 +22,7 @@ Scoring runs in four layers:
 1. **Direct match** — classifier regex patterns matched against display names, job titles, and attributes
 2. **Membership analysis** — score contributions from high-risk resources the principal is a member of
 3. **Structural hygiene** — stale sign-ins, never-signed-in accounts, accounts with no expiration, orphaned identities
-4. **Cross-entity propagation** — risk flowing from high-risk principals upward to their org units
+4. **Cross-entity propagation** — risk flowing from high-risk principals upward to their contexts
 
 Analyst overrides (+50 to −50) are preserved across re-scoring runs and applied after all four layers, with the final score clamped to 0–100.
 
@@ -62,7 +62,7 @@ Overall risk score summary across all entity types. Used by the Risk Scoring pag
       "None": 0
     },
     "BusinessRole": { ... },
-    "OrgUnit": { ... },
+    "Context": { ... },
     "Identity": { ... }
   }
 }
@@ -81,7 +81,7 @@ Each entity type has a dedicated paginated list endpoint.
 | `GET /api/risk-scores/users` | Principals | `RiskScores` + `Principals` |
 | `GET /api/risk-scores/groups` | Resources (non-BusinessRole) | `RiskScores` + `Resources` |
 | `GET /api/risk-scores/business-roles` | Resources (`resourceType='BusinessRole'`) | `RiskScores` + `Resources` |
-| `GET /api/risk-scores/org-units` | OrgUnits | `RiskScores` + `OrgUnits` |
+| `GET /api/risk-scores/contexts` | Contexts | `RiskScores` + `Contexts` |
 | `GET /api/risk-scores/identities` | Identities | `RiskScores` + `Identities` |
 
 ### Common Query Parameters
@@ -145,7 +145,7 @@ Retrieve the current risk score for a single entity.
 
 | Parameter | Values |
 |---|---|
-| `type` | `users`, `groups`, `business-roles`, `org-units`, `identities` |
+| `type` | `users`, `groups`, `business-roles`, `contexts`, `identities` |
 | `id` | Entity UUID |
 
 **Response:** Same structure as a single item from the list endpoints above, plus full `contributors` array (not just top 3).
@@ -160,7 +160,7 @@ Apply an analyst score adjustment to a single entity. The adjustment is stored w
 
 | Parameter | Values |
 |---|---|
-| `type` | `users`, `groups`, `business-roles`, `org-units`, `identities` |
+| `type` | `users`, `groups`, `business-roles`, `contexts`, `identities` |
 | `id` | Entity UUID |
 
 **Request Body**
@@ -277,6 +277,6 @@ Manager hierarchy tree with risk scores propagated to department nodes. Used by 
 }
 ```
 
-**Reads From:** `Principals` (manager hierarchy via `managerId` self-join) + `RiskScores` + `OrgUnits`
+**Reads From:** `Principals` (manager hierarchy via `managerId` self-join) + `RiskScores` + `Contexts`
 
 Risk tiers on manager nodes reflect the **highest risk tier among all direct and indirect reports** — allowing managers to identify high-risk subtrees at a glance.

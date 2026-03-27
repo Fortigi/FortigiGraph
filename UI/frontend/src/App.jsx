@@ -18,7 +18,7 @@ const PerfPage = lazy(() => import('./components/PerfPage'));
 const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
-const OrgUnitDetailPage = lazy(() => import('./components/OrgUnitDetailPage'));
+const ContextDetailPage = lazy(() => import('./components/ContextDetailPage'));
 const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
 const IdentityDetailPage = lazy(() => import('./components/IdentityDetailPage'));
 const AdminPage = lazy(() => import('./components/AdminPage'));
@@ -180,7 +180,7 @@ export default function App() {
   const [detailTabs, setDetailTabs] = useState(() => {
     // Restore detail tab from URL on load (e.g., bookmarked #user:abc)
     const { page: initPage } = parseHash();
-    if (initPage.startsWith('user:') || initPage.startsWith('group:') || initPage.startsWith('resource:') || initPage.startsWith('access-package:') || initPage.startsWith('department:') || initPage.startsWith('orgunit:') || initPage.startsWith('identity:')) {
+    if (initPage.startsWith('user:') || initPage.startsWith('group:') || initPage.startsWith('resource:') || initPage.startsWith('access-package:') || initPage.startsWith('department:') || initPage.startsWith('context:') || initPage.startsWith('identity:')) {
       const sepIdx = initPage.indexOf(':');
       const type = initPage.substring(0, sepIdx);
       const id = initPage.substring(sepIdx + 1);
@@ -211,12 +211,12 @@ export default function App() {
     const tabKey = `${type}:${id}`;
     setDetailTabs(prev => prev.filter(t => `${t.type}:${t.id}` !== tabKey));
     delete detailCacheRef.current[tabKey];
-    navigate(type === 'department' || type === 'orgunit' ? 'org-chart' : type === 'identity' ? 'identities' : type === 'resource' ? 'resources' : 'matrix');
+    navigate(type === 'department' || type === 'context' ? 'org-chart' : type === 'identity' ? 'identities' : type === 'resource' ? 'resources' : 'matrix');
   }, [navigate]);
 
   // When navigating to a detail tab via URL that isn't tracked yet, add it
   useEffect(() => {
-    if (page.startsWith('user:') || page.startsWith('group:') || page.startsWith('resource:') || page.startsWith('access-package:') || page.startsWith('department:') || page.startsWith('orgunit:') || page.startsWith('identity:')) {
+    if (page.startsWith('user:') || page.startsWith('group:') || page.startsWith('resource:') || page.startsWith('access-package:') || page.startsWith('department:') || page.startsWith('context:') || page.startsWith('identity:')) {
       const sepIdx = page.indexOf(':');
       const type = page.substring(0, sepIdx);
       const id = page.substring(sepIdx + 1);
@@ -253,7 +253,7 @@ export default function App() {
   }), [userLimit, activeFilters, managedFilter, filterText]);
 
   // Check if current page is a detail tab
-  const isDetailPage = page.startsWith('user:') || page.startsWith('group:') || page.startsWith('resource:') || page.startsWith('access-package:') || page.startsWith('department:') || page.startsWith('orgunit:') || page.startsWith('identity:');
+  const isDetailPage = page.startsWith('user:') || page.startsWith('group:') || page.startsWith('resource:') || page.startsWith('access-package:') || page.startsWith('department:') || page.startsWith('context:') || page.startsWith('identity:');
 
   if (error) {
     return (
@@ -297,10 +297,10 @@ export default function App() {
       const cacheKey = `department:${name}`;
       return <DepartmentDetailPage departmentName={name} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('department', name)} onOpenDetail={openDetailTab} />;
     }
-    if (page.startsWith('orgunit:')) {
+    if (page.startsWith('context:')) {
       const id = page.substring(8);
-      const cacheKey = `orgunit:${id}`;
-      return <OrgUnitDetailPage orgUnitId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('orgunit', id)} onOpenDetail={openDetailTab} />;
+      const cacheKey = `context:${id}`;
+      return <ContextDetailPage contextId={id} cachedData={detailCacheRef.current[cacheKey]} onCacheData={onCacheData} onClose={() => closeDetailTab('context', id)} onOpenDetail={openDetailTab} />;
     }
     if (page.startsWith('identity:')) {
       const id = page.substring(9);
@@ -402,8 +402,8 @@ export default function App() {
           {detailTabs.map(tab => {
             const tabKey = `${tab.type}:${tab.id}`;
             const isActive = page === tabKey;
-            const icon = tab.type === 'user' ? 'U' : tab.type === 'resource' ? 'R' : tab.type === 'group' ? 'G' : tab.type === 'department' ? 'D' : tab.type === 'orgunit' ? 'OU' : 'AP';
-            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : tab.type === 'resource' ? 'bg-purple-100 text-purple-700' : tab.type === 'group' ? 'bg-purple-100 text-purple-700' : tab.type === 'department' ? 'bg-green-100 text-green-700' : tab.type === 'orgunit' ? 'bg-sky-100 text-sky-700' : 'bg-indigo-100 text-indigo-700';
+            const icon = tab.type === 'user' ? 'U' : tab.type === 'resource' ? 'R' : tab.type === 'group' ? 'G' : tab.type === 'department' ? 'D' : tab.type === 'context' ? 'OU' : 'AP';
+            const iconBg = tab.type === 'user' ? 'bg-blue-100 text-blue-700' : tab.type === 'resource' ? 'bg-purple-100 text-purple-700' : tab.type === 'group' ? 'bg-purple-100 text-purple-700' : tab.type === 'department' ? 'bg-green-100 text-green-700' : tab.type === 'context' ? 'bg-sky-100 text-sky-700' : 'bg-indigo-100 text-indigo-700';
             return (
               <button
                 key={tabKey}
