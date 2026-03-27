@@ -128,7 +128,22 @@ router.get('/user/:id', async (req, res) => {
       hasHistory = false;
     }
 
-    res.json({ attributes, tags, membershipCount, accessPackageCount, hasHistory });
+    // Last sign-in activity from PrincipalActivity table
+    let lastActivity = null;
+    try {
+      const r = await timedRequest(pool, 'user-last-activity', res)
+        .input('id', userId)
+        .query(`
+        SELECT TOP 1 lastActivityDateTime, activityType, syncedAt
+        FROM dbo.PrincipalActivity
+        WHERE principalId = @id
+          AND resourceId = '00000000-0000-0000-0000-000000000000'
+          AND activityType = 'SignIn'
+      `);
+      if (r.recordset.length > 0) lastActivity = r.recordset[0];
+    } catch { /* table may not exist yet */ }
+
+    res.json({ attributes, tags, membershipCount, accessPackageCount, hasHistory, lastActivity });
   } catch (err) {
     console.error('Error fetching user detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch user details' });

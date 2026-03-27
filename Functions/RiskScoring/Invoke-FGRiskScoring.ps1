@@ -206,7 +206,8 @@ function Invoke-FGRiskScoring {
 
     $groupClassifiers = @($classifiers.groups | Where-Object { $_ })
     $userClassifiers = @($classifiers.users | Where-Object { $_ })
-    Write-Host "  Classifiers: $($groupClassifiers.Count) group, $($userClassifiers.Count) user rules" -ForegroundColor Gray
+    $agentClassifiers = @($classifiers.agents | Where-Object { $_ })
+    Write-Host "  Classifiers: $($groupClassifiers.Count) group, $($userClassifiers.Count) user, $($agentClassifiers.Count) agent rules" -ForegroundColor Gray
 
     # ================================================================
     # Ensure RiskScores table exists + denormalized columns on entity tables
@@ -435,6 +436,73 @@ SELECT
     } finally {
         if ($dataConnection.State -eq 'Open') { $dataConnection.Close() }
         $dataConnection.Dispose()
+    }
+
+    # ================================================================
+    # Load PrincipalActivity (sign-in + app-role activity)
+    # ================================================================
+
+    $principalLastSignIn      = @{}   # principalId → [DateTime] last general sign-in
+    $principalActiveResources = @{}   # principalId → [HashSet[string]] resourceIds with AppSignIn
+    $resourceActiveUserCount  = @{}   # resourceId  → [int] distinct active user count
+
+    $activityConnection = New-Object System.Data.SqlClient.SqlConnection($global:FGSQLConnectionString)
+    $activityConnection.Open()
+    try {
+        $cmd = $activityConnection.CreateCommand()
+        $cmd.CommandText = "SELECT OBJECT_ID('dbo.PrincipalActivity', 'U')"
+        $actCheck = $cmd.ExecuteScalar()
+        if ($null -ne $actCheck -and $actCheck -ne [DBNull]::Value) {
+            Write-Host "  Loading PrincipalActivity data..." -ForegroundColor Gray
+
+            # General sign-in records (nil GUID sentinel for resourceId)
+            $cmd = $activityConnection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = @"
+SELECT principalId, lastActivityDateTime
+FROM dbo.PrincipalActivity
+WHERE activityType = 'SignIn'
+  AND resourceId = '00000000-0000-0000-0000-000000000000'
+"@
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                if ($reader[0] -isnot [DBNull] -and $reader[1] -isnot [DBNull]) {
+                    $principalLastSignIn["$($reader[0])"] = [DateTime]$reader[1]
+                }
+            }
+            $reader.Close()
+            Write-Host "    Sign-in records:  $($principalLastSignIn.Count) principals" -ForegroundColor Gray
+
+            # Per-resource AppSignIn activity
+            $cmd = $activityConnection.CreateCommand()
+            $cmd.CommandTimeout = 120
+            $cmd.CommandText = @"
+SELECT principalId, resourceId
+FROM dbo.PrincipalActivity
+WHERE activityType = 'AppSignIn'
+  AND resourceId <> '00000000-0000-0000-0000-000000000000'
+"@
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                if ($reader[0] -isnot [DBNull] -and $reader[1] -isnot [DBNull]) {
+                    $pId = "$($reader[0])"
+                    $rId = "$($reader[1])"
+                    if (-not $principalActiveResources.ContainsKey($pId)) {
+                        $principalActiveResources[$pId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    }
+                    $principalActiveResources[$pId].Add($rId) | Out-Null
+                    if (-not $resourceActiveUserCount.ContainsKey($rId)) { $resourceActiveUserCount[$rId] = 0 }
+                    $resourceActiveUserCount[$rId]++
+                }
+            }
+            $reader.Close()
+            Write-Host "    AppSignIn records: $($principalActiveResources.Count) principals, $($resourceActiveUserCount.Count) resources" -ForegroundColor Gray
+        } else {
+            Write-Host "  PrincipalActivity table not found — skipping activity signals" -ForegroundColor DarkGray
+        }
+    } finally {
+        if ($activityConnection.State -eq 'Open') { $activityConnection.Close() }
+        $activityConnection.Dispose()
     }
 
     Write-MemoryUsage "after data load"
@@ -694,11 +762,16 @@ SELECT
         $upn = if ((Test-DBNull $row['userPrincipalName'])) { "" } else { "$($row['userPrincipalName'])" }
         $dept = if ((Test-DBNull $row['department'])) { "" } else { "$($row['department'])" }
 
+        # Detect non-human principals — use agent classifiers instead of user classifiers
+        $rowPrincipalType = if ($usePrincipals -and -not (Test-DBNull $row['principalType'])) { "$($row['principalType'])" } else { 'User' }
+        $isNonHumanDirect = $rowPrincipalType -in @('ServicePrincipal', 'ManagedIdentity', 'WorkloadIdentity', 'AIAgent')
+        $activeClassifiers = if ($isNonHumanDirect -and $agentClassifiers.Count -gt 0) { $agentClassifiers } else { $userClassifiers }
+
         $bestScore = 0
         $matches = @()
         $directReasons = @()
 
-        foreach ($c in $userClassifiers) {
+        foreach ($c in $activeClassifiers) {
             $titleMatch = Test-PatternMatch -Text $title -Patterns $c.title_patterns
             $deptMatch = Test-PatternMatch -Text $dept -Patterns $c.title_patterns
             $nameMatch = Test-PatternMatch -Text $name -Patterns $c.name_patterns
@@ -965,6 +1038,12 @@ SELECT
                             break
                         }
                     }
+
+                    # Ghost resource: app role with no active sign-ins in the last activity sync window
+                    if ($resourceActiveUserCount.Count -gt 0 -and -not $resourceActiveUserCount.ContainsKey($gId)) {
+                        $score += 5
+                        $reasons += "No active users signed into this app — potential ghost/over-provisioned role [+5]"
+                    }
                 }
                 default {
                     # Future resource types — basic structural scoring
@@ -1003,6 +1082,11 @@ SELECT
         $score = 0
         $reasons = @()
 
+        # Determine principalType — non-human principals (service accounts, managed identities, AI agents)
+        # get different structural signals than interactive user accounts
+        $principalType = if ($usePrincipals -and -not (Test-DBNull $row['principalType'])) { "$($row['principalType'])" } else { 'User' }
+        $isNonHuman = $principalType -in @('ServicePrincipal', 'ManagedIdentity', 'WorkloadIdentity', 'AIAgent')
+
         # Account disabled
         $enabled = if ((Test-DBNull $row['accountEnabled'])) { $true } else { [bool]$row['accountEnabled'] }
         if (-not $enabled) {
@@ -1010,13 +1094,71 @@ SELECT
             $reasons += "Account is disabled but still has group memberships [+5]"
         }
 
-        # Stale sign-in (90+ days)
-        if ($null -ne $row['lastSignInDateTime'] -and $row['lastSignInDateTime'] -isnot [DBNull]) {
+        # Non-human identity specific signals
+        if ($isNonHuman) {
+            # No human in the loop — application permissions are more dangerous than delegated
+            $score += 8
+            $reasons += "Non-human identity ($principalType) — no human judgment in the loop [+8]"
+
+            if ($principalType -eq 'AIAgent') {
+                $score += 5
+                $reasons += "AI agent identity — autonomous access to resources with no MFA protection [+5]"
+            }
+            if ($principalType -eq 'ManagedIdentity') {
+                $score += 3
+                $reasons += "Managed identity — attached to an Azure resource, access persists as long as resource exists [+3]"
+            }
+
+            # Active use of resources by a non-human = confirmed automated access in production
+            if ($principalActiveResources.ContainsKey($uId)) {
+                $userResources = if ($userMemberships.ContainsKey($uId)) { $userMemberships[$uId] } else { @() }
+                $activeCount = @($userResources | Where-Object { $principalActiveResources[$uId].Contains($_) }).Count
+                if ($activeCount -gt 0) {
+                    $score += 5
+                    $reasons += "Active automated access to $activeCount resource(s) — production workload confirmed [+5]"
+                }
+            }
+
+            $userScores[$uId].structuralScore = [Math]::Min($score, 30)
+            $userScores[$uId].explanation.structural = @{ score = [Math]::Min($score, 30); reasons = $reasons }
+            continue
+        }
+
+        # Stale sign-in / never signed in (PrincipalActivity preferred, legacy column fallback)
+        if ($principalLastSignIn.ContainsKey($uId)) {
+            $lastSignIn = $principalLastSignIn[$uId]
+            $daysSince = ([DateTime]::UtcNow - $lastSignIn).Days
+            if ($daysSince -gt 180) {
+                $score += 15
+                $reasons += "Last sign-in $daysSince days ago — very stale account, may be abandoned [+15]"
+            } elseif ($daysSince -gt 90) {
+                $score += 10
+                $reasons += "Last sign-in $daysSince days ago — stale account with active permissions [+10]"
+            }
+        } elseif ($null -ne $row['lastSignInDateTime'] -and $row['lastSignInDateTime'] -isnot [DBNull]) {
+            # Fallback: legacy column (present when PrincipalActivity table is not yet populated)
             $lastSignIn = [DateTime]$row['lastSignInDateTime']
             $daysSince = ([DateTime]::UtcNow - $lastSignIn).Days
             if ($daysSince -gt 90) {
                 $score += 10
                 $reasons += "Last sign-in $daysSince days ago — stale account with active permissions [+10]"
+            }
+        } elseif ($principalLastSignIn.Count -gt 0) {
+            # PrincipalActivity was loaded but this user has no sign-in record — never signed in
+            $score += 8
+            $reasons += "No sign-in activity recorded — account may never have been used [+8]"
+        }
+
+        # Confirmed active use of high-risk app role resources (from AppSignIn activity)
+        if ($principalActiveResources.ContainsKey($uId)) {
+            $userResources = if ($userMemberships.ContainsKey($uId)) { $userMemberships[$uId] } else { @() }
+            $activeHighRisk = @($userResources | Where-Object {
+                $principalActiveResources[$uId].Contains($_) -and
+                ($resourceTypeMap[$_] -eq 'EntraAppRole' -or $resourceTypeMap[$_] -eq 'EntraDirectoryRole')
+            })
+            if ($activeHighRisk.Count -gt 0) {
+                $score += 5
+                $reasons += "Actively uses $($activeHighRisk.Count) high-privilege resource(s) — confirmed exposure, not just theoretical [+5]"
             }
         }
 

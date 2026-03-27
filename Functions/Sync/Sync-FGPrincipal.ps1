@@ -140,7 +140,6 @@ function Sync-FGPrincipal {
         'employeeHireDate'
         'employeeType'
         'managerId'
-        'lastSignInDateTime'
     )
 
     $allAttributes = $defaultAttributes
@@ -160,9 +159,8 @@ function Sync-FGPrincipal {
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Fetching users from Microsoft Graph..." -ForegroundColor Cyan
 
     # Remove special attributes that need expand, separate handling, or are computed
-    $regularAttributes = $allAttributes | Where-Object { $_ -notin @('managerId', 'lastSignInDateTime', 'organizationalUnit', 'administrativeUnits') }
+    $regularAttributes = $allAttributes | Where-Object { $_ -notin @('managerId', 'organizationalUnit', 'administrativeUnits') }
     $needsManager = $allAttributes -contains 'managerId'
-    $needsSignInActivity = $allAttributes -contains 'lastSignInDateTime'
     $needsOU = $allAttributes -contains 'organizationalUnit'
     $needsAU = $allAttributes -contains 'administrativeUnits'
 
@@ -189,10 +187,6 @@ function Sync-FGPrincipal {
     if ($needsManager) {
         $expands += 'manager($select=id)'
     }
-    if ($needsSignInActivity) {
-        $uri += ",signInActivity"
-    }
-
     if ($expands.Count -gt 0) {
         $uri += "&`$expand=$($expands -join ',')"
     }
@@ -297,11 +291,6 @@ function Sync-FGPrincipal {
             # Computed: administrativeUnits
             if ($auMemberMap.ContainsKey($obj.id)) {
                 $extended['administrativeUnits'] = ($auMemberMap[$obj.id] -join ', ')
-            }
-
-            # Sign-in activity
-            if ($obj.signInActivity -and $obj.signInActivity.lastSignInDateTime) {
-                $extended['lastSignInDateTime'] = $obj.signInActivity.lastSignInDateTime
             }
 
             # Extension attributes (from onPremisesExtensionAttributes nested object)

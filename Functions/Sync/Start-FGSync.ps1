@@ -201,7 +201,16 @@ Command-line parameter overrides config file setting
     [bool]$SyncPrincipals = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$SyncOrgUnits = $true
+    [bool]$SyncOrgUnits = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncPrincipalActivity = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncAppRoleActivity = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$SyncServicePrincipals = $false
 )
 
     $ErrorActionPreference = "Stop"
@@ -232,6 +241,9 @@ Command-line parameter overrides config file setting
     ResourceRelationships = $null
     Principals = $null
     OrgUnits = $null
+    PrincipalActivity = $null
+    AppRoleActivity = $null
+    ServicePrincipals = $null
     Errors = @()
 }
 
@@ -409,6 +421,27 @@ function Write-SyncError {
         if ($PSBoundParameters.ContainsKey('SyncOrgUnits') -eq $false -and $null -ne $config.Sync.OrgUnits.Enabled) {
             $SyncOrgUnits = $config.Sync.OrgUnits.Enabled
         }
+        if ($PSBoundParameters.ContainsKey('SyncPrincipalActivity') -eq $false) {
+            if ($null -ne $config.Sync.PrincipalActivity.Enabled) {
+                $SyncPrincipalActivity = $config.Sync.PrincipalActivity.Enabled
+            } else {
+                $SyncPrincipalActivity = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('SyncAppRoleActivity') -eq $false) {
+            if ($null -ne $config.Sync.AppRoleActivity.Enabled) {
+                $SyncAppRoleActivity = $config.Sync.AppRoleActivity.Enabled
+            } else {
+                $SyncAppRoleActivity = $false  # Default off for backward compat
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('SyncServicePrincipals') -eq $false) {
+            if ($null -ne $config.Sync.ServicePrincipals.Enabled) {
+                $SyncServicePrincipals = $config.Sync.ServicePrincipals.Enabled
+            } else {
+                $SyncServicePrincipals = $false  # Default off for backward compat
+            }
+        }
 
         Write-SyncSuccess "Sync configuration read from config file"
     }
@@ -531,8 +564,21 @@ function Write-SyncError {
     #endregion
 
     #region Resource Model Tables
+    # Always ensure activity tables exist when activity sync is active
+    if ($SyncPrincipalActivity -or $SyncAppRoleActivity) {
+        try {
+            Write-SyncStep "Ensuring activity tables exist..."
+            Initialize-FGActivityTables
+            Write-SyncSuccess "Activity tables ready"
+        } catch {
+            Write-SyncError "Failed to initialize activity tables" $_.Exception.Message
+        }
+    }
+    #endregion
+
+    #region Resource Model Tables
     # Always ensure system tables exist when any resource model sync is active
-    if ($SyncUsers -or $SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships) {
+    if ($SyncUsers -or $SyncPrincipals -or $SyncOrgUnits -or $SyncEntraDirectoryRoles -or $SyncEntraAppRoleAssignments -or $SyncResourceRelationships -or $SyncServicePrincipals) {
         try {
             Write-SyncStep "Ensuring resource model tables exist..."
             Initialize-FGSystemTables
@@ -763,6 +809,21 @@ function Write-SyncError {
                         $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.OrgUnits WHERE ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
                         $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
                     }
+                    "PrincipalActivity" {
+                        $null = Sync-FGPrincipalActivity
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.PrincipalActivity WHERE activityType = 'SignIn'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "AppRoleActivity" {
+                        $null = Sync-FGAppRoleActivity
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.PrincipalActivity WHERE activityType = 'AppSignIn'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
+                    "ServicePrincipals" {
+                        $null = Sync-FGServicePrincipal @SyncParams
+                        $count = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Principals WHERE principalType IN ('ServicePrincipal','ManagedIdentity','WorkloadIdentity','AIAgent') AND ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                        $outputMode = [PSCustomObject]@{ Success = $true; Count = [int]$count; Type = $SyncType }
+                    }
                 }
 
                 # Return only the result object
@@ -774,6 +835,34 @@ function Write-SyncError {
                     Error = $_.Exception.Message
                     StackTrace = $_.ScriptStackTrace
                 }
+            }
+        }
+
+        # Create job for ServicePrincipals sync (runs alongside Principals)
+        if ($SyncServicePrincipals) {
+            Write-SyncStep "Starting service principals sync job..."
+            $spSyncParams = @{}
+
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "ServicePrincipals")
+            [void]$ps.AddParameter("TableName", "Principals")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+            [void]$ps.AddParameter("SyncParams", $spSyncParams)
+
+            $jobs += @{
+                Name = "ServicePrincipals"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
             }
         }
 
@@ -1195,6 +1284,56 @@ function Write-SyncError {
             }
         }
 
+        # Create job for PrincipalActivity sync (reads lastSignIn from existing Principals rows)
+        if ($SyncPrincipalActivity) {
+            Write-SyncStep "Starting principal activity sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "PrincipalActivity")
+            [void]$ps.AddParameter("TableName", "PrincipalActivity")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "PrincipalActivity"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
+        # Create job for AppRoleActivity sync (queries audit log)
+        if ($SyncAppRoleActivity) {
+            Write-SyncStep "Starting app role activity sync job..."
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            [void]$ps.AddScript($syncScriptBlock)
+            [void]$ps.AddParameter("SyncType", "AppRoleActivity")
+            [void]$ps.AddParameter("TableName", "PrincipalActivity")
+            [void]$ps.AddParameter("ModuleRoot", $moduleRoot)
+            [void]$ps.AddParameter("SqlConnString", $sqlConnectionString)
+            [void]$ps.AddParameter("SqlServer", $sqlServerName)
+            [void]$ps.AddParameter("SqlDb", $sqlDatabaseName)
+            [void]$ps.AddParameter("AccessToken", $graphAccessToken)
+            [void]$ps.AddParameter("TenantId", $graphTenantId)
+            [void]$ps.AddParameter("ClientId", $graphClientId)
+            [void]$ps.AddParameter("ClientSecret", $graphClientSecret)
+            [void]$ps.AddParameter("RefreshToken", $graphRefreshToken)
+
+            $jobs += @{
+                Name = "AppRoleActivity"
+                PowerShell = $ps
+                Handle = $ps.BeginInvoke()
+            }
+        }
+
         # Wait for all jobs to complete and process results
         Write-SyncStep "Waiting for parallel jobs to complete..."
         foreach ($job in $jobs) {
@@ -1288,6 +1427,18 @@ function Write-SyncError {
                         "OrgUnits" {
                             $script:SyncStats.OrgUnits = $result.Count
                             Write-SyncSuccess "OrgUnits synced: $($result.Count)"
+                        }
+                        "PrincipalActivity" {
+                            $script:SyncStats.PrincipalActivity = $result.Count
+                            Write-SyncSuccess "Principal activity synced: $($result.Count) sign-in records"
+                        }
+                        "AppRoleActivity" {
+                            $script:SyncStats.AppRoleActivity = $result.Count
+                            Write-SyncSuccess "App role activity synced: $($result.Count) app sign-in records"
+                        }
+                        "ServicePrincipals" {
+                            $script:SyncStats.ServicePrincipals = $result.Count
+                            Write-SyncSuccess "Service principals synced: $($result.Count) (includes ManagedIdentity, AIAgent, ServicePrincipal types)"
                         }
                     }
                 } elseif ($result -and -not $result.Success) {
@@ -1543,6 +1694,20 @@ function Write-SyncError {
             }
         }
 
+        # Sync ServicePrincipals (managed identities, AI agents, app SPs)
+        if ($SyncServicePrincipals) {
+            Write-SyncStep "Syncing service principals..."
+            try {
+                Sync-FGServicePrincipal
+
+                $spCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.Principals WHERE principalType IN ('ServicePrincipal','ManagedIdentity','WorkloadIdentity','AIAgent') AND ValidTo = '9999-12-31 23:59:59.9999999'" -AsScalar
+                $script:SyncStats.ServicePrincipals = $spCount
+                Write-SyncSuccess "Service principals synced: $spCount"
+            } catch {
+                Write-SyncError "Service principal sync failed" $_.Exception.Message
+            }
+        }
+
         # Sync Principals (triggered by SyncUsers or SyncPrincipals)
         if ($SyncUsers -or $SyncPrincipals) {
             Write-SyncStep "Syncing principals..."
@@ -1572,6 +1737,34 @@ function Write-SyncError {
                 Write-SyncSuccess "OrgUnits synced: $orgUnitCount"
             } catch {
                 Write-SyncError "OrgUnit sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync PrincipalActivity (reads lastSignIn from Principals.extendedAttributes)
+        if ($SyncPrincipalActivity) {
+            Write-SyncStep "Syncing principal sign-in activity..."
+            try {
+                Sync-FGPrincipalActivity
+
+                $activityCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.PrincipalActivity WHERE activityType = 'SignIn'" -AsScalar
+                $script:SyncStats.PrincipalActivity = $activityCount
+                Write-SyncSuccess "Principal activity synced: $activityCount sign-in records"
+            } catch {
+                Write-SyncError "Principal activity sync failed" $_.Exception.Message
+            }
+        }
+
+        # Sync AppRoleActivity (queries Entra ID audit log)
+        if ($SyncAppRoleActivity) {
+            Write-SyncStep "Syncing app role sign-in activity from audit log..."
+            try {
+                Sync-FGAppRoleActivity
+
+                $appActivityCount = Invoke-FGSQLQuery -Query "SELECT COUNT(*) FROM dbo.PrincipalActivity WHERE activityType = 'AppSignIn'" -AsScalar
+                $script:SyncStats.AppRoleActivity = $appActivityCount
+                Write-SyncSuccess "App role activity synced: $appActivityCount app sign-in records"
+            } catch {
+                Write-SyncError "App role activity sync failed" $_.Exception.Message
             }
         }
     }
@@ -1678,6 +1871,9 @@ function Write-SyncError {
     }
     if (($SyncUsers -or $SyncPrincipals) -and $script:SyncStats.Principals -ne $null) {
         Write-Host "  Principals:              $($script:SyncStats.Principals)" -ForegroundColor White
+    }
+    if ($SyncServicePrincipals -and $null -ne $script:SyncStats.ServicePrincipals) {
+        Write-Host "  Service Principals:      $($script:SyncStats.ServicePrincipals)" -ForegroundColor White
     }
     if ($SyncOrgUnits -and $script:SyncStats.OrgUnits -ne $null) {
         Write-Host "  OrgUnits:                $($script:SyncStats.OrgUnits)" -ForegroundColor White

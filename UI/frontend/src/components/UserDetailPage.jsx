@@ -166,7 +166,7 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
   }
   if (!data) return null;
 
-  const { attributes, tags, hasHistory } = data;
+  const { attributes, tags, hasHistory, lastActivity } = data;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
   const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/${encodeURIComponent(userId)}`;
@@ -204,6 +204,14 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
             {attributes.companyName && <span className="text-gray-400">|</span>}
             {attributes.companyName && <span>{attributes.companyName}</span>}
           </div>
+          {lastActivity?.lastActivityDateTime && (
+            <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400">
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Last sign-in: {formatDate(lastActivity.lastActivityDateTime)}</span>
+            </div>
+          )}
           {tags.length > 0 && (
             <div className="flex gap-1.5 mt-2">
               {tags.map(t => (

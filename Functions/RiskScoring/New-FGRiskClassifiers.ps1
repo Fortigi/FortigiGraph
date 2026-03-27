@@ -203,23 +203,34 @@ FOR USERS:
 - Roles with safety/security authority
 - Roles with financial authority specific to this industry
 
+FOR AGENTS (non-human identities: managed identities, AI agents, service principals, workload identities):
+- AI agents or copilots with access to sensitive data types (mail, files, HR, financial records)
+- Managed identities attached to internet-facing or externally accessible services
+- Service principals with application-level (non-delegated) permissions on critical systems
+- Automation accounts or pipelines with write access to production environments
+- AI agents that aggregate data across multiple sensitive systems
+- Service principals with unusually broad permissions relative to their stated purpose
+
 Return this JSON structure:
 {
   "industry_classifiers": {
     "industry": "$($customerProfile.industry)",
     "sub_industry": "$($customerProfile.sub_industry)",
     "groups": [ ... ],
-    "users": [ ... ]
+    "users": [ ... ],
+    "agents": [ ... ]
   },
   "organization_classifiers": {
     "customer": "$($customerProfile.domain)",
     "groups": [ ... ],
-    "users": [ ... ]
+    "users": [ ... ],
+    "agents": [ ... ]
   }
 }
 
 The industry_classifiers should be reusable for ANY organization in this industry.
 The organization_classifiers should be specific to THIS organization's known systems and context.
+For agents, base_score reflects the risk IF the agent's access is abused or misconfigured — agents with broad application permissions start higher than human users with equivalent access because there is no human judgment in the loop.
 "@
 
     $userPrompt = @"
@@ -229,6 +240,11 @@ $(($customerProfile | ConvertTo-Json -Depth 100))
 
 Create industry-specific classifiers for the "$($customerProfile.industry) / $($customerProfile.sub_industry)" sector,
 plus organization-specific classifiers based on their known systems and critical roles.
+
+Also generate AI agent / service principal classifiers (the "agents" arrays). These should detect high-risk
+non-human identities by their display name, description, or service principal type. Consider what kinds of
+automation, AI copilots, and managed identities are common in this industry and what access patterns would
+be most dangerous if compromised or misconfigured.
 "@
 
     $rawResponse = Invoke-FGLLMRequest `
@@ -260,34 +276,41 @@ plus organization-specific classifiers based on their known systems and critical
 
     $mergedGroups = @()
     $mergedUsers = @()
+    $mergedAgents = @()
 
     # Universal
     if ($universalClassifiers) {
         $mergedGroups += $universalClassifiers.groups
         $mergedUsers += $universalClassifiers.users
-        Write-Host "  Universal:     $($universalClassifiers.groups.Count) group, $($universalClassifiers.users.Count) user classifiers" -ForegroundColor Gray
+        $univAgents = if ($universalClassifiers.agents) { @($universalClassifiers.agents) } else { @() }
+        $mergedAgents += $univAgents
+        Write-Host "  Universal:     $($universalClassifiers.groups.Count) group, $($universalClassifiers.users.Count) user, $($univAgents.Count) agent classifiers" -ForegroundColor Gray
     }
 
     # Industry
     if ($generated.industry_classifiers) {
         $indGroups = @($generated.industry_classifiers.groups | Where-Object { $_ })
         $indUsers = @($generated.industry_classifiers.users | Where-Object { $_ })
+        $indAgents = @($generated.industry_classifiers.agents | Where-Object { $_ })
         $mergedGroups += $indGroups
         $mergedUsers += $indUsers
-        Write-Host "  Industry:      $($indGroups.Count) group, $($indUsers.Count) user classifiers" -ForegroundColor Gray
+        $mergedAgents += $indAgents
+        Write-Host "  Industry:      $($indGroups.Count) group, $($indUsers.Count) user, $($indAgents.Count) agent classifiers" -ForegroundColor Gray
     }
 
     # Organization-specific
     if ($generated.organization_classifiers) {
         $orgGroups = @($generated.organization_classifiers.groups | Where-Object { $_ })
         $orgUsers = @($generated.organization_classifiers.users | Where-Object { $_ })
+        $orgAgents = @($generated.organization_classifiers.agents | Where-Object { $_ })
         $mergedGroups += $orgGroups
         $mergedUsers += $orgUsers
-        Write-Host "  Organization:  $($orgGroups.Count) group, $($orgUsers.Count) user classifiers" -ForegroundColor Gray
+        $mergedAgents += $orgAgents
+        Write-Host "  Organization:  $($orgGroups.Count) group, $($orgUsers.Count) user, $($orgAgents.Count) agent classifiers" -ForegroundColor Gray
     }
 
     Write-Host ""
-    Write-Host "  Total:         $($mergedGroups.Count) group, $($mergedUsers.Count) user classifiers" -ForegroundColor Green
+    Write-Host "  Total:         $($mergedGroups.Count) group, $($mergedUsers.Count) user, $($mergedAgents.Count) agent classifiers" -ForegroundColor Green
 
     # Deduplicate by ID (later entries win)
     $seenGroupIds = @{}
@@ -308,10 +331,20 @@ plus organization-specific classifiers based on their known systems and critical
         }
     }
 
-    if ($dedupedGroups.Count -ne $mergedGroups.Count -or $dedupedUsers.Count -ne $mergedUsers.Count) {
+    $seenAgentIds = @{}
+    $dedupedAgents = @()
+    foreach ($a in $mergedAgents) {
+        if ($a.id -and -not $seenAgentIds.ContainsKey($a.id)) {
+            $seenAgentIds[$a.id] = $true
+            $dedupedAgents += $a
+        }
+    }
+
+    if ($dedupedGroups.Count -ne $mergedGroups.Count -or $dedupedUsers.Count -ne $mergedUsers.Count -or $dedupedAgents.Count -ne $mergedAgents.Count) {
         $removedGroups = $mergedGroups.Count - $dedupedGroups.Count
         $removedUsers = $mergedUsers.Count - $dedupedUsers.Count
-        Write-Host "  Deduplication: removed $removedGroups group, $removedUsers user duplicates" -ForegroundColor Yellow
+        $removedAgents = $mergedAgents.Count - $dedupedAgents.Count
+        Write-Host "  Deduplication: removed $removedGroups group, $removedUsers user, $removedAgents agent duplicates" -ForegroundColor Yellow
     }
 
     # ================================================================
@@ -326,6 +359,7 @@ plus organization-specific classifiers based on their known systems and critical
         llm_provider  = $LLMProvider
         groups        = $dedupedGroups
         users         = $dedupedUsers
+        agents        = $dedupedAgents
     }
 
     # Save to SQL (primary storage)

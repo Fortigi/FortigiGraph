@@ -460,7 +460,33 @@ foreach ($import in @($base + $generic + $specific + $SQL + $sync + $automation)
 - `$Global:FGSQLServerName` - Connected server name
 - `$Global:FGSQLDatabaseName` - Connected database name
 
-### 3. Function Naming Convention
+### 3. `principalType` Conventions
+
+The `Principals.principalType` column is NVARCHAR(50). Use these values consistently across all sync and scoring functions:
+
+| Value | Description | Source |
+|---|---|---|
+| `User` | Interactive human user account | `Sync-FGPrincipal`, `Sync-FGCSVPrincipal` |
+| `ServicePrincipal` | App registration service principal | `Sync-FGServicePrincipal` |
+| `ManagedIdentity` | Azure resource-attached managed identity (system or user-assigned) | `Sync-FGServicePrincipal` |
+| `WorkloadIdentity` | Federated credential identity (GitHub Actions, AKS workloads) | `Sync-FGServicePrincipal` / CSV import |
+| `AIAgent` | Explicitly identified AI agent (Copilot Studio, Azure OpenAI, custom) | `Sync-FGServicePrincipal` auto-detection, CSV import |
+| `ExternalUser` | Guest / B2B account from another tenant | CSV import |
+| `SharedMailbox` | Shared mailbox or room/equipment account | CSV import |
+
+**Detection rules in `Sync-FGServicePrincipal`:**
+1. `servicePrincipalType = 'ManagedIdentity'` → `ManagedIdentity`
+2. Tags contain `CopilotStudio`, `PowerVirtualAgents`, `AzureOpenAI`, or `CognitiveServices` → `AIAgent`
+3. `displayName` matches AI patterns (copilot, openai, bot, azure-ai, gpt, etc.) → `AIAgent`
+4. Custom `-AINamePatterns` provided → `AIAgent`
+5. Default → `ServicePrincipal`
+
+**Risk scoring behavior by principalType:**
+- `User` → full stale sign-in, never-signed-in, guest checks; user classifiers apply
+- `ServicePrincipal` / `ManagedIdentity` / `WorkloadIdentity` / `AIAgent` → non-human structural signals (no stale sign-in); agent classifiers apply
+- All types → direct classifier matching, membership analysis, propagation
+
+### 4. Function Naming Convention
 
 - **Prefix:** `FG` (FortigiGraph) for all exported functions
 - **Aliases:** Each function has an alias without the `FG` prefix (e.g., `Get-FGGroup` -> `Get-Group`)

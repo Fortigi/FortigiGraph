@@ -1,0 +1,99 @@
+site_name: FortigiGraph
+site_description: Universal authorization intelligence — sync, analyze, and govern permissions from any identity system
+site_url: https://fortigi.github.io/FortigiGraph
+repo_url: https://github.com/Fortigi/FortigiGraph
+repo_name: Fortigi/FortigiGraph
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+exclude_docs: |
+  data-model-consolidation-analysis.md
+  identity-risk-plugin-architecture.md
+  identity-risk-scoring-plan.md
+
+nav:
+  - Home: index.md
+  - Quick Start: quickstart.md
+  - Concepts:
+      - Data Model: concepts/data-model.md
+      - Governance Model: concepts/governance-model.md
+  - Sync:
+      - Entra ID: sync/entra-id.md
+      - CSV Import: sync/csv-import.md
+      - Scheduling: sync/scheduling.md
+  - Risk Scoring:
+      - Overview: risk-scoring/overview.md
+      - Classifiers: risk-scoring/classifiers.md
+      - AI Agents: risk-scoring/ai-agents.md
+  - Role Mining UI:
+      - Overview: ui/overview.md
+      - Deployment: ui/deployment.md
+  - API Reference:
+      - Overview: api/index.md
+      - Matrix & Permissions: api/matrix.md
+      - Entity Detail: api/entities.md
+      - Governance & Business Roles: api/governance.md
+      - Risk Scores: api/risk-scores.md
+  - Reference:
+      - Config File: reference/config.md
+      - SQL Views: reference/sql-views.md
+      - Temporal Tables: reference/temporal-tables.md
+      - Troubleshooting: reference/troubleshooting.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Fortigi/FortigiGraph
