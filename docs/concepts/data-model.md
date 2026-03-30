@@ -278,7 +278,9 @@ Risk assessment results for any entity type (Principal, Resource, Identity, Cont
 | Temporal | Yes |
 | Created by | `Initialize-FGRiskScoreTables` |
 
-Key columns: `riskScore`, `riskTier`, `classifierMatches` (JSON), `analystOverride`, `overrideReason`.
+Key columns: `riskScore`, `riskTier`, `riskDirectScore`, `riskMembershipScore`, `riskStructuralScore`, `riskPropagatedScore`, `riskClassifierMatches` (JSON), `riskOverride`, `riskOverrideReason`.
+
+Risk scoring also uses several supporting tables for inputs (org context, classifiers, correlation rules) and outputs (resource clusters). See [Risk Scoring Data Model](risk-scoring-model.md) for the full picture.
 
 ---
 

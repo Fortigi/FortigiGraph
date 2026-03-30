@@ -357,15 +357,33 @@ function Sync-FGGroup {
             $rate = if ($syncElapsed.TotalSeconds -gt 0) { [math]::Round($syncedCount / $syncElapsed.TotalSeconds, 1) } else { 0 }
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Bulk merge completed: $($mergeResult.Inserted) inserted, $($mergeResult.Updated) updated ($rate groups/sec)" -ForegroundColor Green
 
-            # Handle deletions using bulk delete (avoids massive IN clause)
+            # Scoped delete: only remove EntraGroup resources that no longer exist in Graph
+            # Cannot use Invoke-FGSQLBulkDelete because it would delete ALL non-matching Resources (BusinessRoles, DirectoryRoles, etc.)
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted groups..." -ForegroundColor Cyan
 
-            $deletedCount = Invoke-FGSQLBulkDelete `
-                -Connection $connection `
-                -Transaction $transaction `
-                -TargetTableName $TableName `
-                -DataTable $dataTable `
-                -KeyColumns @('id')
+            $deleteCmd = $connection.CreateCommand()
+            $deleteCmd.Transaction = $transaction
+            $deleteCmd.CommandTimeout = 120
+            # Create temp table with source IDs
+            $deleteCmd.CommandText = "CREATE TABLE #SyncSourceIds (id UNIQUEIDENTIFIER PRIMARY KEY)"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            # Bulk copy source IDs to temp table
+            $idTable = New-Object System.Data.DataTable
+            [void]$idTable.Columns.Add("id", [System.Guid])
+            foreach ($row in $dataTable.Rows) {
+                [void]$idTable.Rows.Add($row["id"])
+            }
+            $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($connection, [System.Data.SqlClient.SqlBulkCopyOptions]::Default, $transaction)
+            $bulkCopy.DestinationTableName = "#SyncSourceIds"
+            $bulkCopy.WriteToServer($idTable)
+            $bulkCopy.Close()
+            # Delete resources of type EntraGroup that aren't in source
+            $deleteCmd.CommandText = "DELETE FROM dbo.[$TableName] WHERE resourceType = 'EntraGroup' AND id NOT IN (SELECT id FROM #SyncSourceIds)"
+            $deletedCount = $deleteCmd.ExecuteNonQuery()
+            $deleteCmd.CommandText = "DROP TABLE #SyncSourceIds"
+            $deleteCmd.ExecuteNonQuery() | Out-Null
+            $deleteCmd.Dispose()
+            $idTable.Dispose()
 
             if ($deletedCount -gt 0) {
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted $deletedCount groups that no longer exist in Graph" -ForegroundColor Yellow

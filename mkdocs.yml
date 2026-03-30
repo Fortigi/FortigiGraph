@@ -70,6 +70,7 @@ nav:
   - Concepts:
       - Data Model: concepts/data-model.md
       - Governance Model: concepts/governance-model.md
+      - Risk Scoring Model: concepts/risk-scoring-model.md
   - Sync:
       - Entra ID: sync/entra-id.md
       - CSV Import: sync/csv-import.md

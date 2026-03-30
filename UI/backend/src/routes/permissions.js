@@ -110,9 +110,9 @@ router.get('/permissions', async (req, res) => {
 
       // Return empty data when sync hasn't run yet (no tables exist yet)
       const tableCheck = await p.request().query(
-        `SELECT OBJECT_ID('dbo.GraphUsers', 'U') AS graphUsersExists`
+        `SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists, OBJECT_ID('dbo.GraphUsers', 'U') AS graphUsersExists`
       );
-      if (!tableCheck.recordset[0].graphUsersExists) {
+      if (!tableCheck.recordset[0].principalsExists && !tableCheck.recordset[0].graphUsersExists) {
         return res.json({ data: [], totalUsers: 0, managedByPackages: [] });
       }
 
