@@ -188,10 +188,13 @@ router.get('/identities/:id', async (req, res) => {
   try {
     const p = await db.getPool();
 
-    // Fetch identity
+    // Fetch identity with context name
     const identityResult = await timedRequest(p, 'identity-detail', res)
       .input('id', identityId)
-      .query(`SELECT * FROM dbo.Identities WHERE id = @id`);
+      .query(`SELECT i.*, c.displayName AS contextDisplayName
+              FROM dbo.Identities i
+              LEFT JOIN dbo.Contexts c ON i.contextId = c.id AND c.ValidTo = '9999-12-31 23:59:59.9999999'
+              WHERE i.id = @id`);
 
     if (identityResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Identity not found' });

@@ -312,4 +312,7 @@ UI/frontend/src/utils/exportToExcel.js
 - Fixed: Identity detail page used `m.userId` to navigate to linked accounts but API returns `m.principalId` — updated to `m.principalId`
 - Fixed: User detail memberships endpoint selected non-existent columns from materialized table — now JOINs to Resources for display name and type
 - `Sync-FGCSVIdentity` now sets `accountCount` on Identity records (1 when linked to a principal, 0 otherwise) — required by the Identities page summary statistics
+- Fixed: Identity-to-Context link was only set for 5 identities (from the 5-row Employment.csv sample) — `Sync-FGCSVPrincipal` now populates `$Global:FGCSVPrincipalOULookup` (EmployeeNumber → OU_KEY), and `Sync-FGCSVIdentity` uses it as fallback when Employment.csv doesn't cover an identity; this resolves contextId for all 315 identities with a linked principal
+- Identity detail page now shows the linked Org Unit as a clickable link (navigates to context detail page)
+- Context member counts updated after identity-context linking
 - Resource detail page: added three new collapsible sections — **Assigned Users** (shows all principals assigned to this resource with Direct/Governed/Owner/Eligible badge and status), **Business Roles** (shows which business roles contain this resource via ResourceRelationships), **Member Of** (shows parent resources this resource belongs to); all sections are lazy-loaded and support drill-through navigation

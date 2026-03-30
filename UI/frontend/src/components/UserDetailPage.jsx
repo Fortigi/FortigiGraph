@@ -169,7 +169,12 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
   const { attributes, tags, hasHistory, lastActivity } = data;
   const historyCount = history ? history.length : (hasHistory ? null : 1);
   const otherAttributes = [['id', attributes.id], ...Object.entries(attributes).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'id')];
-  const entraUrl = `https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/${encodeURIComponent(userId)}`;
+  const isEntraSystem = (attributes.systemDisplayName || '').toLowerCase().includes('entra') ||
+    (attributes.systemDisplayName || '').toLowerCase().includes('azure ad') ||
+    (attributes.principalType || '').startsWith('Entra');
+  const entraUrl = isEntraSystem
+    ? `https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/${encodeURIComponent(userId)}`
+    : null;
 
   const historyDiffs = history ? computeHistoryDiffs(history) : [];
 
@@ -192,8 +197,8 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
                 )}
               </div>
               <p className="text-sm text-gray-500">{attributes.userPrincipalName || attributes.email}</p>
-              {attributes.systemId && (
-                <p className="text-xs text-gray-400">System: {attributes.systemId}</p>
+              {(attributes.systemDisplayName || attributes.systemId) && (
+                <p className="text-xs text-gray-400">System: {attributes.systemDisplayName || attributes.systemId}</p>
               )}
             </div>
           </div>
@@ -222,13 +227,15 @@ export default function UserDetailPage({ userId, cachedData, onCacheData, onClos
               ))}
             </div>
           )}
-          <a href={entraUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline">
-            Open in Entra ID
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
+          {entraUrl && (
+            <a href={entraUrl} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline">
+              Open in Entra ID
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          )}
         </div>
         <button onClick={onClose}
           className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"

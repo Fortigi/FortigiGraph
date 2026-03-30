@@ -203,7 +203,13 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
                   <span className="text-sm text-gray-500">
                     {identity.accountCount} account{identity.accountCount !== 1 ? 's' : ''}
                   </span>
-                  {identity.department && (
+                  {identity.contextDisplayName && (
+                    <button
+                      onClick={() => onOpenDetail?.('context', identity.contextId, identity.contextDisplayName)}
+                      className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                    >{identity.contextDisplayName}</button>
+                  )}
+                  {!identity.contextDisplayName && identity.department && (
                     <span className="text-sm text-gray-500">{identity.department}</span>
                   )}
                   {identity.jobTitle && (

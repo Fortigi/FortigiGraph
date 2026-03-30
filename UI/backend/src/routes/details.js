@@ -41,7 +41,10 @@ router.get('/user/:id', async (req, res) => {
     try {
       userResult = await timedRequest(pool, 'user-attributes', res)
         .input('id', userId)
-        .query(`SELECT * FROM Principals WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+        .query(`SELECT p.*, s.displayName AS systemDisplayName
+                FROM Principals p
+                LEFT JOIN Systems s ON p.systemId = s.id AND s.ValidTo = '9999-12-31 23:59:59.9999999'
+                WHERE p.id = @id AND p.ValidTo = '9999-12-31 23:59:59.9999999'`);
       if (userResult.recordset.length > 0) {
         usingPrincipals = true;
       } else {
@@ -641,15 +644,16 @@ router.get('/access-package/:id/assignments', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          a.id, a.principalId, a.state, a.status AS assignmentStatus,
+          a.principalId, a.state, a.assignmentStatus,
           u.displayName AS targetDisplayName,
           u.email AS targetUPN,
           a.ValidFrom AS assignedDate
         FROM ResourceAssignments a
-        LEFT JOIN Principals u ON a.principalId = u.id
+        LEFT JOIN Principals u ON a.principalId = u.id AND u.ValidTo = '9999-12-31 23:59:59.9999999'
         WHERE a.resourceId = @id
           AND a.assignmentType = 'Governed'
-          AND a.state = 'Delivered'
+          AND a.ValidTo = '9999-12-31 23:59:59.9999999'
+          AND (a.state = 'Delivered' OR a.state IS NULL)
         ORDER BY u.displayName
       `);
     } catch {
@@ -658,7 +662,7 @@ router.get('/access-package/:id/assignments', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          a.id, a.principalId, a.state, a.status AS assignmentStatus,
+          a.principalId, a.state, a.assignmentStatus,
           u.displayName AS targetDisplayName,
           u.userPrincipalName AS targetUPN,
           a.ValidFrom AS assignedDate
@@ -666,7 +670,8 @@ router.get('/access-package/:id/assignments', async (req, res) => {
         LEFT JOIN GraphUsers u ON a.principalId = u.id
         WHERE a.resourceId = @id
           AND a.assignmentType = 'Governed'
-          AND a.state = 'Delivered'
+          AND a.ValidTo = '9999-12-31 23:59:59.9999999'
+          AND (a.state = 'Delivered' OR a.state IS NULL)
         ORDER BY u.displayName
       `);
     }
@@ -688,18 +693,16 @@ router.get('/access-package/:id/resource-roles', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT
-        rrs.id, rrs.roleName, rrs.roleOriginSystem,
+        rrs.roleName, rrs.roleOriginSystem,
         r.displayName AS scopeDisplayName, rrs.childResourceId, rrs.roleOriginSystem AS scopeOriginSystem,
-        rrs.createdDateTime,
-        COALESCE(r.displayName, g.displayName) AS groupDisplayName,
-        COALESCE(r.displayName, g.displayName) AS resourceDisplayName,
+        COALESCE(r.displayName, rrs.roleName) AS groupDisplayName,
+        COALESCE(r.displayName, rrs.roleName) AS resourceDisplayName,
         r.resourceType, r.systemId
       FROM ResourceRelationships rrs
-      LEFT JOIN Resources r ON UPPER(rrs.childResourceId) = UPPER(r.id)
+      LEFT JOIN Resources r ON rrs.childResourceId = r.id
         AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-      LEFT JOIN GraphGroups g ON UPPER(rrs.childResourceId) = UPPER(g.id)
-        AND r.id IS NULL
       WHERE rrs.parentResourceId = @id AND rrs.relationshipType = 'Contains'
+        AND rrs.ValidTo = '9999-12-31 23:59:59.9999999'
       ORDER BY COALESCE(r.displayName, g.displayName), rrs.roleName
     `);
     res.json(r.recordset);
