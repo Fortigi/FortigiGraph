@@ -124,8 +124,8 @@ SELECT
 FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
     INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
-    INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
+    LEFT JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
+    LEFT JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
     LEFT JOIN dbo.$ResourcesTable r ON rrs.childResourceId = r.id
 WHERE a.assignmentType = 'Governed'
   AND (a.state = 'delivered' OR a.state IS NULL)  -- Active: 'delivered' for Entra, NULL for derived
@@ -151,8 +151,8 @@ SELECT
 FROM dbo.$ResourceAssignmentsTable a
     INNER JOIN dbo.$UsersTable u ON a.principalId = u.id
     INNER JOIN dbo.$ResourcesTable ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
-    INNER JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
-    INNER JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
+    LEFT JOIN dbo.$GovernanceCatalogsTable c ON ap.catalogId = c.id
+    LEFT JOIN dbo.$ResourceRelationshipsTable rrs ON ap.id = rrs.parentResourceId AND rrs.relationshipType = 'Contains'
     LEFT JOIN dbo.$GroupsTable g ON rrs.childResourceId = g.id
 WHERE a.assignmentType = 'Governed'
   AND (a.state = 'delivered' OR a.state IS NULL)  -- Active: 'delivered' for Entra, NULL for derived

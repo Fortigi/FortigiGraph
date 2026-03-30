@@ -490,14 +490,14 @@ async function accessPackageResourcesHandler(req, res) {
         INNER JOIN dbo.Resources ap ON rrs.parentResourceId = ap.id
                    AND ap.resourceType = 'BusinessRole'
                    AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
-        INNER JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
+        LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
                    AND c.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN dbo.Resources r ON UPPER(rrs.childResourceId) = r.id
                    AND r.ValidTo = '9999-12-31 23:59:59.9999999'
         LEFT  JOIN (
           SELECT resourceId, COUNT(*) AS cnt
           FROM dbo.ResourceAssignments
-          WHERE state = 'delivered' AND assignmentType = 'Governed'
+          WHERE (state = 'delivered' OR state IS NULL) AND assignmentType = 'Governed'
           GROUP BY resourceId
         ) ac ON rrs.parentResourceId = ac.resourceId
         LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.parentResourceId) = ca.resourceId

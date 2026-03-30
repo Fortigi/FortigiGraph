@@ -5,8 +5,8 @@ function Start-FGCSVSync {
 
     .DESCRIPTION
     Loads all CSVs from a folder in dependency order and syncs them to the FortigiGraph
-    universal data model tables (Systems, Resources, Principals, Identities, ResourceAssignments,
-    AssignmentPolicies, ResourceRelationships, CertificationDecisions).
+    universal data model tables (Systems, Contexts, Resources, Principals, Identities,
+    ResourceAssignments, ResourceRelationships, AssignmentPolicies, CertificationDecisions).
 
     CSVs are expected to use semicolon (;) delimiter and UTF-8 encoding.
 
@@ -14,7 +14,8 @@ function Start-FGCSVSync {
     - Validates folder and detects which CSVs are present
     - Ensures system tables and governance tables exist
     - Creates/gets the parent system record
-    - Loads CSVs in dependency order (systems before resources before assignments)
+    - Loads CSVs in dependency order (systems -> org units -> resources -> details ->
+      relationships -> principals -> identities -> assignments -> certifications)
     - Prints a summary of all sync operations
 
     .PARAMETER FolderPath
@@ -69,7 +70,10 @@ function Start-FGCSVSync {
     $syncStats = @{
         StartTime = Get-Date
         Systems = $null
+        OrgUnits = $null
         Resources = $null
+        ResourceDetails = $null
+        ResourceRelationships = $null
         Principals = $null
         Identities = $null
         ResourceAssignments = $null
@@ -90,12 +94,16 @@ function Start-FGCSVSync {
 
     # Detect which CSVs are present
     $csvFiles = @{
-        Systems             = Join-Path $FolderPath "System.csv"
-        Resources           = Join-Path $FolderPath "ResourceSystem.csv"
-        Principals          = Join-Path $FolderPath "Users.csv"
-        Identities          = Join-Path $FolderPath "Identities.csv"
-        ResourceAssignments = Join-Path $FolderPath "Account-Permission.csv"
-        Certifications      = Join-Path $FolderPath "CRAs.csv"
+        Systems               = Join-Path $FolderPath "System.csv"
+        OrgUnits              = Join-Path $FolderPath "Orgunits.csv"
+        Resources             = Join-Path $FolderPath "ResourceSystem.csv"
+        ResourceDetails       = Join-Path $FolderPath "Permission-full-details.csv"
+        ResourceRelationships = Join-Path $FolderPath "Permission-Nesting.csv"
+        Principals            = Join-Path $FolderPath "Users.csv"
+        Identities            = Join-Path $FolderPath "Identities.csv"
+        Employment            = Join-Path $FolderPath "Employment.csv"
+        ResourceAssignments   = Join-Path $FolderPath "Account-Permission.csv"
+        Certifications        = Join-Path $FolderPath "CRAs.csv"
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Scanning for CSV files..." -ForegroundColor Cyan
@@ -108,7 +116,7 @@ function Start-FGCSVSync {
     }
 
     if ($foundCount -eq 0) {
-        throw "No recognized CSV files found in $FolderPath. Expected: System.csv, ResourceSystem.csv, Users.csv, Identities.csv, Account-Permission.csv, CRAs.csv"
+        throw "No recognized CSV files found in $FolderPath. Expected: System.csv, Orgunits.csv, ResourceSystem.csv, Permission-full-details.csv, Permission-Nesting.csv, Users.csv, Identities.csv, Employment.csv, Account-Permission.csv, CRAs.csv"
     }
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Found $foundCount CSV file(s)`n" -ForegroundColor Green
@@ -149,7 +157,20 @@ function Start-FGCSVSync {
             }
         }
 
-        # 2. Resources (depends on system lookup)
+        # 2. OrgUnits (populates $Global:FGCSVOrgUnitLookup for identity context resolution)
+        if (Test-Path $csvFiles.OrgUnits) {
+            Write-Host "`n=== Syncing OrgUnits ===" -ForegroundColor Yellow
+            try {
+                $syncStats.OrgUnits = Sync-FGCSVOrgUnit -Path $csvFiles.OrgUnits
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OrgUnits sync complete" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] OrgUnits sync failed: $_" -ForegroundColor Red
+                $syncStats.Errors += [PSCustomObject]@{ Entity = "OrgUnits"; Message = $_.Exception.Message; Timestamp = Get-Date }
+            }
+        }
+
+        # 3. Resources (depends on system lookup)
         if (Test-Path $csvFiles.Resources) {
             Write-Host "`n=== Syncing Resources ===" -ForegroundColor Yellow
             try {
@@ -162,7 +183,41 @@ function Start-FGCSVSync {
             }
         }
 
-        # 3. Principals (users/accounts)
+        # 4. Resource Details (enriches Resources from Permission-full-details.csv)
+        if (Test-Path $csvFiles.ResourceDetails) {
+            Write-Host "`n=== Syncing Resource Details ===" -ForegroundColor Yellow
+            try {
+                $syncStats.ResourceDetails = Sync-FGCSVResourceDetail -Path $csvFiles.ResourceDetails
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource Details sync complete" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource Details sync failed: $_" -ForegroundColor Red
+                $syncStats.Errors += [PSCustomObject]@{ Entity = "ResourceDetails"; Message = $_.Exception.Message; Timestamp = Get-Date }
+            }
+        }
+
+        # 5. Resource Relationships (Permission-Nesting.csv, depends on Resources)
+        if (Test-Path $csvFiles.ResourceRelationships) {
+            Write-Host "`n=== Syncing Resource Relationships ===" -ForegroundColor Yellow
+            try {
+                $syncStats.ResourceRelationships = Sync-FGCSVResourceRelationship -Path $csvFiles.ResourceRelationships
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource Relationships sync complete" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource Relationships sync failed: $_" -ForegroundColor Red
+                $syncStats.Errors += [PSCustomObject]@{ Entity = "ResourceRelationships"; Message = $_.Exception.Message; Timestamp = Get-Date }
+            }
+        }
+
+        # 6. Business Roles — SKIPPED for CSV sync
+        # Business roles are loaded from ResourceSystem.csv (resourceType='BusinessRole') by Sync-FGCSVResource.
+        # Resource grants come from Permission-Nesting.csv by Sync-FGCSVResourceRelationship.
+        # Governed assignments come from Account-Permission.csv by Sync-FGCSVResourceAssignment.
+        # Sync-FGCSVBusinessRole is NOT called here because it creates duplicate resources with
+        # deterministic GUIDs that conflict with the real UUIDs from ResourceSystem.csv, and its
+        # delete step removes the correct relationships loaded by Sync-FGCSVResourceRelationship.
+
+        # 7. Principals (users/accounts)
         if (Test-Path $csvFiles.Principals) {
             Write-Host "`n=== Syncing Principals ===" -ForegroundColor Yellow
             try {
@@ -175,11 +230,15 @@ function Start-FGCSVSync {
             }
         }
 
-        # 4. Identities
+        # 7. Identities (with optional Employment.csv for org unit context)
         if (Test-Path $csvFiles.Identities) {
             Write-Host "`n=== Syncing Identities ===" -ForegroundColor Yellow
             try {
-                $syncStats.Identities = Sync-FGCSVIdentity -Path $csvFiles.Identities
+                $identityParams = @{ Path = $csvFiles.Identities }
+                if (Test-Path $csvFiles.Employment) {
+                    $identityParams.EmploymentPath = $csvFiles.Employment
+                }
+                $syncStats.Identities = Sync-FGCSVIdentity @identityParams
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Identities sync complete" -ForegroundColor Green
             }
             catch {
@@ -188,7 +247,7 @@ function Start-FGCSVSync {
             }
         }
 
-        # 5. Resource Assignments (depends on resources + principals)
+        # 8. Resource Assignments (depends on resources + principals)
         if (Test-Path $csvFiles.ResourceAssignments) {
             Write-Host "`n=== Syncing Resource Assignments ===" -ForegroundColor Yellow
             try {
@@ -201,7 +260,7 @@ function Start-FGCSVSync {
             }
         }
 
-        # 7. Certifications (CRAs - depends on resources + principals)
+        # 9. Certifications (CRAs - depends on resources + principals)
         if (Test-Path $csvFiles.Certifications) {
             Write-Host "`n=== Syncing Certifications ===" -ForegroundColor Yellow
             try {
@@ -212,6 +271,49 @@ function Start-FGCSVSync {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Certifications sync failed: $_" -ForegroundColor Red
                 $syncStats.Errors += [PSCustomObject]@{ Entity = "Certifications"; Message = $_.Exception.Message; Timestamp = Get-Date }
             }
+        }
+
+        #endregion
+
+        #region Post-Sync: Views and Materialized Data
+
+        # Initialize views and indexes (required for UI matrix + detail pages)
+        Write-Host "`n=== Initializing Views & Indexes ===" -ForegroundColor Yellow
+        try {
+            Initialize-FGResourceViews
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource views ready" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource views failed: $_" -ForegroundColor Red
+            $syncStats.Errors += [PSCustomObject]@{ Entity = "ResourceViews"; Message = $_.Exception.Message; Timestamp = Get-Date }
+        }
+
+        try {
+            Initialize-FGResourceIndexes
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource indexes ready" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Resource indexes failed: $_" -ForegroundColor Red
+            $syncStats.Errors += [PSCustomObject]@{ Entity = "ResourceIndexes"; Message = $_.Exception.Message; Timestamp = Get-Date }
+        }
+
+        try {
+            Initialize-FGAccessPackageViews
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Access package views ready" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Access package views failed: $_" -ForegroundColor Red
+            $syncStats.Errors += [PSCustomObject]@{ Entity = "AccessPackageViews"; Message = $_.Exception.Message; Timestamp = Get-Date }
+        }
+
+        # Refresh materialized views (powers the matrix UI)
+        try {
+            Sync-FGMaterializedViews
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materialized views refreshed" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Materialized views failed: $_" -ForegroundColor Red
+            $syncStats.Errors += [PSCustomObject]@{ Entity = "MaterializedViews"; Message = $_.Exception.Message; Timestamp = Get-Date }
         }
 
         #endregion
@@ -234,7 +336,7 @@ function Start-FGCSVSync {
     Write-Host "Duration:  $([math]::Round($elapsed.TotalMinutes, 1)) minutes" -ForegroundColor White
     Write-Host "System:    $SystemDisplayName (ID: $parentSystemId)" -ForegroundColor White
 
-    $entities = @('Systems', 'Resources', 'Principals', 'Identities', 'ResourceAssignments', 'Certifications')
+    $entities = @('Systems', 'OrgUnits', 'Resources', 'ResourceDetails', 'ResourceRelationships', 'Principals', 'Identities', 'ResourceAssignments', 'Certifications')
     foreach ($entity in $entities) {
         $result = $syncStats[$entity]
         if ($null -ne $result) {
@@ -263,6 +365,47 @@ function Start-FGCSVSync {
         foreach ($err in $syncStats.Errors) {
             Write-Host "  - $($err.Entity): $($err.Message)" -ForegroundColor Red
         }
+    }
+
+    Write-Host "========================================`n" -ForegroundColor Green
+
+    # Validation: query actual database state
+    Write-Host "Database Validation:" -ForegroundColor Cyan
+    try {
+        Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandTimeout = 30
+            $cmd.CommandText = @"
+SELECT 'Systems' AS entity, CAST(COUNT(*) AS NVARCHAR) AS cnt, '' AS detail FROM Systems WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'Contexts (OrgUnits)', CAST(COUNT(*) AS NVARCHAR), '' FROM Contexts WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'Resources', CAST(COUNT(*) AS NVARCHAR), '' FROM Resources WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT '  BusinessRole', CAST(COUNT(*) AS NVARCHAR), '' FROM Resources WHERE resourceType = 'BusinessRole' AND ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'ResourceRelationships', CAST(COUNT(*) AS NVARCHAR), '' FROM ResourceRelationships WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT '  BR Contains', CAST(COUNT(*) AS NVARCHAR), '' FROM ResourceRelationships rr INNER JOIN Resources r ON rr.parentResourceId = r.id AND r.resourceType = 'BusinessRole' WHERE rr.relationshipType = 'Contains' AND rr.ValidTo = '9999-12-31 23:59:59.9999999' AND r.ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'Principals', CAST(COUNT(*) AS NVARCHAR), principalType FROM Principals WHERE ValidTo = '9999-12-31 23:59:59.9999999' GROUP BY principalType
+UNION ALL SELECT 'Identities', CAST(COUNT(*) AS NVARCHAR), '' FROM Identities WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT '  with contextId', CAST(COUNT(contextId) AS NVARCHAR), '' FROM Identities WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'IdentityMembers', CAST(COUNT(*) AS NVARCHAR), '' FROM IdentityMembers WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+UNION ALL SELECT 'ResourceAssignments', CAST(COUNT(*) AS NVARCHAR), assignmentType FROM ResourceAssignments WHERE ValidTo = '9999-12-31 23:59:59.9999999' GROUP BY assignmentType
+UNION ALL SELECT 'Mat BR view', CAST(COUNT(*) AS NVARCHAR), '' FROM mat_UserPermissionAssignmentViaBusinessRole
+UNION ALL SELECT 'Mat Perm (total)', CAST(COUNT(*) AS NVARCHAR), '' FROM mat_UserPermissionAssignments
+UNION ALL SELECT 'Mat Perm (managed)', CAST(SUM(CAST(managedByAccessPackage AS INT)) AS NVARCHAR), '' FROM mat_UserPermissionAssignments
+"@
+            $reader = $cmd.ExecuteReader()
+            while ($reader.Read()) {
+                $entity = $reader.GetString(0)
+                $cnt = $reader.GetString(1)
+                $detail = if (-not $reader.IsDBNull(2)) { $reader.GetString(2) } else { '' }
+                $label = if ($detail) { "$entity ($detail)" } else { $entity }
+                Write-Host "  $($label.PadRight(35)) $cnt" -ForegroundColor White
+            }
+            $reader.Close()
+            $cmd.Dispose()
+        }
+    }
+    catch {
+        Write-Host "  Validation query failed: $_" -ForegroundColor Yellow
     }
 
     Write-Host "========================================`n" -ForegroundColor Green

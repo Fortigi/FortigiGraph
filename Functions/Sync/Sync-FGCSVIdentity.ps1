@@ -22,6 +22,11 @@ function Sync-FGCSVIdentity {
     .PARAMETER Path
     Path to the Identities.csv file.
 
+    .PARAMETER EmploymentPath
+    Optional path to Employment.csv. When provided, resolves identity-to-org-unit links
+    by extracting OU_KEY from OUREF_VALUE and looking up the contextId via
+    $Global:FGCSVOrgUnitLookup (populated by Sync-FGCSVOrgUnit).
+
     .PARAMETER RecreateTable
     If specified, drops and recreates the target tables (WARNING: loses all history!)
 
@@ -44,6 +49,9 @@ function Sync-FGCSVIdentity {
     Param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EmploymentPath,
 
         [Parameter(Mandatory = $false)]
         [switch]$RecreateTable
@@ -116,6 +124,7 @@ function Sync-FGCSVIdentity {
         'primaryPrincipalId'    = 'UNIQUEIDENTIFIER'
         'correlationConfidence' = 'INT'
         'isHrAnchored'          = 'BIT'
+        'contextId'             = 'UNIQUEIDENTIFIER'
         'extendedAttributes'    = 'NVARCHAR(MAX)'
     }
 
@@ -178,6 +187,32 @@ function Sync-FGCSVIdentity {
 
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Employee identities (Primary): $($employeeRecords.Count)" -ForegroundColor Cyan
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Machine identities: $($machineRecords.Count)" -ForegroundColor Cyan
+
+    # Build Employment lookup: _ID (numeric) -> contextId (GUID) via OU_KEY
+    $employmentLookup = @{}
+    if ($EmploymentPath -and (Test-Path $EmploymentPath)) {
+        if (-not $Global:FGCSVOrgUnitLookup -or $Global:FGCSVOrgUnitLookup.Count -eq 0) {
+            Write-Warning "[$(Get-Date -Format 'HH:mm:ss')] Employment.csv provided but `$Global:FGCSVOrgUnitLookup is empty. Run Sync-FGCSVOrgUnit first. Skipping org unit resolution."
+        }
+        else {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Loading Employment.csv for org unit resolution..." -ForegroundColor Cyan
+            $employmentData = Import-Csv -Path $EmploymentPath -Delimiter ';' -Encoding UTF8
+            foreach ($emp in $employmentData) {
+                $ouKey = $null
+                # Extract OU_KEY from OUREF_VALUE: "Finance Chicago [GBG_CHI.B.F]"
+                if ($emp.OUREF_VALUE -match '\[([^\]]+)\]') {
+                    $ouKey = $Matches[1]
+                }
+                if ($ouKey -and $Global:FGCSVOrgUnitLookup.ContainsKey($ouKey)) {
+                    $identityRefId = $emp.IDENTITYREF_ID.Trim().Trim('"')
+                    if ($identityRefId -ne '' -and -not $employmentLookup.ContainsKey($identityRefId)) {
+                        $employmentLookup[$identityRefId] = $Global:FGCSVOrgUnitLookup[$ouKey]
+                    }
+                }
+            }
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Built Employment lookup: $($employmentLookup.Count) identity-to-orgunit mappings" -ForegroundColor Green
+        }
+    }
 
     # ========================================
     # Pass 1: Machine identities → Principals
@@ -285,12 +320,18 @@ function Sync-FGCSVIdentity {
                 continue
             }
 
-            # Look up the linked principal
+            # Look up the linked principal via IDENTITYID (matches Users.EmployeeNumber)
             $linkedPrincipalId = $null
-            if ($Global:FGCSVPrincipalLookup -and $row.EmployeeID) {
-                if ($Global:FGCSVPrincipalLookup.ContainsKey($row.EmployeeID)) {
+            if ($Global:FGCSVPrincipalLookup) {
+                # Primary match: IDENTITYID (6-letter code) matches EmployeeNumber in principal lookup
+                if ($row.IDENTITYID -and $Global:FGCSVPrincipalLookup.ContainsKey($row.IDENTITYID)) {
+                    $linkedPrincipalId = $Global:FGCSVPrincipalLookup[$row.IDENTITYID]
+                }
+                # Fallback: EmployeeID (8-digit HR number)
+                elseif ($row.EmployeeID -and $Global:FGCSVPrincipalLookup.ContainsKey($row.EmployeeID)) {
                     $linkedPrincipalId = $Global:FGCSVPrincipalLookup[$row.EmployeeID]
-                } else {
+                }
+                else {
                     $unmatchedCount++
                 }
             }
@@ -310,6 +351,15 @@ function Sync-FGCSVIdentity {
                 $extendedJson = $extended | ConvertTo-Json -Depth 10 -Compress
             }
 
+            # Resolve contextId from Employment lookup
+            $contextId = $null
+            if ($employmentLookup.Count -gt 0 -and $row._ID) {
+                $idKey = $row._ID.Trim().Trim('"')
+                if ($employmentLookup.ContainsKey($idKey)) {
+                    $contextId = $employmentLookup[$idKey]
+                }
+            }
+
             $identityObjects += [PSCustomObject]@{
                 id                    = [guid]$row._UID
                 displayName           = $row._DISPLAYNAME
@@ -321,6 +371,7 @@ function Sync-FGCSVIdentity {
                 primaryPrincipalId    = $linkedPrincipalId
                 correlationConfidence = 100
                 isHrAnchored          = $true
+                contextId             = $contextId
                 extendedAttributes    = $extendedJson
             }
 
@@ -345,7 +396,7 @@ function Sync-FGCSVIdentity {
 
         # Sync Identities
         if ($identityObjects.Count -gt 0) {
-            $identityAttributes = @('id', 'displayName', 'email', 'jobTitle', 'employeeId', 'givenName', 'surname', 'primaryPrincipalId', 'correlationConfidence', 'isHrAnchored', 'extendedAttributes')
+            $identityAttributes = @('id', 'displayName', 'email', 'jobTitle', 'employeeId', 'givenName', 'surname', 'primaryPrincipalId', 'correlationConfidence', 'isHrAnchored', 'contextId', 'extendedAttributes')
             $identityDt = New-FGDataTableFromGraphObjects -GraphObjects $identityObjects -Columns $identityColumns -Attributes $identityAttributes
 
             $identityResult = Invoke-FGSQLCommand -ScriptBlock {

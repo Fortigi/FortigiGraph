@@ -148,7 +148,9 @@ function Sync-FGCSVResource {
         }
         'resourceType' = {
             param($obj)
-            if ($obj.ResourceType -and $obj.ResourceType.Trim() -ne '') { $obj.ResourceType.Trim() } else { 'Unknown' }
+            $rt = if ($obj.ResourceType -and $obj.ResourceType.Trim() -ne '') { $obj.ResourceType.Trim() } else { 'Unknown' }
+            # Normalize "Business Role" (Omada convention) to "BusinessRole" (FortigiGraph convention)
+            if ($rt -eq 'Business Role') { 'BusinessRole' } else { $rt }
         }
         'enabled' = {
             param($obj)

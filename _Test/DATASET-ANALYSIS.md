@@ -699,12 +699,12 @@ To fully use these datasets in FortigiGraph, the following gaps should be noted:
 
 | Aspect | Dataset 1 | Dataset 2 |
 |--------|-----------|-----------|
-| Core files | 10 | 13 |
-| Usable files | 8 | 11 |
-| Empty files | 1 (EpicCompliance) | 1 (EpicCompliance) |
+| Core files | 10 | 11 (cleaned) |
+| Loadable files | 8 of 10 | **All 11** |
+| Empty/removed files | 1 (EpicCompliance) | 0 (CRAs + EpicCompliance removed) |
 | Org hierarchy | Implied via OU_KEY strings | Full tree (Orgunits.csv) |
 | Permission descriptions | Minimal | Rich (Permission-full-details.csv) |
 | Permission nesting | Not present | 94 parent-child pairs |
 | Recommended for FortigiGraph? | Yes (partial) | **Yes — prefer this one** |
 
-**Bottom line:** Use **Dataset 2** as it is a strict superset. The three additional files (`Orgunits.csv`, `Permission-full-details.csv`, `Permission-Nesting.csv`) fill important gaps and make the data model significantly more complete. The only file that cannot be used in either dataset is `EpicCompliance.csv` (empty).
+**Bottom line:** Use **Dataset 2**. After removing `CRAs.csv` (redundant) and `EpicCompliance.csv` (empty), all 11 remaining files map cleanly to FortigiGraph tables: `Identities.csv` → `Identities`, `Users.csv` → `Principals`, `Jobtitles.csv` → `extendedAttributes` on Identities, `Employment.csv` → sets `orgUnitId` on Identities, and the three additional files (`Orgunits.csv`, `Permission-full-details.csv`, `Permission-Nesting.csv`) fill gaps that Dataset 1 lacks.

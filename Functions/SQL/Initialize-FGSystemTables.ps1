@@ -62,6 +62,16 @@ function Initialize-FGSystemTables {
 
         if ($tableExists -and -not $DropIfExists) {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Table 'Systems' already exists (skipping)" -ForegroundColor Yellow
+            # Ensure extendedAttributes column exists (added in v3.4)
+            $colCheck = $connection.CreateCommand()
+            $colCheck.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Systems' AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'extendedAttributes'"
+            if ($colCheck.ExecuteScalar() -eq 0) {
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Adding 'extendedAttributes' column to Systems..." -ForegroundColor Yellow
+                $alterCmd = $connection.CreateCommand()
+                $alterCmd.CommandText = "ALTER TABLE dbo.Systems ADD extendedAttributes NVARCHAR(MAX) NULL"
+                $alterCmd.ExecuteNonQuery() | Out-Null
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Column added" -ForegroundColor Green
+            }
             return
         }
 
@@ -93,6 +103,7 @@ CREATE TABLE dbo.Systems (
     lastSyncDateTime DATETIME2 NULL,
     resourceTypes NVARCHAR(MAX) NULL,
     assignmentTypes NVARCHAR(MAX) NULL,
+    extendedAttributes NVARCHAR(MAX) NULL,
     ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START NOT NULL DEFAULT SYSUTCDATETIME(),
     ValidTo DATETIME2 GENERATED ALWAYS AS ROW END NOT NULL DEFAULT CAST('9999-12-31 23:59:59.9999999' AS DATETIME2),
     PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo),
