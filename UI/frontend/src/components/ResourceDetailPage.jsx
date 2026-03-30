@@ -56,13 +56,33 @@ function computeHistoryDiffs(history) {
   return diffs;
 }
 
-export default function ResourceDetailPage({ resourceId, cachedData, onCacheData, onClose }) {
+const ASSIGNMENT_TYPE_COLORS = {
+  Direct: 'bg-green-100 text-green-700',
+  Governed: 'bg-blue-100 text-blue-700',
+  Owner: 'bg-amber-100 text-amber-700',
+  Eligible: 'bg-purple-100 text-purple-700',
+};
+
+export default function ResourceDetailPage({ resourceId, cachedData, onCacheData, onClose, onOpenDetail }) {
   const { authFetch } = useAuth();
 
   // Core data
   const [data, setData] = useState(cachedData?.core || null);
   const [loading, setLoading] = useState(!cachedData?.core);
   const [error, setError] = useState(null);
+
+  // Lazy-loaded sections
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [assignments, setAssignments] = useState(null);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+
+  const [businessRolesOpen, setBusinessRolesOpen] = useState(false);
+  const [businessRoles, setBusinessRoles] = useState(null);
+  const [businessRolesLoading, setBusinessRolesLoading] = useState(false);
+
+  const [parentResourcesOpen, setParentResourcesOpen] = useState(false);
+  const [parentResources, setParentResources] = useState(null);
+  const [parentResourcesLoading, setParentResourcesLoading] = useState(false);
 
   // Lazy-loaded history
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -114,6 +134,36 @@ export default function ResourceDetailPage({ resourceId, cachedData, onCacheData
       .catch(() => setHistory([]))
       .finally(() => setHistoryLoading(false));
   }, [resourceId, authFetch, history, onCacheData]);
+
+  const loadAssignments = useCallback(() => {
+    if (assignments) return;
+    setAssignmentsLoading(true);
+    authFetch(`/api/resources/${encodeURIComponent(resourceId)}/assignments`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setAssignments(d))
+      .catch(() => setAssignments([]))
+      .finally(() => setAssignmentsLoading(false));
+  }, [resourceId, authFetch, assignments]);
+
+  const loadBusinessRoles = useCallback(() => {
+    if (businessRoles) return;
+    setBusinessRolesLoading(true);
+    authFetch(`/api/resources/${encodeURIComponent(resourceId)}/business-roles`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setBusinessRoles(d))
+      .catch(() => setBusinessRoles([]))
+      .finally(() => setBusinessRolesLoading(false));
+  }, [resourceId, authFetch, businessRoles]);
+
+  const loadParentResources = useCallback(() => {
+    if (parentResources) return;
+    setParentResourcesLoading(true);
+    authFetch(`/api/resources/${encodeURIComponent(resourceId)}/parent-resources`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setParentResources(d))
+      .catch(() => setParentResources([]))
+      .finally(() => setParentResourcesLoading(false));
+  }, [resourceId, authFetch, parentResources]);
 
   const toggleHistory = useCallback(() => {
     setHistoryOpen(prev => {
@@ -245,6 +295,131 @@ export default function ResourceDetailPage({ resourceId, cachedData, onCacheData
           </Section>
         </div>
       )}
+
+      {/* Assigned Users */}
+      <div className="mt-6">
+        <CollapsibleSection
+          title="Assigned Users"
+          count={assignments ? assignments.length : null}
+          open={assignmentsOpen}
+          onToggle={() => { if (!assignmentsOpen) loadAssignments(); setAssignmentsOpen(p => !p); }}
+          loading={assignmentsLoading}
+        >
+          {assignments && assignments.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">No assignments</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium">User</th>
+                  <th className="px-4 py-2 font-medium">Type</th>
+                  <th className="px-4 py-2 font-medium">Assignment</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(assignments || []).map((a, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => onOpenDetail?.('user', a.principalId, a.principalDisplayName)}
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                      >{a.principalDisplayName || a.principalId}</button>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{a.principalType}</td>
+                    <td className="px-4 py-2">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${ASSIGNMENT_TYPE_COLORS[a.assignmentType] || 'bg-gray-100 text-gray-700'}`}>
+                        {a.assignmentType}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{a.assignmentStatus || a.state || '\u2014'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      {/* Business Roles containing this resource */}
+      <div className="mt-6">
+        <CollapsibleSection
+          title="Business Roles"
+          count={businessRoles ? businessRoles.length : null}
+          open={businessRolesOpen}
+          onToggle={() => { if (!businessRolesOpen) loadBusinessRoles(); setBusinessRolesOpen(p => !p); }}
+          loading={businessRolesLoading}
+        >
+          {businessRoles && businessRoles.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">Not part of any business role</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium">Business Role</th>
+                  <th className="px-4 py-2 font-medium">Role Name</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(businessRoles || []).map((br, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => onOpenDetail?.('resource', br.businessRoleId, br.businessRoleName)}
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                      >{br.businessRoleName}</button>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500">{br.roleName || '\u2014'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      {/* Parent Resources (resources this resource is a member of) */}
+      <div className="mt-6">
+        <CollapsibleSection
+          title="Member Of"
+          count={parentResources ? parentResources.length : null}
+          open={parentResourcesOpen}
+          onToggle={() => { if (!parentResourcesOpen) loadParentResources(); setParentResourcesOpen(p => !p); }}
+          loading={parentResourcesLoading}
+        >
+          {parentResources && parentResources.length === 0 ? (
+            <p className="text-sm text-gray-400 italic p-4">Not a member of any other resource</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 font-medium">Parent Resource</th>
+                  <th className="px-4 py-2 font-medium">Type</th>
+                  <th className="px-4 py-2 font-medium">Relationship</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(parentResources || []).map((pr, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => onOpenDetail?.('resource', pr.parentResourceId, pr.parentDisplayName)}
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                      >{pr.parentDisplayName || pr.parentResourceId}</button>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${RESOURCE_TYPE_COLORS[pr.parentResourceType] || 'bg-gray-100 text-gray-700'}`}>
+                        {pr.parentResourceType}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{pr.relationshipType}{pr.roleName ? ` (${pr.roleName})` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CollapsibleSection>
+      </div>
 
       {/* Version History */}
       <div className="mt-6">

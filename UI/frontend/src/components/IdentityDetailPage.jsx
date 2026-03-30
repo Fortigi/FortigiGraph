@@ -128,7 +128,7 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
   };
 
   const handleMemberOverride = async (userId) => {
-    if (!overrideForm || overrideForm.userId !== userId) return;
+    if (!overrideForm || overrideForm.principalId !== userId) return;
     if (!overrideForm.reason || overrideForm.reason.trim().length < 3) return;
     try {
       const res = await authFetch(`/api/identities/${identityId}/members/${userId}/override`, {
@@ -296,11 +296,11 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
             </thead>
             <tbody>
               {members.map(m => (
-                <tr key={m.userId} className={`border-b border-gray-50 hover:bg-gray-50 ${m.analystOverride === 'rejected' ? 'opacity-50' : ''}`}>
+                <tr key={m.principalId} className={`border-b border-gray-50 hover:bg-gray-50 ${m.analystOverride === 'rejected' ? 'opacity-50' : ''}`}>
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => onOpenDetail?.('user', m.userId, m.displayName)}
+                        onClick={() => onOpenDetail?.('user', m.principalId, m.displayName)}
                         className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
                       >
                         {m.displayName}
@@ -349,7 +349,7 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
                           'bg-yellow-50 text-yellow-700'
                         }`}>{m.analystOverride}</span>
                         <button
-                          onClick={() => handleRemoveOverride(m.userId)}
+                          onClick={() => handleRemoveOverride(m.principalId)}
                           className="text-xs text-gray-400 hover:text-red-600"
                           title="Remove override"
                         >x</button>
@@ -357,16 +357,16 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
                     ) : !m.isPrimary ? (
                       <div className="flex gap-1">
                         <button
-                          onClick={() => setOverrideForm({ userId: m.userId, action: 'confirmed', reason: '' })}
+                          onClick={() => setOverrideForm({ userId: m.principalId, action: 'confirmed', reason: '' })}
                           className="text-xs text-green-600 hover:text-green-800 border border-green-200 rounded px-1.5 py-0.5"
                         >Confirm</button>
                         <button
-                          onClick={() => setOverrideForm({ userId: m.userId, action: 'rejected', reason: '' })}
+                          onClick={() => setOverrideForm({ userId: m.principalId, action: 'rejected', reason: '' })}
                           className="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-1.5 py-0.5"
                         >Reject</button>
                       </div>
                     ) : null}
-                    {overrideForm && overrideForm.userId === m.userId && (
+                    {overrideForm && overrideForm.principalId === m.principalId && (
                       <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">
                           {overrideForm.action === 'confirmed' ? 'Confirm' : 'Reject'} this link:
@@ -380,7 +380,7 @@ export default function IdentityDetailPage({ identityId, cachedData, onCacheData
                         />
                         <div className="flex gap-1">
                           <button
-                            onClick={() => handleMemberOverride(m.userId)}
+                            onClick={() => handleMemberOverride(m.principalId)}
                             disabled={!overrideForm.reason || overrideForm.reason.trim().length < 3}
                             className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded disabled:opacity-50"
                           >Save</button>

@@ -122,6 +122,7 @@ function Sync-FGCSVIdentity {
         'givenName'             = 'NVARCHAR(255)'
         'surname'               = 'NVARCHAR(255)'
         'primaryPrincipalId'    = 'UNIQUEIDENTIFIER'
+        'accountCount'          = 'INT'
         'correlationConfidence' = 'INT'
         'isHrAnchored'          = 'BIT'
         'contextId'             = 'UNIQUEIDENTIFIER'
@@ -369,6 +370,7 @@ function Sync-FGCSVIdentity {
                 givenName             = $row.FIRSTNAME
                 surname               = $row.LASTNAME
                 primaryPrincipalId    = $linkedPrincipalId
+                accountCount          = if ($linkedPrincipalId) { 1 } else { 0 }
                 correlationConfidence = 100
                 isHrAnchored          = $true
                 contextId             = $contextId
@@ -396,7 +398,7 @@ function Sync-FGCSVIdentity {
 
         # Sync Identities
         if ($identityObjects.Count -gt 0) {
-            $identityAttributes = @('id', 'displayName', 'email', 'jobTitle', 'employeeId', 'givenName', 'surname', 'primaryPrincipalId', 'correlationConfidence', 'isHrAnchored', 'contextId', 'extendedAttributes')
+            $identityAttributes = @('id', 'displayName', 'email', 'jobTitle', 'employeeId', 'givenName', 'surname', 'primaryPrincipalId', 'accountCount', 'correlationConfidence', 'isHrAnchored', 'contextId', 'extendedAttributes')
             $identityDt = New-FGDataTableFromGraphObjects -GraphObjects $identityObjects -Columns $identityColumns -Attributes $identityAttributes
 
             $identityResult = Invoke-FGSQLCommand -ScriptBlock {

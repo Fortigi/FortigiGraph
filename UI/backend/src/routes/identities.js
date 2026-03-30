@@ -38,7 +38,7 @@ router.get('/identities', async (req, res) => {
   try {
     const p = await db.getPool();
 
-    if (!(await hasTable(p, 'GraphIdentities'))) {
+    if (!(await hasTable(p, 'Identities'))) {
       return res.json({ available: false, data: [], total: 0, summary: null });
     }
 
@@ -50,7 +50,7 @@ router.get('/identities', async (req, res) => {
     // Check if HR columns exist (schema may be pre-1.1)
     const colCheck = await p.request().query(`
       SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'GraphIdentities' AND COLUMN_NAME IN ('isHrAnchored', 'orphanStatus')
+      WHERE TABLE_NAME = 'Identities' AND COLUMN_NAME IN ('isHrAnchored', 'orphanStatus')
     `);
     const hasHrCols = colCheck.recordset.length >= 2;
 
@@ -66,7 +66,7 @@ router.get('/identities', async (req, res) => {
           MAX(correlatedAt) AS lastCorrelatedAt
           ${hasHrCols ? `, SUM(CASE WHEN isHrAnchored = 1 THEN 1 ELSE 0 END) AS hrAnchoredCount,
           SUM(CASE WHEN orphanStatus IS NOT NULL THEN 1 ELSE 0 END) AS orphanCount` : ''}
-        FROM dbo.GraphIdentities
+        FROM dbo.Identities
       `);
     const summary = summaryResult.recordset[0];
 
@@ -74,7 +74,7 @@ router.get('/identities', async (req, res) => {
     const typeDistResult = await timedRequest(p, 'identity-type-dist', res)
       .query(`
         SELECT accountType, COUNT(*) AS cnt
-        FROM dbo.GraphIdentityMembers
+        FROM dbo.IdentityMembers
         GROUP BY accountType
         ORDER BY cnt DESC
       `);
@@ -85,7 +85,7 @@ router.get('/identities', async (req, res) => {
     const inputs = {};
 
     if (search) {
-      where += ' AND (displayName LIKE @search OR primaryAccountUpn LIKE @search OR mail LIKE @search OR department LIKE @search)';
+      where += ' AND (displayName LIKE @search OR email LIKE @search OR jobTitle LIKE @search OR employeeId LIKE @search)';
       inputs.search = `%${search}%`;
     }
 
@@ -98,8 +98,7 @@ router.get('/identities', async (req, res) => {
     }
 
     if (accountType) {
-      where += ' AND accountTypes LIKE @accountType';
-      inputs.accountType = `%${accountType}%`;
+      // accountTypes column not available in v3.0 Identities table; filter skipped
     }
 
     if (confidence) {
@@ -133,7 +132,7 @@ router.get('/identities', async (req, res) => {
     // Count
     const countReq = timedRequest(p, 'identity-count', res);
     for (const [k, v] of Object.entries(inputs)) countReq.input(k, v);
-    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM dbo.GraphIdentities ${where}`);
+    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM dbo.Identities ${where}`);
     const total = countResult.recordset[0].total;
 
     // Sort
@@ -152,12 +151,15 @@ router.get('/identities', async (req, res) => {
     dataReq.input('pageOffset', pageOffset);
     dataReq.input('pageLimit', pageLimit);
     const dataResult = await dataReq.query(`
-      SELECT id, displayName, primaryAccountId, primaryAccountUpn, accountCount, accountTypes,
-        correlationConfidence, correlationSignals, department, jobTitle, managerId, mail,
-        givenName, surname, employeeId, companyName, employeeType, city, country, officeLocation,
-        accountEnabled, correlatedAt, analystVerified, analystNotes
-        ${hasHrCols ? ', isHrAnchored, hrAccountId, orphanStatus' : ''}
-      FROM dbo.GraphIdentities
+      SELECT id, displayName, primaryPrincipalId AS primaryAccountId, email AS primaryAccountUpn,
+        accountCount, NULL AS accountTypes,
+        correlationConfidence, NULL AS correlationSignals, NULL AS department, jobTitle,
+        NULL AS managerId, email AS mail,
+        givenName, surname, employeeId, NULL AS companyName, NULL AS employeeType,
+        NULL AS city, NULL AS country, NULL AS officeLocation,
+        NULL AS accountEnabled, correlatedAt, analystVerified, analystNotes
+        ${hasHrCols ? ', isHrAnchored, NULL AS hrAccountId, orphanStatus' : ''}
+      FROM dbo.Identities
       ${where}
       ORDER BY ${orderBy}
       OFFSET @pageOffset ROWS FETCH NEXT @pageLimit ROWS ONLY
@@ -189,7 +191,7 @@ router.get('/identities/:id', async (req, res) => {
     // Fetch identity
     const identityResult = await timedRequest(p, 'identity-detail', res)
       .input('id', identityId)
-      .query(`SELECT * FROM dbo.GraphIdentities WHERE id = @id`);
+      .query(`SELECT * FROM dbo.Identities WHERE id = @id`);
 
     if (identityResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Identity not found' });
@@ -204,8 +206,8 @@ router.get('/identities/:id', async (req, res) => {
         .input('identityId', identityId)
         .query(`
           SELECT m.*, u.department, u.jobTitle, u.createdDateTime, u.accountEnabled AS userAccountEnabled
-          FROM dbo.GraphIdentityMembers m
-          LEFT JOIN dbo.Principals u ON m.userId = u.id
+          FROM dbo.IdentityMembers m
+          LEFT JOIN dbo.Principals u ON m.principalId = u.id
           WHERE m.identityId = @identityId
           ORDER BY m.isPrimary DESC, m.accountType ASC
         `);
@@ -214,8 +216,8 @@ router.get('/identities/:id', async (req, res) => {
         .input('identityId', identityId)
         .query(`
           SELECT m.*, u.department, u.jobTitle, u.lastSignInDateTime, u.createdDateTime, u.accountEnabled AS userAccountEnabled
-          FROM dbo.GraphIdentityMembers m
-          LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
+          FROM dbo.IdentityMembers m
+          LEFT JOIN dbo.GraphUsers u ON m.principalId = u.id
           WHERE m.identityId = @identityId
           ORDER BY m.isPrimary DESC, m.accountType ASC
         `);
@@ -229,18 +231,18 @@ router.get('/identities/:id', async (req, res) => {
         riskResult = await timedRequest(p, 'identity-member-risks', res)
           .input('identityId', identityId)
           .query(`
-            SELECT m.userId, u.riskScore, u.riskTier
-            FROM dbo.GraphIdentityMembers m
-            LEFT JOIN dbo.Principals u ON m.userId = u.id
+            SELECT m.principalId, u.riskScore, u.riskTier
+            FROM dbo.IdentityMembers m
+            LEFT JOIN dbo.Principals u ON m.principalId = u.id
             WHERE m.identityId = @identityId
           `);
       } catch {
         riskResult = await timedRequest(p, 'identity-member-risks-legacy', res)
           .input('identityId', identityId)
           .query(`
-            SELECT m.userId, u.riskScore, u.riskTier
-            FROM dbo.GraphIdentityMembers m
-            LEFT JOIN dbo.GraphUsers u ON m.userId = u.id
+            SELECT m.principalId, u.riskScore, u.riskTier
+            FROM dbo.IdentityMembers m
+            LEFT JOIN dbo.GraphUsers u ON m.principalId = u.id
             WHERE m.identityId = @identityId
           `);
       }
@@ -255,15 +257,15 @@ router.get('/identities/:id', async (req, res) => {
       const groupCountResult = await timedRequest(p, 'identity-member-groups', res)
         .input('identityId', identityId)
         .query(`
-          SELECT m.userId, COUNT(DISTINCT gm.groupId) AS groupCount
-          FROM dbo.GraphIdentityMembers m
-          LEFT JOIN dbo.GraphGroupMembers gm ON m.userId = gm.memberId
+          SELECT m.principalId, COUNT(DISTINCT gm.resourceId) AS groupCount
+          FROM dbo.IdentityMembers m
+          LEFT JOIN dbo.ResourceAssignments gm ON m.principalId = gm.principalId AND gm.assignmentType = 'Direct' AND gm.ValidTo = '9999-12-31 23:59:59.9999999'
           WHERE m.identityId = @identityId
-          GROUP BY m.userId
+          GROUP BY m.principalId
         `);
       memberGroupCounts = groupCountResult.recordset;
     } catch {
-      // GraphGroupMembers may not exist
+      // ResourceAssignments may not exist
     }
 
     // Enrich members with group counts and risk scores
@@ -306,7 +308,7 @@ router.put('/identities/:id/verify', async (req, res) => {
     await timedRequest(p, 'identity-verify', res)
       .input('id', identityId)
       .input('notes', notes || null)
-      .query(`UPDATE dbo.GraphIdentities SET analystVerified = 1, analystNotes = @notes WHERE id = @id`);
+      .query(`UPDATE dbo.Identities SET analystVerified = 1, analystNotes = @notes WHERE id = @id`);
 
     res.json({ success: true });
   } catch (err) {
@@ -326,7 +328,7 @@ router.delete('/identities/:id/verify', async (req, res) => {
     const p = await db.getPool();
     await timedRequest(p, 'identity-unverify', res)
       .input('id', identityId)
-      .query(`UPDATE dbo.GraphIdentities SET analystVerified = 0, analystNotes = NULL WHERE id = @id`);
+      .query(`UPDATE dbo.Identities SET analystVerified = 0, analystNotes = NULL WHERE id = @id`);
 
     res.json({ success: true });
   } catch (err) {
@@ -363,7 +365,7 @@ router.put('/identities/:id/members/:userId/override', async (req, res) => {
       .input('action', action)
       .input('reason', reason.trim())
       .query(`
-        UPDATE dbo.GraphIdentityMembers
+        UPDATE dbo.IdentityMembers
         SET analystOverride = @action, analystReason = @reason
         WHERE identityId = @identityId AND userId = @userId
       `);
@@ -385,7 +387,7 @@ router.get('/identities/by-user/:userId', async (req, res) => {
   try {
     const p = await db.getPool();
 
-    if (!(await hasTable(p, 'GraphIdentities'))) {
+    if (!(await hasTable(p, 'Identities'))) {
       return res.json({ identity: null, memberInfo: null });
     }
 
@@ -397,9 +399,9 @@ router.get('/identities/by-user/:userId', async (req, res) => {
           i.primaryAccountUpn, i.primaryAccountId, i.correlationConfidence, i.isHrAnchored,
           m.accountType, m.isPrimary, m.isHrAuthoritative, m.hrScore, m.signalConfidence,
           m.correlationSignals, m.analystOverride
-        FROM dbo.GraphIdentityMembers m
-        JOIN dbo.GraphIdentities i ON i.id = m.identityId
-        WHERE m.userId = @userId
+        FROM dbo.IdentityMembers m
+        JOIN dbo.Identities i ON i.id = m.identityId
+        WHERE m.principalId = @userId
       `);
 
     if (memberResult.recordset.length === 0) {
@@ -433,7 +435,7 @@ router.get('/identities/by-user/:userId', async (req, res) => {
       .query(`
         SELECT userId, displayName, userPrincipalName, accountType, isPrimary,
           isHrAuthoritative, accountEnabled
-        FROM dbo.GraphIdentityMembers
+        FROM dbo.IdentityMembers
         WHERE identityId = @identityId AND userId <> @userId
         ORDER BY isPrimary DESC, accountType ASC
       `);
@@ -460,7 +462,7 @@ router.delete('/identities/:id/members/:userId/override', async (req, res) => {
       .input('identityId', identityId)
       .input('userId', userId)
       .query(`
-        UPDATE dbo.GraphIdentityMembers
+        UPDATE dbo.IdentityMembers
         SET analystOverride = NULL, analystReason = NULL
         WHERE identityId = @identityId AND userId = @userId
       `);

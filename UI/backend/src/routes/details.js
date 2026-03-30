@@ -161,30 +161,31 @@ router.get('/user/:id/memberships', async (req, res) => {
     const table = await getPermissionTable(pool);
     let r;
     try {
-      // New model: resourceId, resourceDisplayName, resourceType
+      // Join materialized table to Resources for display name and type
       r = await timedRequest(pool, 'user-memberships', res)
         .input('id', req.params.id)
         .query(`
-        SELECT resourceId, resourceId AS groupId,
-               resourceDisplayName, resourceDisplayName AS groupDisplayName,
-               resourceType, resourceType AS groupTypeCalculated,
-               membershipType, managedByAccessPackage
-        FROM ${table}
-        WHERE memberId = @id
-        ORDER BY resourceDisplayName, membershipType
+        SELECT p.groupId AS resourceId, p.groupId AS groupId,
+               r.displayName AS resourceDisplayName, r.displayName AS groupDisplayName,
+               r.resourceType, r.resourceType AS groupTypeCalculated,
+               p.membershipType, p.managedByAccessPackage
+        FROM ${table} p
+        LEFT JOIN dbo.Resources r ON p.groupId = r.id AND r.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE p.memberId = @id
+        ORDER BY r.displayName, p.membershipType
       `);
     } catch {
-      // Fall back to old column names
+      // Fall back without Resources join
       r = await timedRequest(pool, 'user-memberships-legacy', res)
         .input('id', req.params.id)
         .query(`
         SELECT groupId, groupId AS resourceId,
-               groupDisplayName, groupDisplayName AS resourceDisplayName,
-               groupTypeCalculated, groupTypeCalculated AS resourceType,
+               NULL AS groupDisplayName, NULL AS resourceDisplayName,
+               NULL AS groupTypeCalculated, NULL AS resourceType,
                membershipType, managedByAccessPackage
         FROM ${table}
         WHERE memberId = @id
-        ORDER BY groupDisplayName, membershipType
+        ORDER BY membershipType
       `);
     }
     res.json(r.recordset);

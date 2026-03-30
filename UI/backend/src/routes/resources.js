@@ -264,39 +264,100 @@ router.get('/resources/:id', async (req, res) => {
   }
 });
 
+// ─── GET /api/resources/:id/assignments ─────────────────────────
+// Get principals assigned to this resource, with assignment type
+router.get('/resources/:id/assignments', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'resource-assignments', res)
+      .input('id', req.params.id)
+      .query(`
+        SELECT ra.principalId, p.displayName AS principalDisplayName, p.email,
+               p.principalType, ra.assignmentType, ra.state, ra.assignmentStatus
+        FROM dbo.ResourceAssignments ra
+        LEFT JOIN dbo.Principals p ON ra.principalId = p.id AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE ra.resourceId = @id AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
+        ORDER BY ra.assignmentType, p.displayName
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('Error fetching resource assignments:', err.message);
+    res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// ─── GET /api/resources/:id/business-roles ──────────────────────
+// Get business roles that contain this resource (via ResourceRelationships)
+router.get('/resources/:id/business-roles', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'resource-business-roles', res)
+      .input('id', req.params.id)
+      .query(`
+        SELECT rr.parentResourceId AS businessRoleId, br.displayName AS businessRoleName,
+               rr.roleName, rr.relationshipType
+        FROM dbo.ResourceRelationships rr
+        INNER JOIN dbo.Resources br ON rr.parentResourceId = br.id
+          AND br.resourceType = 'BusinessRole' AND br.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE rr.childResourceId = @id AND rr.relationshipType = 'Contains'
+          AND rr.ValidTo = '9999-12-31 23:59:59.9999999'
+        ORDER BY br.displayName
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('Error fetching business roles:', err.message);
+    res.status(500).json({ error: 'Failed to fetch business roles' });
+  }
+});
+
+// ─── GET /api/resources/:id/parent-resources ────────────────────
+// Get resources this resource is a member/child of (via ResourceRelationships)
+router.get('/resources/:id/parent-resources', async (req, res) => {
+  if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+  if (!useSql) return res.json([]);
+  try {
+    const pool = await db.getPool();
+    const r = await timedRequest(pool, 'resource-parents', res)
+      .input('id', req.params.id)
+      .query(`
+        SELECT rr.parentResourceId, pr.displayName AS parentDisplayName,
+               pr.resourceType AS parentResourceType, rr.relationshipType, rr.roleName
+        FROM dbo.ResourceRelationships rr
+        INNER JOIN dbo.Resources pr ON rr.parentResourceId = pr.id
+          AND pr.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE rr.childResourceId = @id AND rr.ValidTo = '9999-12-31 23:59:59.9999999'
+        ORDER BY rr.relationshipType, pr.displayName
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('Error fetching parent resources:', err.message);
+    res.status(500).json({ error: 'Failed to fetch parent resources' });
+  }
+});
+
 // ─── GET /api/resources/:id/members ─────────────────────────────
-// Get resource members via permission view or ResourceAssignments
+// Legacy: Get resource members via materialized permission view
 router.get('/resources/:id/members', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
     const table = await getPermissionTable(pool);
-
-    // Try with resourceId column first (new model), fall back to groupId (old model)
-    let r;
-    try {
-      r = await timedRequest(pool, 'resource-members', res)
-        .input('id', req.params.id)
-        .query(`
-          SELECT memberId, memberDisplayName, memberUPN,
-                 membershipType, managedByAccessPackage
-          FROM ${table}
-          WHERE resourceId = @id
-          ORDER BY memberDisplayName, membershipType
-        `);
-    } catch {
-      // Fall back to groupId column name
-      r = await timedRequest(pool, 'resource-members-compat', res)
-        .input('id', req.params.id)
-        .query(`
-          SELECT memberId, memberDisplayName, memberUPN,
-                 membershipType, managedByAccessPackage
-          FROM ${table}
-          WHERE groupId = @id
-          ORDER BY memberDisplayName, membershipType
-        `);
-    }
+    const r = await timedRequest(pool, 'resource-members', res)
+      .input('id', req.params.id)
+      .query(`
+        SELECT p.groupId AS resourceId, p.memberId,
+               u.displayName AS memberDisplayName, u.email AS memberUPN,
+               p.membershipType, p.managedByAccessPackage
+        FROM ${table} p
+        LEFT JOIN dbo.Principals u ON p.memberId = u.id AND u.ValidTo = '9999-12-31 23:59:59.9999999'
+        WHERE p.groupId = @id
+        ORDER BY u.displayName, p.membershipType
+      `);
     res.json(r.recordset);
   } catch (err) {
     console.error('Error fetching resource members:', err.message);
