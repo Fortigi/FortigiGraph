@@ -134,6 +134,7 @@ function Sync-FGCSVPrincipal {
 
     # Build principal lookup for downstream syncs
     $Global:FGCSVPrincipalLookup = @{}
+    $Global:FGCSVPrincipalOULookup = @{}  # EmployeeNumber -> OU_KEY for identity context resolution
 
     # Build DataTable
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Preparing principal data..." -ForegroundColor Cyan
@@ -156,6 +157,11 @@ function Sync-FGCSVPrincipal {
         # Also store by Employee_ID if different from EmployeeNumber
         if ($row.Employee_ID -and $row.Employee_ID -ne $row.EmployeeNumber) {
             $Global:FGCSVPrincipalLookup[$row.Employee_ID] = $principalId
+        }
+
+        # Store OU_KEY for identity context resolution
+        if ($row.OU_KEY) {
+            $Global:FGCSVPrincipalOULookup[$row.EmployeeNumber] = $row.OU_KEY
         }
 
         # Build manager ID if manager corporate key is available

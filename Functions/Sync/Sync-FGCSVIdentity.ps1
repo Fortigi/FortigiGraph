@@ -352,12 +352,23 @@ function Sync-FGCSVIdentity {
                 $extendedJson = $extended | ConvertTo-Json -Depth 10 -Compress
             }
 
-            # Resolve contextId from Employment lookup
+            # Resolve contextId: try Employment lookup first, then fall back to Principal's OU_KEY
             $contextId = $null
             if ($employmentLookup.Count -gt 0 -and $row._ID) {
                 $idKey = $row._ID.Trim().Trim('"')
                 if ($employmentLookup.ContainsKey($idKey)) {
                     $contextId = $employmentLookup[$idKey]
+                }
+            }
+            # Fallback: use the linked principal's OU_KEY (stored as department by Sync-FGCSVPrincipal)
+            if (-not $contextId -and $linkedPrincipalId -and $Global:FGCSVOrgUnitLookup -and $Global:FGCSVOrgUnitLookup.Count -gt 0) {
+                # Find the OU_KEY for this identity's principal via the CSV data
+                $identityKey = $row.IDENTITYID
+                if ($identityKey -and $Global:FGCSVPrincipalOULookup -and $Global:FGCSVPrincipalOULookup.ContainsKey($identityKey)) {
+                    $ouKey = $Global:FGCSVPrincipalOULookup[$identityKey]
+                    if ($ouKey -and $Global:FGCSVOrgUnitLookup.ContainsKey($ouKey)) {
+                        $contextId = $Global:FGCSVOrgUnitLookup[$ouKey]
+                    }
                 }
             }
 
