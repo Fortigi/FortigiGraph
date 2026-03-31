@@ -1,7 +1,7 @@
-# FortigiGraph v3.0 — Universal Resource & Identity Model
+# Identity Atlas v4.0 (formerly FortigiGraph)
 
 **Branch:** `feature/universal-resource-model`
-**Date:** 2026-03-21
+**Date:** 2026-03-31
 **Base:** `dev`
 
 ## Summary
@@ -321,6 +321,38 @@ UI/frontend/src/utils/exportToExcel.js
 - Added comprehensive testing plan (`docs/architecture/testing-plan.md`) — test pyramid (unit → integration → E2E → deployment), implementation steps, coverage targets, and a process for adding regression tests when bugs are found
 - Added local nightly test runner (`_Test/Run-NightlyLocal.ps1`) — provisions Docker environment from scratch, initializes all tables, tests crawler auth lifecycle, runs CSV crawler with test dataset, verifies ingested data via API, runs Playwright E2E browser tests, validates Swagger/OpenAPI docs, tears down, and produces JSON + text + HTML reports
 - Added Windows Task Scheduler setup (`_Test/Register-NightlySchedule.ps1`) — one-command registration for daily nightly test runs at 02:00
+- Added "Fortigi Demo Corp" synthetic E2E test dataset (`_Test/DemoDataset/`) — a purpose-built company with 22 employees, 3 systems, 14 resources, 4 business roles, governed assignments, org hierarchy, multi-system identity correlation, and edge cases (contractor, disabled account, service principal, AI agent, shared mailbox)
+  - `Generate-DemoDataset.ps1`: Generates `demo-company.json` with deterministic GUIDs for reproducible testing
+  - `Ingest-DemoDataset.ps1`: POSTs all entities to the Ingest API in dependency order (systems → contexts → principals → resources → assignments → relationships → identities → governance)
+  - `Verify-DemoDataset.ps1`: 30+ checks — row counts per table, referential integrity (no orphaned FKs), business logic assertions (principal types, assignment types, relationship types, context hierarchy, governance decisions, multi-system identity links), API endpoint verification, Swagger availability
+  - Nightly runner (`Run-NightlyLocal.ps1`) now generates, ingests, and verifies the demo dataset as phases 4f-4h before running Playwright E2E
+- Extended Docker local development stack with automatic table initialization and optional PowerShell scheduling
+  - `sql-table-init` service: one-shot container that runs all `Initialize-FG*` functions after database creation — no manual table init needed
+  - `powershell` service (profile: tools): container with PowerShell 7 + FortigiGraph module for running crawlers, risk scoring, and account correlation via `docker exec`
+  - `scheduler` service (profile: tools): container for cron-based scheduling of recurring jobs (crawlers, risk scoring)
+  - `docker/Dockerfile.powershell`: PowerShell 7 image with FortigiGraph module and crawler scripts
+  - `docker/init-tables.ps1`: initialization script that creates all system, governance, crawler, activity, risk score tables plus views and indexes
+  - `docker/crontab`: configurable schedule for automated jobs
+  - `.env.example`: template for local secrets (SQL password, crawler key, Graph credentials, LLM key)
+  - `scripts/local-sync.ps1` rewritten to use the Ingest API (registers crawler, generates + ingests demo dataset)
+  - Backend now depends on `sql-table-init` instead of `sql-init` — tables are ready before the API starts
+  - Added Docker setup documentation (`docs/architecture/docker-setup.md`) with step-by-step testing guide
+- **BREAKING CHANGE — Complete repository restructuring:** Moved from PowerShell-module-centric layout to a full-solution layout reflecting the product's evolution:
+  - `app/db/` — Database schema (tables, views, indexes) — moved from `Functions/SQL/`
+  - `app/api/` — Express.js backend (Ingest + Read API) — moved from `UI/backend/`
+  - `app/ui/` — React frontend — moved from `UI/frontend/`
+  - `tools/crawlers/` — Crawler scripts — moved from `Crawlers/`
+  - `tools/riskscoring/` — Risk scoring engine — moved from `Functions/RiskScoring/`
+  - `tools/correlation/` — Account correlation scripts
+  - `tools/powershell-sdk/graph/` — Graph API wrappers — moved from `Functions/Base/` + `Functions/Generic/`
+  - `tools/powershell-sdk/helpers/` — Idempotent helpers — moved from `Functions/Specific/`
+  - `setup/docker/` — Docker infrastructure — moved from `docker/`
+  - `setup/azure/` — Azure deployment scripts — moved from `Functions/Automation/`
+  - `setup/config/` — Config templates — moved from `Config/`
+  - `test/` — All testing — moved from `_Test/`
+  - Removed: `_Build/` (no more PSGallery publishing), `Functions/` (distributed to app/tools/setup), `UI/` (moved to app/)
+  - `FortigiGraph.psm1` updated to load from new paths
+  - All Dockerfiles, docker-compose, test scripts, and internal references updated
 - Added `Sync-FGCSVResourceDetail` function: enriches existing Resources with descriptions, role categories, and role type metadata from Omada Identity `Permission-full-details.csv` — runs after `Sync-FGCSVResource` and adds or updates rows with richer metadata
 - `Sync-FGCSVIdentity` now accepts an optional `-EmploymentPath` parameter: when provided with an `Employment.csv` file, resolves identity-to-org-unit links by extracting `OU_KEY` from `OUREF_VALUE` and setting `contextId` on the Identity record
 - `Start-FGCSVSync` orchestrator updated with 4 new sync steps in correct dependency order: OrgUnits (after Systems), Resource Details (after Resources), Resource Relationships (after Resources), and Employment-to-Identity context resolution (during Identities step); now detects `Orgunits.csv`, `Permission-full-details.csv`, `Permission-Nesting.csv`, and `Employment.csv`
@@ -345,3 +377,4 @@ UI/frontend/src/utils/exportToExcel.js
 - Identity detail page now shows the linked Org Unit as a clickable link (navigates to context detail page)
 - Context member counts updated after identity-context linking
 - Resource detail page: added three new collapsible sections — **Assigned Users** (shows all principals assigned to this resource with Direct/Governed/Owner/Eligible badge and status), **Business Roles** (shows which business roles contain this resource via ResourceRelationships), **Member Of** (shows parent resources this resource belongs to); all sections are lazy-loaded and support drill-through navigation
+- **Rebranded to Identity Atlas** — renamed from FortigiGraph to Identity Atlas throughout: UI header with logo and dark theme, page title, Swagger docs, OpenAPI spec, console output, Excel exports, module manifest, MkDocs site; green color scheme matching the new logo

@@ -30,7 +30,7 @@ const TYPE_COLORS = Object.fromEntries(
 
 export async function exportToExcel({ users, orderedGroups, memberships, managedApMap, apIdToIndex, activeFilters, filterFields, accessPackages = [], apGroupMap, shareUrl }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'FortigiGraph Role Mining';
+  wb.creator = 'Identity Atlas';
   wb.created = new Date();
 
   const ws = wb.addWorksheet('Role Mining Matrix', {

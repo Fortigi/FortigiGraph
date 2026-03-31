@@ -39,7 +39,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node src/index.js',
-      cwd: '../backend',
+      cwd: '../api',
       port: 3001,
       env: {
         USE_SQL: 'false',

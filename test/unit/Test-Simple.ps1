@@ -32,7 +32,7 @@ if (Test-Path $ConfigFile) {
 # Test 2: Check module
 Write-Host "`n[2/5] Checking module..." -ForegroundColor Yellow
 $moduleRoot = Split-Path -Parent $PSScriptRoot
-$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
+$modulePath = Join-Path $moduleRoot "IdentityAtlas.psd1"
 
 if (Test-Path $modulePath) {
     Write-Host "  ✓ Module file found: $modulePath" -ForegroundColor Green

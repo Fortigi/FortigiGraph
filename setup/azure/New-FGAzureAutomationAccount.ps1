@@ -749,9 +749,9 @@ function New-FGAzureAutomationAccount {
                 }
 
                 # Verify module exists
-                $psdPath = Join-Path $ModulePath "FortigiGraph.psd1"
+                $psdPath = Join-Path $ModulePath "IdentityAtlas.psd1"
                 if (-not (Test-Path $psdPath)) {
-                    Write-Warning "  FortigiGraph.psd1 not found at: $ModulePath"
+                    Write-Warning "  IdentityAtlas.psd1 not found at: $ModulePath"
                     Write-Warning "  Please specify -ModulePath or import the module manually"
                     Write-Host "  Use -SkipModuleUpload to skip module upload" -ForegroundColor Gray
                 }

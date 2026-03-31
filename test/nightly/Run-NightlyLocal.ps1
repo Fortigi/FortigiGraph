@@ -12,7 +12,7 @@
     Path to the FortigiGraph repository root. Default: parent of _Test folder.
 
 .PARAMETER CsvDataset
-    Path to CSV test dataset folder. Default: _Test/DatasetLed2
+    Path to CSV test dataset folder. Default: test/datasets/DatasetLed2
 
 .PARAMETER SkipBackendUnit
     Skip backend JS unit tests
@@ -30,7 +30,7 @@
     Don't tear down Docker after tests (for debugging)
 
 .PARAMETER LogFolder
-    Folder for test logs and reports. Default: _Test/NightlyResults/<date>
+    Folder for test logs and reports. Default: test/nightly/results/<date>
 
 .EXAMPLE
     pwsh -File _Test\Run-NightlyLocal.ps1
@@ -55,8 +55,8 @@ Param(
 $ErrorActionPreference = 'Continue'
 $startTime = Get-Date
 
-if (-not $CsvDataset) { $CsvDataset = Join-Path $RepoRoot '_Test/DatasetLed2' }
-if (-not $LogFolder) { $LogFolder = Join-Path $RepoRoot "_Test/NightlyResults/$($startTime.ToString('yyyy-MM-dd_HHmm'))" }
+if (-not $CsvDataset) { $CsvDataset = Join-Path $RepoRoot 'test/datasets/DatasetLed2' }
+if (-not $LogFolder) { $LogFolder = Join-Path $RepoRoot "test/nightly/results/$($startTime.ToString('yyyy-MM-dd_HHmm'))" }
 
 New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null
 
@@ -89,8 +89,8 @@ $sqlUser = 'sa'
 $sqlPassword = 'FortigiGraph_Local1!'
 $apiBaseUrl = 'http://localhost:3001/api'
 $uiBaseUrl = 'http://localhost:3001'
-$backendDir = Join-Path $RepoRoot 'UI/backend'
-$frontendDir = Join-Path $RepoRoot 'UI/frontend'
+$backendDir = Join-Path $RepoRoot 'app/api'
+$frontendDir = Join-Path $RepoRoot 'app/ui'
 $composePath = Join-Path $RepoRoot 'docker-compose.local.yml'
 
 Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Yellow
@@ -110,7 +110,7 @@ if (-not $SkipPowerShellUnit) {
     Write-Phase "Phase 1: PowerShell Unit Tests"
 
     try {
-        $unitTestScript = Join-Path $RepoRoot '_Test/Test-Unit.ps1'
+        $unitTestScript = Join-Path $RepoRoot 'test/unit/Test-Unit.ps1'
         if (Test-Path $unitTestScript) {
             $unitOutput = & pwsh -File $unitTestScript 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'ps-unit.log')
             $unitPassed = $LASTEXITCODE -eq 0
@@ -233,7 +233,7 @@ if (-not $SkipIntegration) {
 
         try {
             $Global:FGSQLConnectionString = "Server=$sqlServer;Database=$sqlDatabase;User Id=$sqlUser;Password=$sqlPassword;TrustServerCertificate=True"
-            Import-Module (Join-Path $RepoRoot 'FortigiGraph.psd1') -Force
+            Import-Module (Join-Path $RepoRoot 'setup/IdentityAtlas.psd1') -Force
 
             Initialize-FGSystemTables 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'init-system-tables.log')
             Write-Result 'Init-System-Tables' $true
@@ -338,47 +338,66 @@ if (-not $SkipIntegration) {
                     Write-Result 'Invalid-Key-Rejected' ($statusCode -eq 401)
                 }
 
-                # Run CSV crawler
-                Write-Phase "Phase 4f: CSV Crawler Ingest"
+                # Generate and ingest demo dataset
+                Write-Phase "Phase 4f: Demo Dataset — Generate"
 
+                $demoDir = Join-Path $RepoRoot 'test/demo-dataset'
                 try {
-                    $crawlerScript = Join-Path $RepoRoot 'Crawlers/CSV/Start-CSVCrawler.ps1'
-                    & $crawlerScript -ApiBaseUrl $apiBaseUrl -ApiKey $crawlerKey -CsvFolder $CsvDataset `
-                        -SystemName 'Nightly Test Omada' -SystemType 'Omada' 2>&1 |
-                        Tee-Object -FilePath (Join-Path $LogFolder 'csv-crawler.log')
-                    Write-Result 'CSV-Crawler-Run' ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null)
+                    & (Join-Path $demoDir 'Generate-DemoDataset.ps1') 2>&1 |
+                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-generate.log')
+                    $datasetExists = Test-Path (Join-Path $demoDir 'demo-company.json')
+                    Write-Result 'Demo-Generate' $datasetExists
                 }
                 catch {
-                    Write-Result 'CSV-Crawler-Run' $false $_.Exception.Message
+                    Write-Result 'Demo-Generate' $false $_.Exception.Message
                 }
 
-                # Verify ingested data via API
-                Write-Phase "Phase 4g: Data Verification"
+                Write-Phase "Phase 4g: Demo Dataset — Ingest"
 
-                $verifyEndpoints = @(
-                    @{ Name = 'Resources';  Url = "$apiBaseUrl/resources";   MinCount = 1 }
-                    @{ Name = 'Systems';    Url = "$apiBaseUrl/systems";     MinCount = 1 }
-                )
+                try {
+                    & (Join-Path $demoDir 'Ingest-DemoDataset.ps1') -ApiKey $crawlerKey -ApiBaseUrl $apiBaseUrl 2>&1 |
+                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-ingest.log')
+                    Write-Result 'Demo-Ingest' ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null)
+                }
+                catch {
+                    Write-Result 'Demo-Ingest' $false $_.Exception.Message
+                }
 
-                foreach ($ep in $verifyEndpoints) {
+                Write-Phase "Phase 4h: Demo Dataset — Verify (Row Counts + Integrity + Business Logic)"
+
+                try {
+                    & (Join-Path $demoDir 'Verify-DemoDataset.ps1') -ApiBaseUrl $apiBaseUrl 2>&1 |
+                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-verify.log')
+                    $verifyExitCode = $LASTEXITCODE
+                    Write-Result 'Demo-Verify' ($verifyExitCode -eq 0) "Failed checks: $verifyExitCode"
+
+                    # Copy detailed results
+                    $verifyJson = Join-Path $demoDir 'verify-results.json'
+                    if (Test-Path $verifyJson) {
+                        Copy-Item $verifyJson (Join-Path $LogFolder 'demo-verify-results.json') -Force
+                    }
+                }
+                catch {
+                    Write-Result 'Demo-Verify' $false $_.Exception.Message
+                }
+
+                # Also run CSV crawler against legacy dataset (if exists)
+                Write-Phase "Phase 4i: CSV Crawler (Legacy Dataset)"
+
+                if (Test-Path $CsvDataset) {
                     try {
-                        $data = Invoke-RestMethod -Uri $ep.Url -TimeoutSec 30
-                        $count = if ($data -is [array]) { $data.Count } elseif ($data.data) { $data.data.Count } else { 0 }
-                        Write-Result "Data-$($ep.Name)" ($count -ge $ep.MinCount) "Count: $count (min: $($ep.MinCount))"
+                        $crawlerScript = Join-Path $RepoRoot 'tools/crawlers/csv/Start-CSVCrawler.ps1'
+                        & $crawlerScript -ApiBaseUrl $apiBaseUrl -ApiKey $crawlerKey -CsvFolder $CsvDataset `
+                            -SystemName 'Nightly Test Omada' -SystemType 'Omada' 2>&1 |
+                            Tee-Object -FilePath (Join-Path $LogFolder 'csv-crawler.log')
+                        Write-Result 'CSV-Crawler-Run' ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null)
                     }
                     catch {
-                        Write-Result "Data-$($ep.Name)" $false $_.Exception.Message
+                        Write-Result 'CSV-Crawler-Run' $false $_.Exception.Message
                     }
                 }
-
-                # Verify sync log
-                try {
-                    $syncLog = Invoke-RestMethod -Uri "$apiBaseUrl/permissions/sync-log" -TimeoutSec 10 -ErrorAction SilentlyContinue
-                    # Sync log endpoint may not exist at this path — just check if accessible
-                    Write-Result 'Sync-Log-Accessible' $true
-                }
-                catch {
-                    Write-Result 'Sync-Log-Accessible' $false 'Endpoint not available (non-critical)'
+                else {
+                    Write-Host "  Skipping (no CSV dataset at $CsvDataset)" -ForegroundColor Yellow
                 }
             }
         }

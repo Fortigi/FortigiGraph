@@ -204,7 +204,7 @@ adminCrawlersRouter.delete('/admin/crawlers/:id', async (req, res) => {
 });
 
 // GET /api/admin/crawlers/:id/audit — Paginated audit log
-router.get('/admin/crawlers/:id/audit', async (req, res) => {
+adminCrawlersRouter.get('/admin/crawlers/:id/audit', async (req, res) => {
   if (!useSql) return res.json({ data: [], total: 0 });
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid crawler ID' });
@@ -235,7 +235,7 @@ router.get('/admin/crawlers/:id/audit', async (req, res) => {
 });
 
 // POST /api/admin/crawlers/:id/reset — Admin-initiated key reset
-router.post('/admin/crawlers/:id/reset', async (req, res) => {
+adminCrawlersRouter.post('/admin/crawlers/:id/reset', async (req, res) => {
   if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid crawler ID' });

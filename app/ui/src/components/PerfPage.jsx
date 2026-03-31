@@ -63,7 +63,7 @@ export default function PerfPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fortigraph-perf-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+      a.download = `identity-atlas-perf-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) { console.error('Failed to export performance data:', err); }

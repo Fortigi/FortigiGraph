@@ -780,7 +780,7 @@ function New-FGUI {
     $settingsList += @{ name = "FEATURE_ACCOUNT_CORRELATION"; value = $featureAccountCorrelation }
 
     # Module version (for display in UI footer)
-    $psdPath = Join-Path $PSScriptRoot "..\..\FortigiGraph.psd1"
+    $psdPath = Join-Path $PSScriptRoot "..\IdentityAtlas.psd1"
     if (Test-Path $psdPath) {
         $manifest = Import-PowerShellDataFile -Path $psdPath
         $settingsList += @{ name = "MODULE_VERSION"; value = $manifest.ModuleVersion }

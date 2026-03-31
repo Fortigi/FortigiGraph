@@ -8,7 +8,7 @@ services:
       MSSQL_SA_PASSWORD: "FortigiGraph_Local1!"
       MSSQL_PID: "Developer"
     ports:
-      - "1433:1433"   # Exposed to host so PowerShell sync can connect via localhost,1433
+      - "1433:1433"
     volumes:
       - sql_data:/var/opt/mssql
     healthcheck:
@@ -18,8 +18,8 @@ services:
         -Q "SELECT 1" -b -No
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 30s
+      retries: 30
+      start_period: 60s
 
   # ── One-time database creation ───────────────────────────────────────────────
   sql-init:
@@ -32,26 +32,66 @@ services:
       -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'GraphData') CREATE DATABASE [GraphData];"
     restart: "no"
 
-  # ── Backend (serves built frontend + API) ────────────────────────────────────
-  backend:
+  # ── Table initialization (runs after DB creation) ────────────────────────────
+  sql-table-init:
     build:
-      context: ./UI
-      dockerfile: backend/Dockerfile
+      context: .
+      dockerfile: setup/docker/Dockerfile.powershell
     environment:
-      NODE_ENV: production
-      USE_SQL: "true"
-      SQL_SERVER: sql          # Docker service name resolves inside the network
+      SQL_SERVER: sql
       SQL_DATABASE: GraphData
       SQL_USER: sa
       SQL_PASSWORD: "FortigiGraph_Local1!"
-      SQL_TRUST_SERVER_CERT: "true"   # Required for SQL Server's self-signed cert
+    command: ["pwsh", "-File", "/app/setup/docker/init-tables.ps1"]
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # ── Backend (serves built frontend + API) ────────────────────────────────────
+  backend:
+    build:
+      context: ./app
+      dockerfile: api/Dockerfile
+    environment:
+      NODE_ENV: production
+      USE_SQL: "true"
+      SQL_SERVER: sql
+      SQL_DATABASE: GraphData
+      SQL_USER: sa
+      SQL_PASSWORD: "FortigiGraph_Local1!"
+      SQL_TRUST_SERVER_CERT: "true"
       AUTH_ENABLED: "false"
       PORT: "3001"
     ports:
       - "3001:3001"
     depends_on:
-      sql-init:
+      sql-table-init:
         condition: service_completed_successfully
+
+  # ── Worker (PowerShell — crawlers, risk scoring, account correlation, scheduling) ─
+  worker:
+    build:
+      context: .
+      dockerfile: setup/docker/Dockerfile.powershell
+    environment:
+      SQL_SERVER: sql
+      SQL_DATABASE: GraphData
+      SQL_USER: sa
+      SQL_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
+      CRAWLER_API_KEY: "${CRAWLER_API_KEY:-}"
+      GRAPH_TENANT_ID: "${GRAPH_TENANT_ID:-}"
+      GRAPH_CLIENT_ID: "${GRAPH_CLIENT_ID:-}"
+      GRAPH_CLIENT_SECRET: "${GRAPH_CLIENT_SECRET:-}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+    volumes:
+      - ./setup/docker/crontab:/app/setup/docker/crontab:ro
+      - "${CSV_DATA_PATH:-./test/datasets/DatasetLed2}:/data/csv:ro"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
   sql_data:

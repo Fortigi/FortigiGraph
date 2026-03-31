@@ -41,7 +41,7 @@ const perfEnabled = process.env.PERF_METRICS_ENABLED === 'true';
 let moduleVersion = process.env.MODULE_VERSION || null;
 if (!moduleVersion) {
   try {
-    const psdPath = join(__dirname, '../../../FortigiGraph.psd1');
+    const psdPath = join(__dirname, '../../../setup/IdentityAtlas.psd1');
     const psdContent = readFileSync(psdPath, 'utf-8');
     const match = psdContent.match(/ModuleVersion\s*=\s*'([^']+)'/);
     if (match) moduleVersion = match[1];
@@ -105,7 +105,7 @@ app.use('/api', perfMetrics);
 try {
   const openapiSpec = YAML.load(pathJoin(__dirname, 'openapi.yaml'));
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
-    customSiteTitle: 'FortigiGraph Ingest API',
+    customSiteTitle: 'Identity Atlas Ingest API',
   }));
   app.get('/api/docs/openapi.json', (req, res) => res.json(openapiSpec));
 } catch {
@@ -190,7 +190,7 @@ app.get('*', (req, res, next) => {
 });
 
 const server = app.listen(port, () => {
-  console.log(`FortigiGraph UI running on http://localhost:${port}`);
+  console.log(`Identity Atlas running on http://localhost:${port}`);
   console.log(`Mode: ${process.env.USE_SQL === 'true' ? 'SQL' : 'Mock data'}`);
   console.log(`Auth: ${authEnabled ? 'Entra ID' : 'Disabled'}`);
   console.log(`Perf: ${isPerfEnabled() ? 'Enabled (Server-Timing headers + /api/perf)' : 'Disabled'}`);

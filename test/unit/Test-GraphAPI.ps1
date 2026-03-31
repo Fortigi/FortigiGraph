@@ -78,7 +78,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # ══════════════════════════════════════════════════════════════════════
 
 $moduleRoot = Split-Path -Parent $PSScriptRoot
-$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
+$modulePath = Join-Path $moduleRoot "IdentityAtlas.psd1"
 
 try {
     Import-Module $modulePath -Force -ErrorAction Stop

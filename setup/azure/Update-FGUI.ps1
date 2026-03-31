@@ -53,7 +53,7 @@ function Update-FGUI {
 
     # ─── Update App Settings (module version + optional perf metrics) ────
     # Always update MODULE_VERSION on redeploy; also update perf if specified
-    $psdPath = Join-Path $PSScriptRoot "..\..\FortigiGraph.psd1"
+    $psdPath = Join-Path $PSScriptRoot "..\IdentityAtlas.psd1"
     $moduleVersion = $null
     if (Test-Path $psdPath) {
         $manifest = Import-PowerShellDataFile -Path $psdPath

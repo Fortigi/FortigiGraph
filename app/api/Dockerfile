@@ -1,20 +1,20 @@
-# Build context: ./UI  (one level above backend/)
-# Usage: docker build -f backend/Dockerfile -t fortigraph-backend .
+# Build context: ./app  (contains api/ and ui/)
+# Usage: docker build -f api/Dockerfile -t fortigraph-backend .
 
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
-COPY frontend/package*.json ./
+COPY ui/package*.json ./
 RUN npm ci
-COPY frontend/ .
+COPY ui/ .
 RUN npm run build
 
 # ── Stage 2: Backend runtime ──────────────────────────────────────────────────
 FROM node:20-slim AS runtime
 WORKDIR /app/backend
-COPY backend/package*.json ./
+COPY api/package*.json ./
 RUN npm ci --omit=dev
-COPY backend/src ./src
+COPY api/src ./src
 # Copy the compiled frontend so Express can serve it as static files
 COPY --from=frontend-build /app/frontend/dist ../frontend/dist
 

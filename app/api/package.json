@@ -1,7 +1,7 @@
 {
-  "name": "fortigraph-ui-backend",
-  "version": "0.1.0",
-  "description": "FortigiGraph Role Mining UI - Backend API",
+  "name": "identity-atlas-api",
+  "version": "3.4.0",
+  "description": "Identity Atlas - Ingest & Read API",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",

@@ -9,7 +9,7 @@ param(
 # Ensure FortigiGraph module is loaded
 if (-not (Get-Module -Name FortigiGraph)) {
     $moduleRoot = Split-Path -Parent $PSScriptRoot
-    $modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
+    $modulePath = Join-Path $moduleRoot "IdentityAtlas.psd1"
     Import-Module $modulePath -Force
 }
 

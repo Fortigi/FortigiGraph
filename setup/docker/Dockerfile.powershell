@@ -1,0 +1,21 @@
+# PowerShell runner for FortigiGraph crawlers, risk scoring, and account correlation.
+# Build context: repo root
+
+FROM mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+
+# Install SqlClient for direct SQL access (used by Initialize-FG* and risk scoring)
+RUN pwsh -Command "Install-Module -Name SqlServer -Force -Scope AllUsers -AcceptLicense" 2>/dev/null || true
+
+WORKDIR /app
+
+# Copy module loader
+COPY setup/IdentityAtlas.psd1 setup/IdentityAtlas.psm1 ./setup/
+
+# Copy all PowerShell code (using lowercase paths for Linux case-sensitivity)
+COPY app/db/ ./app/db/
+COPY tools/ ./tools/
+COPY setup/ ./setup/
+COPY test/demo-dataset/ ./test/demo-dataset/
+
+# Default: run the scheduler loop (also accepts ad-hoc commands via docker exec)
+CMD ["pwsh", "-File", "/app/setup/docker/scheduler.ps1"]

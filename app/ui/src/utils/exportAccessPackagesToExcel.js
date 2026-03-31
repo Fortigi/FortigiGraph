@@ -78,7 +78,7 @@ export async function exportAccessPackagesToExcel({ authFetch, search, categoryF
   // 3. Build workbook
   onProgress?.('Building Excel file...');
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'FortigiGraph';
+  wb.creator = 'Identity Atlas';
   wb.created = new Date();
 
   const ws = wb.addWorksheet('Business Roles');

@@ -1,20 +1,20 @@
 # Root-context Dockerfile — used by New-FGUI / Update-FGUI for Azure App Service deployment.
-# Build context: repo root  (contains UI/frontend/ and UI/backend/)
+# Build context: repo root  (contains app/api/ and app/ui/)
 
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
-COPY UI/frontend/package*.json ./
+COPY app/ui/package*.json ./
 RUN npm ci
-COPY UI/frontend/ .
+COPY app/ui/ .
 RUN npm run build
 
 # ── Stage 2: Backend runtime ──────────────────────────────────────────────────
 FROM node:20-slim AS runtime
 WORKDIR /app/backend
-COPY UI/backend/package*.json ./
+COPY app/api/package*.json ./
 RUN npm ci --omit=dev
-COPY UI/backend/src ./src
+COPY app/api/src ./src
 # Copy the compiled frontend so Express can serve it as static files
 COPY --from=frontend-build /app/frontend/dist ../frontend/dist
 

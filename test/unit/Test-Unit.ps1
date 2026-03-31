@@ -60,7 +60,7 @@ $moduleRoot = Split-Path -Parent $PSScriptRoot
 # ══════════════════════════════════════════════════════════════════════
 Write-TestHeader "1. Module Import"
 
-$modulePath = Join-Path $moduleRoot "FortigiGraph.psd1"
+$modulePath = Join-Path $moduleRoot "IdentityAtlas.psd1"
 $moduleLoaded = $false
 
 try {
@@ -324,12 +324,12 @@ foreach ($folder in $expectedFolders) {
 }
 Add-TestResult -Category "Structure" -TestName "One function per file rule" -Passed (($script:TestResults | Where-Object { $_.TestName -like "Single function*" -and -not $_.Passed } | Measure-Object).Count -eq 0)
 
-# Check FortigiGraph.psm1 loads all expected categories
-$psm1Content = Get-Content (Join-Path $moduleRoot "FortigiGraph.psm1") -Raw
+# Check IdentityAtlas.psm1 loads all expected categories
+$psm1Content = Get-Content (Join-Path $moduleRoot "IdentityAtlas.psm1") -Raw
 $loadedCategories = @("functions\base", "functions\generic", "functions\specific", "functions\SQL", "functions\sync", "functions\automation")
 foreach ($cat in $loadedCategories) {
     $loaded = $psm1Content -match [regex]::Escape($cat)
-    Add-TestResult -Category "Structure" -TestName "PSM1 loads $cat" -Passed $loaded -Message $(if (-not $loaded) { "Category not dot-sourced in FortigiGraph.psm1" })
+    Add-TestResult -Category "Structure" -TestName "PSM1 loads $cat" -Passed $loaded -Message $(if (-not $loaded) { "Category not dot-sourced in IdentityAtlas.psm1" })
 }
 
 # ══════════════════════════════════════════════════════════════════════

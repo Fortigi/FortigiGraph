@@ -46,7 +46,7 @@ router.get('/perf/export', (req, res) => {
   const summary = summarize();
   const all = recent(1000); // all buffered entries
 
-  res.setHeader('Content-Disposition', `attachment; filename="fortigraph-perf-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="identity-atlas-perf-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json"`);
   res.json({
     enabled: true,
     exportedAt: new Date().toISOString(),

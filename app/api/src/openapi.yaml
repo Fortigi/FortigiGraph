@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: FortigiGraph Ingest API
+  title: Identity Atlas Ingest API
   version: 3.4.0
   description: |
-    REST API for ingesting authorization data from any source system into FortigiGraph.
+    REST API for ingesting authorization data from any source system into Identity Atlas.
     Crawlers authenticate with API keys (Bearer token) and POST batches of records.
     The API handles validation, bulk merge, scoped delete detection, and temporal versioning.
   contact:

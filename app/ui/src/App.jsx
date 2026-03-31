@@ -316,13 +316,16 @@ export default function App() {
     <ErrorBoundary>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
+      <header className="bg-slate-900 border-b border-slate-700 px-6 py-3">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">FortigiGraph Role Mining</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Analyze permission assignments to discover role patterns
-            </p>
+          <div className="flex items-center gap-3">
+            <img src="/logo.jpeg" alt="Identity Atlas" className="h-10 w-10 rounded" />
+            <div>
+              <h1 className="text-xl font-semibold text-white">Identity <span className="text-green-400">Atlas</span></h1>
+              <p className="text-xs text-slate-400">
+                Universal authorization intelligence
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-3 relative" ref={settingsRef}>
             <button
@@ -490,7 +493,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 bg-white px-6 py-2 text-xs text-gray-400 text-center">
-        FortigiGraph{moduleVersion ? ` v${moduleVersion}` : ''}
+        Identity Atlas{moduleVersion ? ` v${moduleVersion}` : ''}
       </footer>
     </div>
     </ErrorBoundary>

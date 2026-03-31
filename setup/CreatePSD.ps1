@@ -13,13 +13,13 @@ Set-Location $Path
 
 # Module manifest parameters
 $manifestParams = @{
-    Path = '.\FortigiGraph.psd1'
+    Path = '.\IdentityAtlas.psd1'
     Author = $Author
     CompanyName = $Company
     Copyright = $Copyright
     ModuleVersion = $Version
     Description = $Description
-    RootModule = '.\FortigiGraph.psm1'
+    RootModule = '.\IdentityAtlas.psm1'
     Tags = @('MicrosoftGraph', 'Graph', 'AzureAD', 'EntraID', 'SQL', 'Azure', 'IdentityGovernance')
     LicenseUri = 'https://github.com/Fortigi/FortigiGraph/blob/main/LICENSE'
     ProjectUri = 'https://github.com/Fortigi/FortigiGraph'

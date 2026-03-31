@@ -68,7 +68,7 @@ For thorough testing, your tenant should have:
 ```powershell
 git clone https://github.com/Fortigi/FortigiGraph.git
 cd FortigiGraph
-Import-Module .\FortigiGraph.psd1 -Force
+Import-Module .\IdentityAtlas.psd1 -Force
 ```
 
 ### Step 2: Create Test Config
@@ -686,7 +686,7 @@ All test scripts write transcripts to `_Test/logs/`. Check these for detailed ou
 | "No Access Token found" | Run `Get-FGAccessToken -ConfigFile config.test.json` first |
 | SQL connection timeout | Check SQL Server firewall allows your IP |
 | 403 on Graph API | Verify app registration has correct permissions + admin consent |
-| "Module not found" | Run from the repo root: `Import-Module .\FortigiGraph.psd1 -Force` |
+| "Module not found" | Run from the repo root: `Import-Module .\IdentityAtlas.psd1 -Force` |
 | Risk scoring returns 0 scores | Ensure sync has run first — scoring reads from SQL tables |
 | UI returns 500 errors | Check App Service logs: `az webapp log tail --name <app-name> -g <rg>` |
 
