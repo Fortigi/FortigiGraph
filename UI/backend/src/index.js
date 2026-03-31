@@ -23,6 +23,12 @@ import systemsRouter from './routes/systems.js';
 import resourcesRouter from './routes/resources.js';
 import contextsRouter from './routes/contexts.js';
 import adminRouter from './routes/admin.js';
+import { adminCrawlersRouter, selfServiceCrawlersRouter } from './routes/crawlers.js';
+import { crawlerAuthMiddleware } from './middleware/crawlerAuth.js';
+import ingestRouter from './routes/ingest.js';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import { join as pathJoin } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -95,6 +101,17 @@ app.use(express.json({ limit: '100kb' }));
 // ─── Performance metrics middleware (before routes, after body parsing) ─
 app.use('/api', perfMetrics);
 
+// ─── Swagger / OpenAPI docs (public) ─────────────────────────────
+try {
+  const openapiSpec = YAML.load(pathJoin(__dirname, 'openapi.yaml'));
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+    customSiteTitle: 'FortigiGraph Ingest API',
+  }));
+  app.get('/api/docs/openapi.json', (req, res) => res.json(openapiSpec));
+} catch {
+  // OpenAPI spec not available — skip Swagger UI
+}
+
 // ─── Rate limiting on unauthenticated endpoints ──────────────────
 const publicLimiter = rateLimit({
   windowMs: 60 * 1000,  // 1 minute
@@ -153,6 +170,15 @@ app.use('/api', authMiddleware, contextsRouter);
 app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit for import payloads
 app.use('/api', authMiddleware, adminRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
+
+// ─── Crawler routes ─────────────────────────────────────────────
+// Admin crawler management (Entra ID auth) — /api/admin/crawlers/*
+app.use('/api', authMiddleware, adminCrawlersRouter);
+// Crawler self-service (API key auth) — /api/crawlers/whoami, /api/crawlers/rotate
+app.use('/api', crawlerAuthMiddleware, selfServiceCrawlersRouter);
+// Ingest endpoints (API key auth) — /api/ingest/*
+app.use('/api/ingest', express.json({ limit: '10mb' }));  // larger limit for ingest payloads
+app.use('/api', crawlerAuthMiddleware, ingestRouter);
 
 // In production, serve the frontend build output
 const frontendDist = join(__dirname, '../../frontend/dist');

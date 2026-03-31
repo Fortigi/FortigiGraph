@@ -59,10 +59,6 @@ markdown_extensions:
 plugins:
   - search
 
-exclude_docs: |
-  data-model-consolidation-analysis.md
-  identity-risk-plugin-architecture.md
-  identity-risk-scoring-plan.md
 
 nav:
   - Home: index.md
@@ -71,6 +67,10 @@ nav:
       - Data Model: concepts/data-model.md
       - Governance Model: concepts/governance-model.md
       - Risk Scoring Model: concepts/risk-scoring-model.md
+  - Architecture:
+      - Ingest API: architecture/ingest-api.md
+      - Implementation Plan: architecture/implementation-plan.md
+      - Testing Plan: architecture/testing-plan.md
   - Sync:
       - Entra ID: sync/entra-id.md
       - CSV Import: sync/csv-import.md
@@ -79,6 +79,8 @@ nav:
       - Overview: risk-scoring/overview.md
       - Classifiers: risk-scoring/classifiers.md
       - AI Agents: risk-scoring/ai-agents.md
+      - Engine Design: risk-scoring/design.md
+      - Plugin Architecture: risk-scoring/plugin-architecture.md
   - Role Mining UI:
       - Overview: ui/overview.md
       - Deployment: ui/deployment.md

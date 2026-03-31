@@ -166,6 +166,7 @@ CREATE TABLE dbo.SystemOwners (
         'visibility'         = 'NVARCHAR(50)'
         'enabled'            = 'BIT'
         'externalId'         = 'NVARCHAR(500)'
+        'contextId'          = 'UNIQUEIDENTIFIER'      # FK to Contexts (classification or grouping context)
         'catalogId'          = 'UNIQUEIDENTIFIER'
         'isHidden'           = 'BIT'
         'extendedAttributes' = 'NVARCHAR(MAX)'
@@ -232,6 +233,7 @@ CREATE TABLE dbo.SystemOwners (
         'companyName'        = 'NVARCHAR(255)'
         'employeeId'         = 'NVARCHAR(255)'
         'managerId'          = 'UNIQUEIDENTIFIER'
+        'contextId'          = 'UNIQUEIDENTIFIER'      # FK to Contexts (source system org structure, e.g. AD OU)
         'createdDateTime'    = 'DATETIME2'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }

@@ -22,6 +22,7 @@ const ContextDetailPage = lazy(() => import('./components/ContextDetailPage'));
 const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
 const IdentityDetailPage = lazy(() => import('./components/IdentityDetailPage'));
 const AdminPage = lazy(() => import('./components/AdminPage'));
+const CrawlersPage = lazy(() => import('./components/CrawlersPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -94,6 +95,7 @@ const ALL_NAV_TABS = [
   { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },
   { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring',        optional: true },
   { key: 'performance',      label: 'Performance',                                  optional: true },
+  { key: 'crawlers',         label: 'Crawlers',                                     optional: true },
   { key: 'admin',            label: 'Admin',                                        optional: true },
 ];
 
@@ -454,6 +456,8 @@ export default function App() {
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
           ) : page === 'performance' ? (
             <PerfPage />
+          ) : page === 'crawlers' ? (
+            <CrawlersPage />
           ) : page === 'admin' ? (
             <AdminPage />
           ) : loading ? (

@@ -32,15 +32,21 @@ Identities (real persons — the governance anchor)
        └─ ResourceAssignments (what access each account holds)
             └─ Resources (what is being accessed)
 
-Identities
-  └─ Contexts (organizational/structural grouping — contextId lives on Identity)
+Contexts (organizational/structural trees — system-scoped)
+  └─ Identities  (contextId: HR org unit, department)
+  └─ Principals  (contextId: AD OU, Entra admin unit)
+  └─ Resources   (contextId: resource classification, location)
 
-Systems (technical sync root — each Principal and Resource belongs to one System)
+Systems (technical sync root — each Principal, Resource, and Context belongs to one System)
 ```
 
-**Why Identity is the root:** A real person (Identity) may have multiple accounts (Principals) across different source systems. The organizational context — department, team, cost center — belongs to the *person*, not to each individual account. This means `contextId` lives on `Identities`, and only Identities that have been correlated from their Principals carry a context. Uncorrelated accounts have no context by design.
+**Why Identity is the root:** A real person (Identity) may have multiple accounts (Principals) across different source systems. The organizational context — department, team, cost center — belongs to the *person*, not to each individual account. Identities carry a `contextId` that represents their place in the HR/governance org structure.
 
-**Why Systems are the sync root:** At ingestion time, every Principal and Resource must belong to a System. This enables multi-tenant and multi-system deployments without ambiguity.
+**Why Principals and Resources also have a contextId:** Source systems have their own organizational structures that are distinct from the HR org chart. Active Directory has OUs, Entra ID has administrative units, resource management systems have classification hierarchies. These structures are valuable for risk scoring, policy evaluation, and reporting — but they belong to the *system*, not to the person. A Principal's `contextId` captures its position in the source system's own hierarchy, independent of the Identity's HR context.
+
+**Multiple independent context trees:** Each `(systemId, contextType)` combination forms an independent tree. An HR system produces a Department tree linked to Identities. Active Directory produces an OU tree linked to Principals. A resource classification system produces a Category tree linked to Resources. These trees coexist in the same Contexts table, scoped by `systemId`.
+
+**Why Systems are the sync root:** At ingestion time, every Principal, Resource, and Context must belong to a System. This enables multi-tenant and multi-system deployments without ambiguity.
 
 ---
 
@@ -70,6 +76,7 @@ erDiagram
         int systemId FK
         string displayName
         string resourceType
+        guid contextId FK
         string extendedAttributes
         guid catalogId
         decimal riskScore
@@ -79,6 +86,7 @@ erDiagram
         int systemId FK
         string displayName
         string principalType
+        guid contextId FK
         string extendedAttributes
         decimal riskScore
     }
@@ -119,11 +127,13 @@ erDiagram
     }
 
     Identities ||--o{ IdentityMembers : "aggregates"
-    Identities }o--o| Contexts : "belongs to"
+    Identities }o--o| Contexts : "HR org context"
     Principals ||--o{ IdentityMembers : "linked via"
+    Principals }o--o| Contexts : "system org context"
+    Resources }o--o| Contexts : "classification context"
     Systems ||--o{ Resources : "hosts"
     Systems ||--o{ Principals : "hosts"
-    Systems ||--o{ Contexts : "has"
+    Systems ||--o{ Contexts : "scopes"
     Resources ||--o{ ResourceAssignments : "granted via"
     Principals ||--o{ ResourceAssignments : "receives"
     Resources ||--o{ ResourceRelationships : "parent in"
@@ -166,11 +176,28 @@ The join table between Identities and Principals. One identity links to one or m
 
 ### Contexts
 
-Organizational and structural groupings that define access eligibility. A Context can represent a department, division, cost center, team, project, office location, or any other dimension that governs access. `contextType` discriminates between them.
+Organizational and structural groupings from any source system. A Context can represent an HR department, an AD organizational unit, an Entra ID administrative unit, a resource classification category, or any other hierarchy. The `contextType` column discriminates between them; the `systemId` column scopes them to a source system.
 
-Context belongs to the Identity (the real person), not to individual Principals. Principals without a correlated Identity have no context — this is intentional.
+**Multiple independent context trees:** Each `(systemId, contextType)` combination forms its own tree. These trees are independent — an HR department tree, an AD OU tree, and a resource classification tree all coexist in the same table without interfering.
 
-**Context and policy-driven access (Option B):** When an assignment is driven by an Identity's context (e.g., "all Finance employees get access to SharePoint Finance"), the governing rule is captured in `AssignmentPolicies.policyConditions` as a JSON condition referencing the `contextId`. The assignment row in `ResourceAssignments` records the *result*; the policy row records the *rule*. This keeps assignments clean while the "why" remains auditable through the policy chain.
+| Source System | contextType | Linked To | Example |
+|---|---|---|---|
+| HR system (CSV) | `OrgUnit` | Identities | Finance > Accounts Payable > Invoice Processing |
+| Active Directory | `OrgUnit` | Principals | corp.local > Users > Amsterdam > Admins |
+| Entra ID | `AdministrativeUnit` | Principals | AU-Netherlands, AU-Germany |
+| Entra ID | `Department` | Identities | Calculated from user.department field |
+| Resource mgmt | `Classification` | Resources | Confidential > Finance Data > Payment Systems |
+| Custom | Any string | Any | Fully extensible |
+
+**Which entities carry a contextId:**
+
+- **Identities** — HR/governance org context. "This person belongs to Finance > Accounts Payable."
+- **Principals** — Source system org context. "This AD account lives in OU=Admins,OU=Amsterdam."
+- **Resources** — Classification or grouping context. "This SharePoint site is classified as Confidential > Finance Data."
+
+Each entity has a single `contextId` column. If an entity needs to participate in multiple context trees (e.g., an Identity has both an HR department and a location), use the primary governance context as `contextId` and store secondary context references in `extendedAttributes`.
+
+**Context and policy-driven access:** When an assignment is driven by an Identity's context (e.g., "all Finance employees get access to SharePoint Finance"), the governing rule is captured in `AssignmentPolicies.policyConditions` as a JSON condition referencing the `contextId`. The assignment row in `ResourceAssignments` records the *result*; the policy row records the *rule*. This keeps assignments clean while the "why" remains auditable through the policy chain.
 
 | Property | Value |
 |---|---|
@@ -180,7 +207,7 @@ Context belongs to the Identity (the real person), not to individual Principals.
 
 Key columns: `displayName`, `contextType`, `systemId`, `parentContextId` (self-referencing for hierarchy).
 
-**contextType values:** `Department`, `Division`, `CostCenter`, `Team`, `Office`, `Project`, `Location`, or any custom string.
+**contextType values:** `Department`, `Division`, `CostCenter`, `Team`, `Office`, `Project`, `Location`, `OrgUnit`, `AdministrativeUnit`, `Classification`, or any custom string.
 
 ---
 
@@ -208,7 +235,7 @@ Any permission-granting entity: Entra ID groups, directory roles, application ro
 | Temporal | Yes |
 | Created by | `Initialize-FGSystemTables` |
 
-Key columns: `displayName`, `resourceType`, `systemId`, `extendedAttributes` (JSON), `catalogId`, `isHidden`, `riskScore`.
+Key columns: `displayName`, `resourceType`, `systemId`, `contextId` (optional — classification or grouping context), `extendedAttributes` (JSON), `catalogId`, `isHidden`, `riskScore`.
 
 ---
 
@@ -250,7 +277,7 @@ All identity types from any system. The `principalType` column distinguishes hum
 | Temporal | Yes |
 | Created by | `Initialize-FGSystemTables` |
 
-Key columns: `displayName`, `principalType`, `systemId`, `extendedAttributes` (JSON), `riskScore`.
+Key columns: `displayName`, `principalType`, `systemId`, `contextId` (optional — source system org structure, e.g. AD OU), `extendedAttributes` (JSON), `riskScore`.
 
 ---
 

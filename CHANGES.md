@@ -292,6 +292,35 @@ UI/frontend/src/utils/exportToExcel.js
 - Added `Clear-FGDatabase` function: wipes all data from all FortigiGraph tables (including temporal history) while preserving table structures — useful for loading a different dataset without redeploying; supports `-KeepUIData` to preserve tags/categories and `-KeepSyncLog` to preserve sync history
 - Added `Sync-FGCSVOrgUnit` function: loads organizational unit hierarchy from Omada Identity `Orgunits.csv` into the `Contexts` table with `contextType='OrgUnit'`; populates `$Global:FGCSVOrgUnitLookup` for downstream identity context resolution
 - Added `Sync-FGCSVResourceRelationship` function: loads permission parent-child nesting from Omada Identity `Permission-Nesting.csv` into the `ResourceRelationships` table with `relationshipType='Contains'`
+- **Context model broadened (v3.3):** Added `contextId` column to `Principals` and `Resources` tables — Contexts are no longer exclusive to Identities. Each source system can provide its own organizational structure: AD OUs for Principals, classification hierarchies for Resources, HR departments for Identities. Multiple independent context trees coexist, scoped by `(systemId, contextType)`.
+- Updated data model documentation to reflect broader Context usage with examples of multi-system context trees (HR OrgUnits, AD OUs, Entra Administrative Units, resource classifications)
+- Added RFC-001: Inbound Ingest API Layer design document (`_Design/RFC-001-Ingest-API-Layer.md`) — architectural plan to decouple data ingestion via REST API, enabling crawlers in any language with self-contained API key authentication
+- Integrated all design documents into the MkDocs documentation site: Ingest API architecture (`docs/architecture/ingest-api.md`), Risk Scoring Engine design (`docs/risk-scoring/design.md`), and Plugin Architecture (`docs/risk-scoring/plugin-architecture.md`) — all ASCII diagrams converted to Mermaid; added Architecture and two new Risk Scoring pages to `mkdocs.yml` navigation
+- Added Ingest API Phase 0: Crawler authentication and management
+  - `Initialize-FGCrawlerTables.ps1`: Creates `Crawlers` and `CrawlerAuditLog` SQL tables for API key management and audit trail
+  - `middleware/crawlerAuth.js`: API key validation middleware with SHA-256 hash verification, per-crawler rate limiting, expiry checks, and system scope enforcement
+  - `routes/crawlers.js`: Admin endpoints (register, update, disable, reset key, audit log) and self-service endpoints (key rotation, whoami)
+  - `CrawlersPage.jsx`: Admin UI page for managing crawlers — register with one-time key display, enable/disable toggle, key reset, expandable audit log per crawler
+  - Crawlers tab added to the UI navigation (optional, hidden by default)
+- Added Ingest API Phase 1-2: Ingest engine and endpoints
+  - `ingest/engine.js`: Core bulk MERGE + scoped delete detection in JavaScript, replicating the PowerShell `Invoke-FGSQLBulkMerge` pattern using mssql BulkLoad
+  - `ingest/normalization.js`: Type coercion, deterministic GUID generation (MD5-based UUID v3, matching CSV sync pattern), extendedAttributes packing
+  - `ingest/validation.js`: Per-entity-type validation with required fields, type checks, enum validation, UUID format checks, and max length enforcement
+  - `ingest/sessions.js`: Sync session management for chunked uploads (start/continue/end pattern with auto-expiring temp tables)
+  - `routes/ingest.js`: All 12 entity type POST endpoints + refresh-views utility endpoint — generic handler factory pattern with crawler permission and system scope checks
+  - All ingest endpoints registered in `index.js` with crawlerAuth middleware and 10MB body limit
+- Added Ingest API Phase 3: OpenAPI/Swagger documentation
+  - `openapi.yaml`: Complete OpenAPI 3.0 spec covering all ingest, crawler, and admin endpoints with request/response schemas
+  - Swagger UI served at `/api/docs`; raw spec at `/api/docs/openapi.json`
+  - Added `swagger-ui-express` and `yamljs` dependencies
+- Added Ingest API Phase 4-5: EntraID and CSV crawlers
+  - `Crawlers/EntraID/Start-EntraIDCrawler.ps1`: Standalone EntraID crawler — fetches from Graph API, POSTs to ingest endpoints with scoped full sync (principals, resources, assignments, governance)
+  - `Crawlers/CSV/Start-CSVCrawler.ps1`: Standalone CSV crawler — reads semicolon-delimited CSVs (Omada format), POSTs to ingest endpoints with deterministic GUID generation
+  - Both crawlers support chunked sync sessions for large datasets and materialized view refresh
+- **BREAKING CHANGE — Removed direct-SQL sync path:** Deleted `Start-FGSync`, `Start-FGCSVSync`, and all 35 `Sync-FG*` functions (including `Invoke-FGPrincipalMigration` and `Invoke-FGResourceModelMigration`). Data ingestion now goes exclusively through the Ingest API via crawler scripts. The general-purpose helpers `Initialize-FGSyncTable` and `New-FGDataTableFromGraphObjects` are retained for table initialization.
+- Added comprehensive testing plan (`docs/architecture/testing-plan.md`) — test pyramid (unit → integration → E2E → deployment), implementation steps, coverage targets, and a process for adding regression tests when bugs are found
+- Added local nightly test runner (`_Test/Run-NightlyLocal.ps1`) — provisions Docker environment from scratch, initializes all tables, tests crawler auth lifecycle, runs CSV crawler with test dataset, verifies ingested data via API, runs Playwright E2E browser tests, validates Swagger/OpenAPI docs, tears down, and produces JSON + text + HTML reports
+- Added Windows Task Scheduler setup (`_Test/Register-NightlySchedule.ps1`) — one-command registration for daily nightly test runs at 02:00
 - Added `Sync-FGCSVResourceDetail` function: enriches existing Resources with descriptions, role categories, and role type metadata from Omada Identity `Permission-full-details.csv` — runs after `Sync-FGCSVResource` and adds or updates rows with richer metadata
 - `Sync-FGCSVIdentity` now accepts an optional `-EmploymentPath` parameter: when provided with an `Employment.csv` file, resolves identity-to-org-unit links by extracting `OU_KEY` from `OUREF_VALUE` and setting `contextId` on the Identity record
 - `Start-FGCSVSync` orchestrator updated with 4 new sync steps in correct dependency order: OrgUnits (after Systems), Resource Details (after Resources), Resource Relationships (after Resources), and Employment-to-Identity context resolution (during Identities step); now detects `Orgunits.csv`, `Permission-full-details.csv`, `Permission-Nesting.csv`, and `Employment.csv`
