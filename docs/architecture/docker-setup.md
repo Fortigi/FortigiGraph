@@ -8,7 +8,7 @@ Running FortigiGraph locally with Docker — three containers providing the full
 
 ```mermaid
 graph TB
-    subgraph Docker["docker-compose.local.yml"]
+    subgraph Docker["docker-compose.yml"]
         SQL[(SQL Server 2022<br/>port 1433)]
         INIT[sql-init + sql-table-init<br/><i>one-shot: create DB + tables</i>]
         API[Backend + Frontend<br/>port 3001]
@@ -44,10 +44,10 @@ After startup, 3 containers remain running: `sql`, `backend`, `worker`.
 cd c:\Source\GitHub\FortigiGraph
 
 # Start the stack (first time takes ~3 min to build)
-docker compose -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.yml up -d --build
 
 # Verify
-docker compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.yml ps
 # Expected: sql (healthy), backend (up), worker (up)
 
 # Load demo data
@@ -64,10 +64,10 @@ Start-Process http://localhost:3001/api/docs
 
 ```powershell
 # Stop (keep data)
-docker compose -f docker-compose.local.yml down
+docker compose -f docker-compose.yml down
 
 # Stop and delete all data
-docker compose -f docker-compose.local.yml down -v
+docker compose -f docker-compose.yml down -v
 ```
 
 ---
@@ -99,7 +99,7 @@ Edit `setup/docker/crontab` and restart the worker:
 ```
 
 ```powershell
-docker compose -f docker-compose.local.yml restart worker
+docker compose -f docker-compose.yml restart worker
 ```
 
 ### Environment Variables
@@ -140,12 +140,12 @@ After code changes:
 
 ```powershell
 # Rebuild only the backend (API + UI changes)
-docker compose -f docker-compose.local.yml up -d --build backend
+docker compose -f docker-compose.yml up -d --build backend
 
 # Rebuild the worker (PowerShell script changes)
-docker compose -f docker-compose.local.yml up -d --build worker
+docker compose -f docker-compose.yml up -d --build worker
 
 # Rebuild everything from scratch
-docker compose -f docker-compose.local.yml down -v
-docker compose -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.yml down -v
+docker compose -f docker-compose.yml up -d --build
 ```

@@ -91,7 +91,7 @@ $apiBaseUrl = 'http://localhost:3001/api'
 $uiBaseUrl = 'http://localhost:3001'
 $backendDir = Join-Path $RepoRoot 'app/api'
 $frontendDir = Join-Path $RepoRoot 'app/ui'
-$composePath = Join-Path $RepoRoot 'docker-compose.local.yml'
+$composePath = Join-Path $RepoRoot 'docker-compose.yml'
 
 Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Yellow
 Write-Host "║  FortigiGraph Nightly Test Run                   ║" -ForegroundColor Yellow

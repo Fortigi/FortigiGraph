@@ -156,7 +156,7 @@ export default defineConfig({
 
 **Location:** `UI/backend/src/__tests__/integration/`
 
-**Pre-requisite:** Docker SQL Server running (from `docker-compose.local.yml`) with tables initialized.
+**Pre-requisite:** Docker SQL Server running (from `docker-compose.yml`) with tables initialized.
 
 | Test Suite | Tests |
 |---|---|
@@ -252,7 +252,7 @@ sequenceDiagram
 **Script:** `_Test/Test-DockerDeployment.ps1`
 
 Steps:
-1. `docker compose -f docker-compose.local.yml up -d`
+1. `docker compose -f docker-compose.yml up -d`
 2. Wait for SQL health check (up to 60 seconds)
 3. Run `Initialize-FGSystemTables`, `Initialize-FGGovernanceTables`, `Initialize-FGCrawlerTables`
 4. Register a crawler via API

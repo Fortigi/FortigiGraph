@@ -10,7 +10,7 @@
     script directly: Crawlers/EntraID/Start-EntraIDCrawler.ps1
 
     Prerequisites:
-    - Docker stack running: docker compose -f docker-compose.local.yml up -d
+    - Docker stack running: docker compose -f docker-compose.yml up -d
     - FortigiGraph module available at repo root
 
 .PARAMETER ApiBaseUrl
@@ -49,7 +49,7 @@ try {
 }
 catch {
     Write-Host "API not reachable at $ApiBaseUrl — is Docker running?" -ForegroundColor Red
-    Write-Host "Start with: docker compose -f docker-compose.local.yml up -d" -ForegroundColor Yellow
+    Write-Host "Start with: docker compose -f docker-compose.yml up -d" -ForegroundColor Yellow
     exit 1
 }
 

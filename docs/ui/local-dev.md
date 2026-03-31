@@ -23,7 +23,7 @@ The SQL Server port `1433` is exposed to the host so the PowerShell sync can con
 ## Start the Stack
 
 ```bash
-docker compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 This starts:
@@ -39,7 +39,7 @@ Wait ~30 seconds for SQL Server to be ready, then open **http://localhost:3001**
 The UI will show an empty matrix until you run a sync.
 
 !!! warning "Auth is disabled in local mode"
-    `AUTH_ENABLED=false` is set by default in `docker-compose.local.yml`. The amber warning banner will appear in the UI — this is expected.
+    `AUTH_ENABLED=false` is set by default in `docker-compose.yml`. The amber warning banner will appear in the UI — this is expected.
 
 ## Run a Sync
 
@@ -67,16 +67,16 @@ This:
     -SQLDatabase "MyDatabase"
 ```
 
-The default password (`FortigiGraph_Local1!`) matches the `docker-compose.local.yml` setting.
+The default password (`FortigiGraph_Local1!`) matches the `docker-compose.yml` setting.
 
 ## Stopping and Resetting
 
 ```bash
 # Stop the stack (data persists in the sql_data volume)
-docker compose -f docker-compose.local.yml down
+docker compose -f docker-compose.yml down
 
 # Stop and delete all data (full reset)
-docker compose -f docker-compose.local.yml down -v
+docker compose -f docker-compose.yml down -v
 ```
 
 ## Building the Image Manually
@@ -104,7 +104,7 @@ This mounts `src/` from your host for live reload while the container watches fo
 
 ## Environment Variables
 
-Override any setting in `docker-compose.local.yml` by creating a `.env` file in the repo root or setting environment variables before running `docker compose`:
+Override any setting in `docker-compose.yml` by creating a `.env` file in the repo root or setting environment variables before running `docker compose`:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -116,4 +116,4 @@ Override any setting in `docker-compose.local.yml` by creating a `.env` file in 
 | `PORT` | `3001` | Backend port |
 
 !!! tip "Enabling auth locally"
-    Set `AUTH_ENABLED=true`, `AUTH_CLIENT_ID`, and `AUTH_TENANT_ID` in `docker-compose.local.yml` to test with real Entra ID login. Ensure `http://localhost:3001` is added as a redirect URI in your app registration.
+    Set `AUTH_ENABLED=true`, `AUTH_CLIENT_ID`, and `AUTH_TENANT_ID` in `docker-compose.yml` to test with real Entra ID login. Ensure `http://localhost:3001` is added as a redirect URI in your app registration.
