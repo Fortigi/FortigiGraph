@@ -104,10 +104,10 @@ app.use('/api', perfMetrics);
 // ─── Swagger / OpenAPI docs (public) ─────────────────────────────
 try {
   const openapiSpec = YAML.load(pathJoin(__dirname, 'openapi.yaml'));
+  app.get('/api/openapi.json', (req, res) => res.json(openapiSpec));
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
     customSiteTitle: 'Identity Atlas Ingest API',
   }));
-  app.get('/api/docs/openapi.json', (req, res) => res.json(openapiSpec));
 } catch {
   // OpenAPI spec not available — skip Swagger UI
 }

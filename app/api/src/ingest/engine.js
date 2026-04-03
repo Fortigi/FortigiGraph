@@ -46,26 +46,28 @@ export async function discoverColumns(pool, tableName) {
   const result = await pool.request()
     .input('table', tableName)
     .query(`
-      SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = @table AND TABLE_SCHEMA = 'dbo'
-        AND COLUMN_NAME NOT IN ('ValidFrom', 'ValidTo')
-      ORDER BY ORDINAL_POSITION
+      SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH, c.IS_NULLABLE,
+             COLUMNPROPERTY(OBJECT_ID('dbo.' + @table), c.COLUMN_NAME, 'IsIdentity') AS IsIdentity
+      FROM INFORMATION_SCHEMA.COLUMNS c
+      WHERE c.TABLE_NAME = @table AND c.TABLE_SCHEMA = 'dbo'
+        AND c.COLUMN_NAME NOT IN ('ValidFrom', 'ValidTo')
+      ORDER BY c.ORDINAL_POSITION
     `);
 
   return result.recordset.map(r => {
-    let typeName = r.DATA_TYPE.toLowerCase();
-    if (typeName === 'nvarchar' || typeName === 'varchar') {
-      const len = r.CHARACTER_MAXIMUM_LENGTH === -1 ? 'max' : r.CHARACTER_MAXIMUM_LENGTH;
-      typeName = `${r.DATA_TYPE}(${len})`;
-    }
-    return {
-      name: r.COLUMN_NAME,
-      sqlType: getSqlType(typeName),
-      sqlTypeName: typeName,
-      isNullable: r.IS_NULLABLE === 'YES',
-    };
-  });
+      let typeName = r.DATA_TYPE.toLowerCase();
+      if (typeName === 'nvarchar' || typeName === 'varchar') {
+        const len = r.CHARACTER_MAXIMUM_LENGTH === -1 ? 'max' : r.CHARACTER_MAXIMUM_LENGTH;
+        typeName = `${r.DATA_TYPE}(${len})`;
+      }
+      return {
+        name: r.COLUMN_NAME,
+        sqlType: getSqlType(typeName),
+        sqlTypeName: typeName,
+        isNullable: r.IS_NULLABLE === 'YES',
+        isIdentity: !!r.IsIdentity,
+      };
+    });
 }
 
 /**
@@ -111,7 +113,8 @@ export async function ingest(pool, tableName, keyColumns, records, options = {})
       recordKeys.add(k);
     }
   }
-  const activeColumns = columns.filter(c => recordKeys.has(c.name));
+  // Exclude IDENTITY columns — SQL auto-generates them, they can't be inserted
+  const activeColumns = columns.filter(c => recordKeys.has(c.name) && !c.isIdentity);
 
   // Create temp table
   const tempName = existingTempTable || `##TempIngest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -173,7 +176,8 @@ export async function ingest(pool, tableName, keyColumns, records, options = {})
   // Scoped delete (only in full sync mode)
   let deleted = 0;
   if (syncMode === 'full') {
-    deleted = await scopedDelete(pool, tableName, keyColumns, tempName, systemId, scope, systemIdColumn);
+    const tableColumnNames = new Set(columns.map(c => c.name));
+    deleted = await scopedDelete(pool, tableName, keyColumns, tempName, systemId, scope, systemIdColumn, tableColumnNames);
   }
 
   // Clean up temp table (only if we created it)
@@ -188,22 +192,22 @@ export async function ingest(pool, tableName, keyColumns, records, options = {})
  * Scoped delete: remove records in the target table that are NOT in the temp table,
  * scoped by systemId and optional attribute filters.
  */
-async function scopedDelete(pool, tableName, keyColumns, tempTable, systemId, scope, systemIdColumn) {
+async function scopedDelete(pool, tableName, keyColumns, tempTable, systemId, scope, systemIdColumn, tableColumnNames) {
   // Build NOT EXISTS join on key columns
   const notExistsJoin = keyColumns.map(k => `t.[${k}] = source.[${k}]`).join(' AND ');
 
   let where = `t.ValidTo = ${CURRENT_ROW}`;
 
-  // System scope
-  if (systemId !== null && systemId !== undefined) {
+  // System scope — only if the table actually has the systemId column
+  if (systemId !== null && systemId !== undefined && (!tableColumnNames || tableColumnNames.has(systemIdColumn))) {
     where += ` AND t.[${systemIdColumn}] = @systemId`;
   }
 
-  // Additional scope filters (e.g., resourceType, assignmentType)
+  // Additional scope filters — only if the column exists on the table
   const scopeParams = [];
   let paramIndex = 0;
   for (const [key, value] of Object.entries(scope)) {
-    if (value !== undefined && value !== null) {
+    if (value !== undefined && value !== null && (!tableColumnNames || tableColumnNames.has(key))) {
       const paramName = `scope${paramIndex}`;
       where += ` AND t.[${key}] = @${paramName}`;
       scopeParams.push({ name: paramName, value, key });

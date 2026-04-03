@@ -64,8 +64,8 @@ export function normalizeRecords(records, coreColumns, options = {}) {
       normalized.externalId = String(rec.externalId);
     }
 
-    // Set systemId if provided and the record doesn't override it
-    if (systemId !== undefined && normalized.systemId === undefined) {
+    // Set systemId if provided, the record doesn't override it, AND the table has the column
+    if (systemId !== undefined && normalized.systemId === undefined && coreSet.has('systemId')) {
       normalized.systemId = systemId;
     }
 

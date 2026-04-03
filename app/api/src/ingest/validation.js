@@ -222,7 +222,7 @@ export const ENTITY_TABLE_MAP = {
 
 // Key columns per entity type
 export const ENTITY_KEY_MAP = {
-  'systems': ['id'],
+  'systems': ['systemType', 'tenantId'],
   'principals': ['id'],
   'resources': ['id'],
   'resource-assignments': ['resourceId', 'principalId', 'assignmentType'],

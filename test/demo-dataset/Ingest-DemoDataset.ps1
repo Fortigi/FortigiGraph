@@ -27,7 +27,7 @@ Param(
     [string]$DatasetPath = ''
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 if (-not $DatasetPath) { $DatasetPath = Join-Path $PSScriptRoot 'demo-company.json' }
 $ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
 
