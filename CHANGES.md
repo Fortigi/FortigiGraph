@@ -385,3 +385,9 @@ UI/frontend/src/utils/exportToExcel.js
 - Added Playwright E2E tag lifecycle tests (`app/ui/e2e/tags.spec.js`) covering create → assign → filter → delete via the API
 - Added central test config (`test/test.config.json`) with API URLs and SQL connection settings; `run-docker-tests.ps1` now reads from this file instead of hardcoding values
 - Fixed nightly CI workflow paths (`test/automation/github-nightly-tests.yml`) — corrected stale `_Test/` and `UI/frontend/` references to match the actual `test/` and `app/ui/` directory structure
+- Fixed `navigation.spec.js` E2E tests — updated stale "FortigiGraph" title/heading assertions to "Identity Atlas", replaced removed "Groups" tab with "Resources", removed optional tabs from the always-visible check, fixed hash route `/#groups` → `/#resources`
+- Fixed Docker test isolation — crawler name is now `"Test Runner HHmmss"` (unique per run) instead of the static `"Test Runner"`, preventing crawler accumulation on repeated runs
+- Fixed Pester test scope bug — `$using:functionsRoot` inside `BeforeAll` was incorrect Pester v5 syntax; changed to `$functionsRoot` (script-scoped variable, accessible without `$using:`)
+- Added Vitest unit tests for `app/api/src/ingest/validation.js` (53 test cases covering envelope validation, record validation for principals/assignments/relationships, UUID enforcement, enum validation, max-length checks, deterministic ID mode, and the 10-error cap)
+- Added Pester code coverage reporting to PR pipeline — outputs JaCoCo XML artifact alongside JUnit test results; coverage percentage is printed to the CI log
+- Added OpenAPI spec linting to PR pipeline using `@stoplight/spectral-cli` — validates `app/api/src/openapi.yaml` against the OAS ruleset on every PR

@@ -18,7 +18,7 @@ $functionsRoot = Join-Path $repoRoot 'Functions'
 
 BeforeAll {
     Import-Module $modulePath -Force -ErrorAction Stop
-    $script:allPs1Files = Get-ChildItem -Path $using:functionsRoot -Include '*.ps1' -Recurse
+    $script:allPs1Files = Get-ChildItem -Path $functionsRoot -Include '*.ps1' -Recurse
 }
 
 # ── Module Import ────────────────────────────────────────────────────────────

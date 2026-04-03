@@ -7,8 +7,8 @@ test.describe('App Navigation', () => {
   });
 
   test('app loads with title and header', async ({ page }) => {
-    await expect(page).toHaveTitle(/FortigiGraph/);
-    await expect(page.locator('h1')).toContainText('FortigiGraph Role Mining');
+    await expect(page).toHaveTitle(/Identity Atlas/i);
+    await expect(page.locator('h1')).toContainText('Identity Atlas');
   });
 
   test('default page is Matrix', async ({ page }) => {
@@ -17,9 +17,9 @@ test.describe('App Navigation', () => {
     await expect(matrixTab).toBeVisible();
   });
 
-  test('all main tabs are visible', async ({ page }) => {
-    const tabs = ['Matrix', 'Users', 'Groups', 'Access Packages', 'Sync Log',
-                  'Risk Scores', 'Identities', 'Org Chart', 'Performance'];
+  test('all always-visible tabs are present', async ({ page }) => {
+    // Optional tabs (Risk Scores, Identities, Org Chart, Performance, Admin) are hidden by default
+    const tabs = ['Matrix', 'Users', 'Resources', 'Systems', 'Business Roles', 'Sync Log'];
 
     for (const tab of tabs) {
       await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
@@ -31,9 +31,9 @@ test.describe('App Navigation', () => {
     await page.getByRole('button', { name: 'Users', exact: true }).click();
     await expect(page.locator('h2')).toContainText('Users');
 
-    // Navigate to Groups
-    await page.getByRole('button', { name: 'Groups', exact: true }).click();
-    await expect(page.locator('h2')).toContainText('Groups');
+    // Navigate to Resources (formerly Groups)
+    await page.getByRole('button', { name: 'Resources', exact: true }).click();
+    await expect(page.locator('h2')).toContainText('Resources');
 
     // Navigate to Sync Log
     await page.getByRole('button', { name: 'Sync Log', exact: true }).click();
@@ -45,15 +45,15 @@ test.describe('App Navigation', () => {
     await page.goto('/#users');
     await expect(page.locator('h2')).toContainText('Users');
 
-    await page.goto('/#groups');
-    await expect(page.locator('h2')).toContainText('Groups');
+    await page.goto('/#resources');
+    await expect(page.locator('h2')).toContainText('Resources');
 
     await page.goto('/#sync-log');
     await expect(page.locator('h2')).toContainText('Sync Log');
 
-    await page.goto('/#identities');
+    // Matrix is the default / fallback route
+    await page.goto('/');
     await page.waitForTimeout(300);
-    // Identities page should load without crashing (content depends on data)
     await expect(page.locator('nav')).toBeVisible();
   });
 

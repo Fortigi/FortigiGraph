@@ -134,11 +134,13 @@ try {
 Write-Host "`n--- 3. Crawler Auth Lifecycle ---" -ForegroundColor Yellow
 
 $crawlerKey = $null
+$crawlerName = "Test Runner $(Get-Date -Format 'HHmmss')"
 
-# Register crawler
+# Register crawler (unique name per run prevents accumulation across repeated test runs)
 try {
+    $regBody = @{ displayName = $crawlerName; permissions = @('ingest','refreshViews') } | ConvertTo-Json
     $reg = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawlers" -Method Post -ContentType 'application/json' `
-        -Body '{"displayName":"Test Runner","permissions":["ingest","refreshViews"]}' -TimeoutSec 10
+        -Body $regBody -TimeoutSec 10
     $crawlerKey = $reg.apiKey
     Test-Check 'CrawlerAuth' 'Register crawler returns key' ($crawlerKey -match '^fgc_') "prefix=$($reg.apiKeyPrefix)"
 } catch { Test-Check 'CrawlerAuth' 'Register crawler returns key' $false $_.Exception.Message }
@@ -148,7 +150,7 @@ if ($crawlerKey) {
     try {
         $headers = @{ 'Authorization' = "Bearer $crawlerKey" }
         $whoami = Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/whoami" -Headers $headers -TimeoutSec 10
-        Test-Check 'CrawlerAuth' 'Whoami returns crawler name' ($whoami.displayName -eq 'Test Runner')
+        Test-Check 'CrawlerAuth' 'Whoami returns crawler name' ($whoami.displayName -eq $crawlerName)
     } catch { Test-Check 'CrawlerAuth' 'Whoami returns crawler name' $false $_.Exception.Message }
 }
 
@@ -191,7 +193,7 @@ if ($crawlerKey) {
         # New key should work
         $headers = @{ 'Authorization' = "Bearer $newKey" }
         $whoami2 = Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/whoami" -Headers $headers -TimeoutSec 10
-        Test-Check 'CrawlerAuth' 'New key works after rotation' ($whoami2.displayName -eq 'Test Runner')
+        Test-Check 'CrawlerAuth' 'New key works after rotation' ($whoami2.displayName -eq $crawlerName)
         $crawlerKey = $newKey
     } catch { Test-Check 'CrawlerAuth' 'Key rotation returns new key' $false $_.Exception.Message }
 }
