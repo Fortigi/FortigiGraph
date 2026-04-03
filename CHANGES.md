@@ -189,6 +189,7 @@ UI/frontend/src/utils/exportToExcel.js
 ```
 ## Changes in this branch
 
+- Fixed IdentityMembers ingest failing with 500 error — `accountEnabled` column was incorrectly typed as `NVARCHAR(10)` instead of `BIT`, causing mssql BulkLoad to reject boolean values. This also unblocks governance catalog and assignment policy ingest which ran after IdentityMembers.
 - Fixed categories endpoint handling in UI backend
 - Updated access package detail page components
 - Updated access packages page with improved export functionality
@@ -378,3 +379,9 @@ UI/frontend/src/utils/exportToExcel.js
 - Context member counts updated after identity-context linking
 - Resource detail page: added three new collapsible sections — **Assigned Users** (shows all principals assigned to this resource with Direct/Governed/Owner/Eligible badge and status), **Business Roles** (shows which business roles contain this resource via ResourceRelationships), **Member Of** (shows parent resources this resource belongs to); all sections are lazy-loaded and support drill-through navigation
 - **Rebranded to Identity Atlas** — renamed from FortigiGraph to Identity Atlas throughout: UI header with logo and dark theme, page title, Swagger docs, OpenAPI spec, console output, Excel exports, module manifest, MkDocs site; green color scheme matching the new logo
+- Added PR CI pipeline (`.github/workflows/pr.yml`) — runs PSScriptAnalyzer, ESLint, Pester unit tests, and npm audit on every pull request; no Docker or Azure credentials required
+- Added Pester unit tests (`test/unit/IdentityAtlas.Tests.ps1`) — replaces homegrown PowerShell test harness with Pester v5, covering module import, function availability, alias verification, file structure, code quality, and function counts
+- Added ESLint flat config (`app/ui/eslint.config.js`) for the React frontend, enabling `npm run lint` to catch code quality issues before merging
+- Added Playwright E2E tag lifecycle tests (`app/ui/e2e/tags.spec.js`) covering create → assign → filter → delete via the API
+- Added central test config (`test/test.config.json`) with API URLs and SQL connection settings; `run-docker-tests.ps1` now reads from this file instead of hardcoding values
+- Fixed nightly CI workflow paths (`test/automation/github-nightly-tests.yml`) — corrected stale `_Test/` and `UI/frontend/` references to match the actual `test/` and `app/ui/` directory structure

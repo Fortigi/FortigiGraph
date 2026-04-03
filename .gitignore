@@ -6,3 +6,4 @@ test/nightly/results/
 test/demo-dataset/demo-company.json
 test/demo-dataset/verify-results.json
 node_modules/
+.claude/settings.local.json

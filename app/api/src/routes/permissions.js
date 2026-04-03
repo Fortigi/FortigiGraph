@@ -265,7 +265,7 @@ router.get('/permissions', async (req, res) => {
              ${topUsersGroupJoin}
              ${userTagJoin}
              ${groupTagJoin}
-             WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
+             WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
                ${filterWhere}
                ${groupFilterWhere}
              GROUP BY p.${COL_PRINC}
@@ -280,7 +280,7 @@ router.get('/permissions', async (req, res) => {
              ${topUsersGroupJoin}
              ${userTagJoin}
              ${groupTagJoin}
-             WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
+             WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
                ${filterWhere}
                ${groupFilterWhere}`;
 
@@ -312,7 +312,7 @@ router.get('/permissions', async (req, res) => {
           LEFT JOIN Resources r ON p.${COL_RES} = r.id
           LEFT JOIN Systems sys ON r.systemId = sys.id
           ${groupTagJoin}
-          WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
+          WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
             AND p.${COL_PRINC} IN (
               SELECT memberId FROM #UserCounts
             )
@@ -393,7 +393,7 @@ router.get('/permissions', async (req, res) => {
         LEFT JOIN Systems sys ON r.systemId = sys.id
         ${userTagJoin}
         ${groupTagJoin}
-        WHERE p.${COL_PTYPE} != '#microsoft.graph.group'
+        WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
           ${filterWhere}
           ${groupFilterWhere};
 
@@ -696,7 +696,7 @@ router.get('/group/:groupId/nested-groups', async (req, res) => {
           AND ra2.assignmentType = 'Direct'
           AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
       )
-      AND p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} != '#microsoft.graph.group'
+      AND (p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} IS NULL OR p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} != '#microsoft.graph.group')
     `);
 
     return res.json({

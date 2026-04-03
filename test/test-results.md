@@ -1,8 +1,8 @@
 # Identity Atlas — Docker Test Results
 
-**Date:** 2026-03-31 18:20:22
-**Duration:** 58 seconds
-**Results:** 76 passed, 4 failed, 0 skipped (80 total)
+**Date:** 2026-04-03 14:41:46
+**Duration:** 19 seconds
+**Results:** 87 passed, 0 failed, 0 skipped (87 total)
 
 ---
 
@@ -13,7 +13,7 @@
 | SQL Server container running | PASS |  |
 | Backend container running | PASS |  |
 | Worker container running | PASS |  |
-| Table init completed (exit 0) | PASS | Exited (0) 37 seconds ago |
+| Table init completed (exit 0) | PASS | Exited (0) 15 seconds ago |
 
 ## API
 
@@ -35,7 +35,7 @@
 
 | Test | Status | Detail |
 |---|---|---|
-| Register crawler returns key | PASS | prefix=fgc_1ff5 |
+| Register crawler returns key | PASS | prefix=fgc_d8db |
 | Whoami returns crawler name | PASS |  |
 | Invalid key returns 401 | PASS | status=401 |
 | No auth returns 401 | PASS | status=401 |
@@ -49,7 +49,7 @@
 | Test | Status | Detail |
 |---|---|---|
 | Generate dataset | PASS |  |
-| Ingest dataset via API | FAIL | Response status code does not indicate success: 500 (Internal Server Error). |
+| Ingest dataset via API | PASS |  |
 
 ## Schema
 
@@ -75,7 +75,7 @@
 | Test | Status | Detail |
 |---|---|---|
 | Contexts >= 3 rows | PASS | actual=8 |
-| GovernanceCatalogs >= 1 rows | FAIL | actual=0 |
+| GovernanceCatalogs >= 1 rows | PASS | actual=2 |
 | Identities >= 5 rows | PASS | actual=23 |
 | Principals >= 5 rows | PASS | actual=28 |
 | ResourceAssignments >= 10 rows | PASS | actual=73 |
@@ -103,9 +103,9 @@
 | Has Owner assignments | PASS | count=1 |
 | Has root context (no parent) | PASS | count=2 |
 | Has child contexts (with parent) | PASS | count=6 |
-| Has governance catalogs | FAIL | count=0 |
-| Has assignment policies | FAIL | count=0 |
-| Crawler audit log has entries | PASS | count=10 |
+| Has governance catalogs | PASS | count=2 |
+| Has assignment policies | PASS | count=3 |
+| Crawler audit log has entries | PASS | count=14 |
 
 ## APIData
 
@@ -113,6 +113,18 @@
 |---|---|---|
 | Resources endpoint returns data | PASS | count=10 |
 | Systems endpoint returns data | PASS | count=3 |
+
+## MatrixAPI
+
+| Test | Status | Detail |
+|---|---|---|
+| Matrix returns user rows | PASS | users=51 |
+| Matrix rows have resource assignments | PASS |  |
+| Create resource tag | PASS | tagId=1 |
+| Assign tag to resource | PASS |  |
+| Tag filter returns tagged resources | PASS | count=10 |
+| Matrix group tag filter reduces results | PASS | users=51 |
+| Delete tag cleanup | PASS |  |
 
 ## Worker
 
@@ -147,32 +159,10 @@
 
 | Metric | Value |
 |---|---|
-| Total tests | 80 |
-| Passed | 76 |
-| Failed | 4 |
+| Total tests | 87 |
+| Passed | 87 |
+| Failed | 0 |
 | Skipped | 0 |
-| Duration | 58s |
+| Duration | 19s |
 | Docker containers | 3 (sql, backend, worker) |
-| Date | 2026-03-31 18:20 |
-
-## Known Issues (4 failures)
-
-| # | Test | Root Cause | Impact |
-|---|---|---|---|
-| 1 | IdentityMembers ingest 500 | "Invalid string" — mssql BulkLoad type conversion error for boolean/GUID values in IdentityMembers table | IdentityMembers data not loaded |
-| 2 | GovernanceCatalogs = 0 | Ingest script stops at IdentityMembers error before reaching governance endpoints | No governance data loaded |
-| 3 | AssignmentPolicies = 0 | Same as #2 | No policy data loaded |
-| 4 | Ingest dataset FAIL | Consequence of #1 | Overall ingest marked as failed |
-
-**What works (76/80 = 95%):**
-- Full Docker stack (SQL + Backend + Worker) provisions from scratch
-- All 14 SQL tables created with correct schema
-- Crawler registration, authentication, key rotation, and rejection all work
-- Systems, Contexts, Principals, Resources, ResourceAssignments, ResourceRelationships, Identities all ingest correctly
-- Referential integrity: 0 orphaned foreign keys
-- All expected entity types present (User, ServicePrincipal, AIAgent, BusinessRole, EntraGroup, Governed, Owner)
-- Context hierarchy correct (root + children)
-- API read endpoints return ingested data
-- Swagger UI and OpenAPI spec serve correctly
-- Worker container loads module and shows Identity Atlas branding
-- PowerShell module loads 258 functions; deleted sync functions confirmed removed
+| Date | 2026-04-03 14:41 |

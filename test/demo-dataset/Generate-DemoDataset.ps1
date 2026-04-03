@@ -291,8 +291,8 @@ $policies = @(
 )
 
 $certifications = @(
-    @{ id = (New-DemoGuid 'cert-001'); resourceId = $resBRAdmin; principalId = (New-DemoGuid 'principal-E0029'); decision = 'Approve'; reviewedBy = 'Grace Huang'; justification = 'Required for infrastructure maintenance'; systemId = $sysOmada }
-    @{ id = (New-DemoGuid 'cert-002'); resourceId = $resBRBase;  principalId = $guidDisabled; decision = 'Deny'; reviewedBy = 'Paul Quinn'; justification = 'Employee has left the organization'; systemId = $sysOmada }
+    @{ id = (New-DemoGuid 'cert-001'); resourceId = $resBRAdmin; principalId = (New-DemoGuid 'principal-E0029'); decision = 'Approve'; reviewedBy = (New-DemoGuid 'principal-E0011'); reviewedByDisplayName = 'Grace Huang'; justification = 'Required for infrastructure maintenance'; systemId = $sysOmada }
+    @{ id = (New-DemoGuid 'cert-002'); resourceId = $resBRBase;  principalId = $guidDisabled; decision = 'Deny'; reviewedBy = (New-DemoGuid 'principal-E0013'); reviewedByDisplayName = 'Paul Quinn'; justification = 'Employee has left the organization'; systemId = $sysOmada }
 )
 
 # ─── Assemble & Write ────────────────────────────────────────────

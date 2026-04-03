@@ -291,7 +291,7 @@ CREATE TABLE dbo.SystemOwners (
         'isPrimary'           = 'BIT'
         'signalConfidence'    = 'INT'
         'correlationSignals'  = 'NVARCHAR(MAX)'
-        'accountEnabled'      = 'NVARCHAR(10)'
+        'accountEnabled'      = 'BIT'
         'isHrAuthoritative'   = 'BIT'
         'hrScore'             = 'INT'
         'hrIndicators'        = 'NVARCHAR(MAX)'

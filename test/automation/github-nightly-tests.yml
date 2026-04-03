@@ -62,16 +62,28 @@ jobs:
           # No Azure modules needed for unit tests
           Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
 
-      - name: Run unit tests
+      - name: Install Pester
         shell: pwsh
-        run: pwsh -File _Test/Test-Unit.ps1
+        run: Install-Module Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser
 
-      - name: Upload logs
+      - name: Run Pester unit tests
+        shell: pwsh
+        run: |
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = 'test/unit/IdentityAtlas.Tests.ps1'
+          $cfg.Output.Verbosity = 'Detailed'
+          $cfg.TestResult.Enabled = $true
+          $cfg.TestResult.OutputPath = 'test-results.xml'
+          $cfg.TestResult.OutputFormat = 'JUnitXml'
+          $result = Invoke-Pester -Configuration $cfg
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-logs
-          path: _Test/logs/
+          name: unit-test-results
+          path: test-results.xml
           retention-days: 30
 
   # ─── Phase 2+3+4: Azure Integration Tests ──────────────────────────
@@ -117,11 +129,11 @@ jobs:
 
       - name: 'Phase 2a: Simple Diagnostics'
         shell: pwsh
-        run: pwsh -File _Test/Test-Simple.ps1 -ConfigFile _Test/config.ci.json
+        run: pwsh -File test/unit/Test-Simple.ps1 -ConfigFile _Test/config.ci.json
 
       - name: 'Phase 2b: Graph API Tests'
         shell: pwsh
-        run: pwsh -File _Test/Test-GraphAPI.ps1 -ConfigFile _Test/config.ci.json
+        run: pwsh -File test/unit/Test-GraphAPI.ps1 -ConfigFile _Test/config.ci.json
 
       - name: 'Phase 3: Integration Tests'
         shell: pwsh
@@ -201,23 +213,23 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: |
-            UI/frontend/package-lock.json
-            UI/backend/package-lock.json
+            app/ui/package-lock.json
+            app/api/package-lock.json
 
-      - name: Install backend dependencies
-        working-directory: UI/backend
+      - name: Install API dependencies
+        working-directory: app/api
         run: npm ci
 
       - name: Install frontend dependencies
-        working-directory: UI/frontend
+        working-directory: app/ui
         run: npm ci
 
       - name: Install Playwright browsers
-        working-directory: UI/frontend
+        working-directory: app/ui
         run: npx playwright install chromium --with-deps
 
       - name: Run E2E tests
-        working-directory: UI/frontend
+        working-directory: app/ui
         run: npx playwright test
         env:
           CI: true
@@ -227,7 +239,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: UI/frontend/playwright-report/
+          path: app/ui/playwright-report/
           retention-days: 30
 
       - name: Upload test results
@@ -235,7 +247,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-screenshots
-          path: UI/frontend/test-results/
+          path: app/ui/test-results/
           retention-days: 30
 
   # ─── Summary ────────────────────────────────────────────────────────

@@ -198,7 +198,7 @@ const SCHEMAS = {
       decision: { type: 'string', maxLength: 50 },
       justification: { type: 'string' },
       recommendation: { type: 'string', maxLength: 50 },
-      reviewedBy: { type: 'string', maxLength: 500 },
+      reviewedBy: { type: 'uuid' },
       extendedAttributes: { type: 'json' },
     },
   },

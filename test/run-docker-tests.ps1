@@ -9,8 +9,10 @@ Param()
 $ErrorActionPreference = 'Continue'
 $startTime = Get-Date
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$apiBaseUrl = 'http://localhost:3001/api'
-$uiBaseUrl = 'http://localhost:3001'
+
+$cfg = Get-Content (Join-Path $PSScriptRoot 'test.config.json') -Raw | ConvertFrom-Json
+$apiBaseUrl = $cfg.api.baseUrl
+$uiBaseUrl  = $cfg.api.uiUrl
 
 $results = [ordered]@{}
 $totalPassed = 0
@@ -228,7 +230,7 @@ if ($crawlerKey -and $datasetExists) {
 
 Write-Host "`n--- 5. Data Verification (SQL) ---" -ForegroundColor Yellow
 
-$connStr = "Server=localhost,1433;Database=GraphData;User Id=sa;Password=FortigiGraph_Local1!;TrustServerCertificate=True"
+$connStr = "Server=$($cfg.sql.server),$($cfg.sql.port);Database=$($cfg.sql.database);User Id=$($cfg.sql.username);Password=$($cfg.sql.password);TrustServerCertificate=True"
 $CURRENT = "'9999-12-31 23:59:59.9999999'"
 
 function Get-SqlScalar {
@@ -339,6 +341,60 @@ try {
     $sysCount = if ($apiSystems -is [array]) { $apiSystems.Count } else { 0 }
     Test-Check 'APIData' 'Systems endpoint returns data' ($sysCount -ge 1) "count=$sysCount"
 } catch { Test-Check 'APIData' 'Systems endpoint returns data' $false $_.Exception.Message }
+
+# ═══════════════════════════════════════════════════════════════════
+# 6b. MATRIX & TAG API
+# ═══════════════════════════════════════════════════════════════════
+
+Write-Host "`n--- 6b. Matrix & Tag API ---" -ForegroundColor Yellow
+
+# Auth headers — empty when auth is disabled (local Docker), crawler key when enabled
+$authHeaders = if ($crawlerKey) { @{ 'Authorization' = "Bearer $crawlerKey" } } else { @{} }
+
+# Matrix: /api/permissions must return user rows (userLimit is the correct param name)
+try {
+    $perm = Invoke-RestMethod -Uri "$apiBaseUrl/permissions?userLimit=25" -Headers $authHeaders -TimeoutSec 30
+    $userCount = if ($perm.data) { $perm.data.Count } else { 0 }
+    Test-Check 'MatrixAPI' 'Matrix returns user rows' ($userCount -ge 5) "users=$userCount"
+
+    # Each user row has a memberId — check there are also resource rows (groupId)
+    $hasAssignments = $perm.data -and ($perm.data | Where-Object { $_.groupId -or $_.resourceId }) -and
+                      (@($perm.data | Where-Object { $_.groupId -or $_.resourceId }).Count -ge 1)
+    Test-Check 'MatrixAPI' 'Matrix rows have resource assignments' $hasAssignments
+} catch { Test-Check 'MatrixAPI' 'Matrix returns user rows' $false $_.Exception.Message }
+
+# Tags: create a tag, assign it to a resource, filter by it
+try {
+    # 1. Create a tag
+    $tagBody = @{ name = 'test-critical'; entityType = 'resource'; color = '#FF0000' } | ConvertTo-Json
+    $newTag = Invoke-RestMethod -Uri "$apiBaseUrl/tags" -Method Post -Headers $authHeaders -Body $tagBody -ContentType 'application/json' -TimeoutSec 30
+    $tagId = $newTag.id
+    Test-Check 'MatrixAPI' 'Create resource tag' ($null -ne $tagId) "tagId=$tagId"
+
+    # 2. Get a resource to tag
+    $resources = Invoke-RestMethod -Uri "$apiBaseUrl/resources?limit=1" -Headers $authHeaders -TimeoutSec 30
+    $resourceId = if ($resources.data) { $resources.data[0].id } else { $resources[0].id }
+
+    # 3. Assign tag to resource
+    $assignBody = @{ entityIds = @($resourceId) } | ConvertTo-Json
+    Invoke-RestMethod -Uri "$apiBaseUrl/tags/$tagId/assign" -Method Post -Headers $authHeaders -Body $assignBody -ContentType 'application/json' -TimeoutSec 30
+    Test-Check 'MatrixAPI' 'Assign tag to resource' $true
+
+    # 4. Verify tag shows on resource
+    $taggedResources = Invoke-RestMethod -Uri "$apiBaseUrl/resources?tag=test-critical" -Headers $authHeaders -TimeoutSec 30
+    $taggedCount = if ($taggedResources.data) { $taggedResources.data.Count } else { 0 }
+    Test-Check 'MatrixAPI' 'Tag filter returns tagged resources' ($taggedCount -ge 1) "count=$taggedCount"
+
+    # 5. Matrix filtered by group tag should only show users with that resource
+    $permFiltered = Invoke-RestMethod -Uri "$apiBaseUrl/permissions?userLimit=25&__groupTag=test-critical" -Headers $authHeaders -TimeoutSec 30
+    $filteredUsers = if ($permFiltered.data) { $permFiltered.data.Count } else { 0 }
+    Test-Check 'MatrixAPI' 'Matrix group tag filter reduces results' ($filteredUsers -ge 1) "users=$filteredUsers"
+
+    # 6. Cleanup: delete the tag
+    Invoke-RestMethod -Uri "$apiBaseUrl/tags/$tagId" -Method Delete -Headers $authHeaders -TimeoutSec 30
+    Test-Check 'MatrixAPI' 'Delete tag cleanup' $true
+
+} catch { Test-Check 'MatrixAPI' 'Tag lifecycle' $false $_.Exception.Message }
 
 # ═══════════════════════════════════════════════════════════════════
 # 7. WORKER CONTAINER
