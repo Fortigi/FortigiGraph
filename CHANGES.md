@@ -391,3 +391,6 @@ UI/frontend/src/utils/exportToExcel.js
 - Added Vitest unit tests for `app/api/src/ingest/validation.js` (53 test cases covering envelope validation, record validation for principals/assignments/relationships, UUID enforcement, enum validation, max-length checks, deterministic ID mode, and the 10-error cap)
 - Added Pester code coverage reporting to PR pipeline — outputs JaCoCo XML artifact alongside JUnit test results; coverage percentage is printed to the CI log
 - Added OpenAPI spec linting to PR pipeline using `@stoplight/spectral-cli` — validates `app/api/src/openapi.yaml` against the OAS ruleset on every PR
+- Updated Pester unit tests to match restructured repo layout — `Functions/` subfolders no longer exist; tests now reference the actual paths (`tools/powershell-sdk/graph`, `tools/powershell-sdk/helpers`, `tools/riskscoring`, `app/db`, `setup/azure`); all 150 tests pass
+- Updated PR pipeline PSScriptAnalyzer step — corrected paths to actual function folders and changed severity to Error-only (Write-Host and global vars are intentional module patterns); CI now reports only real errors, not design-pattern warnings
+- Removed stale Sync function assertions from Pester tests — `Sync-FGUser`, `Sync-FGGroup`, `Start-FGSync`, `Start-FGCSVSync` moved to "Removed Functions" block (replaced by the crawler-based ingest API)

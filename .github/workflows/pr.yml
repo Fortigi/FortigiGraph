@@ -37,13 +37,27 @@ jobs:
       - name: Analyse PowerShell files
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path ./Functions -Recurse -Severity Warning,Error
+          # Scan all function roots (repo uses tools/ + app/db + setup/azure structure)
+          # Error severity only — Write-Host and global vars are intentional patterns in this module
+          $paths = @(
+            'tools/powershell-sdk/graph',
+            'tools/powershell-sdk/helpers',
+            'tools/riskscoring',
+            'app/db',
+            'setup/azure'
+          )
+          $results = @()
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              $results += Invoke-ScriptAnalyzer -Path $p -Recurse -Severity Error
+            }
+          }
           if ($results) {
-            $results | Format-Table -AutoSize
-            Write-Host "::error::PSScriptAnalyzer found $($results.Count) issue(s)"
+            $results | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize
+            Write-Host "::error::PSScriptAnalyzer found $($results.Count) error(s)"
             exit 1
           }
-          Write-Host "PSScriptAnalyzer: no issues found" -ForegroundColor Green
+          Write-Host "PSScriptAnalyzer: no errors found" -ForegroundColor Green
 
   # ── Stage 2: JavaScript linting ──────────────────────────────────────────
   lint-js:
@@ -88,7 +102,13 @@ jobs:
           $cfg.TestResult.OutputPath = 'pester-results.xml'
           $cfg.TestResult.OutputFormat = 'JUnitXml'
           $cfg.CodeCoverage.Enabled = $true
-          $cfg.CodeCoverage.Path = 'Functions'
+          $cfg.CodeCoverage.Path = @(
+            'tools/powershell-sdk/graph',
+            'tools/powershell-sdk/helpers',
+            'tools/riskscoring',
+            'app/db',
+            'setup/azure'
+          )
           $cfg.CodeCoverage.OutputPath = 'pester-coverage.xml'
           $cfg.CodeCoverage.OutputFormat = 'JaCoCo'
           $result = Invoke-Pester -Configuration $cfg

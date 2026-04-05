@@ -6,19 +6,21 @@ Comprehensive testing strategy for FortigiGraph — covering unit tests, integra
 
 ## Current State
 
-We have a solid foundation but significant gaps:
-
-| What Exists | What's Missing |
+| What Exists | What's Missing / In Progress |
 |---|---|
-| PowerShell unit tests (140+ function checks) | Backend JS unit/integration tests (0 `.test.js` files) |
-| Playwright E2E browser tests (11 specs) | Frontend React component unit tests (0 vitest/jest tests) |
-| PowerShell integration tests (SQL, sync, views) | **Ingest API tests** (new engine, crawlers — untested) |
-| REST API smoke tests via PowerShell | Docker deployment validation |
-| GitHub Actions + Azure DevOps CI definitions | Automated nightly that provisions from scratch |
-| Mock backend for E2E | Real-data E2E (ingest → API → UI verification) |
-| Test datasets (Omada CSVs) | Code coverage reporting |
+| **Pester v5 unit tests** (`test/unit/IdentityAtlas.Tests.ps1`) — replaces homegrown runner | Backend JS integration tests (engine, sessions, crawlers) |
+| **Vitest API unit tests** (`app/api/src/ingest/validation.test.js`, 53 tests) | Frontend React component unit tests |
+| **Playwright E2E browser tests** (12 specs, including tag lifecycle) | Real-data E2E (ingest → API → UI verification) |
+| **PR pipeline** (PSScriptAnalyzer, ESLint, Pester+coverage, Vitest, Spectral, npm audit) | Automated nightly that provisions from scratch |
+| **ESLint flat config** (`app/ui/eslint.config.js`) | Frontend Vitest + React Testing Library |
+| **OpenAPI Spectral lint** in PR pipeline | Ingest engine + normalization unit tests |
+| Docker integration suite (`test/run-docker-tests.ps1`, 87 checks) | Code coverage for JS (coverage-v8) |
+| Nightly GitHub Actions workflow (fixed paths) | Azure DevOps pipeline |
+| Mock backend for E2E (`USE_SQL=false`) | |
+| Test datasets (Omada CSVs in `test/datasets/`) | |
+| Central test config (`test/test.config.json`) | |
 
-The biggest risk right now: the entire Ingest API layer (engine, validation, normalization, sessions, crawler auth, 12 endpoints) has no automated tests.
+The remaining highest-risk gap: the ingest engine (MERGE SQL generation, scoped deletes, sessions) and crawler auth middleware have no automated tests beyond the Docker integration suite.
 
 ---
 
@@ -50,71 +52,58 @@ graph TB
 
 **Goal:** Every function, module, and component is tested in isolation. Runs in < 60 seconds with zero external dependencies.
 
-#### 1a. PowerShell Module Tests (Existing — Extend)
+#### 1a. PowerShell Module Tests ✅ Migrated to Pester v5
 
-**Runner:** Custom `Test-Unit.ps1` (consider migrating to Pester for better reporting)
+**Runner:** Pester v5 (`test/unit/IdentityAtlas.Tests.ps1`)
+
+**Run:** `Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1 -Output Detailed`
 
 **Current coverage:**
-- Function naming conventions (Verb-FGNoun)
-- Alias presence on all exported functions
-- `[CmdletBinding()]` attribute on all functions
-- Parameter validation attributes
-- No syntax errors in any .ps1 file
+- Module import + manifest validity + version format
+- ~130 function exports across Base, Generic, SQL, Sync, Automation, RiskScoring
+- Removed functions must not exist (`Sync-FGGroupTransitiveMember`)
+- All aliases point to the correct function
+- `Verb-FGNoun` naming convention on all `.ps1` files
+- `[CmdletBinding()]` on all functions
+- No Dutch comments; no hardcoded secrets; no `Write-Output`
+- Config template exists and is valid JSON with required sections
+- Function counts per folder within expected ranges
+- `IdentityAtlas.psm1` dot-sources all expected category folders
 
-**Add:**
-- [ ] Validate all functions in `Functions/SQL/Initialize-FG*.ps1` have correct column definitions (no typos in column names or types)
-- [ ] Validate `Initialize-FGCrawlerTables.ps1` SQL syntax (parse the SQL strings)
-- [ ] Verify no remaining references to deleted functions (`Start-FGSync`, `Sync-FG*`)
-- [ ] Check that `FortigiGraph.psm1` dot-sources all .ps1 files in the expected folders (including new crawler tables)
+**Still to add:**
+- [ ] Validate column definitions in `Initialize-FG*.ps1` SQL strings (no typos in column names or types)
+- [ ] Verify no remaining references to deleted sync functions (`Start-FGSync`, `Sync-FGPrincipal`, etc.)
 
-#### 1b. Backend JS Unit Tests (NEW)
+#### 1b. Backend JS Unit Tests (Partially Done ✅)
 
-**Runner:** Vitest (fast, native ESM support, same ecosystem as frontend)
+**Runner:** Vitest — `cd app/api && npm test`
 
-**Location:** `UI/backend/src/__tests__/`
+**Location:** `app/api/src/ingest/`
 
-**Tests to create:**
+**Done:**
+
+| File | Tests | Status |
+|---|---|---|
+| `ingest/validation.test.js` | 53 test cases: envelope validation, per-entity record validation, UUID enforcement, enums, maxLength, error cap | ✅ Done |
+
+**Still to add:**
 
 | File | Tests |
 |---|---|
-| `ingest/engine.test.js` | MERGE SQL generation for single-key and composite-key tables; column discovery parsing; scoped delete SQL generation with various scope combinations |
-| `ingest/normalization.test.js` | Deterministic GUID generation (same input → same output, different input → different output); boolean coercion (true→1, false→0); extendedAttributes packing (non-core fields moved to JSON); type coercion edge cases (null, undefined, nested objects) |
-| `ingest/validation.test.js` | Envelope validation (missing systemId, empty records, invalid syncMode); record validation per entity type (missing required fields, invalid UUIDs, invalid enums, max length exceeded); systems endpoint doesn't require systemId |
-| `ingest/sessions.test.js` | Session lifecycle (start → continue → end); expired session cleanup; session not found error |
-| `middleware/crawlerAuth.test.js` | Hash verification (correct key passes, wrong key fails, timing-safe); rate limit enforcement; expired key rejection; disabled crawler rejection; system scope checking |
-| `routes/crawlers.test.js` | API key generation format (`fgc_` prefix, 32 random hex chars); key rotation invalidates old key |
+| `ingest/normalization.test.js` | Deterministic GUID generation; boolean coercion (true→1, false→0); extendedAttributes packing; null/undefined handling |
+| `ingest/engine.test.js` | MERGE SQL generation for single-key and composite-key tables; scoped delete SQL generation |
+| `ingest/sessions.test.js` | Session lifecycle (start → continue → end); expired session cleanup |
+| `middleware/crawlerAuth.test.js` | Hash verification; rate limit enforcement; expired key rejection |
 
-**Setup:**
+**Setup already done:**
+- `vitest` in `app/api/package.json` devDependencies
+- `"test": "vitest run"` script in `app/api/package.json`
 
-```json
-// UI/backend/package.json — add:
-"scripts": {
-  "test": "vitest run",
-  "test:watch": "vitest",
-  "test:coverage": "vitest run --coverage"
-},
-"devDependencies": {
-  "vitest": "^3.0.0",
-  "@vitest/coverage-v8": "^3.0.0"
-}
-```
-
-```js
-// UI/backend/vitest.config.js
-import { defineConfig } from 'vitest/config';
-export default defineConfig({
-  test: {
-    globals: true,
-    environment: 'node',
-  },
-});
-```
-
-#### 1c. Frontend React Unit Tests (NEW)
+#### 1c. Frontend React Unit Tests (TODO)
 
 **Runner:** Vitest + React Testing Library
 
-**Location:** `UI/frontend/src/__tests__/`
+**Location:** `app/ui/src/__tests__/`
 
 **Tests to create:**
 
@@ -126,21 +115,20 @@ export default defineConfig({
 | `hooks/useEntityPage.test.js` | Search filtering; pagination state; tag operations |
 | `ingest validation (shared)` | Any shared validation logic used client-side |
 
-**Setup:**
+**Setup needed:**
+
+```bash
+cd app/ui
+npm install -D vitest @vitest/coverage-v8 @testing-library/react @testing-library/jest-dom jsdom
+```
+
+Add to `app/ui/package.json`:
 
 ```json
-// UI/frontend/package.json — add:
 "scripts": {
   "test": "vitest run",
   "test:watch": "vitest",
   "test:coverage": "vitest run --coverage"
-},
-"devDependencies": {
-  "vitest": "^3.0.0",
-  "@vitest/coverage-v8": "^3.0.0",
-  "@testing-library/react": "^16.0.0",
-  "@testing-library/jest-dom": "^6.0.0",
-  "jsdom": "^25.0.0"
 }
 ```
 
@@ -197,19 +185,22 @@ export default defineConfig({
 
 **Goal:** Verify the full stack works from a user's perspective — data ingested via API shows up correctly in the UI.
 
-#### 3a. Existing E2E Tests (Extend)
+#### 3a. Existing E2E Tests
 
-**Location:** `UI/frontend/e2e/`
+**Location:** `app/ui/e2e/`
 
-**Existing specs (11):** navigation, matrix, users, groups, access-packages, sync-log, risk-scoring, org-chart, performance, detail-pages, identities
+**Current specs (12):** navigation ✅, matrix ✅, tags ✅ (new), users-page ✅, groups-page ✅, access-packages ✅, sync-log ✅, risk-scoring ✅, org-chart ✅, performance ✅, detail-pages ✅, identities ✅
 
-**Add these specs:**
+All specs run against the mock backend (`USE_SQL=false, AUTH_ENABLED=false`). Playwright config starts both servers automatically.
+
+The `navigation.spec.js` was updated to match the current app state: "Identity Atlas" title/heading, correct tab labels (Resources not Groups, Business Roles not Access Packages), optional tabs excluded from the always-visible assertion.
+
+**Still to add:**
 
 | Spec | Tests |
 |---|---|
-| `crawlers.spec.js` | Crawlers page loads; register crawler shows key; enable/disable toggle works; audit log expands; no console errors |
 | `swagger.spec.js` | `/api/docs` loads Swagger UI; spec renders without errors |
-| `ingest-data-flow.spec.js` | After ingest: resources page shows ingested resources; users page shows ingested principals; matrix shows assignments; detail pages show version history; sync log shows ingest entries |
+| `ingest-data-flow.spec.js` | After real ingest: resources/users/matrix/sync-log show data |
 
 #### 3b. Real-Data E2E (NEW — Nightly Only)
 
@@ -528,57 +519,59 @@ it('should [describe expected behavior] (regression: [issue-description])', asyn
 
 ## Implementation Steps
 
-### Step 1: Set Up Test Infrastructure (Day 1)
+### Step 1: Test Infrastructure ✅ Done
 
-- [ ] Add Vitest to backend: `npm install -D vitest @vitest/coverage-v8` in `UI/backend/`
-- [ ] Add `vitest.config.js` to `UI/backend/`
-- [ ] Add test scripts to `UI/backend/package.json`
-- [ ] Add Vitest + Testing Library to frontend: `npm install -D vitest @vitest/coverage-v8 @testing-library/react @testing-library/jest-dom jsdom` in `UI/frontend/`
-- [ ] Add `vitest.config.js` to `UI/frontend/`
-- [ ] Add test scripts to `UI/frontend/package.json`
-- [ ] Create directory structure: `UI/backend/src/__tests__/`, `UI/backend/src/__tests__/integration/`, `UI/frontend/src/__tests__/`
+- [x] Add Vitest to `app/api/package.json` (devDependencies + `"test"` script)
+- [x] Add ESLint flat config to `app/ui/eslint.config.js`
+- [x] Migrate PowerShell unit tests to Pester v5 (`test/unit/IdentityAtlas.Tests.ps1`)
+- [x] PR pipeline (`.github/workflows/pr.yml`) — PSScriptAnalyzer, ESLint, Pester+coverage, Vitest, Spectral, npm audit
+- [x] Central test config (`test/test.config.json`)
+- [x] Fix nightly workflow paths (`test/automation/github-nightly-tests.yml`)
+- [ ] Add Vitest + Testing Library to `app/ui` for React component tests
+- [ ] Create `app/ui/src/__tests__/` directory structure
 
-### Step 2: Backend Unit Tests (Day 2-3)
+### Step 2: Backend Unit Tests (Partially Done ✅)
 
-- [ ] `ingest/validation.test.js` — all envelope and record validation rules
+- [x] `ingest/validation.test.js` — 53 test cases covering all envelope + record validation rules
 - [ ] `ingest/normalization.test.js` — GUID generation, type coercion, extendedAttributes
 - [ ] `ingest/engine.test.js` — SQL generation logic (mock the pool, test the SQL strings)
 - [ ] `middleware/crawlerAuth.test.js` — hash verification, rate limiting, scope checking
 
-### Step 3: Backend Integration Tests (Day 4-5)
+### Step 3: Backend Integration Tests
 
-- [ ] Set up Docker SQL in CI (service container)
+- [ ] Set up Docker SQL in CI (service container in GitHub Actions)
 - [ ] `ingest-engine.integration.test.js` — full merge + delete cycle against real SQL
 - [ ] `ingest-endpoints.integration.test.js` — HTTP calls to each endpoint
 - [ ] `crawler-auth.integration.test.js` — full key lifecycle
 
-### Step 4: Frontend Unit Tests (Day 5-6)
+### Step 4: Frontend Unit Tests
 
 - [ ] `CrawlersPage.test.jsx` — render, register, toggle
 - [ ] `exportToExcel.test.js` — column mapping, color assignment
 - [ ] `useEntityPage.test.js` — search, pagination state
 
-### Step 5: E2E Tests (Day 6-7)
+### Step 5: E2E Tests (Mostly Done ✅)
 
-- [ ] `crawlers.spec.js` — Playwright tests for crawler admin page
+- [x] `tags.spec.js` — tag lifecycle via API (create → assign → filter → delete)
+- [x] Fixed `navigation.spec.js` — corrected stale tab labels and title after rebrand
 - [ ] `swagger.spec.js` — Swagger UI loads
-- [ ] `ingest-data-flow.spec.js` — data visible in UI after ingest
+- [ ] `ingest-data-flow.spec.js` — data visible in UI after real ingest
 
-### Step 6: Docker Deployment Test (Day 7)
+### Step 6: Docker Deployment Test ✅ Partially Done
 
-- [ ] `_Test/Test-DockerDeployment.ps1` — full provisioning script
-- [ ] Integrate into GitHub Actions as `docker-integration` job
+- [x] `test/run-docker-tests.ps1` — 87 checks covering infrastructure, API, crawler auth, demo dataset, schema, data counts, integrity, business logic, matrix + tag API
+- [ ] Integrate Docker tests into GitHub Actions nightly pipeline as a dedicated job
 
-### Step 7: Nightly CI Pipeline (Day 8)
+### Step 7: Nightly CI Pipeline ✅ Done
 
-- [ ] Create `.github/workflows/nightly-tests.yml`
+- [x] `test/automation/github-nightly-tests.yml` — fixed paths, migrated to Pester
+- [x] PR pipeline at `.github/workflows/pr.yml`
 - [ ] Configure secrets in GitHub repository settings
-- [ ] Run first nightly manually to validate
-- [ ] Set up notification (Slack/email) on failure
+- [ ] Set up failure notification (Slack/email)
 
-### Step 8: Azure Deployment Test (Day 9-10)
+### Step 8: Azure Deployment Test
 
-- [ ] `_Test/Test-AzureDeployment.ps1` — ephemeral resource group, full deploy + test + cleanup
+- [ ] `test/Test-AzureDeployment.ps1` — ephemeral resource group, full deploy + test + cleanup
 - [ ] Add as optional job in nightly pipeline
 
 ---

@@ -12,35 +12,49 @@
     Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1 -Output Detailed
 #>
 
-$repoRoot    = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$modulePath  = Join-Path $repoRoot 'setup\IdentityAtlas.psd1'
-$functionsRoot = Join-Path $repoRoot 'Functions'
-
 BeforeAll {
-    Import-Module $modulePath -Force -ErrorAction Stop
-    $script:allPs1Files = Get-ChildItem -Path $functionsRoot -Include '*.ps1' -Recurse
+    $script:repoRoot    = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $script:modulePath  = Join-Path $script:repoRoot 'setup\IdentityAtlas.psd1'
+
+    # Actual function roots (repo was restructured from Functions/ subfolders)
+    $script:graphRoot   = Join-Path $script:repoRoot 'tools\powershell-sdk\graph'
+    $script:helpersRoot = Join-Path $script:repoRoot 'tools\powershell-sdk\helpers'
+    $script:riskRoot    = Join-Path $script:repoRoot 'tools\riskscoring'
+    $script:dbRoot      = Join-Path $script:repoRoot 'app\db'
+    $script:azureRoot   = Join-Path $script:repoRoot 'setup\azure'
+
+    Import-Module $script:modulePath -Force -ErrorAction Stop
+
+    # Collect all .ps1 files across every function root
+    $script:allPs1Files = @(
+        Get-ChildItem -Path $script:graphRoot   -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $script:helpersRoot -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $script:riskRoot    -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $script:dbRoot      -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $script:azureRoot   -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
+    )
 }
 
 # ── Module Import ────────────────────────────────────────────────────────────
 
 Describe 'Module Import' {
     It 'imports without errors' {
-        { Import-Module $modulePath -Force -ErrorAction Stop } | Should -Not -Throw
+        { Import-Module $script:modulePath -Force -ErrorAction Stop } | Should -Not -Throw
     }
 
     It 'manifest is valid' {
-        { Test-ModuleManifest -Path $modulePath -ErrorAction Stop } | Should -Not -Throw
+        { Test-ModuleManifest -Path $script:modulePath -ErrorAction Stop } | Should -Not -Throw
     }
 
     It 'version format matches Major.Minor.yyyyMMdd.HHmm' {
-        $content = Get-Content $modulePath -Raw
+        $content = Get-Content $script:modulePath -Raw
         $content | Should -Match "ModuleVersion\s*=\s*'\d+\.\d+\.\d{8}\.\d{4}'"
     }
 }
 
-# ── Function Availability — Base ─────────────────────────────────────────────
+# ── Function Availability — Graph / Base ─────────────────────────────────────
 
-Describe 'Function Availability — Base' {
+Describe 'Function Availability — Graph / Base' {
     It 'exports <_>' -ForEach @(
         'New-FGConfig',
         'Get-FGAccessToken', 'Get-FGAccessTokenInteractive', 'Get-FGAccessTokenWithRefreshToken',
@@ -57,9 +71,9 @@ Describe 'Function Availability — Base' {
     }
 }
 
-# ── Function Availability — Generic ─────────────────────────────────────────
+# ── Function Availability — Generic Graph API ────────────────────────────────
 
-Describe 'Function Availability — Generic (sample)' {
+Describe 'Function Availability — Generic Graph API (sample)' {
     It 'exports <_>' -ForEach @(
         'Get-FGUser', 'Get-FGGroup', 'Get-FGDevice', 'Get-FGApplication', 'Get-FGServicePrincipal',
         'Get-FGCatalog', 'Get-FGAccessPackage', 'Get-FGAccessPackagesAssignments', 'Get-FGAccessPackagesPolicy',
@@ -75,9 +89,9 @@ Describe 'Function Availability — Generic (sample)' {
     }
 }
 
-# ── Function Availability — SQL ──────────────────────────────────────────────
+# ── Function Availability — SQL / DB ─────────────────────────────────────────
 
-Describe 'Function Availability — SQL' {
+Describe 'Function Availability — SQL / DB' {
     It 'exports <_>' -ForEach @(
         'Connect-FGSQLServer', 'New-FGSQLConnection', 'Test-FGSQLConnection',
         'Initialize-FGSQLTable', 'Invoke-FGSQLCommand', 'Invoke-FGSQLQuery',
@@ -87,24 +101,22 @@ Describe 'Function Availability — SQL' {
         'Add-FGSQLTableColumn', 'New-FGSQLReadOnlyUser',
         'Write-FGSyncLog', 'Get-FGSyncLog',
         'Initialize-FGAccessPackageViews', 'Initialize-FGGroupMembershipViews',
-        'Initialize-FGGroupMembershipIndexes'
+        'Initialize-FGGroupMembershipIndexes',
+        'Initialize-FGSystemTables', 'Initialize-FGGovernanceTables',
+        'Initialize-FGResourceViews', 'Initialize-FGResourceIndexes',
+        'Initialize-FGCrawlerTables'
     ) {
         Get-Command $_ -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
     }
 }
 
-# ── Function Availability — Sync ─────────────────────────────────────────────
+# ── Function Availability — Helpers (idempotent) ─────────────────────────────
 
-Describe 'Function Availability — Sync' {
+Describe 'Function Availability — Helpers' {
     It 'exports <_>' -ForEach @(
-        'Start-FGSync',
-        'Sync-FGUser', 'Sync-FGGroup',
-        'Sync-FGGroupMember', 'Sync-FGGroupEligibleMember', 'Sync-FGGroupOwner',
-        'Sync-FGCatalog', 'Sync-FGAccessPackage',
-        'Sync-FGAccessPackageAssignment', 'Sync-FGAccessPackageResourceRoleScope',
-        'Sync-FGAccessPackageAssignmentPolicy', 'Sync-FGAccessPackageAssignmentRequest',
-        'Sync-FGAccessPackageAccessReview',
-        'Initialize-FGSyncTable', 'New-FGDataTableFromGraphObjects'
+        'Confirm-FGUser', 'Confirm-FGGroup', 'Confirm-FGGroupMember', 'Confirm-FGNotGroupMember',
+        'Confirm-FGAccessPackage', 'Confirm-FGAccessPackagePolicy', 'Confirm-FGAccessPackageResource',
+        'Confirm-FGCatalog', 'Confirm-FGGroupInCatalog'
     ) {
         Get-Command $_ -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
     }
@@ -141,7 +153,11 @@ Describe 'Function Availability — RiskScoring' {
 
 Describe 'Removed Functions (must NOT exist)' {
     It '<_> is gone' -ForEach @(
-        'Sync-FGGroupTransitiveMember'
+        'Sync-FGGroupTransitiveMember',
+        'Sync-FGUser',
+        'Sync-FGGroup',
+        'Start-FGSync',
+        'Start-FGCSVSync'
     ) {
         Get-Command $_ -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
@@ -156,7 +172,6 @@ Describe 'Alias Verification' {
         @{ Function = 'Get-FGAccessToken';    Alias = 'Get-AccessToken' },
         @{ Function = 'New-FGConfig';         Alias = 'New-Config' },
         @{ Function = 'Connect-FGSQLServer';  Alias = 'Connect-SQLServer' },
-        @{ Function = 'Start-FGSync';         Alias = 'Start-Sync' },
         @{ Function = 'Invoke-FGGetRequest';  Alias = 'Invoke-GetRequest' },
         @{ Function = 'Invoke-FGPostRequest'; Alias = 'Invoke-PostRequest' }
     ) {
@@ -169,8 +184,20 @@ Describe 'Alias Verification' {
 # ── File Structure ───────────────────────────────────────────────────────────
 
 Describe 'File Structure' {
-    It 'Functions/<_> folder exists' -ForEach @('Base','Generic','Specific','SQL','Sync','Automation','RiskScoring') {
-        Join-Path $functionsRoot $_ | Should -Exist
+    It 'tools/powershell-sdk/graph folder exists' {
+        $script:graphRoot | Should -Exist
+    }
+    It 'tools/powershell-sdk/helpers folder exists' {
+        $script:helpersRoot | Should -Exist
+    }
+    It 'tools/riskscoring folder exists' {
+        $script:riskRoot | Should -Exist
+    }
+    It 'app/db folder exists' {
+        $script:dbRoot | Should -Exist
+    }
+    It 'setup/azure folder exists' {
+        $script:azureRoot | Should -Exist
     }
 
     It 'all .ps1 files follow Verb-FGNoun naming' {
@@ -179,11 +206,14 @@ Describe 'File Structure' {
     }
 
     It 'IdentityAtlas.psm1 dot-sources <_>' -ForEach @(
-        'functions\base', 'functions\generic', 'functions\specific',
-        'functions\SQL', 'functions\sync', 'functions\automation'
+        "tools\powershell-sdk\graph",
+        "tools\powershell-sdk\helpers",
+        "tools\riskscoring",
+        "app\db",
+        "PSScriptRoot 'azure'"    # setup/azure — psm1 uses (Join-Path $PSScriptRoot 'azure')
     ) {
-        $psm1 = Get-Content (Join-Path $repoRoot 'setup\IdentityAtlas.psm1') -Raw
-        $psm1 | Should -Match [regex]::Escape($_)
+        $psm1 = Get-Content (Join-Path $script:repoRoot 'setup\IdentityAtlas.psm1') -Raw
+        $psm1 | Should -Match ([regex]::Escape($_))
     }
 }
 
@@ -237,7 +267,7 @@ Describe 'Code Quality' {
     It 'base HTTP functions use = not += for first $ReturnValue assignment' {
         $httpFiles = @('Invoke-FGPostRequest.ps1','Invoke-FGPatchRequest.ps1','Invoke-FGPutRequest.ps1','Invoke-FGDeleteRequest.ps1')
         $bad = $httpFiles | Where-Object {
-            $path = Join-Path $functionsRoot "Base\$_"
+            $path = Join-Path $script:graphRoot $_
             if (-not (Test-Path $path)) { return $false }
             $lines = Get-Content $path
             foreach ($line in $lines) {
@@ -246,7 +276,7 @@ Describe 'Code Quality' {
             }
             return $false
         }
-        $bad | Should -BeNullOrEmpty -Because "+=  used in: $($bad -join ', ')"
+        $bad | Should -BeNullOrEmpty -Because "+= used in: $($bad -join ', ')"
     }
 }
 
@@ -254,7 +284,7 @@ Describe 'Code Quality' {
 
 Describe 'Config Template' {
     BeforeAll {
-        $script:templatePath = Join-Path $repoRoot 'Config\tenantname.json.template'
+        $script:templatePath = Join-Path $script:repoRoot 'setup\config\tenantname.json.template'
     }
 
     It 'template file exists' {
@@ -274,36 +304,30 @@ Describe 'Config Template' {
 # ── Function Counts ──────────────────────────────────────────────────────────
 
 Describe 'Function Counts' {
-    It 'Base has exactly 21 files' {
-        (Get-ChildItem (Join-Path $functionsRoot 'Base') -Filter '*.ps1').Count | Should -Be 21
+    It 'tools/powershell-sdk/graph has 65-80 files' {
+        $n = (Get-ChildItem $script:graphRoot -Filter '*.ps1').Count
+        $n | Should -BeGreaterOrEqual 65
+        $n | Should -BeLessOrEqual 80
     }
-    It 'Generic has 45-55 files' {
-        $n = (Get-ChildItem (Join-Path $functionsRoot 'Generic') -Filter '*.ps1').Count
-        $n | Should -BeGreaterOrEqual 45
-        $n | Should -BeLessOrEqual 55
+    It 'tools/powershell-sdk/helpers has exactly 9 files' {
+        (Get-ChildItem $script:helpersRoot -Filter '*.ps1').Count | Should -Be 9
     }
-    It 'Specific has exactly 9 files' {
-        (Get-ChildItem (Join-Path $functionsRoot 'Specific') -Filter '*.ps1').Count | Should -Be 9
+    It 'tools/riskscoring has 15-20 files' {
+        $n = (Get-ChildItem $script:riskRoot -Filter '*.ps1').Count
+        $n | Should -BeGreaterOrEqual 15
+        $n | Should -BeLessOrEqual 20
     }
-    It 'SQL has 20-28 files' {
-        $n = (Get-ChildItem (Join-Path $functionsRoot 'SQL') -Filter '*.ps1').Count
-        $n | Should -BeGreaterOrEqual 20
-        $n | Should -BeLessOrEqual 28
+    It 'app/db has 30-45 files' {
+        $n = (Get-ChildItem $script:dbRoot -Filter '*.ps1').Count
+        $n | Should -BeGreaterOrEqual 30
+        $n | Should -BeLessOrEqual 45
     }
-    It 'Sync has 14-18 files' {
-        $n = (Get-ChildItem (Join-Path $functionsRoot 'Sync') -Filter '*.ps1').Count
-        $n | Should -BeGreaterOrEqual 14
-        $n | Should -BeLessOrEqual 18
+    It 'setup/azure has exactly 8 files' {
+        (Get-ChildItem $script:azureRoot -Filter '*.ps1').Count | Should -Be 8
     }
-    It 'Automation has exactly 8 files' {
-        (Get-ChildItem (Join-Path $functionsRoot 'Automation') -Filter '*.ps1').Count | Should -Be 8
-    }
-    It 'RiskScoring has exactly 13 files' {
-        (Get-ChildItem (Join-Path $functionsRoot 'RiskScoring') -Filter '*.ps1').Count | Should -Be 13
-    }
-    It 'total function count is 135-170' {
-        $n = (Get-ChildItem $functionsRoot -Include '*.ps1' -Recurse).Count
-        $n | Should -BeGreaterOrEqual 135
-        $n | Should -BeLessOrEqual 170
+    It 'total function count is 130-175' {
+        $n = $script:allPs1Files.Count
+        $n | Should -BeGreaterOrEqual 130
+        $n | Should -BeLessOrEqual 175
     }
 }

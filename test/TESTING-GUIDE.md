@@ -1,21 +1,22 @@
-# FortigiGraph Complete Testing Guide
+# Identity Atlas — Complete Testing Guide
 
-> **For human testers** — this guide walks you through testing FortigiGraph end-to-end, from a fresh setup to validating every major feature. Automated test scripts are provided where possible.
+> **For human testers** — this guide walks you through testing Identity Atlas end-to-end, from a fresh setup to validating every major feature. Automated test scripts are provided where possible.
 
 ## Table of Contents
 
 1. [Prerequisites](#1-prerequisites)
 2. [Environment Setup](#2-environment-setup)
-3. [Phase 1: Offline Tests (No Azure Required)](#3-phase-1-offline-tests-no-azure-required)
-4. [Phase 2: Azure + Graph Setup](#4-phase-2-azure--graph-setup)
-5. [Phase 3: SQL + Sync Integration Tests](#5-phase-3-sql--sync-integration-tests)
-6. [Phase 4: Risk Scoring Tests](#6-phase-4-risk-scoring-tests)
-7. [Phase 5: UI Deployment + Frontend Tests](#7-phase-5-ui-deployment--frontend-tests)
-8. [Phase 6: UI Feature Walkthrough (Manual)](#8-phase-6-ui-feature-walkthrough-manual)
-9. [Phase 7: Azure Automation Tests](#9-phase-7-azure-automation-tests)
-10. [Phase 8: Cleanup](#10-phase-8-cleanup)
-11. [Test Script Reference](#11-test-script-reference)
-12. [CI/CD: Nightly Automated Runs](#12-cicd-nightly-automated-runs)
+3. [Phase 0: PR Checks (No Azure, No Docker)](#3-phase-0-pr-checks-no-azure-no-docker)
+4. [Phase 1: Offline Tests (Docker Only)](#4-phase-1-offline-tests-docker-only)
+5. [Phase 2: Azure + Graph Setup](#5-phase-2-azure--graph-setup)
+6. [Phase 3: SQL + Sync Integration Tests](#6-phase-3-sql--sync-integration-tests)
+7. [Phase 4: Risk Scoring Tests](#7-phase-4-risk-scoring-tests)
+8. [Phase 5: UI Deployment + Frontend Tests](#8-phase-5-ui-deployment--frontend-tests)
+9. [Phase 6: UI Feature Walkthrough (Manual)](#9-phase-6-ui-feature-walkthrough-manual)
+10. [Phase 7: Azure Automation Tests](#10-phase-7-azure-automation-tests)
+11. [Phase 8: Cleanup](#11-phase-8-cleanup)
+12. [Test File Reference](#12-test-file-reference)
+13. [CI/CD Pipelines](#13-cicd-pipelines)
 
 ---
 
@@ -150,42 +151,124 @@ Connect-AzAccount -TenantId "YOUR-TENANT-ID" -SubscriptionId "YOUR-SUBSCRIPTION-
 
 ---
 
-## 3. Phase 1: Offline Tests (No Azure Required)
+## 3. Phase 0: PR Checks (No Azure, No Docker)
 
-These tests validate the module itself without needing any Azure resources.
+These checks run on every pull request and take under 5 minutes. They require nothing beyond a local checkout.
 
-### Run the Unit Tests
+### PSScriptAnalyzer — PowerShell Linting
 
 ```powershell
-pwsh -File _Test\Test-Unit.ps1
+Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+Invoke-ScriptAnalyzer -Path ./Functions -Recurse -Severity Warning,Error
+```
+
+### ESLint — JavaScript Linting
+
+```bash
+cd app/ui
+npm ci
+npm run lint
+```
+
+### Pester — PowerShell Unit Tests
+
+```powershell
+Install-Module Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser
+Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1 -Output Detailed
 ```
 
 **What it tests:**
-- Module import and all 140 functions are loaded
-- Every function has the correct `FG` prefix and alias
-- All function files follow naming conventions
-- `[cmdletbinding()]` attribute is present on all functions
-- No Dutch comments remain in the codebase
-- Config template is valid JSON
-- No hardcoded credentials or tokens in source files
-- Module manifest version format is valid
-- All sync function files exist for each enabled sync type
-- Graph API helper functions are available (Get/Post/Patch/Put/Delete)
+- Module imports without errors; manifest is valid; version format is `Major.Minor.yyyyMMdd.HHmm`
+- All ~130 expected functions are exported (Base, Generic, SQL, Sync, Automation, RiskScoring)
+- Removed functions are gone (e.g. `Sync-FGGroupTransitiveMember`)
+- All function aliases point to the correct functions
+- All `.ps1` files follow `Verb-FGNoun` naming convention
+- `[CmdletBinding()]` present on all functions; no Dutch comments; no hardcoded secrets; no `Write-Output`
+- Config template exists and is valid JSON with required sections
+- Function counts per folder within expected ranges
 
 **Expected result:** All tests pass with 0 failures.
 
-**If tests fail:** Fix any issues before proceeding to Phase 2. Common issues:
-- Module import failure → Check PowerShell version (`$PSVersionTable`)
-- Missing functions → Check that no `.ps1` files have syntax errors
+### Vitest — API Unit Tests
+
+```bash
+cd app/api
+npm ci
+npm test
+```
+
+**What it tests** (`src/ingest/validation.test.js`, 53 test cases):
+- `validateEnvelope`: required fields, array bounds (0–50 000), `syncMode`/`idGeneration` enums, `idPrefix` requirement, `systems` endpoint skips `systemId`
+- `validateRecords` for `principals`: required `displayName`, UUID enforcement on `id`/`managerId`, all `principalType` enum values, `maxLength` on string fields, non-string rejection
+- `validateRecords` for `resource-assignments`: required triad, all `assignmentType` values
+- `validateRecords` for `resource-relationships`: required triad, all `relationshipType` values
+- Unknown entity type → error; 10-error cap with "stopped after" message
+
+### npm audit — Dependency Scan
+
+```bash
+cd app/ui  && npm audit --audit-level=high
+cd app/api && npm audit --audit-level=high
+```
+
+### OpenAPI Lint — Spectral
+
+```bash
+npm install -g @stoplight/spectral-cli
+spectral lint app/api/src/openapi.yaml --ruleset @stoplight/spectral-oas
+```
 
 ---
 
-## 4. Phase 2: Azure + Graph Setup
+## 4. Phase 1: Offline Tests (Docker Only)
+
+These tests validate the full stack locally using Docker. No Azure account needed.
+
+### Start the Docker stack
+
+```bash
+docker compose up -d --build
+# Wait ~30 seconds for SQL to initialize
+```
+
+### Run the Docker integration test suite
+
+```powershell
+pwsh -File test/run-docker-tests.ps1
+```
+
+Results are written to `test/test-results.md`.
+
+**What it tests (87 checks across 9 categories):**
+
+| Category | Coverage |
+|---|---|
+| Infrastructure | SQL, backend, worker containers running; table-init exited 0 |
+| API | Health, version, features, auth-config, Swagger UI, OpenAPI spec, frontend HTML |
+| CrawlerAuth | Register, whoami, invalid key rejection, key rotation, admin list |
+| DemoDataset | Generate + ingest via API |
+| Schema | 14 expected tables exist |
+| DataCounts | Row count minimums for all entity tables after ingest |
+| Integrity | No orphan assignments (resourceId / principalId FK checks) |
+| BusinessLogic | Principal types, resource types, assignment types, context hierarchy, governance |
+| MatrixAPI | Matrix returns user rows; tag create → assign → filter → delete lifecycle |
+
+**Expected result:** 87 passed, 0 failed.
+
+**Teardown:**
+
+```bash
+docker compose down -v
+```
+
+---
+
+## 5. Phase 2: Azure + Graph Setup
 
 ### Run the Simple Diagnostics
 
 ```powershell
-pwsh -File _Test\Test-Simple.ps1 -ConfigFile _Test\config.test.json
+pwsh -File test/unit/Test-Simple.ps1 -ConfigFile _Test\config.test.json
 ```
 
 This validates your config file, Azure connection, and module readiness.
@@ -193,7 +276,7 @@ This validates your config file, Azure connection, and module readiness.
 ### Run Graph API Tests
 
 ```powershell
-pwsh -File _Test\Test-GraphAPI.ps1 -ConfigFile _Test\config.test.json
+pwsh -File test/unit/Test-GraphAPI.ps1 -ConfigFile _Test\config.test.json
 ```
 
 **What it tests:**
@@ -373,7 +456,7 @@ Playwright E2E tests validate that UI pages render correctly, navigation works, 
 **First-time setup:**
 
 ```bash
-cd UI/frontend
+cd app/ui
 npm install
 npx playwright install chromium
 ```
@@ -381,6 +464,8 @@ npx playwright install chromium
 **Run tests:**
 
 ```bash
+cd app/ui
+
 # Headless (CI-friendly)
 npm run test:e2e
 
@@ -393,31 +478,33 @@ npm run test:e2e:ui
 
 Playwright automatically starts the mock backend (`USE_SQL=false`) and Vite dev server. No manual startup needed.
 
-**What it tests (8 test files, ~50 assertions):**
+**What it tests (12 spec files):**
 
-| Test File | What It Validates |
+| Spec file | What it validates |
 |-----------|-------------------|
-| `navigation.spec.js` | App loads, all 8 tabs visible, tab switching, hash routing, no auth gate in NoAuth mode |
-| `matrix.spec.js` | Matrix renders rows/columns, user limit slider, IST/SOLL toggle, D/I/E badges, share/export buttons, filter dropdowns |
-| `users-page.spec.js` | User table, search debounce, tag creation flow, pagination, checkbox selection, click-to-detail |
-| `groups-page.spec.js` | Group table, search filtering, tag management, click-to-detail |
-| `access-packages.spec.js` | AP table, search, category creation flow, assignment type badges, pagination |
+| `navigation.spec.js` | Title is "Identity Atlas"; always-visible tabs present (Matrix, Users, Resources, Systems, Business Roles, Sync Log); tab switching; hash routing; no auth gate in no-auth mode |
+| `matrix.spec.js` | Matrix table renders with rows; user limit slider; IST/SOLL/All toggle; D/I/E membership badges; share/export buttons; filter dropdowns |
+| `tags.spec.js` | Full tag lifecycle via API: create → appears in list → assign to resource → filter resources by tag → matrix `__groupTag` filter → delete |
+| `users-page.spec.js` | User table, search debounce, tag flow, pagination, click-to-detail |
+| `groups-page.spec.js` | Resource table (formerly Groups), search, tag management, click-to-detail |
+| `access-packages.spec.js` | Business Roles table, category creation, assignment type badges, pagination |
 | `sync-log.spec.js` | Table or empty state, column headers, status badge colors |
 | `risk-scoring.spec.js` | Page renders, tier badges, score bars, no unhandled errors |
-| `org-chart.spec.js` | Page renders, search input, no crashes, can navigate away |
-| `performance.spec.js` | View tabs (Summary/Recent/Slow), tab switching, export button |
-| `detail-pages.spec.js` | Hash-based detail routing, detail tabs in nav, multiple tabs, close button |
+| `org-chart.spec.js` | Page renders, search input, no crashes |
+| `performance.spec.js` | Summary/Recent/Slow tabs, export button |
+| `detail-pages.spec.js` | Hash-based detail routing, multiple tabs open, close button |
+| `identities.spec.js` | Identities page renders without errors |
 
-**Test reports** are saved to `UI/frontend/playwright-report/` (open `index.html` in a browser).
+**Test reports** are saved to `app/ui/playwright-report/` (open `index.html` in a browser).
 
-**Screenshots on failure** are saved to `UI/frontend/test-results/`.
+**Screenshots on failure** are saved to `app/ui/test-results/`.
 
 ### Run E2E Tests Against Deployed UI
 
 To test against a live deployment instead of mock data:
 
 ```bash
-cd UI/frontend
+cd app/ui
 BASE_URL=https://your-app.azurewebsites.net npx playwright test
 ```
 
@@ -578,234 +665,139 @@ Remove-Item _Test\exports\* -ErrorAction SilentlyContinue
 
 ---
 
-## 11. Test Script Reference
+## 12. Test File Reference
 
-| Script | Phase | Azure Required | Duration | Purpose |
-|--------|-------|---------------|----------|---------|
-| `Test-Unit.ps1` | 1 | No | ~10 sec | Module structure, naming, code quality |
-| `Test-Simple.ps1` | 2 | Yes (login) | ~5 sec | Config + Azure context validation |
-| `Test-GraphAPI.ps1` | 2 | Yes (token) | ~30 sec | Graph API connectivity + basic queries |
-| `Test-Integration.ps1` | 3 | Yes (full) | 15-30 min | Full end-to-end: create, sync, query |
-| `Test-Integration-Fast.ps1` | 3 | Yes (reuse) | 5-10 min | Regression: clear + re-sync |
-| `Test-RiskScoring.ps1` | 4 | Yes + LLM key | 5-10 min | Risk profile, classifiers, scoring |
-| `Test-UIBackend.ps1` | 5 | Yes (deployed) | ~30 sec | Backend API endpoint validation |
-| `e2e/*.spec.js` (Playwright) | 5 | No (mock) | ~30 sec | Browser rendering, navigation, interactions |
-| **`Run-AllTests.ps1`** | **All** | **Varies** | **20-45 min** | **Single-command runner for the entire suite** |
-
-### Single-Command Full Suite
-
-Use `Run-AllTests.ps1` to run everything with one command. It runs all phases sequentially, skips phases that lack required parameters, and prints a combined summary at the end.
-
-```powershell
-# ── First time (creates SQL Server + runs all tests) ──────────────
-pwsh -File _Test\Run-AllTests.ps1 `
-    -ConfigFile _Test\config.test.json `
-    -FirstRun `
-    -LLMProvider Anthropic -LLMApiKey "sk-ant-..." `
-    -UIBaseUrl "https://fg-test.azurewebsites.net"
-
-# ── Regression run (reuses SQL, skips risk scoring) ───────────────
-pwsh -File _Test\Run-AllTests.ps1 `
-    -ConfigFile _Test\config.test.json
-
-# ── Offline only (no Azure, no config needed) ─────────────────────
-pwsh -File _Test\Run-AllTests.ps1
-
-# ── Full suite, abort on first failure ────────────────────────────
-pwsh -File _Test\Run-AllTests.ps1 `
-    -ConfigFile _Test\config.test.json `
-    -StopOnFailure
-
-# ── Skip specific phases ──────────────────────────────────────────
-pwsh -File _Test\Run-AllTests.ps1 `
-    -ConfigFile _Test\config.test.json `
-    -SkipIntegration `
-    -SkipE2E
-```
-
-**Phase execution logic:**
-
-| Phase | Runs When | Skip Flag |
-|-------|-----------|-----------|
-| 1. Unit Tests | Always | — |
-| 2a. Simple Diagnostics | `-ConfigFile` provided | — |
-| 2b. Graph API | `-ConfigFile` provided | — |
-| 3. Integration | `-ConfigFile` provided | `-SkipIntegration` |
-| 4. Risk Scoring | `-ConfigFile` + `-LLMProvider` + `-LLMApiKey` | `-SkipRiskScoring` |
-| 5a. UI Backend API | `-UIBaseUrl` provided | `-SkipUIBackend` |
-| 5b. UI E2E (Playwright) | Node.js installed | `-SkipE2E` |
-
-The runner produces a summary like:
+### Test structure
 
 ```
-╔══════════════════════════════════════════════════╗
-║           FORTIGRAPH TEST SUITE RESULTS          ║
-╠══════════════════════════════════════════════════╣
-║   ✓ 1. Unit Tests                       8.2s    ║
-║   ✓ 2a. Simple Diagnostics             3.1s    ║
-║   ✓ 2b. Graph API                      12.4s   ║
-║   ✓ 3. Integration (fast)              287.3s  ║
-║   ✗ 4. Risk Scoring                    45.2s   ║
-║   ✓ 5b. UI E2E Browser Tests           18.7s   ║
-╠══════════════════════════════════════════════════╣
-║   Passed: 5 / 6                Total: 375s     ║
-╚══════════════════════════════════════════════════╝
+test/
+├── test.config.json              # Central config: API URLs, SQL credentials
+├── run-docker-tests.ps1          # Docker integration suite (87 checks)
+├── test-results.md               # Latest Docker test run results
+├── TESTING-GUIDE.md              # This file
+├── unit/
+│   ├── IdentityAtlas.Tests.ps1   # Pester v5 unit tests (module structure, quality)
+│   ├── Test-Simple.ps1           # Azure context + config validation
+│   └── Test-GraphAPI.ps1         # Graph API connectivity tests
+├── demo-dataset/
+│   ├── Generate-DemoDataset.ps1  # Generates demo-company.json
+│   ├── Ingest-DemoDataset.ps1    # Posts dataset to Ingest API
+│   └── demo-company.json         # Generated fixture (gitignored)
+├── datasets/
+│   └── DatasetLed2/              # Omada CSV dataset (10 files, real-shape data)
+├── nightly/
+│   ├── Register-NightlySchedule.ps1
+│   └── Run-NightlyLocal.ps1
+└── automation/
+    └── github-nightly-tests.yml  # Nightly GitHub Actions workflow
+
+app/
+├── api/
+│   ├── package.json              # includes "test": "vitest run"
+│   └── src/ingest/
+│       ├── validation.js         # Validation logic
+│       └── validation.test.js    # Vitest unit tests (53 test cases)
+└── ui/
+    ├── playwright.config.js      # Starts mock backend + Vite dev server
+    ├── eslint.config.js          # ESLint 9 flat config
+    └── e2e/                      # Playwright spec files (12 files)
+        ├── navigation.spec.js
+        ├── matrix.spec.js
+        ├── tags.spec.js          # Tag lifecycle: create → assign → filter → delete
+        ├── users-page.spec.js
+        ├── groups-page.spec.js
+        ├── access-packages.spec.js
+        ├── sync-log.spec.js
+        ├── risk-scoring.spec.js
+        ├── org-chart.spec.js
+        ├── performance.spec.js
+        ├── detail-pages.spec.js
+        └── identities.spec.js
+
+.github/workflows/
+├── pr.yml                        # PR checks (fast, no Docker/Azure)
+└── docs.yml                      # MkDocs deploy on push to main
 ```
 
-### Running Individual Tests
+### Quick-reference command table
 
-```powershell
-# Phase 1: Offline
-pwsh -File _Test\Test-Unit.ps1
-
-# Phase 2: Setup validation
-pwsh -File _Test\Test-Simple.ps1 -ConfigFile _Test\config.test.json
-pwsh -File _Test\Test-GraphAPI.ps1 -ConfigFile _Test\config.test.json
-
-# Phase 3: Integration (first time)
-pwsh -File _Test\Test-Integration.ps1 -ConfigFile _Test\config.test.json -SkipCleanup
-
-# Phase 4: Risk scoring (optional)
-pwsh -File _Test\Test-RiskScoring.ps1 -ConfigFile _Test\config.test.json -LLMProvider Anthropic -LLMApiKey "sk-ant-..."
-
-# Phase 5: UI backend (after deploying)
-pwsh -File _Test\Test-UIBackend.ps1 -BaseUrl "https://your-ui.azurewebsites.net" [-BearerToken "..."]
-
-# Phase 5b: UI E2E browser tests (no Azure needed — uses mock backend)
-cd UI/frontend && npx playwright install chromium && npm run test:e2e
-```
+| What | Command | Azure? | Docker? | Duration |
+|------|---------|--------|---------|----------|
+| Pester unit tests | `Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1` | No | No | ~15 s |
+| Vitest API tests | `cd app/api && npm test` | No | No | ~5 s |
+| ESLint | `cd app/ui && npm run lint` | No | No | ~5 s |
+| PSScriptAnalyzer | `Invoke-ScriptAnalyzer -Path ./Functions -Recurse` | No | No | ~10 s |
+| Docker suite | `pwsh -File test/run-docker-tests.ps1` | No | Yes | ~30 s |
+| Playwright E2E | `cd app/ui && npm run test:e2e` | No | No | ~45 s |
+| Azure diagnostics | `pwsh -File test/unit/Test-Simple.ps1 -ConfigFile ...` | Yes | No | ~5 s |
+| Graph API tests | `pwsh -File test/unit/Test-GraphAPI.ps1 -ConfigFile ...` | Yes | No | ~30 s |
 
 ### Logs
 
-All test scripts write transcripts to `_Test/logs/`. Check these for detailed output if any test fails.
+Docker test output goes to `test/test-results.md`. Playwright reports go to `app/ui/playwright-report/`. Pester JUnit XML goes to `pester-results.xml` (CI) or console output (local).
 
 ### Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
+| Pester "module not found" | Run `Install-Module Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser` |
+| ESLint "No files matched" | Check `eslint.config.js` exists in `app/ui/` |
+| Docker tests fail on SQL connection | Wait longer after `docker compose up` — SQL takes ~20 s to init |
 | "No Access Token found" | Run `Get-FGAccessToken -ConfigFile config.test.json` first |
-| SQL connection timeout | Check SQL Server firewall allows your IP |
-| 403 on Graph API | Verify app registration has correct permissions + admin consent |
-| "Module not found" | Run from the repo root: `Import-Module .\IdentityAtlas.psd1 -Force` |
-| Risk scoring returns 0 scores | Ensure sync has run first — scoring reads from SQL tables |
-| UI returns 500 errors | Check App Service logs: `az webapp log tail --name <app-name> -g <rg>` |
+| SQL firewall timeout | Verify your IP is allowed in the Azure SQL firewall |
+| 403 on Graph API | Check app registration has correct permissions + admin consent |
+| UI returns 500 errors | `az webapp log tail --name <app-name> -g <rg>` |
 
 ---
 
-## 12. CI/CD: Nightly Automated Runs
+## 13. CI/CD Pipelines
 
-Both GitHub Actions and Azure DevOps pipelines are provided. They run the full test suite on a schedule (02:00 UTC nightly) and can be triggered manually.
+### PR Pipeline (`.github/workflows/pr.yml`)
 
-### Option A: GitHub Actions
+Runs on every pull request to `main` or `dev`. No Docker, no Azure credentials needed. All 6 jobs run in parallel:
 
-**File:** `.github/workflows/nightly-tests.yml`
+| Job | Tool | What it checks |
+|-----|------|----------------|
+| `lint-ps` | PSScriptAnalyzer | PowerShell code quality (Warnings + Errors fail the build) |
+| `lint-js` | ESLint | JavaScript/JSX code quality in `app/ui/` |
+| `unit-tests` | Pester v5 | Module structure, function availability, code quality; JaCoCo coverage artifact |
+| `unit-js` | Vitest | API validation logic (53 test cases in `validation.test.js`) |
+| `openapi` | Spectral | `app/api/src/openapi.yaml` conforms to OAS3 ruleset |
+| `audit` | npm audit | No high-severity vulnerabilities in `app/ui` or `app/api` |
 
-**Setup:**
+**Typical duration:** 3–5 minutes.
 
-1. Go to **Settings → Secrets and variables → Actions** and add these secrets:
+### Nightly Pipeline (`.github/workflows/` → `test/automation/github-nightly-tests.yml`)
 
-   | Secret | Required | Value |
-   |--------|----------|-------|
-   | `AZURE_CREDENTIALS` | Yes | Service principal JSON (see below) |
-   | `TEST_CONFIG` | Yes | Full contents of your `config.test.json` |
-   | `SQL_ADMIN_PASSWORD` | Yes | SQL Server admin password |
-   | `GRAPH_CLIENT_SECRET` | Yes | Graph API client secret |
-   | `LLM_API_KEY` | No | Anthropic or OpenAI API key |
-   | `LLM_PROVIDER` | No | `Anthropic` or `OpenAI` (default: Anthropic) |
-   | `UI_BASE_URL` | No | Deployed UI URL |
-   | `UI_BEARER_TOKEN` | No | Bearer token for authenticated UI |
-
-2. Create the Azure service principal:
-
-   ```bash
-   az ad sp create-for-rbac --name "FortigiGraph-CI" \
-     --role contributor \
-     --scopes /subscriptions/YOUR-SUBSCRIPTION-ID \
-     --sdk-auth
-   ```
-
-   Copy the entire JSON output into the `AZURE_CREDENTIALS` secret.
-
-3. The pipeline runs automatically at 02:00 UTC. To trigger manually: **Actions → Nightly Tests → Run workflow**.
+Runs at 02:00 UTC daily and on-demand. Requires Azure secrets.
 
 **Pipeline structure:**
 
 ```
-unit-tests ──┬──→ integration-tests (Phase 2-4)
-             ├──→ ui-backend-tests  (Phase 5a, if UI_BASE_URL set)
-             └──→ e2e-tests         (Phase 5b, Playwright)
-                          └──→ summary
+unit-tests (Pester) ──┬──→ integration-tests (Azure SQL + Graph)
+                      ├──→ ui-backend-tests  (deployed UI, if URL set)
+                      └──→ e2e-tests         (Playwright, app/ui/)
+                                    └──→ summary
 ```
 
-Unit tests run first. If they pass, the remaining jobs run **in parallel** to minimize total time.
+**Required secrets** (Settings → Secrets → Actions):
 
-**Artifacts:** Test logs, Playwright reports, and failure screenshots are uploaded as pipeline artifacts (retained 30 days).
+| Secret | Required | Value |
+|--------|----------|-------|
+| `AZURE_CREDENTIALS` | Yes | `az ad sp create-for-rbac --sdk-auth` output |
+| `TEST_CONFIG` | Yes | Full `config.test.json` contents |
+| `SQL_ADMIN_PASSWORD` | Yes | SQL Server admin password |
+| `GRAPH_CLIENT_SECRET` | Yes | Graph API client secret |
+| `LLM_API_KEY` | No | Anthropic or OpenAI key (for risk scoring tests) |
+| `UI_BASE_URL` | No | Deployed UI URL |
+| `UI_BEARER_TOKEN` | No | Bearer token for authenticated deployments |
 
-### Option B: Azure DevOps
+**Manual trigger options:** skip integration, skip risk scoring, skip E2E, first run (creates SQL from scratch).
 
-**File:** `azure-pipelines.yml` (repo root)
-
-**Setup:**
-
-1. Create a **Variable Group** named `FortigiGraph-Test` in **Pipelines → Library**:
-
-   | Variable | Required | Secret? | Value |
-   |----------|----------|---------|-------|
-   | `TEST_CONFIG` | Yes | Yes | Full contents of `config.test.json` |
-   | `SQL_ADMIN_PASSWORD` | Yes | Yes | SQL Server admin password |
-   | `GRAPH_CLIENT_SECRET` | Yes | Yes | Graph API client secret |
-   | `GRAPH_TENANT_ID` | Yes | No | Azure AD tenant ID |
-   | `AZURE_SUBSCRIPTION_ID` | Yes | No | Azure subscription ID |
-   | `LLM_API_KEY` | No | Yes | Anthropic or OpenAI API key |
-   | `LLM_PROVIDER` | No | No | `Anthropic` or `OpenAI` |
-   | `UI_BASE_URL` | No | No | Deployed UI URL |
-   | `UI_BEARER_TOKEN` | No | Yes | Bearer token for authenticated UI |
-
-2. Create an **Azure service connection** named `FortigiGraph-Azure`:
-   - Go to **Project Settings → Service connections → New → Azure Resource Manager**
-   - Use service principal authentication
-   - Scope to your subscription
-
-3. Create a new pipeline pointing to `azure-pipelines.yml` in the repo root.
-
-4. The pipeline runs at 02:00 UTC on `main` and `dev` branches. To trigger manually: **Pipelines → Run pipeline** (with optional parameter overrides).
-
-**Pipeline structure:**
-
-```
-UnitTests ──┬──→ IntegrationTests (Phase 2-4)
-            ├──→ UIBackendTests   (Phase 5a, if UI_BASE_URL set)
-            └──→ E2ETests         (Phase 5b, Playwright)
-```
-
-Stages run in parallel after unit tests pass.
-
-### What Runs Where
-
-| Phase | Azure Needed | Secrets Needed | Runs In |
-|-------|-------------|----------------|---------|
-| 1. Unit Tests | No | None | Always |
-| 2a. Diagnostics | Yes | `AZURE_CREDENTIALS`, `TEST_CONFIG` | If secrets configured |
-| 2b. Graph API | Yes | `TEST_CONFIG`, `GRAPH_CLIENT_SECRET` | If secrets configured |
-| 3. Integration | Yes | All Azure + Graph secrets | If not skipped |
-| 4. Risk Scoring | Yes | All above + `LLM_API_KEY` | If LLM key configured |
-| 5a. UI Backend | No | `UI_BASE_URL` | If URL configured |
-| 5b. Playwright E2E | No | None | Always (unless skipped) |
+**Artifacts retained 30 days:** Pester JUnit XML, Playwright HTML report, failure screenshots.
 
 ### Cost Considerations
 
-- **GitHub Actions:** Free for public repos. Private repos: 2,000 min/month free, then ~$0.008/min
-- **Azure DevOps:** First 1,800 min/month free (self-hosted unlimited), then ~$40/agent/month
-- **Azure resources during tests:** ~$0.10-0.50 per test run (SQL Basic + compute time)
-- **LLM API:** ~$0.05-0.20 per risk scoring test (2-3 API calls)
-
-### Skipping Phases in CI
-
-Both pipelines support skipping phases via manual trigger parameters:
-
-```
-Skip integration tests:  ✓  (saves ~15 min and Azure costs)
-Skip risk scoring:       ✓  (saves ~5 min and LLM costs)
-Skip E2E tests:          ✓  (saves ~2 min)
-First run:               ✓  (creates SQL Server from scratch)
-```
+- **GitHub Actions (private repo):** 2 000 min/month free, then ~$0.008/min
+- **Azure resources during nightly tests:** ~$0.10–0.50 per run
+- **LLM API (risk scoring):** ~$0.05–0.20 per run (2–3 calls)
