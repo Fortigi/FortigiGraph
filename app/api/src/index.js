@@ -26,9 +26,11 @@ import adminRouter from './routes/admin.js';
 import { adminCrawlersRouter, selfServiceCrawlersRouter } from './routes/crawlers.js';
 import { crawlerAuthMiddleware } from './middleware/crawlerAuth.js';
 import ingestRouter from './routes/ingest.js';
+import jobsRouter from './routes/jobs.js';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import { join as pathJoin } from 'path';
+import { bootstrapWorker } from './bootstrap.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -171,9 +173,11 @@ app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit f
 app.use('/api', authMiddleware, adminRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
-// ─── Crawler routes ─────────────────────────────────────────────
+// ─── Crawler & job routes ───────────────────────────────────────
 // Admin crawler management (Entra ID auth) — /api/admin/crawlers/*
 app.use('/api', authMiddleware, adminCrawlersRouter);
+// Crawler jobs (Entra ID auth) — /api/admin/crawler-jobs/*, /api/admin/status
+app.use('/api', authMiddleware, jobsRouter);
 // Crawler self-service (API key auth) — /api/crawlers/whoami, /api/crawlers/rotate
 app.use('/api', crawlerAuthMiddleware, selfServiceCrawlersRouter);
 // Ingest endpoints (API key auth) — /api/ingest/*
@@ -189,11 +193,14 @@ app.get('*', (req, res, next) => {
   res.sendFile(join(frontendDist, 'index.html'));
 });
 
-const server = app.listen(port, () => {
+const server = app.listen(port, async () => {
   console.log(`Identity Atlas running on http://localhost:${port}`);
   console.log(`Mode: ${process.env.USE_SQL === 'true' ? 'SQL' : 'Mock data'}`);
   console.log(`Auth: ${authEnabled ? 'Entra ID' : 'Disabled'}`);
   console.log(`Perf: ${isPerfEnabled() ? 'Enabled (Server-Timing headers + /api/perf)' : 'Disabled'}`);
+
+  // Auto-create built-in worker crawler + infrastructure tables
+  await bootstrapWorker();
 });
 
 // Graceful shutdown: close SQL pool before exiting

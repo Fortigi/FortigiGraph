@@ -1,12 +1,30 @@
 # Quick Start
 
-This guide takes you from a fresh install to a running sync and deployed UI. Each step builds on the previous one, and every command is designed to be copy-paste friendly.
+## Option A: Docker (Easiest — 2 minutes)
 
-Estimated time: 30–60 minutes for a first-time setup.
+No Azure subscription, no PowerShell, no git required. Just Docker.
+
+```bash
+# Download the compose file
+curl -O https://raw.githubusercontent.com/Fortigi/FortigiGraph/main/docker-compose.prod.yml
+
+# Start everything
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Open [http://localhost:3001](http://localhost:3001). The app auto-navigates to the **Crawlers** page. Click **"Load Demo Data"** to explore with synthetic data (~30 seconds).
+
+To connect your own Entra ID tenant, click **"Connect Entra ID"** and enter your App Registration credentials directly in the browser.
+
+See [Docker Setup](architecture/docker-setup.md) for details, environment variables, and scaling.
 
 ---
 
-## 1. Prerequisites
+## Option B: PowerShell Module (Full Azure Deployment)
+
+This path deploys Identity Atlas to your Azure subscription with full Entra ID integration, Azure SQL, and scheduled automation. Estimated time: 30–60 minutes.
+
+### 1. Prerequisites
 
 Before you begin, confirm the following:
 

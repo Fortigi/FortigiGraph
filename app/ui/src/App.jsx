@@ -137,6 +137,21 @@ export default function App() {
     [features]
   );
 
+  // First-visit redirect: send user to Crawlers page when no data exists (runs once)
+  const firstVisitRef = useRef(false);
+  useEffect(() => {
+    if (firstVisitRef.current) return;
+    firstVisitRef.current = true;
+    fetch('/api/admin/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && !d.hasData && window.location.hash.replace('#', '') === 'matrix') {
+          window.location.hash = 'crawlers';
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
     fetch('/api/features').then(r => r.json()).then(d => setFeatures(d)).catch(() => {});
@@ -460,7 +475,7 @@ export default function App() {
           ) : page === 'performance' ? (
             <PerfPage />
           ) : page === 'crawlers' ? (
-            <CrawlersPage />
+            <CrawlersPage onNavigate={navigate} />
           ) : page === 'admin' ? (
             <AdminPage />
           ) : loading ? (

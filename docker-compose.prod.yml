@@ -1,3 +1,18 @@
+# ─── Identity Atlas — Production Docker Compose ─────────────────────────────
+#
+# For end users: no git clone needed, pulls pre-built images from ghcr.io.
+#
+# Quick start:
+#   curl -O https://raw.githubusercontent.com/Fortigi/FortigiGraph/main/docker-compose.prod.yml
+#   docker compose -f docker-compose.prod.yml up
+#
+# Then open http://localhost:3001 and click "Load Demo Data" to get started.
+#
+# Configuration:
+#   Copy .env.example to .env and set your values, or pass them inline:
+#   GRAPH_TENANT_ID=... GRAPH_CLIENT_ID=... GRAPH_CLIENT_SECRET=... docker compose -f docker-compose.prod.yml up
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
 
   # ── SQL Server 2022 ──────────────────────────────────────────────────────────
@@ -5,16 +20,16 @@ services:
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "FortigiGraph_Local1!"
+      MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
       MSSQL_PID: "Developer"
     ports:
-      - "1433:1433"
+      - "${SQL_PORT:-1433}:1433"
     volumes:
       - sql_data:/var/opt/mssql
     healthcheck:
       test: >
         /opt/mssql-tools18/bin/sqlcmd
-        -S localhost -U sa -P "FortigiGraph_Local1!"
+        -S localhost -U sa -P "${SQL_PASSWORD:-FortigiGraph_Local1!}"
         -Q "SELECT 1" -b -No
       interval: 10s
       timeout: 5s
@@ -24,24 +39,22 @@ services:
   # ── One-time database creation ───────────────────────────────────────────────
   sql-init:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    command: >
+      /opt/mssql-tools18/bin/sqlcmd -S sql -U sa -P "${SQL_PASSWORD:-FortigiGraph_Local1!}" -b -No
+      -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'GraphData') CREATE DATABASE [GraphData];"
     depends_on:
       sql:
         condition: service_healthy
-    command: >
-      /opt/mssql-tools18/bin/sqlcmd -S sql -U sa -P "FortigiGraph_Local1!" -b -No
-      -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'GraphData') CREATE DATABASE [GraphData];"
     restart: "no"
 
   # ── Table initialization (runs after DB creation) ────────────────────────────
   sql-table-init:
-    build:
-      context: .
-      dockerfile: setup/docker/Dockerfile.powershell
+    image: ghcr.io/fortigi/identity-atlas-worker:latest
     environment:
       SQL_SERVER: sql
-      SQL_DATABASE: GraphData
+      SQL_DATABASE: "${SQL_DATABASE:-GraphData}"
       SQL_USER: sa
-      SQL_PASSWORD: "FortigiGraph_Local1!"
+      SQL_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
     command: ["pwsh", "-File", "/app/setup/docker/init-tables.ps1"]
     depends_on:
       sql-init:
@@ -50,46 +63,46 @@ services:
 
   # ── Backend (serves built frontend + API) ────────────────────────────────────
   backend:
-    build:
-      context: ./app
-      dockerfile: api/Dockerfile
+    image: ghcr.io/fortigi/identity-atlas:latest
     environment:
       NODE_ENV: production
       USE_SQL: "true"
       SQL_SERVER: sql
-      SQL_DATABASE: GraphData
+      SQL_DATABASE: "${SQL_DATABASE:-GraphData}"
       SQL_USER: sa
-      SQL_PASSWORD: "FortigiGraph_Local1!"
+      SQL_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
       SQL_TRUST_SERVER_CERT: "true"
-      AUTH_ENABLED: "false"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
       PORT: "3001"
+      # Entra ID auth for the UI (optional — set AUTH_ENABLED=true to activate)
+      # AUTH_TENANT_ID: "${AUTH_TENANT_ID:-}"
+      # AUTH_CLIENT_ID: "${AUTH_CLIENT_ID:-}"
     ports:
-      - "3001:3001"
+      - "${PORT:-3001}:3001"
     volumes:
       - job_data:/data/uploads
     depends_on:
       sql-table-init:
         condition: service_completed_successfully
 
-  # ── Worker (PowerShell — crawlers, risk scoring, account correlation, scheduling) ─
+  # ── Worker (crawlers, risk scoring, account correlation, scheduling) ─────────
   worker:
-    build:
-      context: .
-      dockerfile: setup/docker/Dockerfile.powershell
+    image: ghcr.io/fortigi/identity-atlas-worker:latest
     environment:
       SQL_SERVER: sql
-      SQL_DATABASE: GraphData
+      SQL_DATABASE: "${SQL_DATABASE:-GraphData}"
       SQL_USER: sa
       SQL_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
+      # Crawler API key (auto-discovered from SQL if not set)
       CRAWLER_API_KEY: "${CRAWLER_API_KEY:-}"
+      # Entra ID Graph API credentials (optional — configure via UI or set here)
       GRAPH_TENANT_ID: "${GRAPH_TENANT_ID:-}"
       GRAPH_CLIENT_ID: "${GRAPH_CLIENT_ID:-}"
       GRAPH_CLIENT_SECRET: "${GRAPH_CLIENT_SECRET:-}"
+      # LLM for risk scoring (optional)
       LLM_PROVIDER: "${LLM_PROVIDER:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
     volumes:
-      - ./setup/docker/crontab:/app/setup/docker/crontab:ro
-      - "${CSV_DATA_PATH:-./test/datasets/DatasetLed2}:/data/csv:ro"
       - job_data:/data/uploads
     depends_on:
       backend:

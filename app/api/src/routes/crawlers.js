@@ -184,22 +184,35 @@ adminCrawlersRouter.patch('/admin/crawlers/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/admin/crawlers/:id — Soft-delete (disable) crawler
+// DELETE /api/admin/crawlers/:id — Disable or permanently remove crawler
 adminCrawlersRouter.delete('/admin/crawlers/:id', async (req, res) => {
   if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid crawler ID' });
 
+  const permanent = req.body?.permanent === true;
+
   try {
     const pool = await db.getPool();
-    const result = await pool.request()
-      .input('id', id)
-      .query('UPDATE dbo.Crawlers SET enabled = 0 WHERE id = @id');
-    if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Crawler not found' });
-    res.json({ message: 'Crawler disabled' });
+
+    if (permanent) {
+      // Permanent delete — remove audit log entries first, then the crawler
+      await pool.request().input('id', id)
+        .query('DELETE FROM dbo.CrawlerAuditLog WHERE crawlerId = @id');
+      const result = await pool.request().input('id', id)
+        .query('DELETE FROM dbo.Crawlers WHERE id = @id');
+      if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Crawler not found' });
+      res.json({ message: 'Crawler permanently removed' });
+    } else {
+      // Soft delete — just disable
+      const result = await pool.request().input('id', id)
+        .query('UPDATE dbo.Crawlers SET enabled = 0 WHERE id = @id');
+      if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Crawler not found' });
+      res.json({ message: 'Crawler disabled' });
+    }
   } catch (err) {
-    console.error('Error disabling crawler:', err.message);
-    res.status(500).json({ error: 'Failed to disable crawler' });
+    console.error('Error deleting crawler:', err.message);
+    res.status(500).json({ error: 'Failed to delete crawler' });
   }
 });
 

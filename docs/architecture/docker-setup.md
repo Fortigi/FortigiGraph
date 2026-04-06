@@ -1,8 +1,33 @@
 # Docker Setup
 
-Running FortigiGraph locally with Docker — three containers providing the full stack.
+Running Identity Atlas locally with Docker — three containers providing the full stack.
 
 ---
+
+## Quick Start (End Users — No Git Required)
+
+The fastest way to try Identity Atlas — pulls pre-built images, no source code needed:
+
+```bash
+# Download the production compose file
+curl -O https://raw.githubusercontent.com/Fortigi/FortigiGraph/main/docker-compose.prod.yml
+
+# Start everything (first run: ~2 min to pull images)
+docker compose -f docker-compose.prod.yml up -d
+
+# Open the UI
+open http://localhost:3001
+```
+
+On first visit, the UI auto-navigates to the **Crawlers** page with a getting-started card. Click **"Load Demo Data"** to populate the system with synthetic data (~30 seconds). After that, explore the Matrix, Users, Resources, and other pages.
+
+To connect your own Entra ID tenant, click **"Connect Entra ID"** on the Crawlers page and enter your App Registration credentials (Tenant ID, Client ID, Client Secret).
+
+---
+
+## Developer Setup (From Source)
+
+For contributors who want to build and modify the code locally.
 
 ## Architecture
 
@@ -38,22 +63,19 @@ After startup, 3 containers remain running: `sql`, `backend`, `worker`.
 
 ---
 
-## Quick Start
+## Quick Start (Developer)
 
 ```powershell
 cd c:\Source\GitHub\FortigiGraph
 
 # Start the stack (first time takes ~3 min to build)
-docker compose -f docker-compose.yml up -d --build
+docker compose up -d --build
 
 # Verify
-docker compose -f docker-compose.yml ps
+docker compose ps
 # Expected: sql (healthy), backend (up), worker (up)
 
-# Load demo data
-.\setup\local-sync.ps1
-
-# Open the UI
+# Open the UI — click "Load Demo Data" on the Crawlers page
 Start-Process http://localhost:3001
 
 # Open Swagger docs
@@ -72,9 +94,36 @@ docker compose -f docker-compose.yml down -v
 
 ---
 
+## Auto-Bootstrap
+
+On first startup, the backend automatically:
+
+1. Creates a **WorkerConfig** table (key-value store for worker settings)
+2. Creates a **CrawlerJobs** table (SQL-based job queue between UI and worker)
+3. Creates a **Built-in Worker** crawler with a generated API key
+4. Stores the API key in WorkerConfig for the worker to discover
+
+The worker discovers the key on startup by polling WorkerConfig (retries for up to 2 minutes while the backend initializes). This means no manual crawler registration is needed — jobs submitted from the UI are automatically picked up and executed by the worker.
+
+## Job Queue
+
+The UI can submit crawler jobs (demo data, Entra ID sync, CSV import) via `POST /api/admin/crawler-jobs`. Jobs are stored in the `CrawlerJobs` SQL table and picked up by the worker every 30 seconds.
+
+The `Invoke-CrawlerJob.ps1` dispatcher routes jobs to the appropriate crawler script:
+
+| Job Type | Dispatcher target |
+|---|---|
+| `demo` | `Ingest-DemoDataset.ps1` (synthetic data, baked into image) |
+| `entra-id` | `Start-EntraIDCrawler.ps1` (fetches from Microsoft Graph) |
+| `csv` | `Start-CSVCrawler.ps1` (reads uploaded CSV files) |
+
+Progress is updated in SQL during execution and displayed in the UI with a progress bar.
+
+---
+
 ## Worker Container
 
-The worker container runs PowerShell 7 with the FortigiGraph module pre-loaded. It reads `setup/docker/crontab` for scheduled jobs.
+The worker container runs PowerShell 7 with the Identity Atlas module pre-loaded. It has two responsibilities: executing scheduled cron jobs and polling the CrawlerJobs queue for UI-submitted jobs.
 
 ### Run Ad-Hoc Commands
 
