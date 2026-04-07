@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import http from 'http';
 import * as db from '../db/connection.js';
-import { getAuthState, saveAuthConfig } from '../config/authConfig.js';
+import { getAuthState } from '../config/authConfig.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -641,17 +641,13 @@ router.post('/admin/features/toggle', async (req, res) => {
   }
 });
 
-// ─── Authentication settings ────────────────────────────────────────────────
-// GET returns the current snapshot (no secrets — MSAL is a public client flow,
-// there are no client secrets stored on the API side). PUT persists changes
-// to WorkerConfig and reloads the in-memory state so the next request sees
-// the new values without requiring a container restart.
-//
-// Important: when authentication is currently disabled, these endpoints are
-// reachable by anyone (the auth middleware is a no-op). That's deliberate —
-// it's the only way to enable auth for the first time. Once auth is on, the
-// admin router is gated by authMiddleware so only signed-in users can change it.
-
+// ─── Authentication settings (read-only) ────────────────────────────────────
+// Returns the current snapshot so the Admin → Authentication page can show
+// status. There is intentionally NO mutation endpoint — changing auth requires
+// `docker compose exec web node /app/backend/src/cli/auth-config.js`. This
+// avoids the chicken-and-egg of an unauthenticated mutation surface (the only
+// time you'd ever need to change auth from inside the app is when you're
+// not signed in yet, which would require leaving the API write-open).
 router.get('/admin/auth-settings', (req, res) => {
   const s = getAuthState();
   res.json({
@@ -661,37 +657,6 @@ router.get('/admin/auth-settings', (req, res) => {
     requiredRoles: s.requiredRoles || [],
     loaded:        s.loaded,
   });
-});
-
-router.put('/admin/auth-settings', async (req, res) => {
-  const { enabled, tenantId, clientId, requiredRoles } = req.body || {};
-
-  // Validate before persisting so we don't half-save a broken config
-  if (enabled === true) {
-    if (!tenantId || !/^[0-9a-f-]{36}$/i.test(String(tenantId))) {
-      return res.status(400).json({ error: 'tenantId must be a valid GUID when enabling auth' });
-    }
-    if (!clientId || !/^[0-9a-f-]{36}$/i.test(String(clientId))) {
-      return res.status(400).json({ error: 'clientId must be a valid GUID when enabling auth' });
-    }
-  }
-  if (requiredRoles !== undefined && !Array.isArray(requiredRoles)) {
-    return res.status(400).json({ error: 'requiredRoles must be an array of strings' });
-  }
-
-  try {
-    const newState = await saveAuthConfig({ enabled, tenantId, clientId, requiredRoles });
-    res.json({
-      enabled:       newState.enabled,
-      tenantId:      newState.tenantId || '',
-      clientId:      newState.clientId || '',
-      requiredRoles: newState.requiredRoles || [],
-      loaded:        newState.loaded,
-    });
-  } catch (err) {
-    console.error('Auth settings save failed:', err.message);
-    res.status(500).json({ error: 'Failed to save auth settings' });
-  }
 });
 
 // ─── Container stats (Docker socket) ─────────────────────────────────────────

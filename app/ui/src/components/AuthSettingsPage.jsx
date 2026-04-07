@@ -3,112 +3,97 @@ import { useAuth } from '../auth/AuthGate';
 
 // Admin → Authentication sub-tab.
 //
-// Lets the operator turn Entra ID SSO on/off and configure the tenant + client
-// IDs from the UI. The settings are persisted to dbo.WorkerConfig via the new
-// /api/admin/auth-settings endpoints; the backend hot-reloads its in-memory
-// state so the next request uses the new config without a container restart.
+// READ-ONLY by design. There is no Save button, no input form, no PUT endpoint.
+// Auth configuration is changed via the CLI tool inside the web container, which
+// avoids exposing an unauthenticated mutation surface that controls authentication.
 //
-// Important UX considerations baked in:
+// What this page does:
+//   1. Shows the current state (enabled / disabled, tenant id, client id, roles)
+//   2. Walks the operator through the Entra ID app-registration steps
+//   3. Provides copy-pasteable `docker compose exec` commands to enable/disable
+//   4. Auto-detects window.location.origin so the operator knows the exact
+//      redirect URI to register in their Entra app
 //
-//   1. Auto-detected redirect URI: we show the current `window.location.origin`
-//      so the user knows exactly which URI to register in their Entra ID app.
-//      Multi-domain support (localhost + identityatlas.customer.com) is handled
-//      by simply registering all the URIs in Entra — no app config change.
-//
-//   2. Lockout warning: turning auth on with bad config will lock the operator
-//      out. We surface a prominent warning AND a recovery SQL command they can
-//      use to disable auth via direct DB access if they ever get stuck.
-//
-//   3. Step-by-step setup walkthrough: Entra ID app registration is fiddly. The
-//      page bundles a clickable checklist of the exact steps with the values
-//      they need to paste in.
+// Multi-domain support: register every URL (localhost:3001 + production domain)
+// as a separate redirect URI in the same Entra app. The frontend uses
+// window.location.origin at runtime so each environment "just works".
+
+function CopyableCommand({ command }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="relative my-2">
+      <pre className="px-3 py-2 pr-16 bg-gray-900 text-gray-100 rounded text-xs font-mono overflow-x-auto whitespace-pre">{command}</pre>
+      <button
+        onClick={handleCopy}
+        className="absolute top-1.5 right-1.5 px-2 py-0.5 text-xs bg-gray-700 text-gray-100 rounded hover:bg-gray-600"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
 
 export default function AuthSettingsPage() {
   const { authFetch } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [savedAt, setSavedAt] = useState(null);
-  const [confirmEnable, setConfirmEnable] = useState(false);
-
-  // Form state
-  const [enabled, setEnabled] = useState(false);
-  const [tenantId, setTenantId] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [requiredRolesText, setRequiredRolesText] = useState(''); // comma-separated
+  const [state, setState] = useState(null);
 
   // The current page origin — what the user must register as a redirect URI in
-  // Entra. We compute it client-side instead of asking the backend so it works
-  // even when the backend is on a different host (proxied deployments).
+  // Entra ID. Computed in the browser so it Just Works™ on every domain.
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const apiScopeUri = clientId ? `api://${clientId}/access` : 'api://<your-client-id>/access';
 
-  // Fetch current state on mount
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await authFetch('/api/admin/auth-settings');
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
-        if (cancelled) return;
-        setEnabled(!!j.enabled);
-        setTenantId(j.tenantId || '');
-        setClientId(j.clientId || '');
-        setRequiredRolesText((j.requiredRoles || []).join(', '));
-      } catch (err) {
-        if (!cancelled) setError(err.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [authFetch]);
-
-  const tenantIdValid = /^[0-9a-f-]{36}$/i.test(tenantId);
-  const clientIdValid = /^[0-9a-f-]{36}$/i.test(clientId);
-  const enableReady   = tenantIdValid && clientIdValid;
-
-  const handleSave = async () => {
+  const refresh = async () => {
+    setLoading(true);
     setError(null);
-    setSavedAt(null);
-    setSaving(true);
     try {
-      // Parse comma-separated role list, drop blanks
-      const requiredRoles = requiredRolesText
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-
-      const r = await authFetch('/api/admin/auth-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, tenantId, clientId, requiredRoles }),
-      });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${r.status}`);
-      }
-      setSavedAt(new Date());
-      setConfirmEnable(false);
-      // If we just turned auth on, the next page load will redirect to Entra.
-      // We don't auto-reload here — let the user choose when to leave the page.
+      const r = await authFetch('/api/admin/auth-settings');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setState(await r.json());
     } catch (err) {
       setError(err.message);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  if (loading) {
+  useEffect(() => { refresh(); }, [authFetch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading && !state) {
     return <div className="text-sm text-gray-500 p-6">Loading authentication settings...</div>;
   }
+
+  const enabled = state?.enabled === true;
+  const tenantId = state?.tenantId || '';
+  const clientId = state?.clientId || '';
+  const requiredRoles = state?.requiredRoles || [];
+
+  // Build the example enable command. If the operator has already configured
+  // tenant + client (via CLI or env var) we pre-fill them so the displayed
+  // command is a copy-paste-able restore. Otherwise we use placeholders.
+  const exampleTenant = tenantId || '<tenant-guid>';
+  const exampleClient = clientId || '<client-guid>';
+  const enableCmd = `docker compose exec web node /app/backend/src/cli/auth-config.js \\
+    enable --tenant ${exampleTenant} \\
+           --client ${exampleClient}`;
+  const enableWithRolesCmd = `docker compose exec web node /app/backend/src/cli/auth-config.js \\
+    enable --tenant ${exampleTenant} \\
+           --client ${exampleClient} \\
+           --roles IdentityAtlas.Read,IdentityAtlas.Admin`;
+  const disableCmd  = `docker compose exec web node /app/backend/src/cli/auth-config.js disable`;
+  const statusCmd   = `docker compose exec web node /app/backend/src/cli/auth-config.js status`;
+  const restartCmd  = `docker compose restart web`;
 
   return (
     <div className="space-y-6">
       {/* ─── Current state card ─────────────────────────────── */}
-      <div className={`rounded-lg border p-5 ${enabled ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-        <div className="flex items-start justify-between">
+      <div className={`rounded-lg border p-5 ${enabled ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+        <div className="flex items-start justify-between mb-3">
           <div>
             <h3 className="text-base font-semibold text-gray-900">Authentication</h3>
             <p className="text-sm text-gray-600 mt-1">
@@ -121,14 +106,59 @@ export default function AuthSettingsPage() {
             {enabled ? 'ENABLED' : 'DISABLED'}
           </span>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm bg-white/60 rounded p-3 border border-gray-200">
+          <div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide">Tenant ID</div>
+            <div className="font-mono text-xs mt-0.5 break-all">{tenantId || <span className="text-gray-400">— not set —</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide">Client ID</div>
+            <div className="font-mono text-xs mt-0.5 break-all">{clientId || <span className="text-gray-400">— not set —</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide">Required roles</div>
+            <div className="text-xs mt-0.5">{requiredRoles.length ? requiredRoles.join(', ') : <span className="text-gray-400">— any signed-in user —</span>}</div>
+          </div>
+        </div>
+
+        {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+        <button onClick={refresh} className="mt-3 text-xs text-indigo-600 hover:text-indigo-800">↻ Refresh</button>
+      </div>
+
+      {/* ─── How to change it ──────────────────────────────── */}
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <h3 className="text-base font-semibold text-gray-900 mb-3">Changing authentication settings</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          Auth config is intentionally not editable from this page. Allowing it would require leaving an unauthenticated
+          mutation endpoint open whenever auth was off — exactly the kind of hole that defeats the point of having auth
+          in the first place. Configuration is done via a CLI tool inside the web container, which only the host running
+          Docker can reach.
+        </p>
+
+        <h4 className="text-sm font-semibold text-gray-900 mt-4 mb-1">Check current settings</h4>
+        <CopyableCommand command={statusCmd} />
+
+        <h4 className="text-sm font-semibold text-gray-900 mt-4 mb-1">Enable authentication</h4>
+        <p className="text-xs text-gray-500 mb-1">Run this on the host where Docker is running:</p>
+        <CopyableCommand command={enableCmd} />
+        <p className="text-xs text-gray-500 mb-1 mt-2">Or with required app roles (only users with one of these roles can sign in):</p>
+        <CopyableCommand command={enableWithRolesCmd} />
+
+        <h4 className="text-sm font-semibold text-gray-900 mt-4 mb-1">Disable authentication (recovery)</h4>
+        <CopyableCommand command={disableCmd} />
+
+        <h4 className="text-sm font-semibold text-gray-900 mt-4 mb-1">Apply changes</h4>
+        <p className="text-xs text-gray-500 mb-1">After any change, restart the web container so the API picks up the new state:</p>
+        <CopyableCommand command={restartCmd} />
       </div>
 
       {/* ─── Setup walkthrough ──────────────────────────────── */}
       <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <h3 className="text-base font-semibold text-gray-900 mb-3">Setup walkthrough</h3>
+        <h3 className="text-base font-semibold text-gray-900 mb-3">Entra ID app registration walkthrough</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Before enabling authentication, you need to register Identity Atlas as an application in your Entra ID tenant.
-          Follow these steps once per tenant.
+          Before running the enable command, register Identity Atlas as an application in your Entra ID tenant.
+          You only need to do this once per tenant.
         </p>
 
         <ol className="space-y-3 text-sm">
@@ -175,13 +205,6 @@ export default function AuthSettingsPage() {
                 Go to <strong>Expose an API → Add a scope</strong>. Accept the default Application ID URI
                 (<code className="bg-gray-100 px-1 rounded text-xs">api://&lt;client-id&gt;</code>),
                 then create a scope named <code className="bg-gray-100 px-1 rounded">access</code>.
-                The full scope value will be:
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <code className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">{apiScopeUri}</code>
-                {clientId && (
-                  <button onClick={() => navigator.clipboard.writeText(apiScopeUri)} className="text-xs text-indigo-600 hover:text-indigo-800">Copy</button>
-                )}
               </div>
             </div>
           </li>
@@ -194,7 +217,7 @@ export default function AuthSettingsPage() {
                 If you want to restrict access to specific groups of users, define App roles under <strong>App roles → Create app role</strong>
                 {' '}(e.g. <code className="bg-gray-100 px-1 rounded">IdentityAtlas.Read</code>, <code className="bg-gray-100 px-1 rounded">IdentityAtlas.Admin</code>),
                 then assign them to users via <strong>Enterprise applications → &lt;your app&gt; → Users and groups</strong>.
-                Add the role names to the "Required roles" field below to enforce them.
+                Pass the role names to the CLI's <code className="bg-gray-100 px-1 rounded">--roles</code> flag.
               </div>
             </div>
           </li>
@@ -202,150 +225,14 @@ export default function AuthSettingsPage() {
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-semibold flex items-center justify-center text-xs">5</span>
             <div>
-              <div className="font-medium text-gray-900">Paste the Tenant ID and Client ID below</div>
+              <div className="font-medium text-gray-900">Run the enable CLI command</div>
               <div className="text-gray-600">
-                Both values are on the app's <strong>Overview</strong> page (<em>Directory (tenant) ID</em> and <em>Application (client) ID</em>).
-                Then check "Enable authentication" and click Save. The next page reload will redirect you to Entra ID to sign in.
+                Grab the <em>Directory (tenant) ID</em> and <em>Application (client) ID</em> from the app's Overview page,
+                then run the enable command above. Restart web. You'll be redirected to Entra at the next page load.
               </div>
             </div>
           </li>
         </ol>
-      </div>
-
-      {/* ─── Configuration form ─────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <h3 className="text-base font-semibold text-gray-900 mb-4">Configuration</h3>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tenant ID</label>
-            <input
-              type="text"
-              value={tenantId}
-              onChange={e => setTenantId(e.target.value.trim())}
-              placeholder="00000000-0000-0000-0000-000000000000"
-              className={`w-full px-3 py-2 border rounded text-sm font-mono ${tenantId && !tenantIdValid ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
-            />
-            {tenantId && !tenantIdValid && (
-              <p className="text-xs text-red-600 mt-1">Must be a valid GUID</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
-            <input
-              type="text"
-              value={clientId}
-              onChange={e => setClientId(e.target.value.trim())}
-              placeholder="00000000-0000-0000-0000-000000000000"
-              className={`w-full px-3 py-2 border rounded text-sm font-mono ${clientId && !clientIdValid ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
-            />
-            {clientId && !clientIdValid && (
-              <p className="text-xs text-red-600 mt-1">Must be a valid GUID</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Required roles (optional, comma-separated)</label>
-            <input
-              type="text"
-              value={requiredRolesText}
-              onChange={e => setRequiredRolesText(e.target.value)}
-              placeholder="IdentityAtlas.Read, IdentityAtlas.Admin"
-              className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              When set, users without at least one of these app roles get a 403. Leave empty to allow any signed-in user from your tenant.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enabled}
-                disabled={!enableReady}
-                onChange={e => {
-                  if (e.target.checked && !enabled) {
-                    setConfirmEnable(true);
-                  } else {
-                    setEnabled(e.target.checked);
-                    setConfirmEnable(false);
-                  }
-                }}
-                className="rounded"
-              />
-              <span className="text-sm font-medium text-gray-900">Enable authentication</span>
-            </label>
-            {!enableReady && (
-              <span className="text-xs text-gray-500">(fill in valid Tenant ID and Client ID first)</span>
-            )}
-          </div>
-
-          {/* ─── Lockout warning + confirmation ────────────────── */}
-          {confirmEnable && (
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
-              <div className="flex items-start gap-2 mb-2">
-                <span className="text-amber-600 text-lg">⚠️</span>
-                <div>
-                  <h4 className="font-semibold text-amber-900">Lockout warning</h4>
-                  <p className="text-sm text-amber-800 mt-1">
-                    If the Tenant ID, Client ID, or redirect URI registration is wrong, you will be locked out of the application.
-                    Make sure you've completed all the setup steps above before enabling.
-                  </p>
-                  <p className="text-sm text-amber-800 mt-2">
-                    <strong>Recovery:</strong> if you do get locked out, run this SQL command to disable auth:
-                  </p>
-                  <pre className="mt-1 p-2 bg-amber-100 rounded text-xs font-mono overflow-x-auto">{`UPDATE dbo.WorkerConfig SET configValue = 'false'
-WHERE configKey = 'AUTH_ENABLED';`}</pre>
-                  <p className="text-xs text-amber-700 mt-1">
-                    Then refresh the page — auth will be off again. (You can also exec into the sql container with{' '}
-                    <code>docker compose exec sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SQL_PASSWORD" -d GraphData -No -Q "..."</code>.)
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2 mt-3">
-                <button
-                  onClick={() => { setEnabled(true); setConfirmEnable(false); }}
-                  className="px-3 py-1.5 bg-amber-600 text-white rounded text-sm hover:bg-amber-700"
-                >
-                  I understand, enable auth
-                </button>
-                <button
-                  onClick={() => setConfirmEnable(false)}
-                  className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          {savedAt && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
-              Saved at {savedAt.toLocaleTimeString()}.
-              {enabled
-                ? ' Authentication is now active. Reload the page to sign in.'
-                : ' Authentication is now disabled.'}
-            </div>
-          )}
-
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={handleSave}
-              disabled={saving || (enabled && !enableReady)}
-              className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

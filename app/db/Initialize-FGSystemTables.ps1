@@ -181,6 +181,7 @@ CREATE TABLE dbo.SystemOwners (
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: ResourceAssignments" -ForegroundColor Cyan
 
     $assignmentColumns = @{
+        'systemId'            = 'INT'                  # FK to Systems — ingest engine scopes deletes by this
         'resourceId'          = 'UNIQUEIDENTIFIER'
         'principalId'         = 'UNIQUEIDENTIFIER'
         'principalType'       = 'NVARCHAR(100)'

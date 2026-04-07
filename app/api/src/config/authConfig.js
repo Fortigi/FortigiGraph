@@ -1,34 +1,30 @@
-// Dynamic auth configuration.
+// Auth configuration loader.
 //
-// The application's Entra ID SSO settings used to live in environment variables
-// (AUTH_ENABLED, AUTH_TENANT_ID, AUTH_CLIENT_ID, AUTH_REQUIRED_ROLES). Those
-// required a container restart to change, which made first-time configuration
-// from the UI impossible. This module moves the settings into the WorkerConfig
-// table so the Admin → Authentication page can update them at runtime.
+// Identity Atlas's Entra ID SSO settings (AUTH_ENABLED, AUTH_TENANT_ID,
+// AUTH_CLIENT_ID, AUTH_REQUIRED_ROLES) live in dbo.WorkerConfig so they survive
+// container restarts and can be inspected without rebuilding the image. They
+// are written *only* via the CLI tool at cli/auth-config.js, run from the host
+// via `docker compose exec web node ...`, followed by `docker compose restart web`.
+//
+// Why CLI + restart instead of an in-app save endpoint:
+//   - An in-app PUT would have to be reachable when auth is currently *off*
+//     (otherwise nobody could ever turn auth on for the first time). Exposing
+//     an unauthenticated mutation surface that controls authentication itself
+//     is the kind of thing that ends up in a CVE.
+//   - The host running docker is already trusted for everything else
+//     (deployments, secrets, db access). Gating auth config behind shell access
+//     matches an existing trust boundary instead of inventing a new one.
+//   - The recovery path (locked out → flip auth back off) requires shell
+//     access anyway. Consolidating both directions in one tool is consistent.
 //
 // Resolution order at startup (first hit wins per key):
-//   1. WorkerConfig row in SQL (the canonical source after first save)
-//   2. Process environment variable (lets existing deployments keep working
-//      until they explicitly save a different value via the UI)
+//   1. WorkerConfig row in SQL (canonical, written by the CLI)
+//   2. Process environment variable (legacy fallback for stacks that haven't
+//      run the CLI yet — keeps existing deployments working unchanged)
 //   3. Hardcoded default (auth disabled)
 //
-// After a successful PUT to /api/admin/auth-settings, reloadAuthConfig() is
-// called to re-read state and (if needed) rebuild the JWKS client used by the
-// JWT validation middleware. The next inbound request sees the new state.
-//
-// Why not env-only:
-//   - Restarts are disruptive on a running stack
-//   - Operators expect "save in UI = effective immediately"
-//   - First-time setup is impossible if you have to edit env vars before you
-//     can even reach the Admin page
-//
-// Why not full hot-swap of auth on every request:
-//   - Reading SQL on every request would be slow
-//   - JWKS clients cache signing keys for a day; rebuilding per request defeats
-//     that cache and adds latency
-//
-// The compromise: read once into module-level state, expose a `reload()`
-// function that the admin route calls after a successful save. Cheap and fast.
+// reloadAuthConfig() is exposed but called only at startup. There is no
+// runtime mutation API.
 
 import jwksClient from 'jwks-rsa';
 import * as db from '../db/connection.js';
@@ -117,34 +113,11 @@ export async function loadAuthConfig() {
   return _state;
 }
 
-// Re-read from DB and rebuild module state. Called by the admin save endpoint.
+// Re-read from DB and rebuild module state. Called only at process startup —
+// runtime auth changes happen via the CLI tool (cli/auth-config.js) plus a
+// container restart, so there's no in-process write surface to maintain.
 export async function reloadAuthConfig() {
   return loadAuthConfig();
-}
-
-// Persist a partial update to WorkerConfig. Caller passes only the fields they
-// want to change. Empty string means "clear", null/undefined means "leave alone".
-export async function saveAuthConfig({ enabled, tenantId, clientId, requiredRoles }) {
-  if (!useSql) throw new Error('SQL not configured');
-  const pool = await db.getPool();
-
-  const updates = [];
-  if (enabled !== undefined)       updates.push(['AUTH_ENABLED',        enabled ? 'true' : 'false']);
-  if (tenantId !== undefined)      updates.push(['AUTH_TENANT_ID',      tenantId || '']);
-  if (clientId !== undefined)      updates.push(['AUTH_CLIENT_ID',      clientId || '']);
-  if (requiredRoles !== undefined) updates.push(['AUTH_REQUIRED_ROLES', Array.isArray(requiredRoles) ? requiredRoles.join(',') : (requiredRoles || '')]);
-
-  for (const [k, v] of updates) {
-    await pool.request()
-      .input('k', k).input('v', v)
-      .query(`MERGE dbo.WorkerConfig AS t
-              USING (SELECT @k AS configKey) AS s ON t.configKey = s.configKey
-              WHEN MATCHED THEN UPDATE SET configValue = @v, updatedAt = SYSUTCDATETIME()
-              WHEN NOT MATCHED THEN INSERT (configKey, configValue) VALUES (@k, @v);`);
-  }
-
-  await reloadAuthConfig();
-  return _state;
 }
 
 // Read-only accessors used by the middleware and the /api/auth-config route.
