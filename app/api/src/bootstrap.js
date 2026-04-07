@@ -167,11 +167,51 @@ async function ensureBuiltinCrawler(pool) {
  * Run all bootstrap tasks. Called once after the server starts listening.
  * Failures are logged but do not crash the server.
  */
+// Enable Read Committed Snapshot Isolation on the GraphData database. This is
+// the single most important change for keeping the UI responsive while crawlers
+// run: with RCSI on, SELECT statements read the last-committed row version
+// instead of waiting for ongoing writes to commit. The crawler can MERGE 50k
+// memberships into a temporal table while the UI's matrix query against the
+// same table returns instantly from snapshots.
+//
+// RCSI cost: SQL Server keeps a row version in tempdb for the duration of any
+// reader. On a stack with one crawler + a handful of UI users that's
+// negligible. On a 1000-user deployment we'd revisit. For now: enable always.
+//
+// Idempotent — calling SET READ_COMMITTED_SNAPSHOT ON when it's already on is
+// a no-op. Requires no other connections, but we run this at bootstrap time
+// when only the web pool is connected; that single pool is fine because we're
+// not changing isolation level for our own connection (we ALTER from outside
+// of a transaction).
+async function ensureSnapshotIsolation(pool) {
+  try {
+    // ALLOW_SNAPSHOT_ISOLATION lets sessions opt into snapshot isolation
+    // explicitly. READ_COMMITTED_SNAPSHOT changes the *default* read committed
+    // behavior so all existing read queries automatically benefit without
+    // having to add SET TRANSACTION ISOLATION LEVEL on every endpoint.
+    // Both are required to fully decouple readers from writers.
+    const dbName = process.env.SQL_DATABASE || 'GraphData';
+    await pool.request().query(`
+      IF (SELECT snapshot_isolation_state FROM sys.databases WHERE name = '${dbName}') = 0
+        ALTER DATABASE [${dbName}] SET ALLOW_SNAPSHOT_ISOLATION ON;
+    `);
+    await pool.request().query(`
+      IF (SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = '${dbName}') = 0
+        ALTER DATABASE [${dbName}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+    `);
+    console.log('Snapshot isolation: enabled (readers no longer block on writers)');
+  } catch (err) {
+    // Non-fatal — the system still works without RCSI, just slower under load
+    console.warn('Could not enable snapshot isolation:', err.message);
+  }
+}
+
 export async function bootstrapWorker() {
   if (process.env.USE_SQL !== 'true') return;
 
   try {
     const pool = await db.getPool();
+    await ensureSnapshotIsolation(pool);
     await ensureWorkerConfigTable(pool);
     await ensureCrawlerJobsTable(pool);
     await ensureCrawlerConfigsTable(pool);

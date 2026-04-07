@@ -160,7 +160,11 @@ function Send-IngestBatch {
         [string]$SyncMode = 'full',
         [hashtable]$Scope = @{},
         [array]$Records,
-        [int]$BatchSize = 10000
+        # 5000 strikes a balance between MERGE round-trip overhead and lock
+        # duration. With RCSI enabled on the database, readers don't block on
+        # writers, but smaller batches still make the crawler give back the
+        # CPU more often and reduce tempdb version-store pressure.
+        [int]$BatchSize = 5000
     )
 
     if (-not $Records -or $Records.Count -eq 0) {
