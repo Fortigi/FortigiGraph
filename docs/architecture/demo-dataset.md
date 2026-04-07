@@ -1,6 +1,6 @@
 # Demo Dataset & End-to-End Validation
 
-A purpose-built synthetic dataset for testing every feature of FortigiGraph. Unlike the Omada exports (DatasetLed2), this dataset is fully controlled — every record, relationship, and edge case is intentional, so tests can assert on exact values.
+A purpose-built synthetic dataset for testing every feature of Identity Atlas. Fully controlled — every record, relationship, and edge case is intentional, so tests can assert on exact values.
 
 ---
 

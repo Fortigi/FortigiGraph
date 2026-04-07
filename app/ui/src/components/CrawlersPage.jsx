@@ -14,8 +14,8 @@ const CRAWLER_TYPES = [
   {
     id: 'csv',
     name: 'CSV Import',
-    description: 'Import identity data from semicolon-delimited CSV files',
-    available: false, comingSoon: true,
+    description: 'Upload semicolon-delimited CSV files exported from Omada, SailPoint, or other IGA systems',
+    available: true,
   },
   {
     id: 'demo',
@@ -1052,6 +1052,14 @@ function CrawlerConfigCard({ config, onRunNow, onEdit, onRemove, runningJob }) {
         </div>
       )}
 
+      {config.crawlerType === 'csv' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mb-3">
+          <div><span className="text-gray-500">System:</span> <span className="font-medium">{cfg.systemName || '—'}</span></div>
+          <div><span className="text-gray-500">Type:</span> <span className="font-mono text-xs">{cfg.systemType || '—'}</span></div>
+          <div><span className="text-gray-500">Delimiter:</span> <code className="text-xs">{cfg.delimiter === '\t' ? '\\t' : (cfg.delimiter || ';')}</code></div>
+        </div>
+      )}
+
       {/* Schedules */}
       {scheduleList.length > 0 && (
         <div className="text-xs text-gray-500 mt-2 space-y-1">
@@ -1110,10 +1118,25 @@ function CrawlerConfigCard({ config, onRunNow, onEdit, onRemove, runningJob }) {
 
 // ─── Job Progress Card ────────────────────────────────────────────────────────
 function JobProgress({ job, onNavigateToMatrix, onDismiss }) {
+  // Tick every second so the "last update Xs ago" line stays accurate even when
+  // the backend hasn't pushed a new poll yet. Cheap, just a setInterval that bumps
+  // a counter.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!job || ['completed','failed','cancelled'].includes(job.status)) return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [job?.status]);
+
   if (!job) return null;
   const progress = job.progress ? (typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress) : {};
   const pct = progress.pct || 0;
   const step = progress.step || 'Waiting...';
+  const detail = progress.detail || '';
+  const updatedAt = progress.updatedAt ? new Date(progress.updatedAt) : null;
+  const secondsSince = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt.getTime()) / 1000)) : null;
+  // Re-read tick to silence the "unused" lint warning — the interval is what we want
+  void tick;
 
   if (job.status === 'completed') {
     return (
@@ -1146,6 +1169,14 @@ function JobProgress({ job, onNavigateToMatrix, onDismiss }) {
       </div>
     );
   }
+  // "Stale" once we've gone >60s without a fresh update — useful indicator that
+  // something might be hung (or that the crawler is in an unreported tight loop).
+  const staleness = secondsSince == null ? null
+    : secondsSince < 10 ? 'fresh'
+    : secondsSince < 60 ? 'normal'
+    : 'stale';
+  const stalenessColor = staleness === 'stale' ? 'text-amber-600' : 'text-blue-500';
+
   return (
     <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg">
       <div className="flex items-center justify-between mb-2">
@@ -1155,6 +1186,17 @@ function JobProgress({ job, onNavigateToMatrix, onDismiss }) {
       <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2.5">
         <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%` }} />
       </div>
+      {(detail || secondsSince != null) && (
+        <div className="flex items-center justify-between mt-2 text-xs">
+          <span className="text-blue-700 dark:text-blue-300 truncate font-mono">{detail || ''}</span>
+          {secondsSince != null && (
+            <span className={`ml-2 flex-shrink-0 ${stalenessColor}`} title={updatedAt?.toLocaleString()}>
+              {secondsSince === 0 ? 'just now' : `${secondsSince}s ago`}
+              {staleness === 'stale' && ' · no updates'}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1288,6 +1330,354 @@ function GettingStarted({ onAddCrawler }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CSV Crawler Wizard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Expected CSV files. Must stay in sync with CSV_FILE_SLOTS in csvUploads.js and
+// the file names that Start-CSVCrawler.ps1 reads.
+const CSV_SLOTS = [
+  { key: 'orgUnits',          file: 'Orgunits.csv',           label: 'Org Units / Contexts',    required: false },
+  { key: 'permissions',       file: 'Permissions.csv',        label: 'Resources (Permissions)', required: true  },
+  { key: 'permissionNesting', file: 'Permission-Nesting.csv', label: 'Resource Relationships',  required: false },
+  { key: 'users',             file: 'Users.csv',              label: 'Principals (Users)',      required: true  },
+  { key: 'accountPermission', file: 'Account-Permission.csv', label: 'Resource Assignments',    required: true  },
+  { key: 'identities',        file: 'Identities.csv',         label: 'Identities',              required: false },
+  { key: 'cras',              file: 'CRAs.csv',               label: 'Certifications (CRAs)',   required: false },
+];
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const u = ['B','KB','MB','GB']; let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+// Match an uploaded filename against the expected slots. Case-insensitive,
+// also tolerates "users.csv", "USERS.CSV", and minor naming variants like
+// "Org_Units.csv" or "OrgUnits.csv". Returns the slot key or null.
+function matchSlot(filename) {
+  const lower = filename.toLowerCase().replace(/[\s_-]+/g, '');
+  for (const s of CSV_SLOTS) {
+    const target = s.file.toLowerCase().replace(/[\s_-]+/g, '');
+    if (lower === target) return s.key;
+  }
+  // Looser fallback: contains the key
+  for (const s of CSV_SLOTS) {
+    const stem = s.file.toLowerCase().replace('.csv', '').replace(/[\s_-]+/g, '');
+    if (lower.includes(stem)) return s.key;
+  }
+  return null;
+}
+
+function CsvWizard({ onComplete, onCancel, initialConfig, isEdit, authFetch }) {
+  // Steps: 1=info, 2=files, 3=review
+  const [step, setStep] = useState(1);
+  const [displayName, setDisplayName] = useState(initialConfig?.displayName || 'CSV Import');
+  const [systemType, setSystemType] = useState(initialConfig?.systemType || 'Omada');
+  const [systemName, setSystemName] = useState(initialConfig?.systemName || 'Omada Identity');
+  const [delimiter, setDelimiter] = useState(initialConfig?.delimiter || ';');
+
+  // Files staged in the browser before upload (only on create)
+  // and files already on the server (when editing).
+  const [stagedFiles, setStagedFiles] = useState([]);    // [{ file: File, slot: string|null }]
+  const [serverFiles, setServerFiles] = useState([]);    // [{ name, sizeBytes, modifiedAt }]
+  const [savedConfigId, setSavedConfigId] = useState(initialConfig?.id || null);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Load existing files for edit mode
+  useEffect(() => {
+    if (!savedConfigId) return;
+    (async () => {
+      try {
+        const r = await authFetch(`/api/admin/crawler-configs/${savedConfigId}/csv-files`);
+        if (r.ok) {
+          const j = await r.json();
+          setServerFiles(j.files || []);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [savedConfigId, authFetch]);
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    // Filter to .csv only
+    const csv = files.filter(f => /\.csv$/i.test(f.name));
+    const mapped = csv.map(file => ({ file, slot: matchSlot(file.name) }));
+    setStagedFiles(prev => {
+      // Merge: replace files with same name, keep others
+      const byName = new Map(prev.map(s => [s.file.name, s]));
+      for (const m of mapped) byName.set(m.file.name, m);
+      return Array.from(byName.values());
+    });
+    e.target.value = ''; // allow re-selecting the same files
+  };
+
+  const removeStaged = (name) => setStagedFiles(prev => prev.filter(s => s.file.name !== name));
+  const setStagedSlot = (name, slot) => setStagedFiles(prev => prev.map(s => s.file.name === name ? { ...s, slot } : s));
+
+  const removeServerFile = async (name) => {
+    if (!savedConfigId) return;
+    if (!confirm(`Delete ${name} from the server?`)) return;
+    try {
+      await authFetch(`/api/admin/crawler-configs/${savedConfigId}/csv-files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setServerFiles(prev => prev.filter(f => f.name !== name));
+    } catch (err) { setError(err.message); }
+  };
+
+  // Slot coverage check — used to enable/disable Save
+  const allFiles = [
+    ...serverFiles.map(f => ({ name: f.name, slot: matchSlot(f.name), source: 'server' })),
+    ...stagedFiles.map(s => ({ name: s.file.name, slot: s.slot, source: 'staged' })),
+  ];
+  const filledSlots = new Set(allFiles.map(f => f.slot).filter(Boolean));
+  const requiredSlots = CSV_SLOTS.filter(s => s.required);
+  const missingRequired = requiredSlots.filter(s => !filledSlots.has(s.key));
+  const canSave = !uploading && !saving && missingRequired.length === 0 && allFiles.length > 0;
+
+  // Step 1 → 2 validation
+  const canProceedFromInfo = displayName.trim() && systemName.trim() && systemType.trim() && delimiter;
+
+  // Save handler — creates the config if needed, then uploads files
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      // 1. Create or update the config row
+      const configPayload = { systemName, systemType, delimiter };
+      let configId = savedConfigId;
+      if (!configId) {
+        const r = await authFetch('/api/admin/crawler-configs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ crawlerType: 'csv', displayName, config: configPayload }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.error || `HTTP ${r.status}`);
+        }
+        const created = await r.json();
+        configId = created.id;
+        setSavedConfigId(configId);
+      } else {
+        const r = await authFetch(`/api/admin/crawler-configs/${configId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName, config: configPayload }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.error || `HTTP ${r.status}`);
+        }
+      }
+
+      // 2. Upload any staged files
+      if (stagedFiles.length > 0) {
+        setUploading(true);
+        const fd = new FormData();
+        for (const s of stagedFiles) fd.append('files', s.file, s.file.name);
+        const r = await authFetch(`/api/admin/crawler-configs/${configId}/csv-files`, {
+          method: 'POST',
+          body: fd,
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.error || `HTTP ${r.status}`);
+        }
+        setStagedFiles([]);
+      }
+
+      onComplete();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="mb-6 p-5 bg-white dark:bg-gray-800 border rounded-lg">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">{isEdit ? 'Edit CSV Crawler' : 'Add CSV Crawler'} — Step {step} of 3</h3>
+        <button onClick={onCancel} className="text-gray-500 hover:text-gray-700 text-sm">Cancel</button>
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* ── Step 1: System info ──────────────────────────────────────────── */}
+      {step === 1 && (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
+            <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)}
+              placeholder="e.g. Omada Production"
+              className="w-full px-3 py-2 border rounded text-sm" />
+            <p className="text-xs text-gray-500 mt-1">Shown on the configured crawlers card.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">System name</label>
+              <input type="text" value={systemName} onChange={e => setSystemName(e.target.value)}
+                className="w-full px-3 py-2 border rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Recorded in <code>dbo.Systems.displayName</code>.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">System type</label>
+              <input type="text" value={systemType} onChange={e => setSystemType(e.target.value)}
+                placeholder="Omada / SailPoint / Custom"
+                className="w-full px-3 py-2 border rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Used for grouping in the UI.</p>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">CSV delimiter</label>
+            <select value={delimiter} onChange={e => setDelimiter(e.target.value)}
+              className="px-3 py-2 border rounded text-sm">
+              <option value=";">Semicolon (;)</option>
+              <option value=",">Comma (,)</option>
+              <option value="\t">Tab</option>
+              <option value="|">Pipe (|)</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setStep(2)} disabled={!canProceedFromInfo}
+              className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50">
+              Next: Upload files
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 2: File upload ──────────────────────────────────────────── */}
+      {step === 2 && (
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
+            Pick the folder containing your CSV exports, or drop individual files.
+            File names are auto-mapped to expected object types — you can adjust mismatches before saving.
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <label className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 cursor-pointer">
+              Select folder
+              <input type="file" multiple webkitdirectory="" directory="" onChange={handleFileSelect} className="hidden" />
+            </label>
+            <label className="px-4 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200 cursor-pointer">
+              Select files
+              <input type="file" multiple accept=".csv" onChange={handleFileSelect} className="hidden" />
+            </label>
+          </div>
+
+          {/* Staged files (not yet uploaded) */}
+          {stagedFiles.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">Staged files ({stagedFiles.length})</h4>
+              <div className="border rounded divide-y">
+                {stagedFiles.map(s => (
+                  <div key={s.file.name} className="flex items-center justify-between p-2 text-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono truncate">{s.file.name}</div>
+                      <div className="text-xs text-gray-500">{fmtBytes(s.file.size)}</div>
+                    </div>
+                    <select value={s.slot || ''} onChange={e => setStagedSlot(s.file.name, e.target.value || null)}
+                      className="ml-2 text-xs border rounded px-1 py-0.5">
+                      <option value="">— Ignore —</option>
+                      {CSV_SLOTS.map(slot => (
+                        <option key={slot.key} value={slot.key}>{slot.label}{slot.required ? ' *' : ''}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => removeStaged(s.file.name)}
+                      className="ml-2 text-red-500 hover:text-red-700 text-xs">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Files already on the server (edit mode) */}
+          {serverFiles.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">Already uploaded ({serverFiles.length})</h4>
+              <div className="border rounded divide-y">
+                {serverFiles.map(f => {
+                  const slot = matchSlot(f.name);
+                  const slotLabel = CSV_SLOTS.find(s => s.key === slot)?.label || 'Unrecognized';
+                  return (
+                    <div key={f.name} className="flex items-center justify-between p-2 text-sm">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono truncate">{f.name}</div>
+                        <div className="text-xs text-gray-500">{fmtBytes(f.sizeBytes)} · {new Date(f.modifiedAt).toLocaleString()}</div>
+                      </div>
+                      <span className={`ml-2 px-2 py-0.5 rounded text-xs ${slot ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{slotLabel}</span>
+                      <button onClick={() => removeServerFile(f.name)}
+                        className="ml-2 text-red-500 hover:text-red-700 text-xs">Delete</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Required-slot coverage */}
+          <div className="bg-gray-50 border rounded p-3">
+            <div className="text-xs font-semibold text-gray-700 mb-2">Required object types</div>
+            <div className="flex flex-wrap gap-2">
+              {CSV_SLOTS.map(slot => {
+                const filled = filledSlots.has(slot.key);
+                return (
+                  <span key={slot.key} className={`px-2 py-1 rounded text-xs ${
+                    filled ? 'bg-green-100 text-green-800' : (slot.required ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600')
+                  }`}>
+                    {filled ? '✓ ' : (slot.required ? '✗ ' : '○ ')}{slot.label}{slot.required ? ' *' : ''}
+                  </span>
+                );
+              })}
+            </div>
+            {missingRequired.length > 0 && (
+              <div className="text-xs text-red-600 mt-2">
+                Missing required: {missingRequired.map(s => s.file).join(', ')}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-between">
+            <button onClick={() => setStep(1)} className="px-4 py-2 bg-gray-100 rounded text-sm">Back</button>
+            <button onClick={() => setStep(3)} disabled={missingRequired.length > 0 || allFiles.length === 0}
+              className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50">
+              Next: Review
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 3: Review ──────────────────────────────────────────────── */}
+      {step === 3 && (
+        <div className="space-y-4">
+          <div className="bg-gray-50 border rounded p-4 space-y-2 text-sm">
+            <div><span className="text-gray-500">Display name:</span> <span className="font-medium">{displayName}</span></div>
+            <div><span className="text-gray-500">System:</span> {systemName} ({systemType})</div>
+            <div><span className="text-gray-500">Delimiter:</span> <code>{delimiter === '\t' ? '\\t' : delimiter}</code></div>
+            <div><span className="text-gray-500">Files:</span> {allFiles.length} total ({stagedFiles.length} new, {serverFiles.length} existing)</div>
+          </div>
+          <div className="flex justify-between">
+            <button onClick={() => setStep(2)} className="px-4 py-2 bg-gray-100 rounded text-sm">Back</button>
+            <button onClick={handleSave} disabled={!canSave}
+              className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50">
+              {uploading ? 'Uploading...' : saving ? 'Saving...' : (isEdit ? 'Save changes' : 'Create crawler')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Main CrawlersPage
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1373,6 +1763,9 @@ export default function CrawlersPage({ onNavigate }) {
     } else if (type === 'entra-id') {
       setEditingConfig(null);
       setWizardStep('entra-wizard');
+    } else if (type === 'csv') {
+      setEditingConfig(null);
+      setWizardStep('csv-wizard');
     }
   };
 
@@ -1464,7 +1857,7 @@ export default function CrawlersPage({ onNavigate }) {
       displayName: config.displayName,
       ...(config.config || {}),
     });
-    setWizardStep('entra-wizard');
+    setWizardStep(config.crawlerType === 'csv' ? 'csv-wizard' : 'entra-wizard');
   };
 
   // ── Job actions ───────────────────────────────────────────────
@@ -1581,6 +1974,19 @@ export default function CrawlersPage({ onNavigate }) {
           discoverFn={discoverAttributes}
           initialConfig={editingConfig}
           isEdit={!!editingConfig}
+        />
+      )}
+      {wizardStep === 'csv-wizard' && (
+        <CsvWizard
+          onComplete={() => {
+            setWizardStep(null);
+            setEditingConfig(null);
+            fetchConfigs();
+          }}
+          onCancel={() => { setWizardStep(null); setEditingConfig(null); }}
+          initialConfig={editingConfig}
+          isEdit={!!editingConfig}
+          authFetch={authFetch}
         />
       )}
 

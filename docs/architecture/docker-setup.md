@@ -209,7 +209,6 @@ cp setup/config/.env.example .env
 | `CRAWLER_API_KEY` | API key for the worker's crawler |
 | `GRAPH_TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` | For EntraID crawler |
 | `LLM_PROVIDER` / `LLM_API_KEY` | For risk scoring (Anthropic or OpenAI) |
-| `CSV_DATA_PATH` | Host path to CSV files mounted into worker |
 
 ---
 
@@ -222,7 +221,7 @@ cp setup/config/.env.example .env
 | `app/db/` | `/app/app/db/` | sql-table-init, worker |
 | `tools/` | `/app/tools/` | worker |
 | `setup/docker/crontab` | `/app/setup/docker/crontab` | worker |
-| `test/datasets/DatasetLed2/` | `/data/csv/` | worker (mounted volume) |
+| `job_data` (named volume) | `/data/uploads/` | web (writes), worker (reads) — CSV crawler uploads |
 
 ---
 

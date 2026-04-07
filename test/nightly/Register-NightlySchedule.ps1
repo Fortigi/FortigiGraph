@@ -31,7 +31,7 @@
 [CmdletBinding()]
 Param(
     [string]$Time = '02:00',
-    [string]$TaskName = 'FortigiGraph-NightlyTests',
+    [string]$TaskName = 'IdentityAtlas-NightlyTests',
     [switch]$Unregister
 )
 
@@ -76,13 +76,14 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "FortigiGraph nightly test suite — Docker provisioning, ingest, Playwright E2E"
+    -Description "Identity Atlas nightly test suite — Docker provisioning, ingest, Playwright E2E"
 
 Write-Host "`nScheduled task '$TaskName' registered:" -ForegroundColor Green
 Write-Host "  Schedule:  Daily at $Time" -ForegroundColor Gray
 Write-Host "  Script:    $scriptPath" -ForegroundColor Gray
 Write-Host "  User:      $env:USERNAME" -ForegroundColor Gray
 Write-Host "  Timeout:   2 hours" -ForegroundColor Gray
-Write-Host "  Results:   $repoRoot\_Test\NightlyResults\<date>\" -ForegroundColor Gray
+Write-Host "  Report:    $repoRoot\test\nightly\results\latest.md" -ForegroundColor Gray
+Write-Host "  History:   $repoRoot\test\nightly\results\<date>\report.md" -ForegroundColor Gray
 Write-Host "`nTo run immediately: pwsh -File `"$scriptPath`"" -ForegroundColor Cyan
 Write-Host "To remove: .\Register-NightlySchedule.ps1 -Unregister" -ForegroundColor Cyan

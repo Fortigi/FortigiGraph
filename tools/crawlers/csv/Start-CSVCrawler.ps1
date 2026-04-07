@@ -58,7 +58,11 @@ Param(
     [Parameter(Mandatory = $false)]
     [string]$Delimiter = ';',
 
-    [switch]$RefreshViews = $true
+    [switch]$RefreshViews = $true,
+
+    # Optional CrawlerJobs.id — when set, the crawler reports fine-grained progress
+    # back to the API. Zero / unset = no progress reporting (standalone use).
+    [int]$JobId = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,27 +78,47 @@ function Invoke-IngestAPI {
     $headers = @{ 'Authorization' = "Bearer $ApiKey"; 'Content-Type' = 'application/json' }
     $json = $Body | ConvertTo-Json -Depth 20 -Compress
     $uri = "$ApiBaseUrl/$Endpoint"
-    try {
-        return Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $json -TimeoutSec 300
-    }
-    catch {
-        $responseBody = $null
+
+    # Retry policy: up to 5 attempts with exponential backoff (2s, 4s, 8s, 16s, 32s).
+    # Retries on transient failures (network errors, 5xx, 429); 4xx fails immediately.
+    $maxAttempts = 5
+    $attempt = 0
+    while ($true) {
+        $attempt++
         try {
-            $stream = $_.Exception.Response.GetResponseStream()
-            if ($stream) {
-                $reader = [System.IO.StreamReader]::new($stream)
-                $responseBody = $reader.ReadToEnd()
-                $reader.Close()
-            }
-        } catch {}
-        $statusCode = try { $_.Exception.Response.StatusCode.value__ } catch { '?' }
-        Write-Host "  ERROR: $Endpoint returned $statusCode" -ForegroundColor Red
-        if ($responseBody) {
-            Write-Host "  Response: $responseBody" -ForegroundColor Yellow
-        } else {
-            Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+            $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $json -TimeoutSec 300
+            if ($attempt -gt 1) { Write-Host "  Recovered on attempt $attempt" -ForegroundColor Green }
+            return $response
         }
-        throw
+        catch {
+            $responseBody = $null
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                if ($stream) {
+                    $reader = [System.IO.StreamReader]::new($stream)
+                    $responseBody = $reader.ReadToEnd()
+                    $reader.Close()
+                }
+            } catch {}
+            $statusCode = try { $_.Exception.Response.StatusCode.value__ } catch { $null }
+            $isTransient = (-not $statusCode) -or ($statusCode -ge 500) -or ($statusCode -eq 429)
+
+            if ($isTransient -and $attempt -lt $maxAttempts) {
+                $delay = [Math]::Pow(2, $attempt)
+                $reason = if ($statusCode) { "HTTP $statusCode" } else { $_.Exception.Message }
+                Write-Host "  Transient failure on $Endpoint ($reason) — retry $attempt/$($maxAttempts - 1) in ${delay}s" -ForegroundColor Yellow
+                Start-Sleep -Seconds $delay
+                continue
+            }
+
+            Write-Host "  ERROR: $Endpoint returned $statusCode after $attempt attempt(s)" -ForegroundColor Red
+            if ($responseBody) {
+                Write-Host "  Response: $responseBody" -ForegroundColor Yellow
+            } else {
+                Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            throw
+        }
     }
 }
 
@@ -154,6 +178,21 @@ function Read-CsvFile {
     return Import-Csv -Path $path -Delimiter $Delimiter -Encoding UTF8
 }
 
+# Best-effort progress reporter — see Entra crawler for full notes.
+function Update-CrawlerProgress {
+    param([string]$Step, [int]$Pct = -1, [string]$Detail)
+    if (-not $JobId -or $JobId -le 0) { return }
+    $body = @{ jobId = $JobId }
+    if ($PSBoundParameters.ContainsKey('Step'))   { $body['step']   = $Step }
+    if ($Pct -ge 0)                                { $body['pct']    = $Pct }
+    if ($PSBoundParameters.ContainsKey('Detail')) { $body['detail'] = $Detail }
+    try {
+        $headers = @{ 'Authorization' = "Bearer $ApiKey"; 'Content-Type' = 'application/json' }
+        Invoke-RestMethod -Uri "$ApiBaseUrl/crawlers/job-progress" -Method Post `
+            -Headers $headers -Body ($body | ConvertTo-Json -Compress) -TimeoutSec 10 | Out-Null
+    } catch { }
+}
+
 # ─── Main ─────────────────────────────────────────────────────────
 
 Write-Host "`n=== FortigiGraph CSV Crawler ===" -ForegroundColor Cyan
@@ -166,16 +205,31 @@ Write-Host "Connected as: $($whoami.displayName)" -ForegroundColor Green
 
 # Register system
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Registering system..." -ForegroundColor Cyan
-Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
+$systemResult = Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
     syncMode = 'delta'
     records  = @(@{ systemType = $SystemType; displayName = $SystemName; enabled = $true; syncEnabled = $true })
 }
-$systemId = 2  # TODO: resolve from API
+# Read the assigned system ID back from the ingest response so downstream batches
+# get scoped to the right system. Falls back to 2 if the response shape is unexpected
+# (older API versions); a warning is printed so the operator notices.
+$systemId = $null
+if ($systemResult -and $systemResult.systemId) { $systemId = [int]$systemResult.systemId }
+elseif ($systemResult -and $systemResult.records -and $systemResult.records.Count -gt 0 -and $systemResult.records[0].systemId) {
+    $systemId = [int]$systemResult.records[0].systemId
+}
+if (-not $systemId) {
+    Write-Host "  WARNING: ingest/systems did not return a systemId — falling back to 2" -ForegroundColor Yellow
+    $systemId = 2
+}
+Write-Host "  System ID: $systemId" -ForegroundColor Gray
 
 $syncStart = Get-Date
 
+Update-CrawlerProgress -Step 'Reading CSV files' -Pct 12 -Detail "Folder: $CsvFolder"
+
 # ─── OrgUnits / Contexts ─────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing contexts (org units)..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing org units' -Pct 18 -Detail 'Reading Orgunits.csv'
 $orgUnits = Read-CsvFile 'Orgunits.csv'
 if ($orgUnits) {
     $records = @($orgUnits | ForEach-Object {
@@ -193,6 +247,7 @@ if ($orgUnits) {
 
 # ─── Resources (Permissions) ─────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing resources (permissions)..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing resources' -Pct 28 -Detail 'Reading Permissions.csv'
 $permissions = Read-CsvFile 'Permissions.csv'
 if ($permissions) {
     $records = @($permissions | ForEach-Object {
@@ -210,6 +265,7 @@ if ($permissions) {
 
 # ─── Resource Relationships (Nesting) ────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing resource relationships (nesting)..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing resource relationships' -Pct 38 -Detail 'Reading Permission-Nesting.csv'
 $nesting = Read-CsvFile 'Permission-Nesting.csv'
 if ($nesting) {
     $records = @($nesting | ForEach-Object {
@@ -225,6 +281,7 @@ if ($nesting) {
 
 # ─── Principals (Users) ──────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing principals (users)..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing users' -Pct 48 -Detail 'Reading Users.csv'
 $users = Read-CsvFile 'Users.csv'
 if ($users) {
     $records = @($users | ForEach-Object {
@@ -242,6 +299,7 @@ if ($users) {
 
 # ─── Resource Assignments ────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing resource assignments..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing resource assignments' -Pct 58 -Detail 'Reading Account-Permission.csv'
 $assignments = Read-CsvFile 'Account-Permission.csv'
 if ($assignments) {
     $records = @($assignments | ForEach-Object {
@@ -257,6 +315,7 @@ if ($assignments) {
 
 # ─── Identities ──────────────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing identities..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing identities' -Pct 68 -Detail 'Reading Identities.csv'
 $identities = Read-CsvFile 'Identities.csv'
 if ($identities) {
     $records = @($identities | Where-Object { $_.IdentityType -eq 'Primary' } | ForEach-Object {
@@ -272,6 +331,7 @@ if ($identities) {
 
 # ─── Certifications ──────────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing certifications..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Syncing certifications' -Pct 73 -Detail 'Reading CRAs.csv'
 $cras = Read-CsvFile 'CRAs.csv'
 if ($cras) {
     $records = @($cras | ForEach-Object {
@@ -286,6 +346,7 @@ if ($cras) {
 
 # ─── Refresh Views ───────────────────────────────────────────────
 if ($RefreshViews) {
+    Update-CrawlerProgress -Step 'Refreshing materialized views' -Pct 78 -Detail 'Rebuilding SQL views...'
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Refreshing materialized views..." -ForegroundColor Cyan
     try {
         Invoke-IngestAPI -Endpoint 'ingest/refresh-views' -Body @{}

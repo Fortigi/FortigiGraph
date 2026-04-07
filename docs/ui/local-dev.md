@@ -43,31 +43,13 @@ The UI will show an empty matrix until you run a sync.
 
 ## Run a Sync
 
-Use the included helper script to sync Entra ID data into the local SQL Server:
+Open `http://localhost:3001/#admin?sub=crawlers` and use the in-browser wizard:
 
-```powershell
-.\scripts\local-sync.ps1 -ConfigFile .\Config\yourtenant.json
-```
+- **Demo Data** — one-click synthetic dataset, no Graph credentials required
+- **Microsoft Graph** — paste tenant ID, client ID, client secret; the wizard validates the credentials, lets you pick which object types to sync, and runs the crawler in the worker container
+- **CSV Import** — folder picker uploads CSV files (Omada / SailPoint exports) directly into the worker
 
-This:
-
-1. Loads the FortigiGraph module from the repo root
-2. Connects directly to `localhost:1433` (bypasses Azure connection logic)
-3. Authenticates to Microsoft Graph using your config file credentials
-4. Runs `Start-FGSync` against the local database
-
-!!! note
-    The `Azure.*` fields in your config file are not used during local sync. Only `Graph.TenantId`, `Graph.ClientId`, and `Graph.ClientSecret` need to be real values.
-
-### Custom SQL password or database name
-
-```powershell
-.\scripts\local-sync.ps1 -ConfigFile .\Config\yourtenant.json `
-    -SQLPassword "MyCustomPassword!" `
-    -SQLDatabase "MyDatabase"
-```
-
-The default password (`FortigiGraph_Local1!`) matches the `docker-compose.yml` setting.
+The worker runs every minute and picks up queued jobs. Live progress is shown on the Crawlers page.
 
 ## Stopping and Resetting
 

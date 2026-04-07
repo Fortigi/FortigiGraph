@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthGate';
 
 // Lazy-load the heavy sub-tab pages so they don't bloat the initial Admin bundle
 const CrawlersPage = lazy(() => import('./CrawlersPage'));
+const ContainerStatsPage = lazy(() => import('./ContainerStatsPage'));
 const PerfPage = lazy(() => import('./PerfPage'));
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -836,6 +837,7 @@ const ADMIN_TABS = [
   { key: 'correlation',  label: 'Account Correlation', description: 'Rules for linking accounts to identities' },
   { key: 'risk-scoring', label: 'Risk Scoring',        description: 'Risk profile, classifiers and feature toggle' },
   { key: 'performance',  label: 'Performance',         description: 'API and SQL performance metrics' },
+  { key: 'containers',   label: 'Containers',          description: 'Live CPU, memory and network for the Docker stack' },
 ];
 
 // ─── Risk Scoring sub-tab — combines profile + classifiers + feature toggle ──
@@ -1014,6 +1016,12 @@ export default function AdminPage({ onNavigate }) {
         {activeTab === 'performance' && (
           <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
             <PerfPage />
+          </Suspense>
+        )}
+
+        {activeTab === 'containers' && (
+          <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
+            <ContainerStatsPage />
           </Suspense>
         )}
       </div>

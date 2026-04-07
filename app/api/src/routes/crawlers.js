@@ -333,4 +333,56 @@ selfServiceCrawlersRouter.post('/crawlers/rotate', async (req, res) => {
   }
 });
 
+// POST /api/crawlers/job-progress — Crawlers report fine-grained progress here.
+// The body merges into dbo.CrawlerJobs.progress so the UI can show what the crawler
+// is doing right now ("Group memberships: 1500 of 9633") instead of sitting on the
+// last big-step update from the worker dispatcher.
+selfServiceCrawlersRouter.post('/crawlers/job-progress', async (req, res) => {
+  if (!req.crawler) return res.status(401).json({ error: 'Not authenticated' });
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+
+  const { jobId, step, pct, detail } = req.body || {};
+  const id = parseInt(jobId, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'jobId must be a positive integer' });
+  }
+
+  // Length caps so a misbehaving crawler can't fill the column with junk
+  const safeStep   = step   != null ? String(step).slice(0, 200)   : null;
+  const safeDetail = detail != null ? String(detail).slice(0, 500) : null;
+  const safePct    = (typeof pct === 'number' && pct >= 0 && pct <= 100) ? Math.round(pct) : null;
+
+  try {
+    const pool = await db.getPool();
+    // Read existing progress, merge in the new fields, write back. Doing the merge
+    // server-side keeps the crawler's payload tiny — it only sends what changed.
+    const cur = await pool.request().input('id', id)
+      .query(`SELECT progress, status FROM dbo.CrawlerJobs WHERE id = @id`);
+    if (cur.recordset.length === 0) return res.status(404).json({ error: 'Job not found' });
+    if (cur.recordset[0].status !== 'running' && cur.recordset[0].status !== 'queued') {
+      // Don't keep updating finished/failed/cancelled jobs
+      return res.status(409).json({ error: `Job is ${cur.recordset[0].status}` });
+    }
+
+    let merged = {};
+    try { if (cur.recordset[0].progress) merged = JSON.parse(cur.recordset[0].progress); }
+    catch { merged = {}; }
+
+    if (safeStep   !== null) merged.step   = safeStep;
+    if (safePct    !== null) merged.pct    = safePct;
+    if (safeDetail !== null) merged.detail = safeDetail;
+    merged.updatedAt = new Date().toISOString();
+
+    await pool.request()
+      .input('id', id)
+      .input('progress', JSON.stringify(merged))
+      .query(`UPDATE dbo.CrawlerJobs SET progress = @progress WHERE id = @id`);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Job progress update failed:', err.message);
+    res.status(500).json({ error: 'Failed to update progress' });
+  }
+});
+
 export { adminCrawlersRouter, selfServiceCrawlersRouter };

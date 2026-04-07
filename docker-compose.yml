@@ -67,6 +67,7 @@ services:
       - "3001:3001"
     volumes:
       - job_data:/data/uploads
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       sql-table-init:
         condition: service_completed_successfully
@@ -89,7 +90,6 @@ services:
       LLM_API_KEY: "${LLM_API_KEY:-}"
     volumes:
       - ./setup/docker/crontab:/app/setup/docker/crontab:ro
-      - "${CSV_DATA_PATH:-./test/datasets/DatasetLed2}:/data/csv:ro"
       - job_data:/data/uploads
     depends_on:
       web:

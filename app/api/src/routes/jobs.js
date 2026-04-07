@@ -5,6 +5,8 @@
  */
 import { Router } from 'express';
 import * as db from '../db/connection.js';
+import { existsSync, readdirSync } from 'fs';
+import { getCsvFolderPath, deleteConfigFolder } from './csvUploads.js';
 
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
@@ -183,6 +185,8 @@ router.delete('/admin/crawler-configs/:id', async (req, res) => {
     const result = await pool.request().input('id', id)
       .query(`DELETE FROM dbo.CrawlerConfigs WHERE id = @id`);
     if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Config not found' });
+    // Best-effort cleanup of any uploaded CSV files for this config
+    deleteConfigFolder(id).catch(() => {});
     res.json({ message: 'Config removed' });
   } catch (err) {
     console.error('Error removing crawler config:', err.message);
@@ -623,6 +627,19 @@ router.post('/admin/crawler-jobs', async (req, res) => {
       if (!resolvedConfig?.tenantId || !resolvedConfig?.clientId || !resolvedConfig?.clientSecret) {
         return res.status(400).json({ error: 'Entra ID jobs require tenantId, clientId, and clientSecret' });
       }
+    }
+
+    // For CSV jobs, inject the per-config upload folder so the worker knows where
+    // to read files from. The folder must already exist and contain at least one file.
+    if (jobType === 'csv') {
+      if (!configId) {
+        return res.status(400).json({ error: 'CSV jobs require a configId — inline configs are not supported' });
+      }
+      const folder = getCsvFolderPath(configId);
+      if (!existsSync(folder) || readdirSync(folder).length === 0) {
+        return res.status(400).json({ error: 'No CSV files have been uploaded for this config yet' });
+      }
+      resolvedConfig = { ...(resolvedConfig || {}), csvFolder: folder };
     }
 
     const configJson = resolvedConfig ? JSON.stringify(resolvedConfig) : null;

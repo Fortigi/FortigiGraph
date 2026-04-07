@@ -27,6 +27,7 @@ import { adminCrawlersRouter, selfServiceCrawlersRouter } from './routes/crawler
 import { crawlerAuthMiddleware } from './middleware/crawlerAuth.js';
 import ingestRouter from './routes/ingest.js';
 import jobsRouter from './routes/jobs.js';
+import csvUploadsRouter from './routes/csvUploads.js';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import { join as pathJoin } from 'path';
@@ -205,6 +206,7 @@ app.use('/api', authMiddleware, resourcesRouter);
 app.use('/api', authMiddleware, contextsRouter);
 app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit for import payloads
 app.use('/api', authMiddleware, adminRouter);
+app.use('/api', authMiddleware, csvUploadsRouter);
 // app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
 
 // ─── Crawler & job routes ───────────────────────────────────────

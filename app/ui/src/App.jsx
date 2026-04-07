@@ -335,13 +335,13 @@ export default function App() {
     <ErrorBoundary>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-slate-900 border-b border-slate-700 px-6 py-3">
+      <header className="bg-white border-b border-gray-200 px-6 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.jpeg" alt="Identity Atlas" className="h-10 w-10 rounded" />
+            <img src="/logo.png" alt="Identity Atlas" className="h-10 w-10" />
             <div>
-              <h1 className="text-xl font-semibold text-white">Identity <span className="text-green-400">Atlas</span></h1>
-              <p className="text-xs text-slate-400">
+              <h1 className="text-xl font-semibold text-gray-900">Identity <span className="text-emerald-600">Atlas</span></h1>
+              <p className="text-xs text-gray-500">
                 Universal authorization intelligence
               </p>
             </div>

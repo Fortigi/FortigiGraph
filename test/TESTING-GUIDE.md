@@ -187,7 +187,7 @@ docker compose up -d --build
 pwsh -File test/run-docker-tests.ps1
 ```
 
-Results are written to `test/test-results.md`.
+Results are written to `test/test-results.md` (gitignored — local artifact only).
 
 **What it tests (87 checks across 9 categories):**
 
@@ -486,7 +486,7 @@ rm -rf _Test/logs _Test/exports 2>/dev/null
 test/
 ├── test.config.json              # Central config: API URLs, SQL credentials
 ├── run-docker-tests.ps1          # Docker integration suite (87 checks)
-├── test-results.md               # Latest Docker test run results
+├── test-results.md               # Latest Docker test run results (gitignored)
 ├── TESTING-GUIDE.md              # This file
 ├── unit/
 │   ├── IdentityAtlas.Tests.ps1   # Pester v5 unit tests (module structure, quality)
@@ -496,8 +496,6 @@ test/
 │   ├── Generate-DemoDataset.ps1  # Generates demo-company.json
 │   ├── Ingest-DemoDataset.ps1    # Posts dataset to Ingest API
 │   └── demo-company.json         # Generated fixture (gitignored)
-├── datasets/
-│   └── DatasetLed2/              # Omada CSV dataset (10 files, real-shape data)
 ├── nightly/
 │   ├── Register-NightlySchedule.ps1
 │   └── Run-NightlyLocal.ps1

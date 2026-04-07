@@ -115,6 +115,7 @@ switch ($JobType) {
                 ApiBaseUrl = $apiBaseUrl
                 ApiKey     = $ApiKey
                 ConfigFile = $tempConfig
+                JobId      = $JobId
             }
 
             # Apply sync toggles from selectedObjects or direct config keys
@@ -208,7 +209,8 @@ switch ($JobType) {
             -ApiKey $ApiKey `
             -CsvFolder $csvFolder `
             -SystemName $systemName `
-            -SystemType $systemType
+            -SystemType $systemType `
+            -JobId $JobId
 
         # Post-sync: contexts + account correlation
         Update-JobProgress -Step 'Building contexts from principal data' -Pct 80
