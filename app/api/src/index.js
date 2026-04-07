@@ -242,7 +242,7 @@ app.get('*', (req, res, next) => {
 const server = app.listen(port, async () => {
   console.log(`Identity Atlas running on http://localhost:${port}`);
   console.log(`Mode: ${process.env.USE_SQL === 'true' ? 'SQL' : 'Mock data'}`);
-  console.log(`Auth: ${authEnabled ? 'Entra ID' : 'Disabled'}`);
+  console.log(`Auth: ${isAuthEnabled() ? 'Entra ID' : 'Disabled'}`);
   console.log(`Perf: ${isPerfEnabled() ? 'Enabled (Server-Timing headers + /api/perf)' : 'Disabled'}`);
 
   // Auto-create built-in worker crawler + infrastructure tables

@@ -280,7 +280,7 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
-          <h2 className="text-red-800 font-semibold text-lg">Connection Error</h2>
+          <h2 className="text-red-800 font-semibold text-lg">Backend not responding</h2>
           <p className="text-red-600 mt-2 text-sm">{error}</p>
           <p className="text-red-500 mt-2 text-xs">
             Make sure the backend is running: <code className="bg-red-100 px-1 rounded">cd UI/backend && npm run dev</code>

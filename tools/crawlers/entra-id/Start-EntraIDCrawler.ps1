@@ -319,12 +319,16 @@ function Get-FGGroupChildrenParallel {
             }
         } -ThrottleLimit $ThrottleLimit
 
-        # Fold parallel results into the totals (parent thread, not parallel)
+        # Fold parallel results into the totals (parent thread, not parallel).
+        # Note: PowerShell's parser rejects `$list.Add(& $sb $arg)` because the
+        # call-operator syntax is ambiguous inside a method call. Invoke the
+        # script block via .Invoke() and store the result in a temp first.
         foreach ($o in $batchOutput) {
             if ($o.kind -eq 'error') {
                 $totalErrors++
             } else {
-                $allRecords.Add(& $RecordBuilder $o)
+                $rec = $RecordBuilder.Invoke($o)[0]
+                $allRecords.Add($rec)
             }
         }
 

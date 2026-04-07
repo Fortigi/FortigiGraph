@@ -203,11 +203,12 @@ CREATE TABLE dbo.SystemOwners (
     Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Processing table: ResourceRelationships" -ForegroundColor Cyan
 
     $relationshipColumns = @{
-        'parentResourceId'  = 'UNIQUEIDENTIFIER'
-        'childResourceId'   = 'UNIQUEIDENTIFIER'
-        'relationshipType'  = 'NVARCHAR(50)'
-        'roleName'          = 'NVARCHAR(255)'
-        'roleOriginSystem'  = 'NVARCHAR(100)'
+        'systemId'           = 'INT'                    # FK to Systems — ingest engine scopes deletes by this
+        'parentResourceId'   = 'UNIQUEIDENTIFIER'
+        'childResourceId'    = 'UNIQUEIDENTIFIER'
+        'relationshipType'   = 'NVARCHAR(50)'
+        'roleName'           = 'NVARCHAR(255)'
+        'roleOriginSystem'   = 'NVARCHAR(100)'
         'extendedAttributes' = 'NVARCHAR(MAX)'
     }
 
