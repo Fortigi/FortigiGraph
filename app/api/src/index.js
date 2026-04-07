@@ -28,6 +28,7 @@ import { crawlerAuthMiddleware } from './middleware/crawlerAuth.js';
 import ingestRouter from './routes/ingest.js';
 import jobsRouter from './routes/jobs.js';
 import csvUploadsRouter from './routes/csvUploads.js';
+import { loadAuthConfig, isAuthEnabled, getTenantId, getClientId } from './config/authConfig.js';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import { join as pathJoin } from 'path';
@@ -37,7 +38,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
-const authEnabled = process.env.AUTH_ENABLED === 'true';
+// Note: authentication state is now dynamic — read it via isAuthEnabled() which
+// reflects the current value from authConfig.js (DB-backed, hot-reloadable).
+// The local authEnabled below is a startup snapshot used only for the boot warning.
+const authEnabledAtBoot = process.env.AUTH_ENABLED === 'true';
 // Performance monitoring is ON by default — opt-out by setting PERF_METRICS_ENABLED=false.
 // The runtime toggle in the Performance page still works to enable/disable per session.
 const perfEnabled = process.env.PERF_METRICS_ENABLED !== 'false';
@@ -61,9 +65,16 @@ if (perfEnabled) {
 }
 
 // ─── Startup env validation ──────────────────────────────────────
-if (isProduction && !authEnabled) {
-  console.warn('WARNING: AUTH_ENABLED is not set to "true" in production. All API endpoints are unauthenticated!');
+if (isProduction && !authEnabledAtBoot) {
+  console.warn('WARNING: AUTH_ENABLED is not set to "true" in production. All API endpoints are unauthenticated until configured via Admin → Authentication.');
 }
+
+// Load auth config from DB (with env var fallback). Best-effort — if the DB
+// isn't reachable yet at startup we'll fall back to env vars and the admin
+// page can flip things on later.
+loadAuthConfig().catch(err => {
+  console.warn('Initial auth config load failed:', err.message);
+});
 
 // ─── Security headers ────────────────────────────────────────────
 app.use(helmet({
@@ -175,16 +186,15 @@ app.get('/api/features', publicLimiter, async (req, res) => {
 });
 
 app.get('/api/auth-config', publicLimiter, (req, res) => {
-  // Only return client/tenant IDs when auth is enabled (needed by MSAL).
-  // When auth is disabled, return enabled:true with empty IDs so the
-  // response doesn't reveal that auth is off.
-  if (!authEnabled) {
+  // Reads the live config from authConfig.js so a UI-driven save takes effect
+  // immediately for any new browser session.
+  if (!isAuthEnabled()) {
     return res.json({ enabled: false });
   }
   res.json({
     enabled: true,
-    clientId: process.env.AUTH_CLIENT_ID || '',
-    tenantId: process.env.AUTH_TENANT_ID || '',
+    clientId: getClientId(),
+    tenantId: getTenantId(),
   });
 });
 

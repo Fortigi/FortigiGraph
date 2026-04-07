@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthGate';
 // Lazy-load the heavy sub-tab pages so they don't bloat the initial Admin bundle
 const CrawlersPage = lazy(() => import('./CrawlersPage'));
 const ContainerStatsPage = lazy(() => import('./ContainerStatsPage'));
+const AuthSettingsPage = lazy(() => import('./AuthSettingsPage'));
 const PerfPage = lazy(() => import('./PerfPage'));
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -838,6 +839,7 @@ const ADMIN_TABS = [
   { key: 'risk-scoring', label: 'Risk Scoring',        description: 'Risk profile, classifiers and feature toggle' },
   { key: 'performance',  label: 'Performance',         description: 'API and SQL performance metrics' },
   { key: 'containers',   label: 'Containers',          description: 'Live CPU, memory and network for the Docker stack' },
+  { key: 'auth',         label: 'Authentication',      description: 'Configure Entra ID single sign-on' },
 ];
 
 // ─── Risk Scoring sub-tab — combines profile + classifiers + feature toggle ──
@@ -1022,6 +1024,12 @@ export default function AdminPage({ onNavigate }) {
         {activeTab === 'containers' && (
           <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
             <ContainerStatsPage />
+          </Suspense>
+        )}
+
+        {activeTab === 'auth' && (
+          <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
+            <AuthSettingsPage />
           </Suspense>
         )}
       </div>

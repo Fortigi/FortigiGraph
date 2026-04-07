@@ -1,32 +1,36 @@
+// JWT validation middleware. Reads its configuration from authConfig.js (which
+// is hot-reloadable from the Admin → Authentication page) instead of static
+// process.env values, so flipping auth on/off doesn't require a container restart.
+//
+// When auth is disabled the middleware is a no-op (next() immediately).
+
 import jwt from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+import {
+  isAuthEnabled,
+  getJwksClient,
+  getTenantId,
+  getClientId,
+  getRequiredRoles,
+} from '../config/authConfig.js';
 
-const authEnabled = process.env.AUTH_ENABLED === 'true';
-const tenantId = process.env.AUTH_TENANT_ID;
-const clientId = process.env.AUTH_CLIENT_ID;
-// Optional: comma-separated list of required roles (e.g., "FortigiGraph.Read,FortigiGraph.Admin")
-const requiredRoles = process.env.AUTH_REQUIRED_ROLES
-  ? process.env.AUTH_REQUIRED_ROLES.split(',').map(r => r.trim())
-  : null;
-
-let client;
-if (authEnabled && tenantId) {
-  client = jwksClient({
-    jwksUri: `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,
-    cache: true,
-    cacheMaxAge: 86400000,
-  });
+// jwks-rsa's getSigningKey is callback-shaped. We need a stable function ref
+// that resolves the *current* client at call time so a hot reload picks up the
+// new tenant on the next request.
+function makeKeyResolver() {
+  return function getKey(header, callback) {
+    const client = getJwksClient();
+    if (!client) return callback(new Error('Auth is enabled but JWKS client is not initialized'));
+    client.getSigningKey(header.kid, (err, key) => {
+      if (err) return callback(err);
+      callback(null, key.getPublicKey());
+    });
+  };
 }
 
-function getKey(header, callback) {
-  client.getSigningKey(header.kid, (err, key) => {
-    if (err) return callback(err);
-    callback(null, key.getPublicKey());
-  });
-}
+const keyResolver = makeKeyResolver();
 
 export function authMiddleware(req, res, next) {
-  if (!authEnabled) return next();
+  if (!isAuthEnabled()) return next();
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -34,8 +38,10 @@ export function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.split(' ')[1];
+  const tenantId = getTenantId();
+  const clientId = getClientId();
 
-  jwt.verify(token, getKey, {
+  jwt.verify(token, keyResolver, {
     audience: [`api://${clientId}`, clientId],
     issuer: [
       `https://login.microsoftonline.com/${tenantId}/v2.0`,
@@ -48,19 +54,17 @@ export function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Validate tenant ID from token claims (defense-in-depth)
-    const tokenTid = decoded.tid;
-    if (tokenTid && tokenTid !== tenantId) {
-      console.error(`Token tenant mismatch: expected ${tenantId}, got ${tokenTid}`);
+    // Defense-in-depth: token must come from the configured tenant
+    if (decoded.tid && decoded.tid !== tenantId) {
+      console.error(`Token tenant mismatch: expected ${tenantId}, got ${decoded.tid}`);
       return res.status(401).json({ error: 'Token issued by unexpected tenant' });
     }
 
-    // Validate required roles if configured
-    // Entra ID puts app roles in the 'roles' claim
+    // Optional app-role gate
+    const requiredRoles = getRequiredRoles();
     if (requiredRoles && requiredRoles.length > 0) {
       const tokenRoles = decoded.roles || [];
-      const hasRequiredRole = requiredRoles.some(r => tokenRoles.includes(r));
-      if (!hasRequiredRole) {
+      if (!requiredRoles.some(r => tokenRoles.includes(r))) {
         console.error(`Token missing required role. Has: [${tokenRoles.join(', ')}], needs one of: [${requiredRoles.join(', ')}]`);
         return res.status(403).json({ error: 'Insufficient permissions' });
       }

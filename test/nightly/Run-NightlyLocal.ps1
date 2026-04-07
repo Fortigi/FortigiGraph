@@ -400,11 +400,34 @@ if (-not $SkipIntegration) {
                 else {
                     Write-Host "  Skipping (no CSV dataset at $CsvDataset)" -ForegroundColor Yellow
                 }
+
+                # ─── Phase 4j: Entra ID crawler scenarios ────────────────────
+                # Exercises the real crawler against a test tenant. Credentials
+                # come from test/test.secrets.json or env vars; if neither is set,
+                # the step skips itself with a clear message (treated as PASS).
+                Write-Phase "Phase 4j: Entra ID Crawler Scenarios"
+
+                $entraTestScript = Join-Path $PSScriptRoot 'Test-EntraIdCrawler.ps1'
+                if (Test-Path $entraTestScript) {
+                    try {
+                        # Hand the script our Write-Result so its assertions
+                        # show up in the unified report alongside the rest.
+                        & $entraTestScript `
+                            -ApiBaseUrl $apiBaseUrl `
+                            -ApiKey     $crawlerKey `
+                            -LogFolder  $LogFolder `
+                            -WriteResult ${function:Write-Result}
+                    } catch {
+                        Write-Result 'EntraID-Crawler-Tests' $false $_.Exception.Message
+                    }
+                } else {
+                    Write-Host "  Skipping (Test-EntraIdCrawler.ps1 not found)" -ForegroundColor Yellow
+                }
             }
         }
 
         # Backend integration tests (if vitest is set up)
-        Write-Phase "Phase 4h: Backend Integration Tests"
+        Write-Phase "Phase 4k: Backend Integration Tests"
 
         $integrationTestDir = Join-Path $backendDir 'src/__tests__/integration'
         if (Test-Path $integrationTestDir) {
