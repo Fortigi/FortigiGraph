@@ -318,15 +318,7 @@ function Sync-FGUser {
         'lastSignInDateTime' = { param($obj) if ($obj.signInActivity -and $obj.signInActivity.lastSignInDateTime) { [datetime]$obj.signInActivity.lastSignInDateTime } else { $null } }
         'organizationalUnit' = {
             param($obj)
-            $dn = $obj.onPremisesDistinguishedName
-            if (-not $dn) { return $null }
-            $parts = $dn -split '(?<!\\),'
-            $ouParts = @($parts | Where-Object { $_ -match '^OU=' } | ForEach-Object { $_ -replace '^OU=', '' })
-            if ($ouParts.Count -gt 0) {
-                [array]::Reverse($ouParts)
-                return ($ouParts -join '/')
-            }
-            return $null
+            return (ConvertFrom-FGDistinguishedName -DistinguishedName $obj.onPremisesDistinguishedName)
         }
         'administrativeUnits' = {
             param($obj)

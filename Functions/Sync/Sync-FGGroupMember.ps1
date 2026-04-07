@@ -211,6 +211,22 @@ function Sync-FGGroupMember {
         return
     }
 
+    # DEBUG: Show initial table state
+    try {
+        $initialCount = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.[$TableName] WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $count = $cmd.ExecuteScalar()
+            $cmd.Dispose()
+            return $count
+        }
+        Write-Host "[DEBUG] Initial record count in $TableName : $initialCount" -ForegroundColor Magenta
+    }
+    catch {
+        Write-Host "[DEBUG] Could not read initial count (table may not exist yet)" -ForegroundColor Magenta
+    }
+
     # Different sync strategies based on batching mode
     if ($UseBatching) {
         # ============================================
@@ -330,34 +346,113 @@ function Sync-FGGroupMember {
         # Now delete records that weren't seen in this sync (stale memberships)
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
 
+        # DEBUG: Show table state before delete
+        $preDeleteStats = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = @"
+                SELECT
+                    COUNT(*) AS totalRecords,
+                    SUM(CASE WHEN syncBatchId = @syncBatchId THEN 1 ELSE 0 END) AS currentBatchRecords,
+                    SUM(CASE WHEN syncBatchId IS NULL THEN 1 ELSE 0 END) AS nullBatchRecords,
+                    SUM(CASE WHEN syncBatchId IS NOT NULL AND syncBatchId <> @syncBatchId THEN 1 ELSE 0 END) AS staleBatchRecords
+                FROM dbo.[$TableName]
+                WHERE ValidTo = '9999-12-31 23:59:59.9999999'
+"@
+            $cmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
+            $reader = $cmd.ExecuteReader()
+            $reader.Read()
+            $stats = @{
+                Total = $reader.GetInt32(0)
+                CurrentBatch = $reader.GetInt32(1)
+                NullBatch = $reader.GetInt32(2)
+                StaleBatch = $reader.GetInt32(3)
+            }
+            $reader.Close()
+            $cmd.Dispose()
+            return $stats
+        }
+
+        Write-Host "  [DEBUG] Table state BEFORE delete:" -ForegroundColor Magenta
+        Write-Host "    Total current records:           $($preDeleteStats.Total)" -ForegroundColor Magenta
+        Write-Host "    Records with current syncBatchId: $($preDeleteStats.CurrentBatch)" -ForegroundColor Magenta
+        Write-Host "    Records with NULL syncBatchId:    $($preDeleteStats.NullBatch)" -ForegroundColor Magenta
+        Write-Host "    Records with stale syncBatchId:   $($preDeleteStats.StaleBatch)" -ForegroundColor Magenta
+        Write-Host "    Candidates for deletion:          $($preDeleteStats.NullBatch + $preDeleteStats.StaleBatch)" -ForegroundColor Magenta
+
+        # DEBUG: Show sample records that will be deleted (up to 10)
+        if (($preDeleteStats.NullBatch + $preDeleteStats.StaleBatch) -gt 0) {
+            $samplesToDelete = Invoke-FGSQLCommand -ScriptBlock {
+                param($connection)
+
+                $cmd = $connection.CreateCommand()
+                $cmd.CommandText = @"
+                    SELECT TOP 10 groupId, memberId, memberType, syncBatchId
+                    FROM dbo.[$TableName]
+                    WHERE syncBatchId IS NULL OR syncBatchId <> @syncBatchId
+"@
+                $cmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
+                $reader = $cmd.ExecuteReader()
+                $samples = @()
+                while ($reader.Read()) {
+                    $samples += "    groupId=$($reader['groupId']), memberId=$($reader['memberId']), syncBatchId=$($reader['syncBatchId'])"
+                }
+                $reader.Close()
+                $cmd.Dispose()
+                return $samples
+            }
+            Write-Host "  [DEBUG] Sample records to be deleted:" -ForegroundColor Magenta
+            foreach ($sample in $samplesToDelete) {
+                Write-Host $sample -ForegroundColor Magenta
+            }
+        }
+
         $deleteResult = Invoke-FGSQLCommand -ScriptBlock {
             param($connection)
 
-            $transaction = $connection.BeginTransaction()
+            # Delete in batches to avoid timeout on large temporal tables
+            # Each DELETE also writes to the history table, so large deletes are expensive
+            $batchSize = 50000
+            $totalDeleted = 0
 
-            try {
-                # Delete records where syncBatchId doesn't match current batch (or is NULL for old records)
-                $deleteCmd = $connection.CreateCommand()
-                $deleteCmd.Transaction = $transaction
-                $deleteCmd.CommandText = @"
-                    DELETE FROM dbo.[$TableName]
-                    WHERE syncBatchId IS NULL OR syncBatchId <> @syncBatchId
+            while ($true) {
+                $transaction = $connection.BeginTransaction()
+
+                try {
+                    $deleteCmd = $connection.CreateCommand()
+                    $deleteCmd.Transaction = $transaction
+                    $deleteCmd.CommandTimeout = 300
+                    $deleteCmd.CommandText = @"
+                        DELETE TOP ($batchSize) FROM dbo.[$TableName]
+                        WHERE syncBatchId IS NULL OR syncBatchId <> @syncBatchId
 "@
-                $deleteCmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
-                $deletedCount = $deleteCmd.ExecuteNonQuery()
+                    $deleteCmd.Parameters.AddWithValue("@syncBatchId", $syncBatchId) | Out-Null
+                    $batchDeleted = $deleteCmd.ExecuteNonQuery()
 
-                $transaction.Commit()
-                $transaction.Dispose()
-
-                return $deletedCount
-            }
-            catch {
-                if ($transaction) {
-                    $transaction.Rollback()
+                    $transaction.Commit()
                     $transaction.Dispose()
+
+                    $totalDeleted += $batchDeleted
+                    if ($batchDeleted -gt 0) {
+                        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Deleted batch: $batchDeleted (total so far: $totalDeleted)" -ForegroundColor Gray
+                    }
+
+                    # If we deleted less than batchSize, we're done
+                    if ($batchDeleted -lt $batchSize) {
+                        break
+                    }
                 }
-                throw
+                catch {
+                    if ($transaction) {
+                        $transaction.Rollback()
+                        $transaction.Dispose()
+                    }
+                    throw
+                }
             }
+
+            return $totalDeleted
         }
 
         if ($deleteResult -gt 0) {
@@ -366,6 +461,17 @@ function Sync-FGGroupMember {
         else {
             Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] No deleted memberships found" -ForegroundColor Green
         }
+
+        # DEBUG: Show table state after delete
+        $postDeleteCount = Invoke-FGSQLCommand -ScriptBlock {
+            param($connection)
+            $cmd = $connection.CreateCommand()
+            $cmd.CommandText = "SELECT COUNT(*) FROM dbo.[$TableName] WHERE ValidTo = '9999-12-31 23:59:59.9999999'"
+            $count = $cmd.ExecuteScalar()
+            $cmd.Dispose()
+            return $count
+        }
+        Write-Host "  [DEBUG] Table state AFTER delete: $postDeleteCount current records" -ForegroundColor Magenta
 
         $syncedCount = $totalInserted + $totalUpdated
         $deletedCount = $deleteResult
@@ -510,6 +616,16 @@ function Sync-FGGroupMember {
 
                 # Handle deletions using bulk delete (avoids massive VALUES clause)
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Checking for deleted memberships..." -ForegroundColor Cyan
+
+                # DEBUG: Show pre-delete state
+                $preDeleteCmd = $connection.CreateCommand()
+                $preDeleteCmd.Transaction = $transaction
+                $preDeleteCmd.CommandText = "SELECT COUNT(*) FROM dbo.$TableName"
+                $preDeleteTotal = $preDeleteCmd.ExecuteScalar()
+                $preDeleteCmd.Dispose()
+                Write-Host "  [DEBUG] Records in table before delete: $preDeleteTotal" -ForegroundColor Magenta
+                Write-Host "  [DEBUG] Records in current Graph data:  $($dataTable.Rows.Count)" -ForegroundColor Magenta
+                Write-Host "  [DEBUG] Expected deletions:             $($preDeleteTotal - $dataTable.Rows.Count)" -ForegroundColor Magenta
 
                 $deletedCount = Invoke-FGSQLBulkDelete `
                     -Connection $connection `

@@ -72,6 +72,9 @@ function Sync-FGGroup {
         [switch]$RecreateTable,
 
         [Parameter(Mandatory = $false)]
+        [string[]]$DeriveOrgUnitFrom,
+
+        [Parameter(Mandatory = $false)]
         [int]$BatchSize = 100
     )
 
@@ -190,6 +193,21 @@ function Sync-FGGroup {
     # Add calculated fields (not Graph attributes, computed during sync)
     $calculatedFields = @('groupTypeCalculated', 'administrativeUnits')
 
+    # Add OrgUnit derived columns for each configured DN attribute
+    if ($DeriveOrgUnitFrom) {
+        foreach ($dnAttr in $DeriveOrgUnitFrom) {
+            $orgUnitCol = "${dnAttr}_OrgUnit"
+            $calculatedFields += $orgUnitCol
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Will derive OrgUnit from '$dnAttr' -> column '$orgUnitCol'" -ForegroundColor Cyan
+
+            # Ensure the source attribute is included in the sync
+            if ($Attributes -notcontains $dnAttr) {
+                $Attributes += $dnAttr
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Added source attribute '$dnAttr' to sync attributes" -ForegroundColor Gray
+            }
+        }
+    }
+
     # Build column definitions
     $columns = @{}
     foreach ($attr in $Attributes) {
@@ -203,6 +221,12 @@ function Sync-FGGroup {
     # Add calculated columns
     $columns['groupTypeCalculated'] = 'NVARCHAR(100)'
     $columns['administrativeUnits'] = 'NVARCHAR(MAX)'
+    # Add OrgUnit derived columns
+    if ($DeriveOrgUnitFrom) {
+        foreach ($dnAttr in $DeriveOrgUnitFrom) {
+            $columns["${dnAttr}_OrgUnit"] = 'NVARCHAR(1000)'
+        }
+    }
 
     # Check if table exists and handle schema
     try {
@@ -296,7 +320,13 @@ function Sync-FGGroup {
             $groupTypesValue = $obj.groupTypes
             $isUnified = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'Unified'
             $hasTeam = $obj.resourceProvisioningOptions -is [Array] -and $obj.resourceProvisioningOptions -contains 'Team'
-            $isDynamic = -not [string]::IsNullOrWhiteSpace($obj.membershipRule)
+            # A group is only truly dynamic when Entra has 'DynamicMembership' in groupTypes
+            # AND processing is not paused. The membershipRule string can linger as residue
+            # after a dynamic group is converted back to Assigned, so checking it alone
+            # mislabels converted groups as Dynamic.
+            $hasDynamicType = $groupTypesValue -is [Array] -and $groupTypesValue -contains 'DynamicMembership'
+            $isPaused = $obj.membershipRuleProcessingState -eq 'Paused'
+            $isDynamic = $hasDynamicType -and -not $isPaused
 
             if ($isUnified -and $hasTeam) { $baseType = 'Unified Group with Team' }
             elseif ($isUnified) { $baseType = 'Unified Group without Team' }
@@ -312,6 +342,19 @@ function Sync-FGGroup {
                 return ($auMemberMap[$obj.id] -join ', ')
             }
             return $null
+        }
+    }
+
+    # Add OrgUnit resolvers for each configured DN attribute
+    if ($DeriveOrgUnitFrom) {
+        foreach ($dnAttr in $DeriveOrgUnitFrom) {
+            $orgUnitCol = "${dnAttr}_OrgUnit"
+            $capturedAttr = $dnAttr  # Capture for closure
+            $valueResolvers[$orgUnitCol] = {
+                param($obj)
+                $dnValue = $obj.$capturedAttr
+                return (ConvertFrom-FGDistinguishedName -DistinguishedName $dnValue)
+            }.GetNewClosure()
         }
     }
 

@@ -40,6 +40,8 @@
       "Enabled": true,
       "TableName": "GraphGroups",
       "Filter": "",
+      "_DeriveOrgUnitFrom_NOTE": "Array of attribute names containing Active Directory Distinguished Names (DN). For each attribute, an additional column '{attr}_OrgUnit' will be created with the OU path (e.g. 'Clients/Groups/Distribution'). Useful for extension attributes synced from on-prem AD.",
+      "DeriveOrgUnitFrom": [],
       "Schedule": {
         "Enabled": true,
         "Time": "06:00",

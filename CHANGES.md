@@ -14,3 +14,6 @@
 - Access package detail page: "Open in Entra ID" link now points to the correct Azure Portal ELM blade (includes catalog ID and names)
 - Access package detail page: policy scope values (e.g. "specificDirectoryUsers") now display as human-readable labels (e.g. "Specific directory users")
 - Access package detail page: auto-assignment policy scope now shows the filter rule expression (e.g. which department or attribute conditions determine who gets the package automatically)
+- Fixed: Group member sync in batching mode timed out when deleting stale records, causing memberships to accumulate indefinitely. Deletes now run in batches of 50,000 with a 5-minute timeout per batch
+- Fixed: Groups that were converted from Dynamic to Assigned in Entra were still labeled as "Dynamic Security Group" in the matrix because Entra leaves the old `membershipRule` text behind as residue. Group type detection now uses `groupTypes` containing `DynamicMembership` (and ignores paused rules), matching what Entra actually shows
+- Added `DeriveOrgUnitFrom` config setting for Groups sync — specify attribute names containing Active Directory Distinguished Names and an additional `{attr}_OrgUnit` column is automatically created with the OU path (e.g. "Clients/Groups/Distribution"). Useful for extension attributes synced from on-prem AD via cloud sync

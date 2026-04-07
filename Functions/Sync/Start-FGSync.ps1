@@ -159,6 +159,9 @@ Command-line parameter overrides config file setting
     [string[]]$GroupAdditionalAttributes,
 
     [Parameter(Mandatory = $false)]
+    [string[]]$GroupDeriveOrgUnitFrom,
+
+    [Parameter(Mandatory = $false)]
     [bool]$SyncCatalogs = $true,
 
     [Parameter(Mandatory = $false)]
@@ -345,6 +348,9 @@ function Write-SyncError {
         }
         if ($PSBoundParameters.ContainsKey('GroupAdditionalAttributes') -eq $false -and $config.Sync.Groups.AdditionalAttributes) {
             $GroupAdditionalAttributes = $config.Sync.Groups.AdditionalAttributes
+        }
+        if ($PSBoundParameters.ContainsKey('GroupDeriveOrgUnitFrom') -eq $false -and $config.Sync.Groups.DeriveOrgUnitFrom) {
+            $GroupDeriveOrgUnitFrom = @($config.Sync.Groups.DeriveOrgUnitFrom)
         }
 
         Write-SyncSuccess "Sync configuration read from config file"
@@ -687,6 +693,7 @@ function Write-SyncError {
             $groupSyncParams = @{ TableName = $groupTableName }
             if ($GroupFilter) { $groupSyncParams.Filter = $GroupFilter }
             if ($GroupAdditionalAttributes) { $groupSyncParams.AdditionalAttributes = $GroupAdditionalAttributes }
+            if ($GroupDeriveOrgUnitFrom) { $groupSyncParams.DeriveOrgUnitFrom = $GroupDeriveOrgUnitFrom }
 
             $ps = [PowerShell]::Create()
             $ps.RunspacePool = $runspacePool
@@ -1113,6 +1120,11 @@ function Write-SyncError {
                 if ($GroupAdditionalAttributes) {
                     $syncParams.AdditionalAttributes = $GroupAdditionalAttributes
                     Write-SyncStep "Additional attributes: $($GroupAdditionalAttributes -join ', ')"
+                }
+
+                if ($GroupDeriveOrgUnitFrom) {
+                    $syncParams.DeriveOrgUnitFrom = $GroupDeriveOrgUnitFrom
+                    Write-SyncStep "Deriving OrgUnit from: $($GroupDeriveOrgUnitFrom -join ', ')"
                 }
 
                 Sync-FGGroup @syncParams
