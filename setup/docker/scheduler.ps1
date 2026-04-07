@@ -156,7 +156,12 @@ function Invoke-PendingJob {
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): completed" -ForegroundColor Green
         }
         catch {
-            $errMsg = $_.Exception.Message -replace "'", "''"
+            # Capture the full error including any inner exceptions
+            $errMsg = $_.Exception.Message
+            if ($_.ErrorDetails.Message) {
+                $errMsg = "$errMsg | $($_.ErrorDetails.Message)"
+            }
+            $errMsg = ($errMsg -replace "'", "''").Substring(0, [Math]::Min($errMsg.Length, 2000))
             Invoke-FGSQLQuery -Query "
                 UPDATE dbo.CrawlerJobs
                 SET status = 'failed', completedAt = SYSUTCDATETIME(),
@@ -171,17 +176,99 @@ function Invoke-PendingJob {
     }
 }
 
-# ── Main loop — check cron every minute, poll jobs every 30 seconds ───────────
+# ── Scheduled crawlers from CrawlerConfigs ────────────────────────────────────
+
+function Invoke-ScheduledCrawlers {
+    <#
+    .SYNOPSIS
+        Checks CrawlerConfigs for scheduled crawlers and queues jobs when they match.
+        Schedule format in config JSON: { "schedule": { "enabled": true, "frequency": "daily", "hour": 2, "minute": 0 } }
+        Supported frequencies: hourly, daily, weekly (day 0-6, 0=Sunday)
+    #>
+    if (-not $Global:BuiltinApiKey) { return }
+
+    try {
+        $configs = Invoke-FGSQLQuery -Query "
+            SELECT id, crawlerType, config
+            FROM dbo.CrawlerConfigs
+            WHERE enabled = 1"
+
+        if (-not $configs) { return }
+        # Handle single row (not array)
+        if ($configs -isnot [array]) { $configs = @($configs) }
+
+        $now = Get-Date
+        foreach ($cfg in $configs) {
+            $parsed = $cfg.config | ConvertFrom-Json -AsHashtable
+
+            # Build list of schedules — supports both `schedules` (array) and legacy `schedule` (single)
+            $schedList = @()
+            if ($parsed['schedules'] -and $parsed['schedules'] -is [array]) {
+                $schedList = $parsed['schedules']
+            } elseif ($parsed['schedule']) {
+                $schedList = @($parsed['schedule'])
+            }
+            if ($schedList.Count -eq 0) { continue }
+
+            $shouldRun = $false
+            foreach ($sched in $schedList) {
+                if (-not $sched['enabled']) { continue }
+
+                $freq = $sched['frequency']
+                $schedHour = [int]($sched['hour'] ?? 2)
+                $schedMinute = [int]($sched['minute'] ?? 0)
+                $schedDay = [int]($sched['day'] ?? 0)
+
+                switch ($freq) {
+                    'hourly' {
+                        if ($now.Minute -eq $schedMinute) { $shouldRun = $true }
+                    }
+                    'daily' {
+                        if ($now.Hour -eq $schedHour -and $now.Minute -eq $schedMinute) { $shouldRun = $true }
+                    }
+                    'weekly' {
+                        if ([int]$now.DayOfWeek -eq $schedDay -and $now.Hour -eq $schedHour -and $now.Minute -eq $schedMinute) { $shouldRun = $true }
+                    }
+                }
+                if ($shouldRun) { break }
+            }
+
+            if ($shouldRun) {
+                # Check if a job for this config is already queued or running
+                $existing = Invoke-FGSQLQuery -Query "
+                    SELECT 1 FROM dbo.CrawlerJobs
+                    WHERE jobType = '$($cfg.crawlerType)' AND status IN ('queued','running')
+                    AND config LIKE '%""tenantId"":""$($parsed['tenantId'])%'"
+                if (-not $existing) {
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Schedule: queuing $($cfg.crawlerType) job (config $($cfg.id))" -ForegroundColor Cyan
+                    Invoke-FGSQLQuery -Query "
+                        INSERT INTO dbo.CrawlerJobs (jobType, config, createdBy)
+                        VALUES ('$($cfg.crawlerType)', '$($cfg.config -replace "'","''")', 'scheduler')"
+                    # Update lastRunAt
+                    Invoke-FGSQLQuery -Query "
+                        UPDATE dbo.CrawlerConfigs SET lastRunAt = SYSUTCDATETIME() WHERE id = $($cfg.id)"
+                }
+            }
+        }
+    }
+    catch {
+        # Non-critical — don't crash the loop
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Schedule check error: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# ── Main loop — check schedules every minute, poll jobs every 30 seconds ──────
 
 $lastMinute = -1
 while ($true) {
     $now = Get-Date
     $currentMinute = $now.Minute
 
-    # Cron check (once per minute)
-    if ($currentMinute -ne $lastMinute -and $cronJobs.Count -gt 0) {
+    # Once per minute: check crontab + scheduled configs
+    if ($currentMinute -ne $lastMinute) {
         $lastMinute = $currentMinute
 
+        # Legacy crontab
         foreach ($cj in $cronJobs) {
             $match = (Test-CronMatch $cj.Minute $now.Minute) -and
                      (Test-CronMatch $cj.Hour $now.Hour) -and
@@ -201,6 +288,9 @@ while ($true) {
                 }
             }
         }
+
+        # Scheduled crawler configs
+        Invoke-ScheduledCrawlers
     }
 
     # Job queue check (every iteration)

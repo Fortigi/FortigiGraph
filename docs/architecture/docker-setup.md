@@ -56,10 +56,10 @@ graph TB
 | `sql` | SQL Server 2022 | 1433 | Database with temporal tables |
 | `sql-init` | SQL Server 2022 (one-shot) | — | Creates `GraphData` database |
 | `sql-table-init` | PowerShell 7 (one-shot) | — | Creates all application tables, views, indexes |
-| `backend` | Node.js 20 | 3001 | Ingest API + Read API + served React frontend |
+| `web` | Node.js 20 | 3001 | Ingest API + Read API + served React frontend |
 | `worker` | PowerShell 7 | — | Crawlers, risk scoring, account correlation, scheduling |
 
-After startup, 3 containers remain running: `sql`, `backend`, `worker`.
+After startup, 3 containers remain running: `sql`, `web`, `worker`.
 
 ---
 
@@ -73,7 +73,7 @@ docker compose up -d --build
 
 # Verify
 docker compose ps
-# Expected: sql (healthy), backend (up), worker (up)
+# Expected: sql (healthy), web (up), worker (up)
 
 # Open the UI — click "Load Demo Data" on the Crawlers page
 Start-Process http://localhost:3001
@@ -119,11 +119,57 @@ The `Invoke-CrawlerJob.ps1` dispatcher routes jobs to the appropriate crawler sc
 
 Progress is updated in SQL during execution and displayed in the UI with a progress bar.
 
+## Crawler Configuration
+
+Crawler configs are stored persistently in `dbo.CrawlerConfigs` and managed through the UI wizard. Each config stores:
+
+- **Credentials** (Tenant ID, Client ID, Client Secret — secret is write-only, never readable via API)
+- **Object types** to sync (Identity, Context, Users & Groups, Governance, Apps, Directory Roles, PIM)
+- **Custom attributes** — additional user/group attributes to fetch from Graph (e.g., `employeeHireDate`, `extension_*`)
+- **Identity filter** — selects which users are treated as identities (e.g., `employeeId` is not null)
+- **Schedule** — hourly/daily/weekly with configurable time
+
+### Custom Attributes
+
+Extra attributes are appended to the Graph API `$select` clause and stored in the `extendedAttributes` JSON column:
+
+```
+User attributes:  employeeHireDate, onPremisesSyncEnabled, employeeType, extension_abc_costCenter
+Group attributes: classification, resourceBehaviorOptions
+```
+
+### Identity Filter
+
+Controls which users get synced as identities (useful for HR-managed account detection):
+
+| Condition | Example |
+|---|---|
+| `isNotNull` | Users where `employeeId` has a value |
+| `equals` | Users where `employeeType` equals `"Employee"` |
+| `notEquals` | Users where `accountEnabled` is not `false` |
+| `inValues` | Users where `companyName` is in `["Contoso", "Fabrikam"]` |
+
+### Scheduling
+
+Crawlers can be scheduled directly from the UI. The worker checks `CrawlerConfigs` every minute and queues jobs at the configured time.
+
+| Frequency | Description |
+|---|---|
+| `hourly` | Runs at `:MM` every hour |
+| `daily` | Runs at `HH:MM UTC` every day |
+| `weekly` | Runs at `HH:MM UTC` on a specific day |
+
+Scheduled jobs appear in the "Recent Jobs" table like any other job.
+
 ---
 
 ## Worker Container
 
-The worker container runs PowerShell 7 with the Identity Atlas module pre-loaded. It has two responsibilities: executing scheduled cron jobs and polling the CrawlerJobs queue for UI-submitted jobs.
+The worker container runs PowerShell 7 with the Identity Atlas module pre-loaded. It has three responsibilities:
+
+1. **Job queue polling** — picks up queued jobs from CrawlerJobs every 30 seconds
+2. **Scheduled crawlers** — reads CrawlerConfigs schedules every minute and queues jobs at the right time
+3. **Legacy crontab** — reads `setup/docker/crontab` for manually configured jobs (risk scoring, account correlation)
 
 ### Run Ad-Hoc Commands
 
@@ -132,19 +178,16 @@ The worker container runs PowerShell 7 with the Identity Atlas module pre-loaded
 docker exec -it fortigigraph-worker-1 pwsh
 
 # Run a one-off command
-docker exec fortigigraph-worker-1 pwsh -Command "Import-Module /app/FortigiGraph.psd1; Get-Command *FG*"
+docker exec fortigigraph-worker-1 pwsh -Command "Import-Module /app/setup/IdentityAtlas.psd1; Get-Command *FG*"
 ```
 
-### Configure Scheduled Jobs
+### Legacy Crontab (for non-crawler jobs)
 
-Edit `setup/docker/crontab` and restart the worker:
+Edit `setup/docker/crontab` for jobs that aren't configured via the UI (risk scoring, account correlation):
 
 ```cron
 # Risk scoring nightly at 03:00
-0 3 * * * /usr/bin/pwsh -Command "Import-Module /app/FortigiGraph.psd1; Invoke-FGRiskScoring"
-
-# CSV crawler nightly at 02:00
-0 2 * * * /usr/bin/pwsh -File /app/tools/crawlers/csv/Start-CSVCrawler.ps1 -ApiBaseUrl http://backend:3001/api -ApiKey $CRAWLER_API_KEY -CsvFolder /data/csv
+0 3 * * * /usr/bin/pwsh -Command "Import-Module /app/setup/IdentityAtlas.psd1; Invoke-FGRiskScoring"
 ```
 
 ```powershell
@@ -174,8 +217,8 @@ cp setup/config/.env.example .env
 
 | Host Path | Container Path | Used By |
 |---|---|---|
-| `app/api/src/` | `/app/backend/src/` | backend |
-| `app/ui/` (built) | `/app/frontend/dist/` | backend (static) |
+| `app/api/src/` | `/app/backend/src/` | web |
+| `app/ui/` (built) | `/app/frontend/dist/` | web (static) |
 | `app/db/` | `/app/app/db/` | sql-table-init, worker |
 | `tools/` | `/app/tools/` | worker |
 | `setup/docker/crontab` | `/app/setup/docker/crontab` | worker |
@@ -188,8 +231,8 @@ cp setup/config/.env.example .env
 After code changes:
 
 ```powershell
-# Rebuild only the backend (API + UI changes)
-docker compose -f docker-compose.yml up -d --build backend
+# Rebuild only the web service (API + UI changes)
+docker compose -f docker-compose.yml up -d --build web
 
 # Rebuild the worker (PowerShell script changes)
 docker compose -f docker-compose.yml up -d --build worker

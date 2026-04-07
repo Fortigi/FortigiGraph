@@ -37,7 +37,9 @@ const app = express();
 const port = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
 const authEnabled = process.env.AUTH_ENABLED === 'true';
-const perfEnabled = process.env.PERF_METRICS_ENABLED === 'true';
+// Performance monitoring is ON by default — opt-out by setting PERF_METRICS_ENABLED=false.
+// The runtime toggle in the Performance page still works to enable/disable per session.
+const perfEnabled = process.env.PERF_METRICS_ENABLED !== 'false';
 
 // Resolve module version: env var (set during deployment) → fallback to .psd1 manifest
 let moduleVersion = process.env.MODULE_VERSION || null;
@@ -97,8 +99,15 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// ─── Body parsing with size limit ────────────────────────────────
-app.use(express.json({ limit: '100kb' }));
+// ─── Body parsing with size limits ───────────────────────────────
+// Route-specific parsers for large payloads are set below (ingest: 10mb, import: 2mb).
+// The global parser handles all other routes with a conservative limit.
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/ingest') || req.path.startsWith('/api/admin/import')) {
+    return next(); // Skip global parser — route-specific parsers handle these
+  }
+  express.json({ limit: '100kb' })(req, res, next);
+});
 
 // ─── Performance metrics middleware (before routes, after body parsing) ─
 app.use('/api', perfMetrics);
@@ -132,10 +141,35 @@ app.get('/api/version', publicLimiter, (req, res) => {
   res.json({ version: moduleVersion || null });
 });
 
-app.get('/api/features', publicLimiter, (req, res) => {
+// Helper: read a feature flag override from WorkerConfig (overrides the env var)
+async function getFeatureOverride(key) {
+  if (process.env.USE_SQL !== 'true') return null;
+  try {
+    const { getPool } = await import('./db/connection.js');
+    const pool = await getPool();
+    const r = await pool.request().input('k', `FEATURE_${key}`)
+      .query(`SELECT configValue FROM dbo.WorkerConfig WHERE configKey = @k`);
+    if (r.recordset.length === 0) return null;
+    const v = r.recordset[0].configValue;
+    return v === 'true' ? true : v === 'false' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/features', publicLimiter, async (req, res) => {
+  // WorkerConfig overrides win over env vars; env vars are the fallback default.
+  // Risk Scoring defaults to OFF on a fresh install — opt-in via the toggle
+  // in Admin → Risk Scoring or via FEATURE_RISK_SCORING=true.
+  const riskOverride = await getFeatureOverride('RISK_SCORING');
+  const corrOverride = await getFeatureOverride('ACCOUNT_CORRELATION');
   res.json({
-    riskScoring: process.env.FEATURE_RISK_SCORING !== 'false',
-    accountCorrelation: process.env.FEATURE_ACCOUNT_CORRELATION !== 'false',
+    riskScoring: riskOverride !== null
+      ? riskOverride
+      : process.env.FEATURE_RISK_SCORING === 'true',
+    accountCorrelation: corrOverride !== null
+      ? corrOverride
+      : process.env.FEATURE_ACCOUNT_CORRELATION !== 'false',
   });
 });
 

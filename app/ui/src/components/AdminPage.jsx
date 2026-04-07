@@ -1,5 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useAuth } from '../auth/AuthGate';
+
+// Lazy-load the heavy sub-tab pages so they don't bloat the initial Admin bundle
+const CrawlersPage = lazy(() => import('./CrawlersPage'));
+const PerfPage = lazy(() => import('./PerfPage'));
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -682,20 +686,337 @@ function ResultRow({ label, value, good, warn, bad }) {
 
 // ── Page ──────────────────────────────────────────────────────────
 
-export default function AdminPage() {
+// ─── Danger Zone — Clean Database ─────────────────────────────────────────────
+function DangerZoneSection() {
+  const { authFetch } = useAuth();
+  const [confirmStep, setConfirmStep] = useState(0); // 0=idle, 1=confirm, 2=type-confirm
+  const [typedConfirm, setTypedConfirm] = useState('');
+  const [cleaning, setCleaning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const handleClean = async () => {
+    setCleaning(true);
+    setError(null);
+    try {
+      const r = await authFetch('/api/admin/clean-database', { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      setResult(data);
+      setConfirmStep(0);
+      setTypedConfirm('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Admin Configuration</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Saved configuration used for risk scoring and account correlation. Read-only — manage via PowerShell cmdlets.</p>
+    <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
+      <div className="px-5 py-4 border-b border-red-100 bg-red-50">
+        <div className="flex items-center gap-3">
+          <span className="text-lg">⚠️</span>
+          <span className="font-medium text-red-900">Danger Zone</span>
+        </div>
+      </div>
+      <div className="p-5">
+        <h4 className="font-semibold text-gray-900 mb-1">Clean Database</h4>
+        <p className="text-sm text-gray-600 mb-4">
+          Wipes all identity data (users, groups, assignments, identities, governance, sync log) but
+          preserves crawler configurations, risk profiles, and correlation rules. Use this when you want
+          to re-sync from a clean slate without re-creating your crawler setup.
+        </p>
+
+        {result && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded">
+            <div className="font-medium text-green-800 text-sm mb-2">Database cleaned</div>
+            <div className="text-xs text-green-700">
+              Wiped {result.wiped?.length || 0} table{result.wiped?.length !== 1 ? 's' : ''}
+              {result.skipped?.length > 0 && ` (${result.skipped.length} skipped)`}
+            </div>
+            {result.wiped?.length > 0 && (
+              <details className="mt-2">
+                <summary className="text-xs text-green-700 cursor-pointer hover:underline">Show details</summary>
+                <ul className="mt-1 text-xs text-green-600 space-y-0.5">
+                  {result.wiped.map(w => (
+                    <li key={w.table}>
+                      <code>{w.table}</code>: {w.rowsAffected} rows{w.temporal ? ' (temporal)' : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <button onClick={() => setResult(null)} className="mt-2 text-xs text-green-600 hover:text-green-800">Dismiss</button>
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded">
+            <div className="text-sm text-red-700">{error}</div>
+            <button onClick={() => setError(null)} className="mt-1 text-xs text-red-600 hover:text-red-800">Dismiss</button>
+          </div>
+        )}
+
+        {confirmStep === 0 && (
+          <button
+            onClick={() => setConfirmStep(1)}
+            className="px-4 py-2 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700"
+          >
+            Clean Database
+          </button>
+        )}
+
+        {confirmStep === 1 && (
+          <div className="p-4 bg-yellow-50 border border-yellow-300 rounded">
+            <p className="text-sm text-yellow-900 font-medium mb-2">Are you sure?</p>
+            <p className="text-xs text-yellow-800 mb-3">
+              This will delete all identity data. Crawler configurations and risk profiles will be kept.
+              You'll need to re-run your crawlers to populate the data again.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmStep(2)}
+                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+              >
+                Yes, continue
+              </button>
+              <button
+                onClick={() => setConfirmStep(0)}
+                className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {confirmStep === 2 && (
+          <div className="p-4 bg-red-50 border border-red-300 rounded">
+            <p className="text-sm text-red-900 font-medium mb-2">Final confirmation</p>
+            <p className="text-xs text-red-800 mb-3">
+              Type <code className="px-1 bg-red-100 rounded">DELETE ALL DATA</code> to confirm:
+            </p>
+            <input
+              type="text"
+              value={typedConfirm}
+              onChange={e => setTypedConfirm(e.target.value)}
+              placeholder="DELETE ALL DATA"
+              className="w-full p-2 border rounded mb-3 text-sm font-mono"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleClean}
+                disabled={cleaning || typedConfirm !== 'DELETE ALL DATA'}
+                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {cleaning ? 'Cleaning...' : 'Clean Database'}
+              </button>
+              <button
+                onClick={() => { setConfirmStep(0); setTypedConfirm(''); }}
+                className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Admin Sub-Tabs ───────────────────────────────────────────────────────────
+const ADMIN_TABS = [
+  { key: 'crawlers',     label: 'Crawlers',            description: 'Add, configure and run identity data crawlers' },
+  { key: 'data',         label: 'Data',                description: 'Export/import curated data and clean the database' },
+  { key: 'correlation',  label: 'Account Correlation', description: 'Rules for linking accounts to identities' },
+  { key: 'risk-scoring', label: 'Risk Scoring',        description: 'Risk profile, classifiers and feature toggle' },
+  { key: 'performance',  label: 'Performance',         description: 'API and SQL performance metrics' },
+];
+
+// ─── Risk Scoring sub-tab — combines profile + classifiers + feature toggle ──
+function RiskScoringSection() {
+  const { authFetch } = useAuth();
+  const [features, setFeatures] = useState(null);
+  const [toggling, setToggling] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchFeatures = async () => {
+    try {
+      const r = await fetch('/api/features');
+      if (r.ok) setFeatures(await r.json());
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { fetchFeatures(); }, []);
+
+  const handleToggle = async () => {
+    if (!features) return;
+    setToggling(true);
+    setError(null);
+    try {
+      const r = await authFetch('/api/admin/features/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feature: 'riskScoring', enabled: !features.riskScoring }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      // Hard reload so the main navigation tabs (Risk Scores, Org Chart) re-evaluate
+      // their visibility against the new feature flags. A re-fetch alone wouldn't
+      // re-run the nav tab filter logic in App.jsx until the user navigates away.
+      window.location.reload();
+    } catch (err) {
+      setError(err.message);
+      setToggling(false);
+    }
+  };
+
+  const enabled = features?.riskScoring !== false;
+
+  return (
+    <div className="space-y-4">
+      {/* Feature toggle card */}
+      <div className={`rounded-lg border p-5 ${enabled ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-300'}`}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Risk Scoring Feature</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Risk scoring assigns a 0-100 risk score to every identity based on direct classifier matches,
+              membership analysis, structural hygiene checks, and cross-entity propagation.
+              When disabled, the Risk Scores tab is hidden from the main navigation and the scoring engine
+              is skipped during sync runs.
+            </p>
+            {error && (
+              <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>
+            )}
+          </div>
+          <div className="flex-shrink-0">
+            <button
+              onClick={handleToggle}
+              disabled={toggling || features === null}
+              className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                enabled ? 'bg-emerald-600' : 'bg-gray-300'
+              } disabled:opacity-50`}
+              title={enabled ? 'Disable risk scoring' : 'Enable risk scoring'}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                  enabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+            <div className="text-xs text-gray-500 text-center mt-1">
+              {toggling ? '...' : enabled ? 'Enabled' : 'Disabled'}
+            </div>
+          </div>
         </div>
       </div>
 
-      <CuratedDataSection />
-      <RiskProfileSection />
-      <ClassifiersSection />
-      <CorrelationSection />
+      {/* Risk profile + classifiers — only render when feature is enabled */}
+      {enabled ? (
+        <>
+          <RiskProfileSection />
+          <ClassifiersSection />
+        </>
+      ) : (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+          Risk Scoring is disabled. Enable the feature toggle above to configure profiles and classifiers.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminSubTabs({ activeTab, onTabChange }) {
+  return (
+    <div className="border-b border-gray-200 mb-4">
+      <nav className="flex gap-1 -mb-px">
+        {ADMIN_TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => onTabChange(tab.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.key
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+export default function AdminPage({ onNavigate }) {
+  // Persist active sub-tab in URL hash like #admin?sub=crawlers so deep links work.
+  // Also handles legacy #crawlers and #performance hashes by mapping them to the
+  // corresponding sub-tab.
+  const getInitialTab = () => {
+    const hash = window.location.hash.replace('#', '');
+    const page = hash.split('?')[0];
+    if (page === 'crawlers') return 'crawlers';
+    if (page === 'performance') return 'performance';
+    const m = window.location.hash.match(/sub=([\w-]+)/);
+    return m && ADMIN_TABS.some(t => t.key === m[1]) ? m[1] : 'crawlers';
+  };
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+
+  useEffect(() => {
+    // Update the hash when the user changes sub-tab so reloads land in the same place.
+    // Also rewrite legacy #crawlers / #performance to #admin?sub=...
+    const hash = window.location.hash.replace('#', '');
+    const page = hash.split('?')[0];
+    const isLegacy = page === 'crawlers' || page === 'performance';
+    const newHash = `#admin?sub=${activeTab}`;
+    if (isLegacy || !window.location.hash.includes(`sub=${activeTab}`)) {
+      window.history.replaceState(null, '', newHash);
+    }
+  }, [activeTab]);
+
+  const currentTab = ADMIN_TABS.find(t => t.key === activeTab) || ADMIN_TABS[0];
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-3 px-2">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Admin</h2>
+          <p className="text-sm text-gray-500 mt-0.5">{currentTab.description}</p>
+        </div>
+      </div>
+
+      <AdminSubTabs activeTab={activeTab} onTabChange={setActiveTab} />
+
+      <div className="space-y-4 px-2">
+        {activeTab === 'crawlers' && (
+          <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
+            <CrawlersPage onNavigate={onNavigate} />
+          </Suspense>
+        )}
+
+        {activeTab === 'data' && (
+          <>
+            <CuratedDataSection />
+            <DangerZoneSection />
+          </>
+        )}
+
+        {activeTab === 'correlation' && <CorrelationSection />}
+        {activeTab === 'risk-scoring' && <RiskScoringSection />}
+
+        {activeTab === 'performance' && (
+          <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>
+            <PerfPage />
+          </Suspense>
+        )}
+      </div>
     </div>
   );
 }

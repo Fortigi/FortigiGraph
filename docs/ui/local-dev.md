@@ -32,7 +32,7 @@ This starts:
 |---|---|
 | `sql` | SQL Server 2022 Developer Edition (persisted in `sql_data` volume) |
 | `sql-init` | Creates the `GraphData` database on first start (runs once, then exits) |
-| `backend` | Builds frontend + starts Express API; auth disabled by default |
+| `web` | Builds frontend + starts Express API; auth disabled by default |
 
 Wait ~30 seconds for SQL Server to be ready, then open **http://localhost:3001**.
 

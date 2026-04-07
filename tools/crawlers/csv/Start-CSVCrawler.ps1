@@ -78,7 +78,22 @@ function Invoke-IngestAPI {
         return Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $json -TimeoutSec 300
     }
     catch {
-        Write-Host "  ERROR: $Endpoint - $($_.Exception.Message)" -ForegroundColor Red
+        $responseBody = $null
+        try {
+            $stream = $_.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                $responseBody = $reader.ReadToEnd()
+                $reader.Close()
+            }
+        } catch {}
+        $statusCode = try { $_.Exception.Response.StatusCode.value__ } catch { '?' }
+        Write-Host "  ERROR: $Endpoint returned $statusCode" -ForegroundColor Red
+        if ($responseBody) {
+            Write-Host "  Response: $responseBody" -ForegroundColor Yellow
+        } else {
+            Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+        }
         throw
     }
 }

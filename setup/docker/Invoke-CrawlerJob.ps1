@@ -36,7 +36,7 @@ Param(
 )
 
 $ErrorActionPreference = 'Stop'
-$apiBaseUrl = 'http://backend:3001/api'
+$apiBaseUrl = 'http://web:3001/api'
 
 function Update-JobProgress {
     param([string]$Step, [int]$Pct = 0, [string]$Detail = '')
@@ -117,7 +117,20 @@ switch ($JobType) {
                 ConfigFile = $tempConfig
             }
 
-            # Apply sync toggles from config
+            # Apply sync toggles from selectedObjects or direct config keys
+            $objects = $Config['selectedObjects']
+            if ($objects) {
+                if ($objects.ContainsKey('identity'))           { $crawlerParams['SyncPrincipals']         = [bool]$objects['identity'] }
+                if ($objects.ContainsKey('usersGroupsMembers')) {
+                    $crawlerParams['SyncPrincipals']  = [bool]$objects['usersGroupsMembers']
+                    $crawlerParams['SyncResources']   = [bool]$objects['usersGroupsMembers']
+                    $crawlerParams['SyncAssignments'] = [bool]$objects['usersGroupsMembers']
+                }
+                if ($objects.ContainsKey('identityGovernance')) { $crawlerParams['SyncGovernance']          = [bool]$objects['identityGovernance'] }
+                if ($objects.ContainsKey('context'))            { $crawlerParams['SyncContexts']            = [bool]$objects['context'] }
+                if ($objects.ContainsKey('pim'))                { $crawlerParams['SyncPim']                 = [bool]$objects['pim'] }
+            }
+            # Direct sync toggles (backward compat)
             if ($Config.ContainsKey('syncPrincipals'))         { $crawlerParams['SyncPrincipals']         = [bool]$Config['syncPrincipals'] }
             if ($Config.ContainsKey('syncServicePrincipals'))   { $crawlerParams['SyncServicePrincipals']   = [bool]$Config['syncServicePrincipals'] }
             if ($Config.ContainsKey('syncResources'))           { $crawlerParams['SyncResources']           = [bool]$Config['syncResources'] }
@@ -125,7 +138,45 @@ switch ($JobType) {
             if ($Config.ContainsKey('syncGovernance'))          { $crawlerParams['SyncGovernance']          = [bool]$Config['syncGovernance'] }
             if ($Config.ContainsKey('syncContexts'))            { $crawlerParams['SyncContexts']            = [bool]$Config['syncContexts'] }
 
+            # Custom attributes — merge identityAttributes into CustomUserAttributes
+            # so they're fetched in the same Graph call AND included in identity records
+            $userAttrs = @()
+            if ($Config['customUserAttributes']) { $userAttrs += @($Config['customUserAttributes']) }
+            if ($Config['identityAttributes']) { $userAttrs += @($Config['identityAttributes']) }
+            $userAttrs = $userAttrs | Select-Object -Unique
+            if ($userAttrs.Count -gt 0) {
+                $crawlerParams['CustomUserAttributes'] = $userAttrs
+            }
+            if ($Config['customGroupAttributes']) {
+                $crawlerParams['CustomGroupAttributes'] = @($Config['customGroupAttributes'])
+            }
+
+            # Identity filter
+            if ($Config['identityFilter'] -and $Config['identityFilter']['attribute']) {
+                $crawlerParams['IdentityFilter'] = $Config['identityFilter']
+            }
+
             & /app/tools/crawlers/entra-id/Start-EntraIDCrawler.ps1 @crawlerParams
+
+            # ── Post-sync: build contexts from principal data ────────────
+            Update-JobProgress -Step 'Building contexts from principal data' -Pct 80
+            try {
+                & /app/setup/docker/Build-FGContexts.ps1
+            } catch {
+                Write-Host "  Context build failed (non-critical): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+
+            # ── Post-sync: account-to-identity correlation ───────────────
+            Update-JobProgress -Step 'Linking accounts to identities' -Pct 90
+            try {
+                if (Get-Command Invoke-FGAccountCorrelation -ErrorAction SilentlyContinue) {
+                    Invoke-FGAccountCorrelation
+                } else {
+                    Write-Host "  Invoke-FGAccountCorrelation not available — skipping" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "  Account correlation failed (non-critical): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
 
             Update-JobProgress -Step 'Complete' -Pct 100
             Set-JobResult @{ status = 'Entra ID sync completed successfully' }
@@ -158,6 +209,15 @@ switch ($JobType) {
             -CsvFolder $csvFolder `
             -SystemName $systemName `
             -SystemType $systemType
+
+        # Post-sync: contexts + account correlation
+        Update-JobProgress -Step 'Building contexts from principal data' -Pct 80
+        try { & /app/setup/docker/Build-FGContexts.ps1 } catch { Write-Host "  Context build failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+        Update-JobProgress -Step 'Linking accounts to identities' -Pct 90
+        try {
+            if (Get-Command Invoke-FGAccountCorrelation -ErrorAction SilentlyContinue) { Invoke-FGAccountCorrelation }
+        } catch { Write-Host "  Account correlation failed: $($_.Exception.Message)" -ForegroundColor Yellow }
 
         Update-JobProgress -Step 'Complete' -Pct 100
         Set-JobResult @{ status = 'CSV import completed successfully' }

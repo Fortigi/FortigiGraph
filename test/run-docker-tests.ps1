@@ -55,8 +55,8 @@ $containers = $ps | ConvertFrom-Json -ErrorAction SilentlyContinue
 $sqlRunning = $containers | Where-Object { $_.Service -eq 'sql' -and $_.State -eq 'running' }
 Test-Check 'Infrastructure' 'SQL Server container running' ($null -ne $sqlRunning)
 
-$backendRunning = $containers | Where-Object { $_.Service -eq 'backend' -and $_.State -eq 'running' }
-Test-Check 'Infrastructure' 'Backend container running' ($null -ne $backendRunning)
+$webRunning = $containers | Where-Object { $_.Service -eq 'web' -and $_.State -eq 'running' }
+Test-Check 'Infrastructure' 'Web container running' ($null -ne $webRunning)
 
 $workerRunning = $containers | Where-Object { $_.Service -eq 'worker' -and $_.State -eq 'running' }
 Test-Check 'Infrastructure' 'Worker container running' ($null -ne $workerRunning)
@@ -498,7 +498,7 @@ $md += "| Passed | $totalPassed |"
 $md += "| Failed | $totalFailed |"
 $md += "| Skipped | $totalSkipped |"
 $md += "| Duration | $([Math]::Round($elapsed.TotalSeconds))s |"
-$md += "| Docker containers | 3 (sql, backend, worker) |"
+$md += "| Docker containers | 3 (sql, web, worker) |"
 $md += "| Date | $(Get-Date -Format 'yyyy-MM-dd HH:mm') |"
 
 $reportPath = Join-Path $repoRoot 'test/test-results.md'

@@ -41,6 +41,7 @@ function createIngestHandler(entityType) {
     // Validate envelope
     const envResult = validateEnvelope(body, entityType);
     if (!envResult.valid) {
+      console.warn(`Ingest validation failed [${entityType}]: envelope errors:`, envResult.errors);
       return res.status(400).json({ error: 'Validation failed', details: envResult.errors });
     }
 
@@ -52,6 +53,7 @@ function createIngestHandler(entityType) {
     // Validate records
     const recResult = validateRecords(body.records, entityType, body.idGeneration);
     if (!recResult.valid) {
+      console.warn(`Ingest validation failed [${entityType}]: ${recResult.errors.length} record error(s):`, recResult.errors.slice(0, 5));
       return res.status(400).json({ error: 'Record validation failed', details: recResult.errors });
     }
 
@@ -156,6 +158,42 @@ function createIngestHandler(entityType) {
       }
 
       const durationMs = Date.now() - startTime.getTime();
+
+      // For the systems endpoint, look up the system IDs of the records we just merged
+      // and return them so the crawler can use them in subsequent calls (no more hardcoded systemId=1).
+      let systemIds = undefined;
+      if (entityType === 'systems' && body.records.length > 0) {
+        try {
+          const lookup = body.records.map(r => ({
+            tenantId: r.tenantId || null,
+            systemType: r.systemType || null,
+            displayName: r.displayName || null,
+          }));
+          const ids = [];
+          for (const rec of lookup) {
+            // Match on (tenantId + systemType) when both present, else by displayName + systemType
+            let q;
+            const reqq = pool.request();
+            if (rec.tenantId && rec.systemType) {
+              reqq.input('tenantId', rec.tenantId).input('systemType', rec.systemType);
+              q = `SELECT TOP 1 id FROM dbo.Systems WHERE tenantId = @tenantId AND systemType = @systemType
+                   AND ValidTo = '9999-12-31 23:59:59.9999999' ORDER BY id DESC`;
+            } else if (rec.displayName) {
+              reqq.input('displayName', rec.displayName).input('systemType', rec.systemType || '');
+              q = `SELECT TOP 1 id FROM dbo.Systems WHERE displayName = @displayName
+                   AND ValidTo = '9999-12-31 23:59:59.9999999' ORDER BY id DESC`;
+            } else {
+              continue;
+            }
+            const r2 = await reqq.query(q);
+            if (r2.recordset.length > 0) ids.push(r2.recordset[0].id);
+          }
+          if (ids.length > 0) systemIds = ids;
+        } catch (lookupErr) {
+          console.error('Failed to look up system IDs after ingest:', lookupErr.message);
+        }
+      }
+
       return res.status(201).json({
         table: tableName,
         inserted: result.inserted,
@@ -163,6 +201,7 @@ function createIngestHandler(entityType) {
         deleted: result.deleted,
         records: body.records.length,
         durationMs,
+        ...(systemIds ? { systemIds } : {}),
       });
 
     } catch (err) {

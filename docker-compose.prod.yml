@@ -61,8 +61,8 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # ── Backend (serves built frontend + API) ────────────────────────────────────
-  backend:
+  # ── Web (serves built frontend + API) ────────────────────────────────────────
+  web:
     image: ghcr.io/fortigi/identity-atlas:latest
     environment:
       NODE_ENV: production
@@ -105,7 +105,7 @@ services:
     volumes:
       - job_data:/data/uploads
     depends_on:
-      backend:
+      web:
         condition: service_started
     restart: unless-stopped
 

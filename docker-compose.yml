@@ -48,8 +48,8 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # ── Backend (serves built frontend + API) ────────────────────────────────────
-  backend:
+  # ── Web (serves built frontend + API) ────────────────────────────────────────
+  web:
     build:
       context: ./app
       dockerfile: api/Dockerfile
@@ -92,7 +92,7 @@ services:
       - "${CSV_DATA_PATH:-./test/datasets/DatasetLed2}:/data/csv:ro"
       - job_data:/data/uploads
     depends_on:
-      backend:
+      web:
         condition: service_started
     restart: unless-stopped
 

@@ -3,7 +3,7 @@
 // Only available when PERF_METRICS_ENABLED=true.
 
 import { Router } from 'express';
-import { isEnabled, summarize, recent, slowest, clear } from '../perf/collector.js';
+import { isEnabled, enable, disable, summarize, recent, slowest, clear } from '../perf/collector.js';
 
 const router = Router();
 
@@ -60,6 +60,18 @@ router.get('/perf/export', (req, res) => {
 router.post('/perf/clear', (req, res) => {
   clear();
   res.json({ ok: true, message: 'Metrics cleared' });
+});
+
+// ─── POST /api/perf/toggle ─────────────────────────────────────
+// Enable or disable the metrics collector at runtime.
+// body: { enabled: boolean }
+router.post('/perf/toggle', (req, res) => {
+  const { enabled: target } = req.body || {};
+  if (typeof target !== 'boolean') {
+    return res.status(400).json({ error: 'enabled (boolean) is required' });
+  }
+  if (target) enable(); else disable();
+  res.json({ enabled: isEnabled() });
 });
 
 export default router;

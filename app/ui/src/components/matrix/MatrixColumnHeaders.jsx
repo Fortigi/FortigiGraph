@@ -7,17 +7,15 @@ export function getAccessPackageColor(index) {
 
 export const BLANK_TAG = '__blank__';
 
-export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange, uniqueSystemNames = [], systemNameFilter, onSystemNameFilterChange, hasGroupsWithoutTags = false, onOpenDetail }) {
+export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCount, accessPackages = [], uniqueGroupTypes = [], groupTypeFilter, onGroupTypeFilterChange, uniqueGroupTags = [], groupTagFilter, onGroupTagFilterChange, hasGroupsWithoutTags = false, onOpenDetail }) {
   const [typeFilterOpen, setTypeFilterOpen] = useState(false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
-  const [systemFilterOpen, setSystemFilterOpen] = useState(false);
   const typeFilterRef = useRef(null);
   const tagFilterRef = useRef(null);
-  const systemFilterRef = useRef(null);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
-    if (!typeFilterOpen && !tagFilterOpen && !systemFilterOpen) return;
+    if (!typeFilterOpen && !tagFilterOpen) return;
     const handler = (e) => {
       if (typeFilterOpen && typeFilterRef.current && !typeFilterRef.current.contains(e.target)) {
         setTypeFilterOpen(false);
@@ -25,13 +23,10 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
       if (tagFilterOpen && tagFilterRef.current && !tagFilterRef.current.contains(e.target)) {
         setTagFilterOpen(false);
       }
-      if (systemFilterOpen && systemFilterRef.current && !systemFilterRef.current.contains(e.target)) {
-        setSystemFilterOpen(false);
-      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [typeFilterOpen, tagFilterOpen, systemFilterOpen]);
+  }, [typeFilterOpen, tagFilterOpen]);
 
   const isTypeFiltered = groupTypeFilter && groupTypeFilter.size > 0;
 
@@ -65,22 +60,6 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
   };
 
   const selectAllTags = () => onGroupTagFilterChange(null);
-
-  const isSystemFiltered = systemNameFilter && systemNameFilter.size > 0;
-
-  const toggleSystemValue = (val) => {
-    if (!systemNameFilter) {
-      onSystemNameFilterChange(new Set([val]));
-    } else if (systemNameFilter.has(val)) {
-      const next = new Set(systemNameFilter);
-      next.delete(val);
-      onSystemNameFilterChange(next.size === 0 ? null : next);
-    } else {
-      onSystemNameFilterChange(new Set([...systemNameFilter, val]));
-    }
-  };
-
-  const selectAllSystems = () => onSystemNameFilterChange(null);
 
   // Group consecutive users by job title for merged headers
   const jobTitleSpans = [];
@@ -174,10 +153,10 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           );
         })}
 
-        {/* Right metadata column headers row 1 - empty placeholders */}
+        {/* Right metadata column headers row 1 - empty placeholders (#, Description, Tags) */}
         <th className="border-b border-l-2 border-gray-300 bg-gray-100" style={{ minWidth: '40px' }} />
-        <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '60px' }} />
         <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '500px' }} />
+        <th className="border-b border-gray-300 bg-gray-100" style={{ minWidth: '120px' }} />
       </tr>
 
       {/* Row 2: User names */}
@@ -186,13 +165,17 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
         <th className="sticky left-0 z-30 bg-gray-100 border-b border-r border-gray-300 px-1 py-1 text-[10px] text-gray-500"
             style={{ minWidth: '24px' }}>
         </th>
-        <th className={`sticky z-30 border-b border-r border-gray-300 px-1 py-1 text-xs text-left font-medium cursor-pointer select-none relative ${isSystemFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            style={{ left: '24px', minWidth: '80px' }}
-            ref={systemFilterRef}>
-          <div onClick={() => setSystemFilterOpen(prev => !prev)}>
-            System {isSystemFiltered ? '\u25BC' : '\u25BD'}
+        <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
+            style={{ left: '24px', minWidth: '275px' }}>
+          Resource Name
+        </th>
+        <th className={`sticky z-30 border-b border-r border-gray-300 px-2 py-1 text-xs text-left font-medium cursor-pointer select-none relative ${isTypeFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            style={{ left: '299px', minWidth: '90px' }}
+            ref={typeFilterRef}>
+          <div onClick={() => setTypeFilterOpen(prev => !prev)}>
+            Type {isTypeFiltered ? '\u25BC' : '\u25BD'}
           </div>
-          {systemFilterOpen && (
+          {typeFilterOpen && (
             <div
               className="absolute bg-white border border-gray-300 rounded shadow-lg z-50 text-left"
               style={{ top: '100%', left: 0, minWidth: '200px' }}
@@ -202,30 +185,30 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
                   <input
                     type="checkbox"
-                    checked={!isSystemFiltered}
-                    onChange={selectAllSystems}
+                    checked={!isTypeFiltered}
+                    onChange={selectAllTypes}
                     className="rounded"
                   />
                   (Select All)
                 </label>
               </div>
               <div className="max-h-48 overflow-auto py-1">
-                {uniqueSystemNames.map(s => (
-                  <label key={s} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
+                {uniqueGroupTypes.map(t => (
+                  <label key={t} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
                     <input
                       type="checkbox"
-                      checked={!systemNameFilter || systemNameFilter.has(s)}
-                      onChange={() => toggleSystemValue(s)}
+                      checked={!groupTypeFilter || groupTypeFilter.has(t)}
+                      onChange={() => toggleTypeValue(t)}
                       className="rounded"
                     />
-                    {s}
+                    {t}
                   </label>
                 ))}
               </div>
-              {isSystemFiltered && (
+              {isTypeFiltered && (
                 <div className="px-3 py-1.5 border-t border-gray-200">
                   <button
-                    onClick={selectAllSystems}
+                    onClick={selectAllTypes}
                     className="text-xs text-blue-600 hover:text-blue-800"
                   >
                     Clear filter
@@ -235,8 +218,49 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
             </div>
           )}
         </th>
-        <th className={`sticky z-30 border-b border-r border-gray-300 px-2 py-1 text-xs text-left font-medium cursor-pointer select-none relative ${isTagFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            style={{ left: '104px', minWidth: '100px' }}
+
+        {users.map(user => (
+          <th
+            key={user.id}
+            className="border-b border-r border-gray-200 px-0 py-0 text-center bg-gray-100"
+            style={{
+              height: '100px',
+              width: '24px',
+              minWidth: '24px',
+              verticalAlign: 'bottom',
+            }}
+            title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}`}
+          >
+            <div
+              className="text-[10px] text-gray-700 font-medium cursor-pointer hover:text-blue-600"
+              style={{
+                writingMode: 'vertical-lr',
+                textOrientation: 'mixed',
+                transform: 'rotate(180deg)',
+                maxHeight: '95px',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                margin: '0 auto',
+              }}
+              onClick={() => onOpenDetail?.('user', user.id, user.displayName)}
+            >
+              {user.displayName}
+            </div>
+          </th>
+        ))}
+
+        {/* Right metadata column headers row 2 — # | Description | Tags */}
+        <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
+            onClick={onSortByCount}
+            title="Sort by member count (descending)">
+          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}># &#x25BC;</div>
+        </th>
+        <th className="border-b border-gray-300 bg-gray-100 px-2 py-1 text-xs text-gray-500 font-medium text-left"
+            style={{ minWidth: '500px' }}>
+          Description
+        </th>
+        <th className={`border-b border-gray-300 px-2 py-1 text-xs font-medium cursor-pointer select-none relative text-left ${isTagFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            style={{ minWidth: '120px' }}
             ref={tagFilterRef}>
           <div onClick={() => setTagFilterOpen(prev => !prev)}>
             Tags {isTagFiltered ? '\u25BC' : '\u25BD'}
@@ -244,7 +268,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           {tagFilterOpen && (
             <div
               className="absolute bg-white border border-gray-300 rounded shadow-lg z-50 text-left"
-              style={{ top: '100%', left: 0, minWidth: '200px' }}
+              style={{ top: '100%', right: 0, minWidth: '200px' }}
               onClick={e => e.stopPropagation()}
             >
               <div className="px-3 py-1.5 border-b border-gray-200">
@@ -298,101 +322,6 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
               )}
             </div>
           )}
-        </th>
-        <th className="sticky z-30 bg-gray-100 border-b border-r border-gray-300 px-2 py-1 text-xs text-gray-600 text-left font-medium"
-            style={{ left: '204px', minWidth: '275px' }}>
-          Resource Name
-        </th>
-
-        {users.map(user => (
-          <th
-            key={user.id}
-            className="border-b border-r border-gray-200 px-0 py-0 text-center bg-gray-100"
-            style={{
-              height: '100px',
-              width: '24px',
-              minWidth: '24px',
-              verticalAlign: 'bottom',
-            }}
-            title={`${user.displayName}\n${user.jobTitle || ''}\n${user.department || ''}`}
-          >
-            <div
-              className="text-[10px] text-gray-700 font-medium cursor-pointer hover:text-blue-600"
-              style={{
-                writingMode: 'vertical-lr',
-                textOrientation: 'mixed',
-                transform: 'rotate(180deg)',
-                maxHeight: '95px',
-                overflow: 'hidden',
-                whiteSpace: 'nowrap',
-                margin: '0 auto',
-              }}
-              onClick={() => onOpenDetail?.('user', user.id, user.displayName)}
-            >
-              {user.displayName}
-            </div>
-          </th>
-        ))}
-
-        {/* Right metadata column headers row 2 - labels close to data */}
-        <th className="border-b border-l-2 border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium cursor-pointer hover:bg-gray-200 select-none"
-            onClick={onSortByCount}
-            title="Sort by member count (descending)">
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}># &#x25BC;</div>
-        </th>
-        <th className={`border-b border-gray-300 px-1 py-1 text-[10px] font-medium cursor-pointer select-none relative ${isTypeFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-            ref={typeFilterRef}>
-          <div
-            style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}
-            onClick={() => setTypeFilterOpen(prev => !prev)}
-          >
-            Type {isTypeFiltered ? '\u25BC' : '\u25BD'}
-          </div>
-          {typeFilterOpen && (
-            <div
-              className="absolute bg-white border border-gray-300 rounded shadow-lg z-50 text-left"
-              style={{ top: '100%', right: 0, minWidth: '200px', writingMode: 'horizontal-tb' }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="px-3 py-1.5 border-b border-gray-200">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={!isTypeFiltered}
-                    onChange={selectAllTypes}
-                    className="rounded"
-                  />
-                  (Select All)
-                </label>
-              </div>
-              <div className="max-h-48 overflow-auto py-1">
-                {uniqueGroupTypes.map(t => (
-                  <label key={t} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-gray-50 text-xs text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={!groupTypeFilter || groupTypeFilter.has(t)}
-                      onChange={() => toggleTypeValue(t)}
-                      className="rounded"
-                    />
-                    {t}
-                  </label>
-                ))}
-              </div>
-              {isTypeFiltered && (
-                <div className="px-3 py-1.5 border-t border-gray-200">
-                  <button
-                    onClick={selectAllTypes}
-                    className="text-xs text-blue-600 hover:text-blue-800"
-                  >
-                    Clear filter
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </th>
-        <th className="border-b border-gray-300 bg-gray-100 px-1 py-1 text-[10px] text-gray-500 font-medium">
-          <div style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>Description</div>
         </th>
       </tr>
     </thead>

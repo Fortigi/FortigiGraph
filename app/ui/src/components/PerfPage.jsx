@@ -74,6 +74,15 @@ export default function PerfPage() {
     fetchData();
   }, [authFetch, fetchData]);
 
+  const handleToggle = useCallback(async (target) => {
+    await authFetch('/api/perf/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: target }),
+    });
+    fetchData();
+  }, [authFetch, fetchData]);
+
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-gray-500">Loading performance metrics...</div>;
   }
@@ -84,14 +93,19 @@ export default function PerfPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
           <h2 className="text-amber-800 font-semibold text-lg">Performance Monitoring Disabled</h2>
           <p className="text-amber-700 mt-2 text-sm">
-            To enable performance monitoring, set the environment variable:
-          </p>
-          <pre className="mt-3 bg-amber-100 rounded px-4 py-2 text-sm font-mono text-amber-900">
-            PERF_METRICS_ENABLED=true
-          </pre>
-          <p className="text-amber-600 mt-3 text-xs">
-            This adds minimal overhead: high-resolution timing on each API request and SQL query,
+            Performance monitoring captures high-resolution timing on each API request and SQL query,
             stored in a 1000-entry ring buffer. Server-Timing headers appear in browser DevTools.
+            Adds minimal overhead — safe to enable in production.
+          </p>
+          <button
+            onClick={() => handleToggle(true)}
+            className="mt-4 px-4 py-2 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700"
+          >
+            Enable Performance Monitoring
+          </button>
+          <p className="text-amber-600 mt-3 text-xs">
+            Toggling here is runtime-only and resets when the backend restarts.
+            Set <code className="px-1 bg-amber-100 rounded">PERF_METRICS_ENABLED=true</code> in your environment for permanent activation.
           </p>
         </div>
       </div>
@@ -126,6 +140,9 @@ export default function PerfPage() {
           </button>
           <button onClick={handleClear} className="px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200">
             Clear
+          </button>
+          <button onClick={() => handleToggle(false)} className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300" title="Disable performance monitoring">
+            Disable
           </button>
         </div>
       </div>

@@ -756,8 +756,8 @@ export default function MatrixView({
     memberships: memberships.size,
   };
 
-  // Number of info columns (drag handle + system + tags + resource name)
-  const infoColumnCount = 4;
+  // Number of info columns on the left (drag handle + resource name + type)
+  const infoColumnCount = 3;
 
   // Shared column headers element (used by both sortable and static table)
   const columnHeaders = (
@@ -772,9 +772,6 @@ export default function MatrixView({
       uniqueGroupTags={uniqueGroupTags}
       groupTagFilter={groupTagFilter}
       onGroupTagFilterChange={setGroupTagFilter}
-      uniqueSystemNames={uniqueSystemNames}
-      systemNameFilter={systemNameFilter}
-      onSystemNameFilterChange={setSystemNameFilter}
       hasGroupsWithoutTags={hasGroupsWithoutTags}
       onOpenDetail={onOpenDetail}
     />

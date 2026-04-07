@@ -4,7 +4,7 @@
 # which pulls pre-built images instead of building locally.
 #
 # Images published:
-#   ghcr.io/fortigi/identity-atlas         — Node.js backend + React frontend
+#   ghcr.io/fortigi/identity-atlas         — Node.js API + React frontend (web service)
 #   ghcr.io/fortigi/identity-atlas-worker  — PowerShell worker (crawlers, risk scoring)
 #
 # Tags: latest + version from IdentityAtlas.psd1 (e.g., 4.0.20260403.1730)
@@ -49,8 +49,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # ── Backend image (Node.js + React frontend) ─────────────────────
-      - name: Build and push backend image
+      # ── Web image (Node.js API + React frontend) ─────────────────────
+      - name: Build and push web image
         uses: docker/build-push-action@v6
         with:
           context: ./app
@@ -59,8 +59,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/fortigi/identity-atlas:latest
             ${{ env.REGISTRY }}/fortigi/identity-atlas:${{ steps.version.outputs.version }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
 
       # ── Worker image (PowerShell — crawlers, risk scoring) ───────────
       - name: Build and push worker image

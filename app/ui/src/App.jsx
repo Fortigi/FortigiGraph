@@ -14,7 +14,6 @@ const GroupDetailPage = lazy(() => import('./components/GroupDetailPage'));
 const ResourceDetailPage = lazy(() => import('./components/ResourceDetailPage'));
 const AccessPackageDetailPage = lazy(() => import('./components/AccessPackageDetailPage'));
 const SystemsPage = lazy(() => import('./components/SystemsPage'));
-const PerfPage = lazy(() => import('./components/PerfPage'));
 const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
@@ -22,7 +21,7 @@ const ContextDetailPage = lazy(() => import('./components/ContextDetailPage'));
 const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
 const IdentityDetailPage = lazy(() => import('./components/IdentityDetailPage'));
 const AdminPage = lazy(() => import('./components/AdminPage'));
-const CrawlersPage = lazy(() => import('./components/CrawlersPage'));
+// PerfPage and CrawlersPage are lazy-loaded inside AdminPage as sub-tabs.
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -93,10 +92,8 @@ const ALL_NAV_TABS = [
   { key: 'sync-log',         label: 'Sync Log' },
   { key: 'risk-scores',      label: 'Risk Scores',  feature: 'riskScoring',        optional: true },
   { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },
-  { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring',        optional: true },
-  { key: 'performance',      label: 'Performance',                                  optional: true },
-  { key: 'crawlers',         label: 'Crawlers',                                     optional: true },
-  { key: 'admin',            label: 'Admin',                                        optional: true },
+  { key: 'org-chart',        label: 'Org Chart',                                    optional: true },
+  { key: 'admin',            label: 'Admin' },
 ];
 
 export default function App() {
@@ -146,7 +143,7 @@ export default function App() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d && !d.hasData && window.location.hash.replace('#', '') === 'matrix') {
-          window.location.hash = 'crawlers';
+          window.location.hash = 'admin?sub=crawlers';
         }
       })
       .catch(() => {});
@@ -156,6 +153,13 @@ export default function App() {
     fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
     fetch('/api/features').then(r => r.json()).then(d => setFeatures(d)).catch(() => {});
   }, []);
+
+  // Re-fetch features whenever the user navigates — picks up runtime toggle changes
+  // from the admin Risk Scoring sub-tab so the optional Risk Scores / Identities / Org Chart
+  // tabs appear or disappear without a hard reload.
+  useEffect(() => {
+    fetch('/api/features').then(r => r.json()).then(d => setFeatures(d)).catch(() => {});
+  }, [page]);
 
   // Load user preferences
   useEffect(() => {
@@ -472,12 +476,10 @@ export default function App() {
             <IdentitiesPage onOpenDetail={openDetailTab} />
           ) : page === 'org-chart' ? (
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
-          ) : page === 'performance' ? (
-            <PerfPage />
-          ) : page === 'crawlers' ? (
-            <CrawlersPage onNavigate={navigate} />
-          ) : page === 'admin' ? (
-            <AdminPage />
+          ) : page === 'performance' || page === 'crawlers' || page === 'admin' ? (
+            // Crawlers and Performance now live under Admin as sub-tabs.
+            // Legacy #crawlers and #performance hashes redirect to the matching sub-tab.
+            <AdminPage onNavigate={navigate} />
           ) : loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-gray-500">Loading permission data...</div>

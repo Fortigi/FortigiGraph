@@ -517,4 +517,126 @@ router.post('/admin/import/curated', async (req, res) => {
   }
 });
 
+// ─── Clean Database — wipes all identity data, keeps configs ─────────────────
+//
+// Deletes all rows from data tables (Principals, Resources, Identities, etc.)
+// but preserves crawler configs, risk profiles, and audit log so the user can
+// re-sync from a clean slate without losing their setup.
+router.post('/admin/clean-database', async (req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+
+  // Tables to wipe (data only — configs/profiles/audit preserved)
+  // Listed in dependency order: child tables first to avoid FK issues
+  const TABLES_TO_WIPE = [
+    // Identity correlation
+    'IdentityMembers', 'Identities',
+    // Resource graph
+    'ResourceAssignments', 'ResourceRelationships',
+    'AssignmentRequests', 'AssignmentPolicies', 'CertificationDecisions',
+    'Resources',
+    // Principals, contexts, systems
+    'Principals', 'Contexts', 'OrgUnits',
+    // Governance + risk artifacts
+    'GovernanceCatalogs', 'RiskScores',
+    // Systems is wiped LAST so any FK references from above are gone first
+    'Systems',
+    // Crawler runtime artifacts (jobs, sync log) — but NOT configs
+    'CrawlerJobs', 'SyncLog', 'GraphSyncLog',
+    // Legacy tables
+    'GraphGroupMembers', 'GraphGroupOwners', 'GraphGroups', 'GraphUsers',
+  ];
+
+  try {
+    const pool = await db.getPool();
+    const wiped = [];
+    const skipped = [];
+
+    for (const table of TABLES_TO_WIPE) {
+      try {
+        // Check if table exists
+        const check = await pool.request().input('t', table)
+          .query(`SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @t AND TABLE_SCHEMA = 'dbo'`);
+        if (check.recordset.length === 0) {
+          skipped.push({ table, reason: 'does not exist' });
+          continue;
+        }
+
+        // Detect temporal table (system-versioned) — must disable versioning before DELETE
+        const tempCheck = await pool.request().input('t', table)
+          .query(`SELECT temporal_type FROM sys.tables WHERE name = @t AND schema_id = SCHEMA_ID('dbo')`);
+        const isTemporal = tempCheck.recordset[0]?.temporal_type === 2;
+
+        if (isTemporal) {
+          // Disable versioning, delete from main + history, re-enable
+          await pool.request().query(`ALTER TABLE dbo.[${table}] SET (SYSTEM_VERSIONING = OFF)`);
+          const delMain = await pool.request().query(`DELETE FROM dbo.[${table}]`);
+          // Try to find and clear the history table
+          try {
+            const histRes = await pool.request().input('t', table)
+              .query(`SELECT name FROM sys.tables WHERE object_id = (SELECT history_table_id FROM sys.tables WHERE name = @t AND schema_id = SCHEMA_ID('dbo'))`);
+            const histName = histRes.recordset[0]?.name;
+            if (histName) {
+              await pool.request().query(`DELETE FROM dbo.[${histName}]`);
+            }
+          } catch {}
+          // Re-enable versioning
+          try {
+            const histRes2 = await pool.request().input('t', table)
+              .query(`SELECT name FROM sys.tables WHERE name = @t + 'History' AND schema_id = SCHEMA_ID('dbo')`);
+            const histName = histRes2.recordset[0]?.name;
+            if (histName) {
+              await pool.request().query(`ALTER TABLE dbo.[${table}] SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.[${histName}]))`);
+            }
+          } catch {}
+          wiped.push({ table, rowsAffected: delMain.rowsAffected[0], temporal: true });
+        } else {
+          const result = await pool.request().query(`DELETE FROM dbo.[${table}]`);
+          wiped.push({ table, rowsAffected: result.rowsAffected[0], temporal: false });
+        }
+      } catch (err) {
+        skipped.push({ table, reason: err.message });
+      }
+    }
+
+    // Reset lastRunAt on crawler configs so the UI shows them as "never run"
+    try {
+      await pool.request().query(`UPDATE dbo.CrawlerConfigs SET lastRunAt = NULL, lastRunStatus = NULL`);
+    } catch {}
+
+    res.json({ message: 'Database cleaned', wiped, skipped });
+  } catch (err) {
+    console.error('Clean database failed:', err.message);
+    res.status(500).json({ error: 'Clean database failed: ' + err.message });
+  }
+});
+
+// ─── Feature flag toggle (persisted in WorkerConfig) ─────────────────────────
+// POST /api/admin/features/toggle  body: { feature: 'riskScoring'|'accountCorrelation', enabled: boolean }
+//
+// Stores the override in WorkerConfig as FEATURE_<UPPER_SNAKE>. The /api/features
+// endpoint reads this and overrides the matching env var. Survives container restarts.
+router.post('/admin/features/toggle', async (req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  const { feature, enabled } = req.body || {};
+  const VALID = { riskScoring: 'FEATURE_RISK_SCORING', accountCorrelation: 'FEATURE_ACCOUNT_CORRELATION' };
+  const key = VALID[feature];
+  if (!key) return res.status(400).json({ error: `feature must be one of: ${Object.keys(VALID).join(', ')}` });
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
+
+  try {
+    const pool = await db.getPool();
+    await pool.request()
+      .input('k', key)
+      .input('v', enabled ? 'true' : 'false')
+      .query(`MERGE dbo.WorkerConfig AS t
+              USING (SELECT @k AS configKey) AS s ON t.configKey = s.configKey
+              WHEN MATCHED THEN UPDATE SET configValue = @v, updatedAt = SYSUTCDATETIME()
+              WHEN NOT MATCHED THEN INSERT (configKey, configValue) VALUES (@k, @v);`);
+    res.json({ feature, enabled });
+  } catch (err) {
+    console.error('Feature toggle failed:', err.message);
+    res.status(500).json({ error: 'Feature toggle failed' });
+  }
+});
+
 export default router;

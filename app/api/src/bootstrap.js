@@ -56,6 +56,40 @@ async function ensureCrawlerJobsTable(pool) {
   `);
 }
 
+async function ensureSyncLogTable(pool) {
+  await ensureTable(pool, 'GraphSyncLog', `
+    CREATE TABLE dbo.GraphSyncLog (
+      Id              INT IDENTITY(1,1) PRIMARY KEY,
+      SyncType        NVARCHAR(100) NOT NULL,
+      TableName       NVARCHAR(100),
+      StartTime       DATETIME2 NOT NULL,
+      EndTime         DATETIME2,
+      DurationSeconds INT,
+      RecordCount     INT,
+      Status          NVARCHAR(20) NOT NULL,
+      ErrorMessage    NVARCHAR(MAX),
+      CreatedAt       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_GraphSyncLog_StartTime ON dbo.GraphSyncLog (StartTime DESC);
+  `);
+}
+
+async function ensureCrawlerConfigsTable(pool) {
+  await ensureTable(pool, 'CrawlerConfigs', `
+    CREATE TABLE dbo.CrawlerConfigs (
+      id            INT IDENTITY(1,1) PRIMARY KEY,
+      crawlerType   NVARCHAR(50) NOT NULL,
+      displayName   NVARCHAR(255) NOT NULL,
+      config        NVARCHAR(MAX) NOT NULL,
+      enabled       BIT NOT NULL DEFAULT 1,
+      lastRunAt     DATETIME2,
+      lastRunStatus NVARCHAR(20),
+      createdAt     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      updatedAt     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+  `);
+}
+
 async function ensureBuiltinCrawler(pool) {
   // Check if built-in crawler already exists
   const existing = await pool.request()
@@ -140,6 +174,8 @@ export async function bootstrapWorker() {
     const pool = await db.getPool();
     await ensureWorkerConfigTable(pool);
     await ensureCrawlerJobsTable(pool);
+    await ensureCrawlerConfigsTable(pool);
+    await ensureSyncLogTable(pool);
     await ensureBuiltinCrawler(pool);
     console.log('Bootstrap complete');
   } catch (err) {

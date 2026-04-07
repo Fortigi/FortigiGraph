@@ -62,35 +62,10 @@ export default function MatrixGroupRow({
         )}
       </td>
 
-      {/* System column - sticky left */}
-      <td
-        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-1 py-0.5 text-[10px] text-gray-500 truncate`}
-        style={{ left: '24px', minWidth: '80px', maxWidth: '80px', zIndex: 10 }}
-        title={group.systemName || ''}
-      >
-        {group.systemName || ''}
-      </td>
-      {/* Tags column - sticky left */}
-      <td
-        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-1 py-0.5`}
-        style={{ left: '104px', minWidth: '100px', maxWidth: '100px', zIndex: 10 }}
-      >
-        <div className="flex flex-wrap gap-0.5">
-          {(group.tags || []).map(t => (
-            <span
-              key={t.id}
-              className="inline-block px-1 py-0 rounded-full text-[9px] font-medium border leading-tight"
-              style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
-              title={t.name}
-            >
-              {t.name}
-            </span>
-          ))}
-        </div>
-      </td>
+      {/* Resource Name column - sticky left */}
       <td
         className={`sticky ${nestedBg} border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-900 font-medium`}
-        style={{ left: '204px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
+        style={{ left: '24px', minWidth: '275px', maxWidth: '275px', zIndex: 10 }}
         title={group.displayName}
       >
         <div className="flex items-center gap-0.5" style={{ paddingLeft: (group.nestLevel || 0) * 16 }}>
@@ -118,6 +93,15 @@ export default function MatrixGroupRow({
             {group.displayName}
           </div>
         </div>
+      </td>
+
+      {/* Type column - sticky left */}
+      <td
+        className={`sticky ${nestedBg} border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 truncate`}
+        style={{ left: '299px', minWidth: '90px', maxWidth: '90px', zIndex: 10 }}
+        title={group.groupType}
+      >
+        {group.groupType}
       </td>
 
       {/* Intersection cells */}
@@ -232,19 +216,29 @@ export default function MatrixGroupRow({
         );
       })}
 
-      {/* Right-side metadata */}
+      {/* Right-side metadata: # | Description | Tags */}
       <td className="border-l-2 border-b border-gray-200 px-2 py-0.5 text-xs text-gray-600 text-center"
           style={{ minWidth: '40px' }}>
         {memberCount}
       </td>
-      <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500"
-          style={{ minWidth: '60px' }}
-          title={group.groupType}>
-        {group.groupType}
-      </td>
       <td className="border-b border-gray-200 px-2 py-0.5 text-xs text-gray-400 max-w-[500px]"
           title={group.description}>
         <div className="truncate">{group.description}</div>
+      </td>
+      <td className="border-b border-gray-200 px-1 py-0.5"
+          style={{ minWidth: '120px', maxWidth: '180px' }}>
+        <div className="flex flex-wrap gap-0.5">
+          {(group.tags || []).map(t => (
+            <span
+              key={t.id}
+              className="inline-block px-1 py-0 rounded-full text-[9px] font-medium border leading-tight"
+              style={{ backgroundColor: t.color + '20', borderColor: t.color, color: t.color }}
+              title={t.name}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
       </td>
     </tr>
   );
