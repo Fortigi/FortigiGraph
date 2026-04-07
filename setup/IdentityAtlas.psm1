@@ -15,11 +15,8 @@ $helpers = @( Get-ChildItem -Path (Join-Path $repoRoot 'tools\powershell-sdk\hel
 $riskScoring = @( Get-ChildItem -Path (Join-Path $repoRoot 'tools\riskscoring') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 $correlation = @( Get-ChildItem -Path (Join-Path $repoRoot 'tools\correlation') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
 
-# Setup — Azure deployment scripts
-$azure = @( Get-ChildItem -Path (Join-Path $PSScriptRoot 'azure') -Include *.ps1 -Recurse -ErrorAction SilentlyContinue )
-
 # Dot source all function files
-foreach ($import in @($db + $graph + $sql + $helpers + $riskScoring + $correlation + $azure)) {
+foreach ($import in @($db + $graph + $sql + $helpers + $riskScoring + $correlation)) {
     try {
         . $import.fullname
     }

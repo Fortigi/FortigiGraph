@@ -1,6 +1,6 @@
 # Testing Plan
 
-Comprehensive testing strategy for FortigiGraph — covering unit tests, integration tests, end-to-end browser tests, and nightly validation across Docker and Azure deployments.
+Comprehensive testing strategy for Identity Atlas — covering unit tests, integration tests, end-to-end browser tests, and nightly validation against the Docker stack.
 
 ---
 
@@ -15,7 +15,7 @@ Comprehensive testing strategy for FortigiGraph — covering unit tests, integra
 | **ESLint flat config** (`app/ui/eslint.config.js`) | Frontend Vitest + React Testing Library |
 | **OpenAPI Spectral lint** in PR pipeline | Ingest engine + normalization unit tests |
 | Docker integration suite (`test/run-docker-tests.ps1`, 87 checks) | Code coverage for JS (coverage-v8) |
-| Nightly GitHub Actions workflow (fixed paths) | Azure DevOps pipeline |
+| Nightly GitHub Actions workflow (fixed paths) | Failure notification (Slack/email) |
 | Mock backend for E2E (`USE_SQL=false`) | |
 | Test datasets (Omada CSVs in `test/datasets/`) | |
 | Central test config (`test/test.config.json`) | |
@@ -136,7 +136,7 @@ Add to `app/ui/package.json`:
 
 ### Layer 2: Integration Tests (Real SQL, Real API)
 
-**Goal:** Verify that components work together correctly with a real database. Runs against Docker SQL or Azure SQL.
+**Goal:** Verify that components work together correctly with a real database. Runs against the Docker SQL container.
 
 #### 2a. Ingest API Integration Tests (NEW — Critical)
 
@@ -216,7 +216,7 @@ These tests run against a fully provisioned environment with real data (not mock
 
 ---
 
-### Layer 4: Deployment Validation Tests (Docker + Azure)
+### Layer 4: Deployment Validation Tests (Docker)
 
 **Goal:** Verify the full deployment pipeline works — from zero to a running, data-populated environment.
 
@@ -251,21 +251,6 @@ Steps:
 6. Verify via API: principals count > 0, resources count > 0, assignments count > 0
 7. Run Playwright E2E tests against `http://localhost:3001`
 8. `docker compose down -v`
-
-#### 4b. Azure Deployment Test
-
-**Script:** `_Test/Test-AzureDeployment.ps1`
-
-Steps:
-1. Create resource group (ephemeral, tagged for cleanup)
-2. Deploy SQL Server + Database via `New-FGConfig` (or Az CLI)
-3. Deploy UI via `New-FGUI`
-4. Initialize tables
-5. Register crawler
-6. Run EntraID crawler against test tenant
-7. Verify via API
-8. Run Playwright E2E tests against Azure URL
-9. Clean up all resources (`Remove-FGUI`, delete resource group)
 
 ---
 
@@ -351,11 +336,6 @@ on:
   schedule:
     - cron: '0 2 * * *'  # 02:00 UTC daily
   workflow_dispatch:
-    inputs:
-      skip_azure:
-        description: 'Skip Azure deployment tests'
-        type: boolean
-        default: false
 
 jobs:
   unit-tests:
@@ -457,24 +437,6 @@ jobs:
         with:
           name: playwright-report
           path: UI/frontend/playwright-report/
-
-  azure-integration:
-    needs: unit-tests
-    if: github.event.inputs.skip_azure != 'true'
-    runs-on: ubuntu-latest
-    environment: test
-    steps:
-      - uses: actions/checkout@v4
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Run Azure deployment tests
-        shell: pwsh
-        env:
-          TEST_CONFIG: ${{ secrets.TEST_CONFIG }}
-          CRAWLER_API_KEY: ${{ secrets.CRAWLER_API_KEY }}
-        run: ./_Test/Test-AzureDeployment.ps1 -ConfigFile $env:TEST_CONFIG
 ```
 
 ---
@@ -569,11 +531,6 @@ it('should [describe expected behavior] (regression: [issue-description])', asyn
 - [ ] Configure secrets in GitHub repository settings
 - [ ] Set up failure notification (Slack/email)
 
-### Step 8: Azure Deployment Test
-
-- [ ] `test/Test-AzureDeployment.ps1` — ephemeral resource group, full deploy + test + cleanup
-- [ ] Add as optional job in nightly pipeline
-
 ---
 
 ## Coverage Targets
@@ -589,7 +546,6 @@ it('should [describe expected behavior] (regression: [issue-description])', asyn
 | React hooks/utils | 0% | 70% |
 | Playwright E2E pages | 11/14 pages | 14/14 pages |
 | Docker deployment | Manual | Automated |
-| Azure deployment | Manual | Automated (nightly) |
 
 ---
 
@@ -616,5 +572,5 @@ Use the existing mock backend (`USE_SQL=false`). Tests verify UI behavior, not d
 ### E2E Tests (Nightly Real-Data)
 Use Docker SQL + CSV crawler with `_Test/DatasetLed2/` dataset. Tests verify data flows end-to-end.
 
-### Azure Tests
-Use a real Entra ID test tenant (separate from production). Tests verify Graph API → Crawler → Ingest → UI pipeline.
+### Tenant Tests
+Use a real Entra ID test tenant (separate from production). Tests verify Graph API → Crawler → Ingest → UI pipeline running inside the Docker stack.

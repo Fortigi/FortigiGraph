@@ -8,11 +8,11 @@
 
 ## Project Overview
 
-FortigiGraph is a PowerShell module that simplifies working with Microsoft Graph API and syncing data to Azure SQL databases with temporal versioning. It provides a guided setup wizard (`New-FGConfig`), comprehensive cmdlets for managing Azure AD/Entra ID resources, and orchestrated sync to SQL with automatic change tracking.
+Identity Atlas is a Docker-deployed application that pulls authorization data from Microsoft Graph (and other systems via CSV) into a temporal SQL Server database, then surfaces it through a React role-mining UI. The repo also ships PowerShell SDK functions for the Graph API and SQL operations, used internally by the worker container.
 
 **Key Information:**
 - **Language:** PowerShell
-- **Primary Purpose:** Microsoft Graph API wrapper with Azure SQL data persistence
+- **Primary Purpose:** Microsoft Graph API wrapper with SQL Server data persistence (Docker-hosted)
 - **Author:** Wim van den Heijkant
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph
@@ -81,13 +81,10 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 
 ## Major Features
 
-### 1. Guided Setup Wizard (`New-FGConfig`)
-- **Requires PowerShell 7+** (enforced at runtime with helpful error message)
-- Creates Azure resources (Resource Group, SQL Server, Database, Automation Account)
-- Creates App Registration with correct Graph API permissions
-- Configures sync settings interactively
-- Saves everything to a config file that drives all operations
-- Supports selecting existing resources or creating new ones
+### 1. In-Browser Crawler Wizard
+- The Crawlers page in Admin walks the user through Microsoft Graph credentials → permission validation → object type selection → identity filter → custom attributes → schedules
+- Works against any Entra ID tenant without leaving the browser
+- The legacy `New-FGConfig` PowerShell wizard is still available for users running scripts outside Docker
 
 ### 2. Microsoft Graph API Integration
 - Easy authentication (service principal & interactive)
@@ -110,14 +107,14 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **CSV Import**: `Sync-FGCSV*` functions import data from any system via CSV files (systems, principals, resources, assignments, identities, business roles, certifications)
 - **Analytical Views**: 12+ SQL views for IST vs SOLL analysis, approval metrics, access reviews
 
-### 5. Azure Automation
-- `New-FGAzureAutomationAccount` creates everything needed for scheduled syncs
-- Encrypted variables, runbooks, daily schedules, SQL firewall rules
-- Memory-safe batching mode for large datasets (400 MB Azure sandbox limit)
+### 5. Docker Deployment
+- All services run in Docker containers: SQL Server, web (Node.js API + React frontend), worker (PowerShell crawlers + scheduler)
+- Crawler scheduling lives in the `CrawlerConfigs` SQL table; the worker polls every minute and queues jobs
+- See [docker-setup.md](docs/architecture/docker-setup.md) for full architecture and operations
 
 ### 6. Role Mining UI
-- **Web Application**: React + Vite + Tailwind + TanStack Table v8 deployed to Azure App Service (default P0v3 SKU)
-- **Authentication**: Entra ID (MSAL) with support for both v1 and v2 token formats; `-NoAuth` option for demos
+- **Web Application**: React + Vite + Tailwind + TanStack Table v8 served by the `web` Docker container on port 3001
+- **Authentication**: Optional Entra ID (MSAL) with support for both v1 and v2 token formats; defaults to no-auth for local Docker
 - **Tab Navigation**: Eleven pages — Matrix, Users, Resources, Systems, Access Packages, Sync Log, Risk Scoring, Identities, Org Chart, Performance — plus dynamic detail tabs. Optional tabs (Risk Scores, Identities, Org Chart, Performance) are hidden by default and can be enabled per-user via the settings dropdown.
 - **User Preferences**: Clicking the user avatar in the top-right opens a settings dropdown with toggle switches for optional tabs. Preferences are stored per-user in the `GraphUserPreferences` SQL table (auto-created). User identified by Entra ID `oid` claim; `anonymous` fallback for no-auth mode.
 - **Matrix View**: User-group permission heatmap with drag-and-drop row reordering
@@ -134,9 +131,8 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
 - **Entity Detail Pages**: Click any user, group, or access package name to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id` / `#access-package:id`) supports bookmarking. Drill-through navigation between user and group details.
 - **Access Package Detail Page**: Lazy-loaded collapsible sections: Assignments (active users with UPN and assigned date), Resource Assignments (groups/resources with Member/Owner role badges), Assignment Policies (auto-assigned vs request-based with scope), Access Reviews (decisions with auto-review indicator for AAD Access Reviews), Pending Requests, Version History. Review status differentiates "Not required" (no review configured) from "Pending first review" (review configured but no instance yet).
-- **Performance Monitoring**: Opt-in via `PERF_METRICS_ENABLED=true`. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance page shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
-- **Scaling**: `Set-FGUI -Scaling Tiny|Basic|Optimum|Fast` queries database row counts to determine environment size (Small/Medium/Large), then selects matched App Service + SQL tiers accordingly. Shows estimated monthly costs. `New-FGUI` presents an interactive scaling selection menu with cost estimates and a recommendation based on user count (unless `-Scaling` is explicitly provided). Tiny is the cheapest option for very small setups (< 500 users). Tiny is hidden from menus when it resolves to the same SKUs as Basic (e.g., Small environments); passing `-Scaling Tiny` in that case silently uses Basic.
-- **Deployment**: `New-FGUI` / `Update-FGUI` / `Set-FGUI` / `Remove-FGUI` PowerShell cmdlets
+- **Performance Monitoring**: ON by default (Performance page in Admin); `PERF_METRICS_ENABLED=false` opts out at startup. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance sub-tab shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
+- **Deployment**: `docker compose up -d` — all services run in containers, configured via the in-browser wizard (Admin → Crawlers)
 
 ### 7. Identity Risk Scoring
 - **LLM-Assisted Profiling**: `New-FGRiskProfile` discovers organizational context from public domain info (no sensitive identity data sent to LLM)
@@ -315,15 +311,7 @@ FortigiGraph/
 │   ├── Specific/               # Higher-level helper functions (9)
 │   │   └── Confirm-FG*.ps1     # Idempotent confirmation/creation
 │   │
-│   ├── Automation/             # Azure Automation & UI management (8)
-│   │   ├── New-FGAzureAutomationAccount.ps1
-│   │   ├── Get-FGAutomationRunbook.ps1
-│   │   ├── Start-FGAutomationRunbook.ps1
-│   │   ├── Get-FGAutomationJob.ps1
-│   │   ├── New-FGUI.ps1                 # Deploy Role Mining UI
-│   │   ├── Update-FGUI.ps1              # Redeploy UI code
-│   │   ├── Remove-FGUI.ps1              # Remove UI resources
-│   │   └── Set-FGUI.ps1                 # Scale App Service + SQL together
+│   │ # (Azure deployment functions removed in April 2026 — Docker-only now)
 │   │
 │   └── RiskScoring/            # Identity risk scoring engine (17)
 │       ├── New-FGRiskProfile.ps1         # LLM-assisted org context discovery
@@ -420,11 +408,10 @@ FortigiGraph/
 | **Base** | 22 | Authentication, HTTP operations, setup wizard, token management |
 | **Generic** | 49 | Graph API CRUD operations |
 | **Sync** | 32 | High-performance data sync (Start-FGSync + CSV sync + entity syncs + migration + helpers) |
-| **SQL** | 31 | Azure SQL database operations (tables, views, indexes, bulk ops, system tables, governance tables) |
-| **Automation** | 8 | Azure Automation Account & UI management |
+| **SQL** | 31 | SQL database operations (tables, views, indexes, bulk ops, system tables, governance tables) |
 | **Specific** | 9 | High-level idempotent helpers |
 | **RiskScoring** | 17 | LLM-assisted risk profiling, batch scoring, cluster analysis, account correlation |
-| **Total** | **168 functions** | |
+| **Total** | **~160 functions** | (Azure deployment functions removed April 2026) |
 
 ## Architecture & Design Patterns
 
@@ -498,12 +485,12 @@ The `Principals.principalType` column is NVARCHAR(50). Use these values consiste
 The config file (`Config/tenantname.json.template`) drives all operations:
 
 ```powershell
-# All major functions support -ConfigFile
-New-FGConfig -Path .\Config\mycompany.json          # Create config interactively
+# All major functions support -ConfigFile (only relevant when running crawler scripts outside Docker)
 Get-FGAccessToken -ConfigFile .\Config\mycompany.json
-Connect-FGSQLServer -ConfigFile .\Config\mycompany.json
-Start-FGSync -ConfigFile .\Config\mycompany.json
-New-FGAzureAutomationAccount -ConfigFile .\Config\mycompany.json
+.\tools\crawlers\entra-id\Start-EntraIDCrawler.ps1 `
+    -ApiBaseUrl http://localhost:3001/api `
+    -ApiKey $apiKey `
+    -ConfigFile .\Config\mycompany.json
 ```
 
 ### 5. The SQL Helper Pattern: `Invoke-FGSQLCommand`
@@ -546,9 +533,8 @@ Debug output controlled via `$Global:DebugMode`:
 |--------|---------|---------|
 | **Functions/Base/** | Core HTTP operations, authentication, setup wizard | `Invoke-FGGetRequest.ps1`, `New-FGConfig.ps1` |
 | **Functions/Generic/** | Direct Microsoft Graph API wrappers (1:1 mapping) | `Get-FGUser.ps1`, `Get-FGGroup.ps1` |
-| **Functions/SQL/** | Azure SQL database operations | `Connect-FGSQLServer.ps1`, `Initialize-FGSQLTable.ps1` |
+| **Functions/SQL/** | SQL database operations | `Connect-FGSQLServer.ps1`, `Initialize-FGSQLTable.ps1` |
 | **Functions/Sync/** | Data sync operations | `Sync-FGUser.ps1`, `Start-FGSync.ps1` |
-| **Functions/Automation/** | Azure Automation management | `New-FGAzureAutomationAccount.ps1` |
 | **Functions/Specific/** | Business logic combining multiple functions | `Confirm-FGGroup.ps1` |
 
 **File naming:** `Verb-FGNoun.ps1` (e.g., `Get-FGGroupMember.ps1`)
@@ -634,8 +620,7 @@ function Get-FGSQLResource {
 1. **Check if function already exists:** Search `Functions/` folders first
 2. **Determine correct location:**
    - Direct Graph API call -> `Functions/Generic/`
-   - Azure SQL operation -> `Functions/SQL/`
-   - Azure Automation operation -> `Functions/Automation/`
+   - SQL operation -> `Functions/SQL/`
    - Data sync operation -> `Functions/Sync/`
    - Risk scoring / LLM / clustering -> `Functions/RiskScoring/`
    - Combines multiple operations -> `Functions/Specific/`
@@ -717,29 +702,21 @@ Then immediately overwrite `CHANGES.md` with a fresh header (no old entries).
 
 Version format: `Major.Minor.yyyyMMdd.HHmm` (e.g., `2.5.20260317.1430`)
 
-See the **Branching & Versioning Strategy** section above for the full scheme.
-
-This is critical because `New-FGAzureAutomationAccount` checks version numbers and only uploads the module if the local version is newer than the deployed version.
+See the **Branching & Versioning Strategy** section above for the full scheme. The Docker images are built and pushed by the `docker-publish.yml` GitHub Action on merge to `main`, tagged with both `latest` and the module version.
 
 ## User Workflow (Getting Started)
 
 The recommended flow for new users:
 
-```powershell
-# 1. Setup wizard - creates all Azure resources and config
-New-FGConfig -Path .\Config\mycompany.json
+```bash
+# 1. Download the production compose file
+curl -O https://raw.githubusercontent.com/Fortigi/FortigiGraph/main/docker-compose.prod.yml
 
-# 2. Authenticate to Graph
-Get-FGAccessToken -ConfigFile '.\Config\mycompany.json'
+# 2. Start the stack
+docker compose -f docker-compose.prod.yml up -d
 
-# 3. Connect to SQL
-Connect-FGSQLServer -ConfigFile '.\Config\mycompany.json'
-
-# 4. Run first sync
-Start-FGSync -ConfigFile '.\Config\mycompany.json'
-
-# 5. (Optional) Set up Azure Automation for scheduled syncs
-New-FGAzureAutomationAccount -ConfigFile '.\Config\mycompany.json'
+# 3. Open http://localhost:3001 → click "Load Demo Data" or "Connect Entra ID"
+# 4. Configure crawlers via the in-browser wizard (Admin → Crawlers → Add Crawler)
 ```
 
 ## Codebase Maintenance Analysis (Feb 2026)
@@ -789,9 +766,7 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 
 | Function | Lines | Suggested Split |
 |----------|-------|----------------|
-| `New-FGConfig.ps1` | 836 | Extract: `Select-FGAzureSubscription`, `Select-FGResourceGroup`, `Select-FGSqlServer`, `Select-FGAutomationAccount`, `Select-FGAppRegistration`, `Get-FGSyncSettings`. Move `New-FGRandomPassword`/`New-FGRandomSqlName`/`New-FGRandomAutomationAccountName` to `Functions/Specific/` |
-| `New-FGAzureAutomationAccount.ps1` | 1,408 | Extract: `New-FGAutomationVariables`, `New-FGAutomationRunbooks`, `New-FGAutomationSchedules` |
-| `New-FGUI.ps1` | 877 | Extract Kudu deployment logic shared with `Update-FGUI.ps1` (~115 lines) into `Deploy-FGUIToAppService` helper |
+| `New-FGConfig.ps1` | 836 | Now mostly obsolete in the Docker-only world — the in-browser wizard handles config creation. Keep only the Graph-credentials path for users running scripts outside Docker. |
 
 ### High-Priority: Generic Functions Consolidation
 
@@ -846,13 +821,11 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 
 **Action:** Migrate to `/oauth2/v2.0/token` endpoint.
 
-### Medium-Priority: Specific/Automation Cleanup
+### Medium-Priority: Specific/Helper Cleanup
 
 ~~**Typos**~~ → **RESOLVED** (March 2026): "cataloge" → "catalog", "More then one" → "More than one", Dutch comment translated.
 
-**Duplicate `Invoke-AzureRestApi` / `Invoke-GraphApi`** helpers defined inline in both `New-FGUI.ps1` and `Remove-FGUI.ps1`. Extract to shared helper in `Functions/Base/`.
-
-**Config loading** duplicated across 3 automation functions (`Get-FGAutomationJob`, `Get-FGAutomationRunbook`, `Start-FGAutomationRunbook`). Extract to `Get-FGConfigAzureContext`.
+~~**Duplicate Azure REST helpers in New-FGUI / Remove-FGUI**~~ → **RESOLVED** (April 2026): all Azure deployment functions removed; project is Docker-only.
 
 **Confirm-FGGroupMember / Confirm-FGNotGroupMember** share 40+ lines of identical member resolution logic. Extract to `Resolve-FGMemberObjectIds`.
 

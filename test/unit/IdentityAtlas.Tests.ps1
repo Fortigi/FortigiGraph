@@ -21,7 +21,6 @@ BeforeAll {
     $script:helpersRoot = Join-Path $script:repoRoot 'tools\powershell-sdk\helpers'
     $script:riskRoot    = Join-Path $script:repoRoot 'tools\riskscoring'
     $script:dbRoot      = Join-Path $script:repoRoot 'app\db'
-    $script:azureRoot   = Join-Path $script:repoRoot 'setup\azure'
 
     Import-Module $script:modulePath -Force -ErrorAction Stop
 
@@ -31,7 +30,6 @@ BeforeAll {
         Get-ChildItem -Path $script:helpersRoot -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
         Get-ChildItem -Path $script:riskRoot    -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
         Get-ChildItem -Path $script:dbRoot      -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
-        Get-ChildItem -Path $script:azureRoot   -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue
     )
 }
 
@@ -122,18 +120,6 @@ Describe 'Function Availability — Helpers' {
     }
 }
 
-# ── Function Availability — Automation ──────────────────────────────────────
-
-Describe 'Function Availability — Automation' {
-    It 'exports <_>' -ForEach @(
-        'New-FGAzureAutomationAccount',
-        'Get-FGAutomationRunbook', 'Start-FGAutomationRunbook', 'Get-FGAutomationJob',
-        'New-FGUI', 'Update-FGUI', 'Remove-FGUI', 'Set-FGUI'
-    ) {
-        Get-Command $_ -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-    }
-}
-
 # ── Function Availability — RiskScoring ─────────────────────────────────────
 
 Describe 'Function Availability — RiskScoring' {
@@ -157,7 +143,11 @@ Describe 'Removed Functions (must NOT exist)' {
         'Sync-FGUser',
         'Sync-FGGroup',
         'Start-FGSync',
-        'Start-FGCSVSync'
+        'Start-FGCSVSync',
+        # Azure deployment functions removed when project went Docker-only
+        'New-FGUI', 'Update-FGUI', 'Remove-FGUI', 'Set-FGUI',
+        'New-FGAzureAutomationAccount',
+        'Get-FGAutomationRunbook', 'Start-FGAutomationRunbook', 'Get-FGAutomationJob'
     ) {
         Get-Command $_ -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
@@ -196,9 +186,6 @@ Describe 'File Structure' {
     It 'app/db folder exists' {
         $script:dbRoot | Should -Exist
     }
-    It 'setup/azure folder exists' {
-        $script:azureRoot | Should -Exist
-    }
 
     It 'all .ps1 files follow Verb-FGNoun naming' {
         $bad = $script:allPs1Files | Where-Object { $_.BaseName -notmatch '^[A-Z][a-z]+-FG[A-Z]' }
@@ -209,11 +196,14 @@ Describe 'File Structure' {
         "tools\powershell-sdk\graph",
         "tools\powershell-sdk\helpers",
         "tools\riskscoring",
-        "app\db",
-        "PSScriptRoot 'azure'"    # setup/azure — psm1 uses (Join-Path $PSScriptRoot 'azure')
+        "app\db"
     ) {
         $psm1 = Get-Content (Join-Path $script:repoRoot 'setup\IdentityAtlas.psm1') -Raw
         $psm1 | Should -Match ([regex]::Escape($_))
+    }
+
+    It 'setup/azure folder is gone (Docker-only)' {
+        Join-Path $script:repoRoot 'setup\azure' | Should -Not -Exist
     }
 }
 
@@ -248,7 +238,6 @@ Describe 'Code Quality' {
 
     It 'no Write-Output usage (use return instead)' {
         $found = $script:allPs1Files | Where-Object {
-            $_.Name -ne 'New-FGAzureAutomationAccount.ps1' -and
             (Get-Content $_.FullName -Raw) -match 'Write-Output\s'
         }
         $found | Should -BeNullOrEmpty -Because "found in: $($found.Name -join ', ')"
@@ -295,7 +284,7 @@ Describe 'Config Template' {
         { Get-Content $script:templatePath -Raw | ConvertFrom-Json } | Should -Not -Throw
     }
 
-    It 'template has <_> section' -ForEach @('Azure','Graph','Sync') {
+    It 'template has <_> section' -ForEach @('Graph','RiskScoring','AccountCorrelation') {
         $t = Get-Content $script:templatePath -Raw | ConvertFrom-Json
         $t.$_ | Should -Not -BeNullOrEmpty
     }
@@ -322,12 +311,9 @@ Describe 'Function Counts' {
         $n | Should -BeGreaterOrEqual 30
         $n | Should -BeLessOrEqual 45
     }
-    It 'setup/azure has exactly 8 files' {
-        (Get-ChildItem $script:azureRoot -Filter '*.ps1').Count | Should -Be 8
-    }
-    It 'total function count is 130-175' {
+    It 'total function count is 120-170' {
         $n = $script:allPs1Files.Count
-        $n | Should -BeGreaterOrEqual 130
-        $n | Should -BeLessOrEqual 175
+        $n | Should -BeGreaterOrEqual 120
+        $n | Should -BeLessOrEqual 170
     }
 }

@@ -37,14 +37,13 @@ jobs:
       - name: Analyse PowerShell files
         shell: pwsh
         run: |
-          # Scan all function roots (repo uses tools/ + app/db + setup/azure structure)
+          # Scan all function roots (Docker-only project: no setup/azure folder)
           # Error severity only — Write-Host and global vars are intentional patterns in this module
           $paths = @(
             'tools/powershell-sdk/graph',
             'tools/powershell-sdk/helpers',
             'tools/riskscoring',
-            'app/db',
-            'setup/azure'
+            'app/db'
           )
           $results = @()
           foreach ($p in $paths) {
@@ -106,8 +105,7 @@ jobs:
             'tools/powershell-sdk/graph',
             'tools/powershell-sdk/helpers',
             'tools/riskscoring',
-            'app/db',
-            'setup/azure'
+            'app/db'
           )
           $cfg.CodeCoverage.OutputPath = 'pester-coverage.xml'
           $cfg.CodeCoverage.OutputFormat = 'JaCoCo'

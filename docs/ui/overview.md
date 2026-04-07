@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Role Mining UI is a web application that visualizes your synced permission data. It is the primary way most users interact with FortigiGraph data. Built with React, Vite, Tailwind CSS, and TanStack Table v8, the UI is deployed to Azure App Service and authenticated via Entra ID.
+The Role Mining UI is a web application that visualizes your synced permission data. It is the primary way most users interact with Identity Atlas data. Built with React, Vite, Tailwind CSS, and TanStack Table v8, the UI runs in the Docker stack alongside the API (the `web` container) and is optionally protected by Entra ID authentication.
 
-**URL after deployment:** `https://<webappname>.azurewebsites.net`
+**URL after starting the stack:** `http://localhost:3001` (or whatever host you map port 3001 to).
 
 ---
 

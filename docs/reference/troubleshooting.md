@@ -40,7 +40,6 @@ Debug output writes to the host (not the pipeline), so it does not interfere wit
 | **UI shows a blank or empty matrix** | Run `Sync-FGMaterializedViews -ConfigFile config.json` to refresh the materialized view tables that the matrix reads from. This is normally run automatically at the end of `Start-FGSync`. |
 | **Risk scores not visible in the UI** | Run `Invoke-FGRiskScoring -ConfigFile config.json` to populate the `RiskScores` table. Risk scoring does not run as part of `Start-FGSync` — it is a separate step. |
 | **"More than one object found"** in Confirm-FG* functions | A `Confirm-FG*` function found multiple objects matching the supplied name. Use a more specific identifier (object ID instead of display name). |
-| **Azure Automation runbook fails immediately** | Check that the module version in the Automation Account matches or is older than the locally installed version. `New-FGAzureAutomationAccount` uploads the module only when the local version is newer. |
 | **Parallel sync causes runspace errors** | Set `Sync.ParallelExecution = false` in the config and re-run. Runspace pool issues can occur when global state is not available inside the runspace. Report the error message for investigation. |
 
 ---
@@ -66,26 +65,6 @@ All permissions below are **Application** permissions (not Delegated). They are 
 
 ---
 
-## Azure Automation Memory Limits
-
-Azure Automation sandboxes enforce a **400 MB memory limit**. Syncing very large tenants (100,000+ users or groups) in a single batch can exceed this limit and cause the runbook job to fail with an out-of-memory error.
-
-**Diagnosis:** The Automation job log will show the process was terminated, often without a PowerShell exception.
-
-**Solution:** Enable batching mode for the affected sync functions. Batching processes records in smaller chunks and calls `[System.GC]::Collect()` between iterations to release memory.
-
-```powershell
-# Example: sync users in batches of 5000
-Sync-FGPrincipal -ConfigFile '.\Config\mycompany.json' -BatchSize 5000
-
-# Check job memory usage in the Automation Account
-Get-FGAutomationJob -ConfigFile '.\Config\mycompany.json' | Select-Object -Last 10
-```
-
-If batching is not available for a particular sync function, split the sync into multiple runbooks that each handle a subset of entity types, rather than calling `Start-FGSync` (which runs all types in one job).
-
----
-
 ## Config File Issues
 
 ### Missing keys after a module upgrade
@@ -106,8 +85,6 @@ If you need to move a config file to another machine:
 1. Copy the config file to the new machine.
 2. Remove all `_Encrypted` keys from the JSON.
 3. Run `Update-FGConfig` or `New-FGConfig` and re-enter credentials — they will be encrypted for the new machine.
-
-For Azure Automation, credentials are stored as encrypted Automation Variables, not read from the `_Encrypted` fields. Re-running `New-FGAzureAutomationAccount` re-uploads all variables.
 
 ### Config file not found
 

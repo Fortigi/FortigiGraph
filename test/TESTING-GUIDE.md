@@ -6,39 +6,35 @@
 
 1. [Prerequisites](#1-prerequisites)
 2. [Environment Setup](#2-environment-setup)
-3. [Phase 0: PR Checks (No Azure, No Docker)](#3-phase-0-pr-checks-no-azure-no-docker)
+3. [Phase 0: PR Checks (No Docker)](#3-phase-0-pr-checks)
 4. [Phase 1: Offline Tests (Docker Only)](#4-phase-1-offline-tests-docker-only)
-5. [Phase 2: Azure + Graph Setup](#5-phase-2-azure--graph-setup)
-6. [Phase 3: SQL + Sync Integration Tests](#6-phase-3-sql--sync-integration-tests)
-7. [Phase 4: Risk Scoring Tests](#7-phase-4-risk-scoring-tests)
-8. [Phase 5: UI Deployment + Frontend Tests](#8-phase-5-ui-deployment--frontend-tests)
-9. [Phase 6: UI Feature Walkthrough (Manual)](#9-phase-6-ui-feature-walkthrough-manual)
-10. [Phase 7: Azure Automation Tests](#10-phase-7-azure-automation-tests)
-11. [Phase 8: Cleanup](#11-phase-8-cleanup)
-12. [Test File Reference](#12-test-file-reference)
-13. [CI/CD Pipelines](#13-cicd-pipelines)
+5. [Phase 3: Sync Integration Tests](#6-phase-3-sql--sync-integration-tests)
+6. [Phase 4: Risk Scoring Tests](#7-phase-4-risk-scoring-tests)
+7. [Phase 6: UI Feature Walkthrough (Manual)](#9-phase-6-ui-feature-walkthrough-manual)
+8. [Phase 8: Cleanup](#11-phase-8-cleanup)
+9. [Test File Reference](#12-test-file-reference)
+10. [CI/CD Pipelines](#13-cicd-pipelines)
+
+> **Note (April 2026)**: Azure App Service / Azure Automation deployment phases have been removed.
+> Identity Atlas is now Docker-only. Phase 2 (Azure setup), Phase 5 (UI deployment), and Phase 7
+> (Azure Automation tests) are no longer applicable. The remaining phases test the Docker stack.
 
 ---
 
 ## 1. Prerequisites
 
-### Azure Requirements
-
-| Requirement | Details |
-|---|---|
-| **Azure Subscription** | Active subscription with Contributor access |
-| **Entra ID (Azure AD)** | At least Reader access; Global Admin to create App Registrations |
-| **Entra ID Data** | At least 5 users, 5 groups with members, ideally some access packages |
-| **Budget** | ~$5-10/day for test SQL Server + App Service (Basic tiers) |
-
 ### Software Requirements
 
 | Software | Version | Install Command |
 |---|---|---|
-| **PowerShell** | 7.2+ | `winget install Microsoft.PowerShell` |
-| **Az PowerShell module** | Latest | `Install-Module Az -Scope CurrentUser` |
-| **Node.js** | 20+ | `winget install OpenJS.NodeJS.LTS` (for UI testing only) |
-| **Git** | Any | `winget install Git.Git` |
+| **Docker Desktop** | Latest | `winget install Docker.DockerDesktop` |
+| **PowerShell** | 7.2+ | `winget install Microsoft.PowerShell` (only for running unit tests) |
+| **Node.js** | 20+ | `winget install OpenJS.NodeJS.LTS` (only for UI testing) |
+| **Git** | Any | `winget install Git.Git` (only for cloning the repo) |
+
+### Optional: Entra ID test tenant
+
+A separate Entra ID tenant with a few users, groups, and (ideally) access packages is needed for end-to-end testing of the Microsoft Graph crawler. Use the in-browser wizard (Admin → Crawlers → Add Crawler → Microsoft Graph) to wire it up.
 
 ### Optional (for Risk Scoring)
 
@@ -64,72 +60,34 @@ For thorough testing, your tenant should have:
 
 ## 2. Environment Setup
 
-### Step 1: Clone and Import
+### Step 1: Clone the repo (developers only)
 
-```powershell
+```bash
 git clone https://github.com/Fortigi/FortigiGraph.git
 cd FortigiGraph
-Import-Module .\IdentityAtlas.psd1 -Force
 ```
 
-### Step 2: Create Test Config
+End users can skip cloning entirely — see [docker-compose.prod.yml](../docker-compose.prod.yml).
 
-**Option A: Use the setup wizard (recommended for first-time setup)**
+### Step 2: Start the Docker stack
 
-```powershell
-New-FGConfig -Path .\_Test\config.test.json
+```bash
+docker compose up -d --build
 ```
 
-This interactively walks you through creating all Azure resources and an App Registration.
+Wait ~30 seconds for SQL Server to be ready, then open [http://localhost:3001](http://localhost:3001).
 
-**Option B: Copy and edit the template manually**
+### Step 3: Add a Microsoft Graph crawler (for tenant-backed tests)
 
-```powershell
-Copy-Item .\Config\tenantname.json.template .\_Test\config.test.json
-```
+In the UI, go to **Admin → Crawlers → Add Crawler → Microsoft Graph** and enter:
 
-Edit `_Test/config.test.json` and fill in:
+| Field | Value |
+|---|---|
+| Tenant ID | Your test tenant ID |
+| Client ID | App Registration client ID |
+| Client Secret | App Registration secret |
 
-```json
-{
-  "Azure": {
-    "TenantId": "YOUR-AZURE-TENANT-ID",
-    "SubscriptionId": "YOUR-SUBSCRIPTION-ID",
-    "ResourceGroupName": "rg-fortigraph-test",
-    "Location": "westeurope",
-    "SQLServerName": "sql-fgtest-UNIQUE",
-    "DatabaseName": "FortigiGraphTest",
-    "AdminUsername": "fgadmin",
-    "AdminUserPassword": ""
-  },
-  "Graph": {
-    "TenantId": "YOUR-GRAPH-TENANT-ID",
-    "ClientId": "YOUR-APP-CLIENT-ID",
-    "ClientSecret": ""
-  },
-  "Sync": {
-    "Users": { "Enabled": true, "TableName": "GraphUsers" },
-    "Groups": { "Enabled": true, "TableName": "GraphGroups" },
-    "GroupMembers": { "Enabled": true, "TableName": "GraphGroupMembers" },
-    "GroupEligibleMembers": { "Enabled": true, "TableName": "GraphGroupEligibleMembers" },
-    "GroupOwners": { "Enabled": true, "TableName": "GraphGroupOwners" },
-    "Catalogs": { "Enabled": true, "TableName": "GraphCatalogs" },
-    "AccessPackages": { "Enabled": true, "TableName": "GraphAccessPackages" },
-    "AccessPackageAssignments": { "Enabled": true, "TableName": "GraphAccessPackageAssignments" },
-    "AccessPackageResourceRoleScopes": { "Enabled": true, "TableName": "GraphAccessPackageResourceRoleScopes" },
-    "AccessPackageAssignmentPolicies": { "Enabled": true, "TableName": "GraphAccessPackageAssignmentPolicies" },
-    "AccessPackageAssignmentRequests": { "Enabled": true, "TableName": "GraphAccessPackageAssignmentRequests" },
-    "AccessPackageAccessReviews": { "Enabled": true, "TableName": "GraphAccessPackageAccessReviewDecisions" },
-    "Views": true,
-    "MaterializedViews": false,
-    "ParallelExecution": true
-  }
-}
-```
-
-### Step 3: Create App Registration (if not using wizard)
-
-The App Registration needs these **Application permissions** (not Delegated):
+The wizard validates the credentials, shows which Graph permissions are granted, lets you pick object types, and saves the config in the `CrawlerConfigs` SQL table. Required Application permissions:
 
 | Permission | Purpose |
 |---|---|
@@ -139,19 +97,11 @@ The App Registration needs these **Application permissions** (not Delegated):
 | `Directory.Read.All` | Read directory data |
 | `EntitlementManagement.Read.All` | Read access packages |
 | `AccessReview.Read.All` | Read access reviews |
-| `AuditLog.Read.All` | Read audit/sign-in data |
-
-After creating the app registration, grant admin consent for all permissions.
-
-### Step 4: Login to Azure
-
-```powershell
-Connect-AzAccount -TenantId "YOUR-TENANT-ID" -SubscriptionId "YOUR-SUBSCRIPTION-ID"
-```
+| `AuditLog.Read.All` | Read audit/sign-in data (optional) |
 
 ---
 
-## 3. Phase 0: PR Checks (No Azure, No Docker)
+## 3. Phase 0: PR Checks (No Docker)
 
 These checks run on every pull request and take under 5 minutes. They require nothing beyond a local checkout.
 
@@ -222,7 +172,7 @@ spectral lint app/api/src/openapi.yaml --ruleset @stoplight/spectral-oas
 
 ## 4. Phase 1: Offline Tests (Docker Only)
 
-These tests validate the full stack locally using Docker. No Azure account needed.
+These tests validate the full stack locally using Docker. No external services needed.
 
 ### Start the Docker stack
 
@@ -263,93 +213,38 @@ docker compose down -v
 
 ---
 
-## 5. Phase 2: Azure + Graph Setup
-
-### Run the Simple Diagnostics
-
-```powershell
-pwsh -File test/unit/Test-Simple.ps1 -ConfigFile _Test\config.test.json
-```
-
-This validates your config file, Azure connection, and module readiness.
-
-### Run Graph API Tests
-
-```powershell
-pwsh -File test/unit/Test-GraphAPI.ps1 -ConfigFile _Test\config.test.json
-```
-
-**What it tests:**
-- Access token acquisition (service principal)
-- Token structure validation (required claims present)
-- Token expiry is in the future
-- Basic Graph API call: `GET /users?$top=1`
-- Pagination: fetch first 2 pages of users
-- User query: `GET /users/{id}`
-- Group query: `GET /groups?$top=5`
-- Group members: `GET /groups/{id}/members`
-- Access packages: `GET /identityGovernance/entitlementManagement/accessPackages`
-- Error handling: invalid endpoint returns proper error
-
-**Expected result:** All tests pass. If you don't have access packages, those tests will be skipped gracefully.
-
----
-
 ## 5. Phase 3: SQL + Sync Integration Tests
 
-### Full Integration Test (First Time)
+### Full Integration Test
 
-Creates Azure SQL Server, database, runs all syncs, validates data:
+Run the Microsoft Graph crawler against a real test tenant via the UI:
 
-```powershell
-pwsh -File _Test\Test-Integration.ps1 -ConfigFile _Test\config.test.json -SkipCleanup
-```
+1. In the browser, go to **Admin → Crawlers**
+2. Click your saved Microsoft Graph crawler → **Run Now**
+3. Watch the job progress bar
+4. After completion, open the **Matrix** page and verify users, groups, and assignments appear
 
-**Duration:** 15-30 minutes (Azure resource creation takes ~5 minutes)
-
-**What it tests:**
-- SQL Server creation
-- Database creation
-- Table creation with temporal versioning
-- Schema evolution (adding columns to existing tables)
-- User sync (default + additional attributes)
-- Group sync
-- Group member sync (direct, eligible, owners)
-- Access package sync (catalogs, packages, assignments, policies, requests, reviews)
-- Parallel sync (`Start-FGSync`)
-- Point-in-time temporal queries
-- View creation and querying
-- Data integrity checks
-
-### Fast Regression Test (Subsequent Runs)
-
-Reuses existing SQL Server, clears data, re-syncs:
-
-```powershell
-pwsh -File _Test\Test-Integration-Fast.ps1 -ConfigFile _Test\config.test.json
-```
-
-**Duration:** 5-10 minutes
+**What this exercises:**
+- Backend bootstrap (creates Built-in Worker crawler + queues)
+- Worker job pickup from `CrawlerJobs` SQL queue
+- Microsoft Graph API auth + paging
+- Ingest API for principals, resources, assignments, identities, governance
+- Post-sync context build + account correlation
+- Matrix view rendering with AP coloring
 
 ### Manual Sync Verification
 
-After the integration test completes, verify data manually:
+```bash
+# Open a SQL shell into the SQL container
+docker exec -it fortigigraph-sql-1 /opt/mssql-tools18/bin/sqlcmd \
+  -S localhost -U sa -P 'FortigiGraph_Local1!' -d GraphData -No
 
-```powershell
-# Connect and query
-Connect-FGSQLServer -ConfigFile _Test\config.test.json
-
-# Check row counts
-Invoke-FGSQLQuery -Query "SELECT 'Users' AS Entity, COUNT(*) AS Rows FROM GraphUsers
-    UNION ALL SELECT 'Groups', COUNT(*) FROM GraphGroups
-    UNION ALL SELECT 'Members', COUNT(*) FROM GraphGroupMembers
-    UNION ALL SELECT 'Owners', COUNT(*) FROM GraphGroupOwners"
-
-# Check temporal history
-Invoke-FGSQLQuery -Query "SELECT TOP 5 displayName, SysStartTime, SysEndTime FROM GraphUsers FOR SYSTEM_TIME ALL ORDER BY SysStartTime DESC"
-
-# Check views
-Invoke-FGSQLQuery -Query "SELECT TOP 10 * FROM vw_UserPermissionAssignments"
+# Row counts
+SELECT (SELECT COUNT(*) FROM dbo.Principals) AS Users,
+       (SELECT COUNT(*) FROM dbo.Resources)  AS Resources,
+       (SELECT COUNT(*) FROM dbo.ResourceAssignments) AS Assignments,
+       (SELECT COUNT(*) FROM dbo.Identities) AS Identities;
+GO
 ```
 
 ---
@@ -399,59 +294,11 @@ Invoke-FGSQLQuery -Query "SELECT displayName, riskScore, riskOverride, riskOverr
 
 ---
 
-## 7. Phase 5: UI Deployment + Frontend Tests
-
-### Deploy the UI
-
-```powershell
-# Deploy with authentication
-New-FGUI -ConfigFile _Test\config.test.json
-
-# OR deploy without auth for easier testing
-New-FGUI -ConfigFile _Test\config.test.json -NoAuth
-```
-
-**Duration:** 10-15 minutes (creates App Service, deploys code via Kudu)
-
-Note the URL printed at the end (e.g., `https://fg-test-ui.azurewebsites.net`).
-
-### Run Backend API Tests
-
-These test the Node.js backend API directly:
-
-```powershell
-pwsh -File _Test\Test-UIBackend.ps1 -BaseUrl "https://fg-test-ui.azurewebsites.net"
-```
-
-If deployed with authentication, you'll need to pass a token:
-
-```powershell
-pwsh -File _Test\Test-UIBackend.ps1 -BaseUrl "https://fg-test-ui.azurewebsites.net" -BearerToken "eyJ0..."
-```
-
-**What it tests:**
-- `/api/auth-config` endpoint responds
-- `/api/permissions` returns user-group matrix data
-- `/api/permissions/groups` returns access package groups
-- `/api/permissions/sync-log` returns sync history
-- `/api/users` returns paginated users with correct attributes
-- `/api/groups` returns paginated groups
-- `/api/access-packages` returns access packages with catalogs
-- `/api/tags` CRUD operations (create, list, assign, unassign, delete)
-- `/api/categories` CRUD operations
-- `/api/details/user/{id}` returns user details with history
-- `/api/details/group/{id}` returns group details with members
-- `/api/risk-scores` returns risk score summary (if scoring done)
-- `/api/risk-scores/users` returns paginated scored users
-- `/api/risk-scores/groups` returns paginated scored groups
-- `/api/org-chart` returns manager hierarchy
-- `/api/governance/summary` returns review compliance KPIs
-- `/api/perf` returns performance metrics (if enabled)
-- Error handling: invalid endpoints return 404
+## 7. Phase 5: Frontend Tests
 
 ### Run UI E2E Tests (Browser Tests)
 
-Playwright E2E tests validate that UI pages render correctly, navigation works, and interactive features function. These run against the **mock backend** — no Azure or SQL required.
+Playwright E2E tests validate that UI pages render correctly, navigation works, and interactive features function. These run against the **mock backend** — no Docker or SQL required.
 
 **First-time setup:**
 
@@ -499,16 +346,16 @@ Playwright automatically starts the mock backend (`USE_SQL=false`) and Vite dev 
 
 **Screenshots on failure** are saved to `app/ui/test-results/`.
 
-### Run E2E Tests Against Deployed UI
+### Run E2E Tests Against the Local Docker Stack
 
-To test against a live deployment instead of mock data:
+To test against the running Docker stack instead of mock data:
 
 ```bash
 cd app/ui
-BASE_URL=https://your-app.azurewebsites.net npx playwright test
+BASE_URL=http://localhost:3001 npx playwright test
 ```
 
-Note: Tag/category creation tests will create real data in SQL when running against a live deployment.
+Note: Tag/category creation tests will create real data in SQL when running against the Docker stack.
 
 ---
 
@@ -609,58 +456,24 @@ Open the UI URL in a browser and test each page. Use this checklist:
 
 ---
 
-## 9. Phase 7: Azure Automation Tests
-
-### Deploy Automation Account
-
-```powershell
-New-FGAzureAutomationAccount -ConfigFile _Test\config.test.json
-```
-
-### Manual Verification
-
-- [ ] Automation Account created in the resource group
-- [ ] Encrypted variables exist for: ClientId, ClientSecret, TenantId, SQLConnectionString
-- [ ] Runbooks are published (one per sync type)
-- [ ] Schedules exist (if configured)
-- [ ] SQL firewall rule allows Azure services
-
-### Test a Runbook
-
-```powershell
-Start-FGAutomationRunbook -ConfigFile _Test\config.test.json -RunbookName "Sync-Users"
-Get-FGAutomationJob -ConfigFile _Test\config.test.json -Last 1
-```
-
----
-
 ## 10. Phase 8: Cleanup
 
-### Remove UI Resources
+### Stop the Docker stack (keeps data)
 
-```powershell
-Remove-FGUI -ConfigFile _Test\config.test.json
+```bash
+docker compose down
 ```
 
-### Remove SQL Server (deletes all data!)
+### Stop and remove all data
 
-```powershell
-pwsh -File _Test\Test-Integration-Fast.ps1 -ConfigFile _Test\config.test.json -RemoveServer
-```
-
-### Remove All Azure Resources
-
-```powershell
-# This removes the entire resource group — DESTRUCTIVE
-Remove-AzResourceGroup -Name "rg-fortigraph-test" -Force
+```bash
+docker compose down -v
 ```
 
 ### Clean Up Local Files
 
-```powershell
-Remove-Item _Test\config.test.json -ErrorAction SilentlyContinue
-Remove-Item _Test\logs\* -ErrorAction SilentlyContinue
-Remove-Item _Test\exports\* -ErrorAction SilentlyContinue
+```bash
+rm -rf _Test/logs _Test/exports 2>/dev/null
 ```
 
 ---
@@ -677,7 +490,7 @@ test/
 ├── TESTING-GUIDE.md              # This file
 ├── unit/
 │   ├── IdentityAtlas.Tests.ps1   # Pester v5 unit tests (module structure, quality)
-│   ├── Test-Simple.ps1           # Azure context + config validation
+│   ├── Test-Simple.ps1           # Module + config sanity check
 │   └── Test-GraphAPI.ps1         # Graph API connectivity tests
 ├── demo-dataset/
 │   ├── Generate-DemoDataset.ps1  # Generates demo-company.json
@@ -715,22 +528,20 @@ app/
         └── identities.spec.js
 
 .github/workflows/
-├── pr.yml                        # PR checks (fast, no Docker/Azure)
+├── pr.yml                        # PR checks (fast, no Docker required)
 └── docs.yml                      # MkDocs deploy on push to main
 ```
 
 ### Quick-reference command table
 
-| What | Command | Azure? | Docker? | Duration |
-|------|---------|--------|---------|----------|
-| Pester unit tests | `Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1` | No | No | ~15 s |
-| Vitest API tests | `cd app/api && npm test` | No | No | ~5 s |
-| ESLint | `cd app/ui && npm run lint` | No | No | ~5 s |
-| PSScriptAnalyzer | `Invoke-ScriptAnalyzer -Path ./Functions -Recurse` | No | No | ~10 s |
-| Docker suite | `pwsh -File test/run-docker-tests.ps1` | No | Yes | ~30 s |
-| Playwright E2E | `cd app/ui && npm run test:e2e` | No | No | ~45 s |
-| Azure diagnostics | `pwsh -File test/unit/Test-Simple.ps1 -ConfigFile ...` | Yes | No | ~5 s |
-| Graph API tests | `pwsh -File test/unit/Test-GraphAPI.ps1 -ConfigFile ...` | Yes | No | ~30 s |
+| What | Command | Docker? | Duration |
+|------|---------|---------|----------|
+| Pester unit tests | `Invoke-Pester -Path test/unit/IdentityAtlas.Tests.ps1` | No | ~15 s |
+| Vitest API tests | `cd app/api && npm test` | No | ~5 s |
+| ESLint | `cd app/ui && npm run lint` | No | ~5 s |
+| PSScriptAnalyzer | `Invoke-ScriptAnalyzer -Path ./tools -Recurse` | No | ~10 s |
+| Docker suite | `pwsh -File test/run-docker-tests.ps1` | Yes | ~30 s |
+| Playwright E2E | `cd app/ui && npm run test:e2e` | No | ~45 s |
 
 ### Logs
 
@@ -744,9 +555,9 @@ Docker test output goes to `test/test-results.md`. Playwright reports go to `app
 | ESLint "No files matched" | Check `eslint.config.js` exists in `app/ui/` |
 | Docker tests fail on SQL connection | Wait longer after `docker compose up` — SQL takes ~20 s to init |
 | "No Access Token found" | Run `Get-FGAccessToken -ConfigFile config.test.json` first |
-| SQL firewall timeout | Verify your IP is allowed in the Azure SQL firewall |
-| 403 on Graph API | Check app registration has correct permissions + admin consent |
-| UI returns 500 errors | `az webapp log tail --name <app-name> -g <rg>` |
+| 403 on Graph API | Check the App Registration has the right permissions + admin consent |
+| Web container returns 500 | `docker logs fortigigraph-web-1 --tail 50` |
+| Worker not picking up jobs | `docker logs fortigigraph-worker-1 --tail 50` — check that it discovered the API key |
 
 ---
 
@@ -754,7 +565,7 @@ Docker test output goes to `test/test-results.md`. Playwright reports go to `app
 
 ### PR Pipeline (`.github/workflows/pr.yml`)
 
-Runs on every pull request to `main` or `dev`. No Docker, no Azure credentials needed. All 6 jobs run in parallel:
+Runs on every pull request to `main` or `dev`. No Docker, no external credentials needed. All 6 jobs run in parallel:
 
 | Job | Tool | What it checks |
 |-----|------|----------------|
@@ -767,37 +578,22 @@ Runs on every pull request to `main` or `dev`. No Docker, no Azure credentials n
 
 **Typical duration:** 3–5 minutes.
 
-### Nightly Pipeline (`.github/workflows/` → `test/automation/github-nightly-tests.yml`)
+### Nightly Pipeline (`test/automation/github-nightly-tests.yml`)
 
-Runs at 02:00 UTC daily and on-demand. Requires Azure secrets.
-
-**Pipeline structure:**
-
-```
-unit-tests (Pester) ──┬──→ integration-tests (Azure SQL + Graph)
-                      ├──→ ui-backend-tests  (deployed UI, if URL set)
-                      └──→ e2e-tests         (Playwright, app/ui/)
-                                    └──→ summary
-```
+Runs at 02:00 UTC daily and on-demand. Brings up the Docker stack inside the runner, runs the integration suite + Playwright E2E, then tears it down.
 
 **Required secrets** (Settings → Secrets → Actions):
 
 | Secret | Required | Value |
 |--------|----------|-------|
-| `AZURE_CREDENTIALS` | Yes | `az ad sp create-for-rbac --sdk-auth` output |
-| `TEST_CONFIG` | Yes | Full `config.test.json` contents |
-| `SQL_ADMIN_PASSWORD` | Yes | SQL Server admin password |
-| `GRAPH_CLIENT_SECRET` | Yes | Graph API client secret |
-| `LLM_API_KEY` | No | Anthropic or OpenAI key (for risk scoring tests) |
-| `UI_BASE_URL` | No | Deployed UI URL |
-| `UI_BEARER_TOKEN` | No | Bearer token for authenticated deployments |
-
-**Manual trigger options:** skip integration, skip risk scoring, skip E2E, first run (creates SQL from scratch).
+| `GRAPH_TENANT_ID` | Optional | Tenant ID for crawler tests |
+| `GRAPH_CLIENT_ID` | Optional | Graph App Registration client ID |
+| `GRAPH_CLIENT_SECRET` | Optional | Graph API client secret |
+| `LLM_API_KEY` | Optional | Anthropic or OpenAI key (for risk scoring tests) |
 
 **Artifacts retained 30 days:** Pester JUnit XML, Playwright HTML report, failure screenshots.
 
 ### Cost Considerations
 
 - **GitHub Actions (private repo):** 2 000 min/month free, then ~$0.008/min
-- **Azure resources during nightly tests:** ~$0.10–0.50 per run
 - **LLM API (risk scoring):** ~$0.05–0.20 per run (2–3 calls)
