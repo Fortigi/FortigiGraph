@@ -1,162 +1,120 @@
-// Shared column discovery cache with TTL.
-// Used by both permissions.js and tags.js to avoid querying INFORMATION_SCHEMA on every request.
-// Also caches the expensive DISTINCT-values queries (UNION ALL per column).
+// Shared column-discovery cache for the principals/resources tables.
+//
+// Routes use this to discover what columns exist (so the UI can render
+// dynamic filter dropdowns) and to fetch the distinct values per filterable
+// column. Both queries are cached for 5 minutes; an in-flight deduplication
+// promise prevents thundering-herd on cold cache.
+//
+// In v5 the only tables are postgres `principals` and `resources` (snake_case).
+// The legacy `GraphUsers` / `GraphGroups` paths are removed — they were the v3
+// pre-universal-resource-model fallback and have been dead code since v3.1.
+//
+// Returned column shape stays in camelCase so the frontend doesn't need
+// changes — we map snake_case → camelCase here.
 
-const COLUMN_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+import * as db from './connection.js';
 
-const SYSTEM_COLS = new Set(['id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime']);
-const FILTERABLE_TYPES = new Set(['nvarchar', 'varchar', 'char', 'bit', 'int', 'smallint', 'tinyint']);
+const COLUMN_CACHE_TTL = 5 * 60 * 1000;
 
-// ─── Column schema cache ────────────────────────────────────────
+// Postgres data types we treat as filterable. The legacy types like
+// `nvarchar` no longer apply.
+const FILTERABLE_TYPES = new Set([
+  'text', 'character varying', 'character', 'boolean',
+  'integer', 'bigint', 'smallint',
+]);
 
-let userColumnsCache = null;
-let userColumnsCacheTime = 0;
+// Validate identifiers used in dynamic SQL — defense-in-depth even though
+// we only feed it information_schema output.
+const SAFE_IDENT_RE = /^[a-zA-Z0-9_]+$/;
+
+// Convert postgres column name to camelCase for the API response
+function snakeToCamel(s) {
+  return s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+}
+
+// ─── Schema cache ───────────────────────────────────────────────
 let principalColumnsCache = null;
 let principalColumnsCacheTime = 0;
-let groupColumnsCache = null;
-let groupColumnsCacheTime = 0;
 let resourceColumnsCache = null;
 let resourceColumnsCacheTime = 0;
 
-async function discoverColumns(pool, table) {
-  const result = await pool.request()
-    .input('tableName', table)
-    .query(`
-      SELECT COLUMN_NAME, DATA_TYPE
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = @tableName
-        AND COLUMN_NAME NOT IN ('id', 'ValidFrom', 'ValidTo', 'SysStartTime', 'SysEndTime')
-      ORDER BY ORDINAL_POSITION
-    `);
-  return result.recordset.map(r => ({ name: r.COLUMN_NAME, type: r.DATA_TYPE }));
+async function discoverColumns(table) {
+  if (!SAFE_IDENT_RE.test(table)) throw new Error(`Invalid table name: ${table}`);
+  const r = await db.query(
+    `SELECT column_name, data_type
+       FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+        AND column_name NOT IN ('id', 'system_id', 'extended_attributes')
+      ORDER BY ordinal_position`,
+    [table]
+  );
+  return r.rows.map(row => ({
+    name: snakeToCamel(row.column_name),
+    rawName: row.column_name,
+    type: row.data_type,
+  }));
 }
 
-export async function getUserColumns(pool) {
-  const now = Date.now();
-  if (userColumnsCache && (now - userColumnsCacheTime) < COLUMN_CACHE_TTL) {
-    return userColumnsCache;
-  }
-  userColumnsCache = await discoverColumns(pool, 'GraphUsers');
-  userColumnsCacheTime = now;
-  return userColumnsCache;
-}
-
-export async function getGroupColumns(pool) {
-  const now = Date.now();
-  if (groupColumnsCache && (now - groupColumnsCacheTime) < COLUMN_CACHE_TTL) {
-    return groupColumnsCache;
-  }
-  groupColumnsCache = await discoverColumns(pool, 'GraphGroups');
-  groupColumnsCacheTime = now;
-  return groupColumnsCache;
-}
-
-export async function getPrincipalColumns(pool) {
+export async function getPrincipalColumns(_pool) {
   const now = Date.now();
   if (principalColumnsCache && (now - principalColumnsCacheTime) < COLUMN_CACHE_TTL) {
     return principalColumnsCache;
   }
-  principalColumnsCache = await discoverColumns(pool, 'Principals');
+  principalColumnsCache = await discoverColumns('principals');
   principalColumnsCacheTime = now;
   return principalColumnsCache;
 }
 
-/**
- * Returns columns from Principals if that table exists, otherwise falls back to GraphUsers.
- * Cached for 5 minutes (inherits from whichever table is used).
- */
-export async function getPrincipalOrUserColumns(pool) {
-  try {
-    return await getPrincipalColumns(pool);
-  } catch {
-    return await getUserColumns(pool);
-  }
-}
-
-export async function getResourceColumns(pool) {
+export async function getResourceColumns(_pool) {
   const now = Date.now();
   if (resourceColumnsCache && (now - resourceColumnsCacheTime) < COLUMN_CACHE_TTL) {
     return resourceColumnsCache;
   }
-  resourceColumnsCache = await discoverColumns(pool, 'Resources');
+  resourceColumnsCache = await discoverColumns('resources');
   resourceColumnsCacheTime = now;
   return resourceColumnsCache;
 }
 
-// ─── Column distinct values cache ───────────────────────────────
-// These queries (UNION ALL of SELECT DISTINCT per column) are the
-// single most expensive operations: 44s for users, 29s for groups.
-// Caching with the same 5-min TTL makes subsequent loads instant.
+// Backward-compat aliases used by some routes — they always return principal/
+// resource columns now, no GraphUsers/GraphGroups fallback exists in v5.
+export const getUserColumns                = getPrincipalColumns;
+export const getGroupColumns               = getResourceColumns;
+export const getPrincipalOrUserColumns     = getPrincipalColumns;
 
-let userValuesCache = null;
-let userValuesCacheTime = 0;
-let userValuesInflight = null;
+// ─── Distinct values cache ──────────────────────────────────────
 let principalValuesCache = null;
 let principalValuesCacheTime = 0;
 let principalValuesInflight = null;
-let groupValuesCache = null;
-let groupValuesCacheTime = 0;
-let groupValuesInflight = null;
 let resourceValuesCache = null;
 let resourceValuesCacheTime = 0;
 let resourceValuesInflight = null;
 
-// Validate SQL identifier to prevent injection via schema-derived names
-const SAFE_IDENT_RE = /^[a-zA-Z0-9_]+$/;
-
-async function discoverColumnValues(pool, table, columns) {
-  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type) && SAFE_IDENT_RE.test(c.name));
+async function discoverColumnValues(table, columns) {
+  const filterableCols = columns.filter(c => FILTERABLE_TYPES.has(c.type) && SAFE_IDENT_RE.test(c.rawName));
   if (filterableCols.length === 0) return {};
-
   if (!SAFE_IDENT_RE.test(table)) throw new Error(`Invalid table name: ${table}`);
 
+  // One UNION ALL query per filterable column. Each gets up to 500 distinct
+  // non-null values. The result is a flat (col, val) list which we group in JS.
+  // postgres syntax: ::text cast for non-text columns, LIMIT 500 instead of TOP.
   const parts = filterableCols.map(c =>
-    `SELECT '${c.name}' AS col, CAST(val AS NVARCHAR(400)) AS val ` +
-    `FROM (SELECT DISTINCT TOP 500 [${c.name}] AS val FROM ${table} ` +
-    `WHERE [${c.name}] IS NOT NULL AND CAST([${c.name}] AS NVARCHAR(400)) != '' ` +
-    `AND ValidTo = '9999-12-31 23:59:59.9999999') t`
+    `SELECT '${c.name}' AS col, val FROM (
+       SELECT DISTINCT "${c.rawName}"::text AS val FROM "${table}"
+        WHERE "${c.rawName}" IS NOT NULL AND "${c.rawName}"::text <> ''
+        LIMIT 500
+     ) t`
   );
 
-  const result = await pool.request().query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
-
+  const r = await db.query(parts.join('\nUNION ALL\n') + '\nORDER BY col, val');
   const grouped = {};
-  for (const r of result.recordset) {
-    if (!grouped[r.col]) grouped[r.col] = [];
-    grouped[r.col].push(r.val);
+  for (const row of r.rows) {
+    if (!grouped[row.col]) grouped[row.col] = [];
+    grouped[row.col].push(row.val);
   }
   return grouped;
 }
 
-/**
- * Returns { [columnName]: [value1, value2, ...] } for GraphUsers.
- * Cached for 5 minutes.
- */
-export async function getUserColumnValues(pool) {
-  const now = Date.now();
-  if (userValuesCache && (now - userValuesCacheTime) < COLUMN_CACHE_TTL) {
-    return userValuesCache;
-  }
-  // Deduplicate concurrent callers — only run one expensive query at a time
-  if (userValuesInflight) return userValuesInflight;
-  userValuesInflight = (async () => {
-    try {
-      const cols = await getUserColumns(pool);
-      const result = await discoverColumnValues(pool, 'GraphUsers', cols);
-      userValuesCache = result;
-      userValuesCacheTime = Date.now();
-      return result;
-    } finally {
-      userValuesInflight = null;
-    }
-  })();
-  return userValuesInflight;
-}
-
-/**
- * Returns { [columnName]: [value1, value2, ...] } for Principals.
- * Cached for 5 minutes.
- */
-export async function getPrincipalColumnValues(pool) {
+export async function getPrincipalColumnValues(_pool) {
   const now = Date.now();
   if (principalValuesCache && (now - principalValuesCacheTime) < COLUMN_CACHE_TTL) {
     return principalValuesCache;
@@ -164,8 +122,8 @@ export async function getPrincipalColumnValues(pool) {
   if (principalValuesInflight) return principalValuesInflight;
   principalValuesInflight = (async () => {
     try {
-      const cols = await getPrincipalColumns(pool);
-      const result = await discoverColumnValues(pool, 'Principals', cols);
+      const cols = await getPrincipalColumns(null);
+      const result = await discoverColumnValues('principals', cols);
       principalValuesCache = result;
       principalValuesCacheTime = Date.now();
       return result;
@@ -176,57 +134,16 @@ export async function getPrincipalColumnValues(pool) {
   return principalValuesInflight;
 }
 
-/**
- * Returns column values from Principals if that table exists, otherwise falls back to GraphUsers.
- */
-export async function getPrincipalOrUserColumnValues(pool) {
-  try {
-    return await getPrincipalColumnValues(pool);
-  } catch {
-    return await getUserColumnValues(pool);
-  }
-}
-
-/**
- * Returns { [columnName]: [value1, value2, ...] } for GraphGroups.
- * Cached for 5 minutes.
- */
-export async function getGroupColumnValues(pool) {
-  const now = Date.now();
-  if (groupValuesCache && (now - groupValuesCacheTime) < COLUMN_CACHE_TTL) {
-    return groupValuesCache;
-  }
-  // Deduplicate concurrent callers — only run one expensive query at a time
-  if (groupValuesInflight) return groupValuesInflight;
-  groupValuesInflight = (async () => {
-    try {
-      const cols = await getGroupColumns(pool);
-      const result = await discoverColumnValues(pool, 'GraphGroups', cols);
-      groupValuesCache = result;
-      groupValuesCacheTime = Date.now();
-      return result;
-    } finally {
-      groupValuesInflight = null;
-    }
-  })();
-  return groupValuesInflight;
-}
-
-/**
- * Returns { [columnName]: [value1, value2, ...] } for Resources.
- * Cached for 5 minutes.
- */
-export async function getResourceColumnValues(pool) {
+export async function getResourceColumnValues(_pool) {
   const now = Date.now();
   if (resourceValuesCache && (now - resourceValuesCacheTime) < COLUMN_CACHE_TTL) {
     return resourceValuesCache;
   }
-  // Deduplicate concurrent callers — only run one expensive query at a time
   if (resourceValuesInflight) return resourceValuesInflight;
   resourceValuesInflight = (async () => {
     try {
-      const cols = await getResourceColumns(pool);
-      const result = await discoverColumnValues(pool, 'Resources', cols);
+      const cols = await getResourceColumns(null);
+      const result = await discoverColumnValues('resources', cols);
       resourceValuesCache = result;
       resourceValuesCacheTime = Date.now();
       return result;
@@ -237,4 +154,9 @@ export async function getResourceColumnValues(pool) {
   return resourceValuesInflight;
 }
 
-export { SYSTEM_COLS, FILTERABLE_TYPES };
+export const getUserColumnValues             = getPrincipalColumnValues;
+export const getGroupColumnValues            = getResourceColumnValues;
+export const getPrincipalOrUserColumnValues  = getPrincipalColumnValues;
+
+export { FILTERABLE_TYPES };
+export const SYSTEM_COLS = new Set(['id', 'system_id', 'extended_attributes']);

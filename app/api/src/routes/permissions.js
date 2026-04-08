@@ -72,9 +72,9 @@ router.get('/user-columns', async (req, res) => {
       await ensureTagTables(p);
       const tagResult = await timedRequest(p, 'user-columns-tags', res).query(`
         SELECT t.name
-        FROM dbo.GraphTags t
-        WHERE t.entityType = 'user'
-          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        FROM "GraphTags" t
+        WHERE t."entityType" = 'user'
+          AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta WHERE ta."tagId" = t.id)
         ORDER BY t.name
       `);
       const userTags = tagResult.recordset.map(r => r.name);
@@ -108,42 +108,32 @@ router.get('/permissions', async (req, res) => {
     if (useSql) {
       const p = await db.getPool();
 
-      // Return empty data when sync hasn't run yet (no tables exist yet)
+      // Return empty data when sync hasn't run yet. v5 always has Principals
+      // (created by migrations) so this is mostly a safety net.
       const tableCheck = await p.request().query(
-        `SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists, OBJECT_ID('dbo.GraphUsers', 'U') AS graphUsersExists`
+        `SELECT to_regclass('"Principals"') AS "principalsExists"`
       );
-      if (!tableCheck.recordset[0].principalsExists && !tableCheck.recordset[0].graphUsersExists) {
+      if (!tableCheck.recordset[0].principalsExists) {
         return res.json({ data: [], totalUsers: 0, managedByPackages: [] });
       }
 
-      // Prefer materialized tables (fast), then new resource views, then old views as fallback
+      // v5: always use the unified view; no materialized tables exist.
       const matCheck = await timedRequest(p, 'perm-mat-check', res).query(`
         SELECT
-          OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
-          OBJECT_ID('dbo.mat_UserPermissionAssignmentViaBusinessRole', 'U') AS matApExists,
-          OBJECT_ID('dbo.mat_UserCounts', 'U') AS matCountsExists,
-          OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resourceViewExists,
-          OBJECT_ID('dbo.Principals', 'U') AS principalsExists
+          to_regclass('"vw_ResourceUserPermissionAssignments"') AS "resourceViewExists",
+          to_regclass('"Principals"') AS "principalsExists",
+          to_regclass('"vw_UserPermissionAssignmentViaBusinessRole"') AS "matApExists"
       `);
-      const permSource = matCheck.recordset[0].matPermExists
-        ? 'mat_UserPermissionAssignments'
-        : matCheck.recordset[0].resourceViewExists
-          ? 'vw_ResourceUserPermissionAssignments'
-          : 'vw_UserPermissionAssignments';
-      // Detect whether the permission source uses resourceId or groupId
-      const useResourceId = !!matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists;
-      // Column names differ between old views (groupId/memberId/memberType) and new views (resourceId/principalId/principalType)
-      const COL_RES = useResourceId ? 'resourceId' : 'groupId';
-      const COL_PRINC = useResourceId ? 'principalId' : 'memberId';
-      const COL_PTYPE = useResourceId ? 'principalType' : 'memberType';
-      const apSource = matCheck.recordset[0].matApExists
-        ? 'mat_UserPermissionAssignmentViaBusinessRole'
-        : 'vw_UserPermissionAssignmentViaBusinessRole';
-      const hasPrecomputedCounts = !!matCheck.recordset[0].matCountsExists;
-
-      // Determine user table: prefer Principals, fall back to GraphUsers
-      const userTable = matCheck.recordset[0].principalsExists ? 'Principals' : 'GraphUsers';
-      const upnCol = userTable === 'Principals' ? 'u.email' : 'u.userPrincipalName';
+      // v5: always use the unified resource view + Principals table.
+      // The legacy mat_/GraphUsers paths are gone.
+      const permSource = '"vw_ResourceUserPermissionAssignments"';
+      const COL_RES = 'resourceId';
+      const COL_PRINC = 'principalId';
+      const COL_PTYPE = 'principalType';
+      const apSource = '"vw_UserPermissionAssignmentViaBusinessRole"';
+      const hasPrecomputedCounts = false;
+      const userTable = '"Principals"';
+      const upnCol = 'u."email"';
 
       // Discover user and group columns dynamically
       const allCols = await getPrincipalOrUserColumns(p);
@@ -157,11 +147,16 @@ router.get('/permissions', async (req, res) => {
       }
       const groupColNames = new Set(allGroupCols.map(c => GROUP_COL_ALIASES[c.name] || c.name));
 
-      // Build dynamic user column SELECT (exclude aliased cols handled explicitly)
-      const dynamicUserCols = allCols
+      // Build dynamic user column SELECT (exclude aliased cols handled explicitly).
+      // Postgres needs camelCase columns wrapped in double quotes. We include
+      // a trailing comma so the calling SELECT can add a final column without
+      // a syntax error when this list is empty.
+      const dynamicUserColsList = allCols
         .filter(c => !ALIASED_COLS.has(c.name))
-        .map(c => `u.[${c.name}]`)
-        .join(',\n            ');
+        .map(c => `u."${c.name}"`);
+      const dynamicUserCols = dynamicUserColsList.length > 0
+        ? dynamicUserColsList.join(',\n            ') + ','
+        : '';
 
       // Extract special tag filters before regular validation
       let userTagFilter = null;
@@ -204,27 +199,25 @@ router.get('/permissions', async (req, res) => {
       const addParams = (request) => {
         for (let i = 0; i < validUserFilters.length; i++) {
           const f = validUserFilters[i];
-          // Use CAST for consistent string comparison (handles bit/int columns)
-          filterWhere += ` AND CAST(u.[${f.field}] AS NVARCHAR(400)) = @f${i}`;
+          filterWhere += ` AND u."${f.field}"::text = @f${i}`;
           request.input(`f${i}`, f.value);
         }
         for (let i = 0; i < validGroupFilters.length; i++) {
           const f = validGroupFilters[i];
-          // Map aliased names back to real Resources column names
           const realCol = GROUP_ALIAS_TO_COL[f.field] || f.field;
-          groupFilterWhere += ` AND CAST(r.[${realCol}] AS NVARCHAR(400)) = @gf${i}`;
+          groupFilterWhere += ` AND r."${realCol}"::text = @gf${i}`;
           request.input(`gf${i}`, f.value);
         }
         if (userTagFilter) {
           userTagJoin = `
-            INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
-            INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
+            INNER JOIN "GraphTagAssignments" _uta ON _uta."entityId" = UPPER(u.id::text)
+            INNER JOIN "GraphTags" _ut ON _uta."tagId" = _ut.id AND _ut."name" = @__userTag AND _ut."entityType" = 'user'`;
           request.input('__userTag', userTagFilter);
         }
         if (groupTagFilter) {
           groupTagJoin = `
-            INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(p.${COL_RES} AS NVARCHAR(36)))
-            INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType IN ('resource', 'group')`;
+            INNER JOIN "GraphTagAssignments" _gta ON _gta."entityId" = UPPER(p."resourceId"::text)
+            INNER JOIN "GraphTags" _gt ON _gta."tagId" = _gt.id AND _gt."name" = @__groupTag AND _gt."entityType" IN ('resource', 'group')`;
           request.input('__groupTag', groupTagFilter);
         }
       };
@@ -237,116 +230,70 @@ router.get('/permissions', async (req, res) => {
         filterWhere = '';
         groupFilterWhere = '';
 
-        // When no filters are active and pre-computed counts exist, skip the
-        // expensive GROUP BY entirely — just read top N from mat_UserCounts
-        // (instant clustered index scan vs full table scan + hash aggregate)
-        const noFilters = validUserFilters.length === 0 && validGroupFilters.length === 0
-          && !userTagFilter && !groupTagFilter;
-        const usePrecomputed = hasPrecomputedCounts && noFilters;
-
-        const request = timedRequest(p, `perm-combined[${usePrecomputed ? 'pre' : sourceTag}]`, res);
+        const request = timedRequest(p, 'perm-combined-limited', res);
         request.input('userLimit', userLimit);
         addParams(request);
 
-        // Join Resources in user-count step only when group/resource filters are active
-        const topUsersGroupJoin = validGroupFilters.length > 0 || groupTagJoin
-          ? `LEFT JOIN Resources r ON p.${COL_RES} = r.id` : '';
-
-        // Step 1: Get top users — pre-computed (instant) or computed (GROUP BY)
-        const step1Sql = usePrecomputed
-          ? `SELECT TOP (@userLimit) memberId, cnt
-             INTO #UserCounts
-             FROM dbo.mat_UserCounts
-             ORDER BY cnt DESC`
-          : `SELECT TOP (@userLimit) p.${COL_PRINC} AS memberId, COUNT(*) AS cnt
-             INTO #UserCounts
-             FROM ${permSource} p
-             INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
-             ${topUsersGroupJoin}
-             ${userTagJoin}
-             ${groupTagJoin}
-             WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
-               ${filterWhere}
-               ${groupFilterWhere}
-             GROUP BY p.${COL_PRINC}
-             ORDER BY cnt DESC`;
-
-        // Step 3: Total count — must reflect ALL matching users, not just the TOP N
-        const step3Sql = usePrecomputed
-          ? `SELECT COUNT(*) AS totalUsers FROM dbo.mat_UserCounts`
-          : `SELECT COUNT(DISTINCT p.${COL_PRINC}) AS totalUsers
-             FROM ${permSource} p
-             INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
-             ${topUsersGroupJoin}
-             ${userTagJoin}
-             ${groupTagJoin}
-             WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
-               ${filterWhere}
-               ${groupFilterWhere}`;
-
+        // Postgres-native: subquery selects the top N users by assignment count.
+        // No temp tables — just an inline subquery in WHERE.
         const result = await request.query(`
-          -- Step 1: Top users ${usePrecomputed ? '(pre-computed — no GROUP BY)' : '(computed — GROUP BY)'}
-          ${step1Sql};
-
-          -- Step 2: Main data for top N users (index seek on memberId)
           SELECT
-            p.${COL_RES} AS resourceId,
-            p.${COL_RES} AS groupId,
-            r.displayName AS resourceDisplayName,
-            r.displayName AS groupDisplayName,
-            r.resourceType,
-            r.resourceType AS groupTypeCalculated,
-            r.description AS resourceDescription,
-            r.description AS groupDescription,
-            r.systemId,
-            sys.displayName AS systemName,
-            p.${COL_PRINC} AS memberId,
-            u.displayName AS memberDisplayName,
-            ${upnCol} AS memberUPN,
-            p.${COL_PTYPE} AS memberType,
-            p.membershipType,
-            ${dynamicUserCols},
-            p.managedByAccessPackage
-          FROM ${permSource} p
-          INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
-          LEFT JOIN Resources r ON p.${COL_RES} = r.id
-          LEFT JOIN Systems sys ON r.systemId = sys.id
+            p."resourceId" AS "resourceId",
+            p."resourceId" AS "groupId",
+            r."displayName" AS "resourceDisplayName",
+            r."displayName" AS "groupDisplayName",
+            r."resourceType",
+            r."resourceType" AS "groupTypeCalculated",
+            r."description" AS "resourceDescription",
+            r."description" AS "groupDescription",
+            r."systemId",
+            sys."displayName" AS "systemName",
+            p."principalId" AS "memberId",
+            u."displayName" AS "memberDisplayName",
+            u."email" AS "memberUPN",
+            p."principalType" AS "memberType",
+            p."membershipType",
+            ${dynamicUserCols}
+            p."managedByAccessPackage"
+          FROM "vw_ResourceUserPermissionAssignments" p
+          INNER JOIN "Principals" u ON p."principalId" = u.id
+          LEFT JOIN "Resources" r ON p."resourceId" = r.id
+          LEFT JOIN "Systems" sys ON r."systemId" = sys.id
           ${groupTagJoin}
-          WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
-            AND p.${COL_PRINC} IN (
-              SELECT memberId FROM #UserCounts
+          WHERE (p."principalType" IS NULL OR p."principalType" != '#microsoft.graph.group')
+            AND p."principalId" IN (
+              SELECT "principalId" FROM "vw_ResourceUserPermissionAssignments"
+              WHERE ("principalType" IS NULL OR "principalType" != '#microsoft.graph.group')
+              GROUP BY "principalId"
+              ORDER BY COUNT(*) DESC
+              LIMIT @userLimit
             )
-            ${groupFilterWhere};
-
-          -- Step 3: Total user count
-          ${step3Sql};
-
-          -- Step 4: AP mapping for same top N users (non-fatal)
-          BEGIN TRY
-            SELECT
-              ap.userId AS memberId,
-              ap.groupId AS resourceId,
-              ap.groupId,
-              STRING_AGG(CAST(ap.businessRoleId AS NVARCHAR(36)), ',') AS accessPackageIds
-            FROM ${apSource} ap
-            WHERE ap.userId IN (
-              SELECT memberId FROM #UserCounts
-            )
-            GROUP BY ap.userId, ap.groupId;
-          END TRY
-          BEGIN CATCH
-            SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
-                   CAST(NULL AS NVARCHAR(36)) AS resourceId,
-                   CAST(NULL AS NVARCHAR(36)) AS groupId,
-                   CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
-            WHERE 1 = 0;
-          END CATCH
-
-          DROP TABLE #UserCounts;
+            ${groupFilterWhere}
         `);
 
-        // recordsets: [0]=main data, [1]=totalUsers, [2]=AP mapping
-        const managedByPackages = (result.recordsets[2] || [])
+        // Total user count separately
+        const totalResult = await timedRequest(p, 'perm-total-users', res).query(`
+          SELECT COUNT(DISTINCT "principalId")::int AS "totalUsers"
+          FROM "vw_ResourceUserPermissionAssignments"
+          WHERE ("principalType" IS NULL OR "principalType" != '#microsoft.graph.group')
+        `);
+
+        // AP mapping for the same users
+        let apMapping = [];
+        try {
+          const apRes = await timedRequest(p, 'perm-ap-mapping', res).query(`
+            SELECT
+              ap."userId" AS "memberId",
+              ap."resourceId",
+              ap."resourceId" AS "groupId",
+              string_agg(ap."businessRoleId"::text, ',') AS "accessPackageIds"
+            FROM "vw_UserPermissionAssignmentViaBusinessRole" ap
+            GROUP BY ap."userId", ap."resourceId"
+          `);
+          apMapping = apRes.recordset;
+        } catch { /* AP view may not exist */ }
+
+        const managedByPackages = apMapping
           .filter(r => r.memberId)
           .map(r => ({
             memberId: r.memberId,
@@ -356,8 +303,8 @@ router.get('/permissions', async (req, res) => {
           }));
 
         return res.json({
-          data: result.recordsets[0],
-          totalUsers: result.recordsets[1][0].totalUsers,
+          data: result.recordset,
+          totalUsers: totalResult.recordset[0].totalUsers,
           managedByPackages,
         });
       }
@@ -368,55 +315,54 @@ router.get('/permissions', async (req, res) => {
       groupFilterWhere = '';
       addParams(request);
 
+      // v5: forced to the resource view (we always have it). Postgres has no
+      // BEGIN TRY/END TRY, so the AP-mapping query is split out separately
+      // and only runs when the AP view exists.
       const result = await request.query(`
         SELECT
-          p.${COL_RES} AS resourceId,
-          p.${COL_RES} AS groupId,
-          r.displayName AS resourceDisplayName,
-          r.displayName AS groupDisplayName,
-          r.resourceType,
-          r.resourceType AS groupTypeCalculated,
-          r.description AS resourceDescription,
-          r.description AS groupDescription,
-          r.systemId,
-          sys.displayName AS systemName,
-          p.${COL_PRINC} AS memberId,
-          u.displayName AS memberDisplayName,
-          ${upnCol} AS memberUPN,
-          p.${COL_PTYPE} AS memberType,
-          p.membershipType,
-          ${dynamicUserCols},
-          p.managedByAccessPackage
-        FROM ${permSource} p
-        INNER JOIN ${userTable} u ON p.${COL_PRINC} = u.id
-        LEFT JOIN Resources r ON p.${COL_RES} = r.id
-        LEFT JOIN Systems sys ON r.systemId = sys.id
+          p."resourceId" AS "resourceId",
+          p."resourceId" AS "groupId",
+          r."displayName" AS "resourceDisplayName",
+          r."displayName" AS "groupDisplayName",
+          r."resourceType",
+          r."resourceType" AS "groupTypeCalculated",
+          r."description" AS "resourceDescription",
+          r."description" AS "groupDescription",
+          r."systemId",
+          sys."displayName" AS "systemName",
+          p."principalId" AS "memberId",
+          u."displayName" AS "memberDisplayName",
+          u."email" AS "memberUPN",
+          p."principalType" AS "memberType",
+          p."membershipType",
+          ${dynamicUserCols}
+          p."managedByAccessPackage"
+        FROM "vw_ResourceUserPermissionAssignments" p
+        INNER JOIN "Principals" u ON p."principalId" = u.id
+        LEFT JOIN "Resources" r ON p."resourceId" = r.id
+        LEFT JOIN "Systems" sys ON r."systemId" = sys.id
         ${userTagJoin}
         ${groupTagJoin}
-        WHERE (p.${COL_PTYPE} IS NULL OR p.${COL_PTYPE} != '#microsoft.graph.group')
+        WHERE (p."principalType" IS NULL OR p."principalType" != '#microsoft.graph.group')
           ${filterWhere}
-          ${groupFilterWhere};
-
-        BEGIN TRY
-          SELECT
-            ap.userId AS memberId,
-            ap.groupId AS resourceId,
-            ap.groupId,
-            STRING_AGG(CAST(ap.businessRoleId AS NVARCHAR(36)), ',') AS accessPackageIds
-          FROM ${apSource} ap
-          GROUP BY ap.userId, ap.groupId;
-        END TRY
-        BEGIN CATCH
-          SELECT CAST(NULL AS NVARCHAR(36)) AS memberId,
-                 CAST(NULL AS NVARCHAR(36)) AS resourceId,
-                 CAST(NULL AS NVARCHAR(36)) AS groupId,
-                 CAST(NULL AS NVARCHAR(MAX)) AS accessPackageIds
-          WHERE 1 = 0;
-        END CATCH
+          ${groupFilterWhere}
       `);
+      // AP mapping is optional — fetch separately, swallow errors.
+      let apMapping = [];
+      try {
+        const apResult = await timedRequest(p, 'perm-ap-mapping', res).query(`
+          SELECT
+            ap."userId" AS "memberId",
+            ap."resourceId" AS "resourceId",
+            ap."resourceId" AS "groupId",
+            string_agg(ap."businessRoleId"::text, ',') AS "accessPackageIds"
+          FROM "vw_UserPermissionAssignmentViaBusinessRole" ap
+          GROUP BY ap."userId", ap."resourceId"
+        `);
+        apMapping = apResult.recordset;
+      } catch { /* AP view may not exist */ }
 
-      // recordsets: [0]=main data, [1]=AP mapping
-      const managedByPackages = (result.recordsets[1] || [])
+      const managedByPackages = apMapping
         .filter(r => r.memberId)
         .map(r => ({
           memberId: r.memberId,
@@ -426,8 +372,8 @@ router.get('/permissions', async (req, res) => {
         }));
 
       return res.json({
-        data: result.recordsets[0],
-        totalUsers: new Set(result.recordsets[0].map(r => r.memberId)).size,
+        data: result.recordset,
+        totalUsers: new Set(result.recordset.map(r => r.memberId)).size,
         managedByPackages,
       });
     }
@@ -454,7 +400,7 @@ router.get('/permissions', async (req, res) => {
     }
     res.json({ data: mockData, totalUsers: allUserIds.length, managedByPackages: [] });
   } catch (err) {
-    console.error('permissions query failed:', err.message);
+    console.error('permissions query failed:', err.message, '\nStack:', err.stack);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -471,39 +417,35 @@ async function accessPackageResourcesHandler(req, res) {
       try { await ensureCategoryTables(p); } catch { /* category tables optional */ }
       const result = await timedRequest(p, 'ap-groups', res).query(`
         SELECT
-          rrs.parentResourceId AS businessRoleId,
-          rrs.parentResourceId AS accessPackageId,
-          ap.displayName AS accessPackageName,
-          c.displayName  AS catalogName,
-          UPPER(rrs.childResourceId) AS resourceId,
-          UPPER(rrs.childResourceId) AS groupId,
-          r.displayName  AS resourceName,
-          r.displayName  AS groupName,
-          r.resourceType,
-          r.systemId,
-          rrs.roleName,
-          ISNULL(ac.cnt, 0) AS totalAssignments,
-          cat.id AS categoryId,
-          cat.name AS categoryName,
-          cat.color AS categoryColor
-        FROM dbo.ResourceRelationships rrs
-        INNER JOIN dbo.Resources ap ON rrs.parentResourceId = ap.id
-                   AND ap.resourceType = 'BusinessRole'
-                   AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
-        LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
-                   AND c.ValidTo = '9999-12-31 23:59:59.9999999'
-        LEFT  JOIN dbo.Resources r ON UPPER(rrs.childResourceId) = r.id
-                   AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-        LEFT  JOIN (
-          SELECT resourceId, COUNT(*) AS cnt
-          FROM dbo.ResourceAssignments
-          WHERE (state = 'delivered' OR state IS NULL) AND assignmentType = 'Governed'
-          GROUP BY resourceId
-        ) ac ON rrs.parentResourceId = ac.resourceId
-        LEFT  JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(rrs.parentResourceId) = ca.resourceId
-        LEFT  JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-        WHERE rrs.relationshipType = 'Contains'
-          AND rrs.ValidTo = '9999-12-31 23:59:59.9999999'
+          rrs."parentResourceId" AS "businessRoleId",
+          rrs."parentResourceId" AS "accessPackageId",
+          ap."displayName" AS "accessPackageName",
+          c."displayName"  AS "catalogName",
+          rrs."childResourceId" AS "resourceId",
+          rrs."childResourceId" AS "groupId",
+          r."displayName"  AS "resourceName",
+          r."displayName"  AS "groupName",
+          r."resourceType",
+          r."systemId",
+          rrs."roleName",
+          COALESCE(ac.cnt, 0) AS "totalAssignments",
+          cat.id AS "categoryId",
+          cat."name" AS "categoryName",
+          cat."color" AS "categoryColor"
+        FROM "ResourceRelationships" rrs
+        INNER JOIN "Resources" ap ON rrs."parentResourceId" = ap.id
+                   AND ap."resourceType" = 'BusinessRole'
+        LEFT JOIN "GovernanceCatalogs" c ON ap."catalogId" = c.id
+        LEFT JOIN "Resources" r ON rrs."childResourceId" = r.id
+        LEFT JOIN (
+          SELECT "resourceId", COUNT(*) AS cnt
+          FROM "ResourceAssignments"
+          WHERE ("state" = 'delivered' OR "state" IS NULL) AND "assignmentType" = 'Governed'
+          GROUP BY "resourceId"
+        ) ac ON rrs."parentResourceId" = ac."resourceId"
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON rrs."parentResourceId"::text = ca."resourceId"
+        LEFT JOIN "GovernanceCategories" cat ON ca."categoryId" = cat.id
+        WHERE rrs."relationshipType" = 'Contains'
       `);
       return res.json(result.recordset);
     }
@@ -524,18 +466,18 @@ router.get('/sync-log', async (req, res) => {
       const p = await db.getPool();
       // Check if GraphSyncLog table exists before querying
       const tableCheck = await timedRequest(p, 'sync-log-check', res).query(`
-        SELECT OBJECT_ID('dbo.GraphSyncLog', 'U') AS tableExists
+        SELECT to_regclass('"GraphSyncLog"') AS "tableExists"
       `);
       if (!tableCheck.recordset[0].tableExists) {
         return res.json([]);
       }
 
       const result = await timedRequest(p, 'sync-log-data', res).input('limit', limit).query(`
-        SELECT TOP (@limit)
-          Id, SyncType, StartTime, EndTime, DurationSeconds,
-          RecordCount, Status, ErrorMessage, TableName, CreatedAt
-        FROM dbo.GraphSyncLog
-        ORDER BY StartTime DESC
+        SELECT "Id", "SyncType", "StartTime", "EndTime", "DurationSeconds",
+               "RecordCount", "Status", "ErrorMessage", "TableName", "CreatedAt"
+          FROM "GraphSyncLog"
+         ORDER BY "StartTime" DESC
+         LIMIT @limit
       `);
       return res.json(result.recordset);
     }
@@ -598,25 +540,13 @@ router.get('/groups-with-nested', async (req, res) => {
   try {
     if (!useSql) return res.json({ groupIds: [] });
     const p = await db.getPool();
+    // v5: only the universal resource model exists, no GraphGroupMembers fallback.
+    // UUIDs are returned as strings already (no UPPER cast needed).
     const result = await timedRequest(p, 'groups-with-nested', res).query(`
-      BEGIN TRY
-        SELECT DISTINCT UPPER(principalId) AS groupId
-        FROM dbo.ResourceAssignments
-        WHERE principalType LIKE '%group%'
-          AND assignmentType = 'Direct'
-          AND ValidTo = '9999-12-31 23:59:59.9999999'
-      END TRY
-      BEGIN CATCH
-        -- Fall back to old table if ResourceAssignments doesn't exist
-        BEGIN TRY
-          SELECT DISTINCT UPPER(memberId) AS groupId
-          FROM dbo.GraphGroupMembers
-          WHERE memberType = '#microsoft.graph.group'
-        END TRY
-        BEGIN CATCH
-          SELECT CAST(NULL AS NVARCHAR(36)) AS groupId WHERE 1 = 0
-        END CATCH
-      END CATCH
+      SELECT DISTINCT "principalId"::text AS "groupId"
+        FROM "ResourceAssignments"
+       WHERE "principalType" LIKE '%group%'
+         AND "assignmentType" = 'Direct'
     `);
     return res.json({ groupIds: result.recordset.map(r => r.groupId) });
   } catch (err) {
@@ -631,77 +561,49 @@ router.get('/group/:groupId/nested-groups', async (req, res) => {
   try {
     if (!useSql) return res.json({ groups: [], memberships: [] });
     const p = await db.getPool();
-    const groupId = req.params.groupId;
 
-    const matCheck = await timedRequest(p, 'nested-mat-check', res).query(`
-      SELECT OBJECT_ID('dbo.mat_UserPermissionAssignments', 'U') AS matPermExists,
-             OBJECT_ID('dbo.vw_ResourceUserPermissionAssignments', 'V') AS resourceViewExists
-    `);
-    const permSource = matCheck.recordset[0].matPermExists
-      ? 'mat_UserPermissionAssignments'
-      : matCheck.recordset[0].resourceViewExists
-        ? 'vw_ResourceUserPermissionAssignments'
-        : 'vw_UserPermissionAssignments';
-    const COL_RES_N = matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists ? 'resourceId' : 'groupId';
-    const COL_PRINC_N = matCheck.recordset[0].resourceViewExists && !matCheck.recordset[0].matPermExists ? 'principalId' : 'memberId';
-
+    // v5: query the unified resource view directly. No fallback to v4
+    // GraphGroupMembers, no UPPER(uuid) (postgres uuid is already canonical).
     const request = timedRequest(p, 'nested-groups-data', res);
-    request.input('childGroupId', groupId);
+    request.input('childGroupId', req.params.groupId);
 
-    const result = await request.query(`
-      -- Resources/groups that this group is a member of (parent groups)
-      -- Try ResourceAssignments first, fall back to GraphGroupMembers
-      BEGIN TRY
-        SELECT
-          UPPER(ra.resourceId) AS groupId,
-          UPPER(ra.resourceId) AS resourceId,
-          r.displayName,
-          r.resourceType,
-          r.resourceType AS groupTypeCalculated,
-          r.description
-        FROM dbo.ResourceAssignments ra
-        LEFT JOIN dbo.Resources r ON UPPER(ra.resourceId) = r.id
-          AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE UPPER(ra.principalId) = UPPER(@childGroupId)
-          AND ra.principalType LIKE '%group%'
-          AND ra.assignmentType = 'Direct'
-          AND ra.ValidTo = '9999-12-31 23:59:59.9999999';
-      END TRY
-      BEGIN CATCH
-        SELECT
-          UPPER(gm.groupId) AS groupId,
-          UPPER(gm.groupId) AS resourceId,
-          g.displayName,
-          g.groupTypeCalculated AS resourceType,
-          g.groupTypeCalculated,
-          g.description
-        FROM dbo.GraphGroupMembers gm
-        LEFT JOIN dbo.GraphGroups g ON UPPER(gm.groupId) = g.id
-        WHERE UPPER(gm.memberId) = UPPER(@childGroupId)
-          AND gm.memberType = '#microsoft.graph.group';
-      END CATCH
-
-      -- User memberships for those parent groups
+    const groupsResult = await request.query(`
       SELECT
-        p.${COL_RES_N} AS resourceId,
-        p.${COL_RES_N} AS groupId,
-        p.${COL_PRINC_N} AS memberId,
-        p.membershipType
-      FROM ${permSource} p
-      WHERE p.${COL_RES_N} IN (
-        SELECT UPPER(ra2.resourceId)
-        FROM dbo.ResourceAssignments ra2
-        WHERE UPPER(ra2.principalId) = UPPER(@childGroupId)
-          AND ra2.principalType LIKE '%group%'
-          AND ra2.assignmentType = 'Direct'
-          AND ra2.ValidTo = '9999-12-31 23:59:59.9999999'
-      )
-      AND (p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} IS NULL OR p.${COL_PRINC_N === 'principalId' ? 'principalType' : 'memberType'} != '#microsoft.graph.group')
+        ra."resourceId" AS "groupId",
+        ra."resourceId" AS "resourceId",
+        r."displayName",
+        r."resourceType",
+        r."resourceType" AS "groupTypeCalculated",
+        r."description"
+        FROM "ResourceAssignments" ra
+        LEFT JOIN "Resources" r ON ra."resourceId" = r.id
+       WHERE ra."principalId"::text = @childGroupId
+         AND ra."principalType" LIKE '%group%'
+         AND ra."assignmentType" = 'Direct'
+    `);
+
+    const membersRequest = timedRequest(p, 'nested-groups-members', res);
+    membersRequest.input('childGroupId', req.params.groupId);
+    const membersResult = await membersRequest.query(`
+      SELECT
+        p."resourceId",
+        p."resourceId" AS "groupId",
+        p."principalId" AS "memberId",
+        p."membershipType"
+        FROM "vw_ResourceUserPermissionAssignments" p
+       WHERE p."resourceId" IN (
+         SELECT ra2."resourceId"
+           FROM "ResourceAssignments" ra2
+          WHERE ra2."principalId"::text = @childGroupId
+            AND ra2."principalType" LIKE '%group%'
+            AND ra2."assignmentType" = 'Direct'
+       )
+       AND (p."principalType" IS NULL OR p."principalType" != '#microsoft.graph.group')
     `);
 
     return res.json({
-      groups: result.recordsets[0] || [],
-      memberships: result.recordsets[1] || [],
+      groups: groupsResult.recordset || [],
+      memberships: membersResult.recordset || [],
     });
   } catch (err) {
     console.error('nested-groups query failed:', err.message);

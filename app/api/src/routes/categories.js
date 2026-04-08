@@ -11,39 +11,9 @@ if (useSql) {
 // ─── Auto-create category tables if they don't exist ─────────────
 let tablesReady = false;
 
-async function ensureCategoryTables(pool) {
-  if (tablesReady) return;
-  // Create each table in a separate statement to avoid partial failures
-  await pool.request().query(`
-    IF OBJECT_ID('dbo.GovernanceCategories', 'U') IS NULL
-    CREATE TABLE dbo.GovernanceCategories (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      name NVARCHAR(100) NOT NULL UNIQUE,
-      color NVARCHAR(7) NOT NULL DEFAULT '#3b82f6',
-      createdAt DATETIME2 DEFAULT GETUTCDATE()
-    );
-  `);
-  await pool.request().query(`
-    IF OBJECT_ID('dbo.GovernanceCategoryAssignments', 'U') IS NULL
-    CREATE TABLE dbo.GovernanceCategoryAssignments (
-      resourceId NVARCHAR(36) NOT NULL PRIMARY KEY,
-      categoryId INT NOT NULL REFERENCES dbo.GovernanceCategories(id) ON DELETE CASCADE
-    );
-  `);
-  // Migrate: rename businessRoleId -> resourceId if the old column still exists
-  try {
-    const colCheck = await pool.request().query(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'GovernanceCategoryAssignments' AND COLUMN_NAME = 'businessRoleId'
-    `);
-    if (colCheck.recordset.length > 0) {
-      await pool.request().query(`EXEC sp_rename 'dbo.GovernanceCategoryAssignments.businessRoleId', 'resourceId', 'COLUMN'`);
-      console.log('[categories] Migrated GovernanceCategoryAssignments: businessRoleId -> resourceId');
-    }
-  } catch { /* column already renamed or table is new */ }
-  tablesReady = true;
-}
-
+// In v5 the category tables are created by the migrations runner.
+// This function is a no-op kept for backward compatibility.
+async function ensureCategoryTables(_pool) { tablesReady = true; }
 export { ensureCategoryTables };
 
 const TAG_COLORS = [
@@ -61,11 +31,12 @@ router.get('/categories', async (req, res) => {
     const p = await db.getPool();
     await ensureCategoryTables(p);
     const result = await p.request().query(`
-      SELECT c.*, ISNULL(COUNT(ca.categoryId), 0) AS assignmentCount
-      FROM dbo.GovernanceCategories c
-      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON ca.categoryId = c.id
-      GROUP BY c.id, c.name, c.color, c.createdAt
-      ORDER BY c.name
+      SELECT c.id, c."name", c."color", c."createdAt",
+             COALESCE(COUNT(ca."categoryId"), 0)::int AS "assignmentCount"
+        FROM "GovernanceCategories" c
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON ca."categoryId" = c.id
+       GROUP BY c.id, c."name", c."color", c."createdAt"
+       ORDER BY c."name"
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -88,9 +59,9 @@ router.post('/categories', async (req, res) => {
       .input('name', name.trim())
       .input('color', color || TAG_COLORS[0])
       .query(`
-        INSERT INTO dbo.GovernanceCategories (name, color)
-        OUTPUT INSERTED.*
-        VALUES (@name, @color)
+        INSERT INTO "GovernanceCategories" (name, color)
+              VALUES (@name, @color)
+              RETURNING *
       `);
     res.status(201).json(result.recordset[0]);
   } catch (err) {
@@ -114,11 +85,11 @@ router.patch('/categories/:id', async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
     const request = p.request().input('id', id);
     const sets = [];
-    if (name) { sets.push('name = @name'); request.input('name', name.trim()); }
-    if (color) { sets.push('color = @color'); request.input('color', color); }
+    if (name) { sets.push('"name" = @name'); request.input('name', name.trim()); }
+    if (color) { sets.push('"color" = @color'); request.input('color', color); }
     if (sets.length === 0) return res.status(400).json({ error: 'Nothing to update' });
     const result = await request.query(
-      `UPDATE dbo.GovernanceCategories SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`
+      `UPDATE "GovernanceCategories" SET ${sets.join(', ')} WHERE id = @id RETURNING *`
     );
     res.json(result.recordset[0] || null);
   } catch (err) {
@@ -137,7 +108,7 @@ router.delete('/categories/:id', async (req, res) => {
     await ensureCategoryTables(p);
     await p.request()
       .input('id', id)
-      .query('DELETE FROM dbo.GovernanceCategories WHERE id = @id');
+      .query('DELETE FROM GovernanceCategories WHERE id = @id');
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /categories failed:', err.message);
@@ -160,17 +131,19 @@ router.post('/categories/:id/assign', async (req, res) => {
     const categoryId = parseInt(req.params.id, 10);
     if (isNaN(categoryId)) return res.status(400).json({ error: 'Invalid category ID' });
 
-    // MERGE: insert or replace the category for this AP (only one allowed)
-    await p.request()
-      .input('categoryId', categoryId)
-      .input('resourceId', String(resId).toLowerCase())
-      .query(`
-        MERGE dbo.GovernanceCategoryAssignments AS target
-        USING (SELECT @resourceId AS resourceId) AS source
-        ON target.resourceId = source.resourceId
-        WHEN MATCHED THEN UPDATE SET categoryId = @categoryId
-        WHEN NOT MATCHED THEN INSERT (resourceId, categoryId) VALUES (@resourceId, @categoryId);
-      `);
+    // An AP can only have ONE category. The PK is (categoryId, resourceId) so a
+    // simple UPSERT can't enforce that — delete any existing assignment for the
+    // resource first, then insert the new one. Two statements wrapped in tx().
+    await db.tx(async (client) => {
+      await client.query(
+        `DELETE FROM "GovernanceCategoryAssignments" WHERE "resourceId" = $1`,
+        [String(resId).toLowerCase()]
+      );
+      await client.query(
+        `INSERT INTO "GovernanceCategoryAssignments" ("resourceId", "categoryId") VALUES ($1, $2)`,
+        [String(resId).toLowerCase(), categoryId]
+      );
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /categories/:id/assign failed:', err.message);
@@ -192,7 +165,7 @@ router.post('/categories/unassign', async (req, res) => {
 
     await p.request()
       .input('resourceId', String(resId).toLowerCase())
-      .query('DELETE FROM dbo.GovernanceCategoryAssignments WHERE resourceId = @resourceId');
+      .query('DELETE FROM GovernanceCategoryAssignments WHERE resourceId = @resourceId');
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /categories/unassign failed:', err.message);
@@ -201,231 +174,150 @@ router.post('/categories/unassign', async (req, res) => {
 });
 
 // ─── GET /api/access-packages ────────────────────────────────────
-// Paginated list of access packages with category info
+// Paginated list of business roles (resources where resourceType='BusinessRole')
+// with category, policy, assignment counts. Postgres-native (v5).
 router.get('/access-packages', async (req, res) => {
   try {
     if (!useSql) return res.json({ data: [], total: 0 });
 
     const search = (req.query.search || '').trim().slice(0, 200);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
-    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const categoryFilter = req.query.categoryId ? parseInt(req.query.categoryId, 10) : null;
+    const showUncategorized = req.query.uncategorized === 'true';
 
-    // Parse category filter
-    let categoryFilter = null;
-    if (req.query.categoryId) {
-      categoryFilter = parseInt(req.query.categoryId);
-    }
-    let showUncategorized = req.query.uncategorized === 'true';
-
-    // Server-side sorting
     const SORT_COL_MAP = {
-      'displayName':      'ap.displayName',
-      'assignmentType':   'ISNULL(pol.autoAddCount, 0)',  // approximate: auto-add first
-      'complianceStatus': `CASE
-                             WHEN rev.complianceStatus = 'Missed' THEN 1
-                             WHEN rev.complianceStatus = 'Reviewed Late' THEN 2
-                             WHEN rev.complianceStatus = 'In Progress' THEN 3
-                             WHEN rev.complianceStatus IS NULL AND ISNULL(pol.hasReviewConfigured, 0) = 1 THEN 4
-                             WHEN rev.complianceStatus = 'Compliant' THEN 5
-                             ELSE 6 END`,
-      'lastReviewDate':   'rev.lastReviewDate',
-      'lastReviewedBy':   'rev.lastReviewedBy',
-      'category':         'cat.name',
+      displayName:      'ap."displayName"',
+      totalAssignments: 'totalAssignments',
+      category:         'categoryName',
+      catalog:          'catalogName',
     };
-    let sortExpr = SORT_COL_MAP[req.query.sortCol] || 'ap.displayName';
+    const sortExpr = SORT_COL_MAP[req.query.sortCol] || 'ap."displayName"';
     const sortDir = req.query.sortDir === 'desc' ? 'DESC' : 'ASC';
 
     const p = await db.getPool();
     await ensureCategoryTables(p);
 
-    const request = p.request();
-    request.input('limit', limit);
-    request.input('offset', offset);
-
-    let where = '1=1';
+    const params = [];
+    const where = [`ap."resourceType" = 'BusinessRole'`];
     if (search) {
-      where += ` AND (ap.displayName LIKE @search OR c.displayName LIKE @search)`;
-      request.input('search', `%${search}%`);
+      params.push(`%${search}%`);
+      where.push(`(ap."displayName" ILIKE $${params.length} OR c."displayName" ILIKE $${params.length})`);
     }
     if (categoryFilter) {
-      where += ` AND ca.categoryId = @categoryId`;
-      request.input('categoryId', categoryFilter);
+      params.push(categoryFilter);
+      where.push(`ca."categoryId" = $${params.length}`);
     } else if (showUncategorized) {
-      where += ` AND ca.resourceId IS NULL`;
+      where.push(`ca."resourceId" IS NULL`);
     }
+    const whereSql = where.join(' AND ');
 
-    // Check if the review decisions table exists (it may not if reviews haven't been synced)
-    let hasReviewTable = false;
-    try {
-      const check = await p.request().query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CertificationDecisions'
-      `);
-      hasReviewTable = check.recordset.length > 0;
-    } catch { /* ignore */ }
+    params.push(limit);
+    const limitIdx = params.length;
+    params.push(offset);
+    const offsetIdx = params.length;
 
-    // Check if hasAccessReview column exists (added after re-syncing policies)
-    let hasReviewCol = false;
-    try {
-      const check = await p.request().query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'AssignmentPolicies' AND COLUMN_NAME = 'hasAccessReview'
-      `);
-      hasReviewCol = check.recordset.length > 0;
-    } catch { /* ignore */ }
+    // Review compliance is computed only when CertificationDecisions exists.
+    // The CTE follows the same logic as governance.js LAST_REVIEW_CTE: pick the
+    // newest review instance per AP, then derive a status from the decisions in
+    // that instance (Compliant / In Progress / Missed / Reviewed Late).
+    const hasReviewTable = await db.queryOne(
+      `SELECT to_regclass('"CertificationDecisions"') AS t`
+    ).then(r => !!r?.t).catch(() => false);
 
-    // Check if reviewSettings column exists (for extracting reviewer names)
-    let hasReviewSettingsCol = false;
-    try {
-      const check = await p.request().query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'AssignmentPolicies' AND COLUMN_NAME = 'reviewSettings'
-      `);
-      hasReviewSettingsCol = check.recordset.length > 0;
-    } catch { /* ignore */ }
+    const reviewCte = hasReviewTable ? `, "LatestInstance" AS (
+        SELECT DISTINCT ON ("resourceId")
+               "resourceId",
+               "reviewInstanceId",
+               "reviewInstanceEndDateTime"
+          FROM "CertificationDecisions"
+         ORDER BY "resourceId", "reviewInstanceEndDateTime" DESC NULLS LAST
+      ), "LastReviewPerAP" AS (
+        SELECT li."resourceId",
+               li."reviewInstanceEndDateTime" AS deadline,
+               MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d."reviewedDateTime" END)      AS "lastReviewDate",
+               MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d."reviewedByDisplayName" END) AS "lastReviewedBy",
+               CASE
+                 WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
+                  AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND d."reviewedDateTime"::date > li."reviewInstanceEndDateTime"::date THEN 1 ELSE 0 END) = 0
+                   THEN 'Compliant'
+                 WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+                  AND li."reviewInstanceEndDateTime"::date >= current_date
+                   THEN 'In Progress'
+                 WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
+                  AND li."reviewInstanceEndDateTime"::date < current_date
+                   THEN 'Missed'
+                 ELSE 'Reviewed Late'
+               END AS "complianceStatus",
+               CASE
+                 WHEN li."reviewInstanceEndDateTime"::date < current_date
+                   THEN (current_date - li."reviewInstanceEndDateTime"::date)
+                 ELSE 0
+               END AS "daysOverdue"
+          FROM "LatestInstance" li
+          INNER JOIN "CertificationDecisions" d
+            ON d."resourceId" = li."resourceId"
+           AND d."reviewInstanceId" = li."reviewInstanceId"
+         GROUP BY li."resourceId", li."reviewInstanceEndDateTime"
+      )` : '';
 
-    // If no review table, fall back to displayName for review-based sort columns
-    const isReviewSort = ['complianceStatus', 'lastReviewDate', 'lastReviewedBy'].includes(req.query.sortCol);
+    const reviewCols = hasReviewTable
+      ? `, lr."lastReviewDate", lr."lastReviewedBy", lr."complianceStatus", lr.deadline AS "reviewDeadline", COALESCE(lr."daysOverdue", 0) AS "daysOverdue"`
+      : `, NULL AS "lastReviewDate", NULL AS "lastReviewedBy", NULL AS "complianceStatus", NULL AS "reviewDeadline", 0 AS "daysOverdue"`;
+    const reviewJoin = hasReviewTable
+      ? `LEFT JOIN "LastReviewPerAP" lr ON lr."resourceId" = ap.id`
+      : '';
 
-    // Build review CTE + JOIN (uses same compliance logic as governance.js)
-    let reviewCte = '';
-    let reviewJoin = '';
-    let reviewCols = ', NULL AS lastReviewDate, NULL AS lastReviewedBy, NULL AS complianceStatus, NULL AS reviewDeadline, 0 AS daysOverdue, 0 AS missedReviewsCount';
-    if (hasReviewTable) {
-      reviewCte = `,
-        _LatestInstance AS (
-          SELECT resourceId,
-                 MAX(reviewInstanceId) AS reviewInstanceId,
-                 MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime
-          FROM CertificationDecisions
-          WHERE reviewInstanceEndDateTime = (
-            SELECT MAX(r2.reviewInstanceEndDateTime)
-            FROM CertificationDecisions r2
-            WHERE r2.resourceId = CertificationDecisions.resourceId
-          )
-          GROUP BY resourceId
-        ),
-        _LastReviewPerAP AS (
-          SELECT
-            li.resourceId,
-            li.reviewInstanceEndDateTime AS deadline,
-            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedDateTime END) AS lastReviewDate,
-            MAX(CASE WHEN d.decision <> 'NotReviewed' THEN d.reviewedByDisplayName END) AS lastReviewedBy,
-            CASE
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
-               AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) = 0
-              THEN 'Compliant'
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-               AND CAST(li.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE)
-              THEN 'In Progress'
-              WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-               AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-              THEN 'Missed'
-              ELSE 'Reviewed Late'
-            END AS complianceStatus,
-            CASE
-              WHEN CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-              THEN DATEDIFF(DAY, CAST(li.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
-              ELSE 0
-            END AS daysOverdue
-          FROM _LatestInstance li
-            INNER JOIN CertificationDecisions d
-              ON d.resourceId = li.resourceId
-              AND d.reviewInstanceId = li.reviewInstanceId
-          GROUP BY li.resourceId, li.reviewInstanceEndDateTime
-        ),
-        _MissedReviewCount AS (
-          SELECT resourceId, COUNT(*) AS missedCount
-          FROM (
-            SELECT resourceId, reviewInstanceId
-            FROM dbo.CertificationDecisions
-            WHERE reviewInstanceEndDateTime < GETUTCDATE()
-            GROUP BY resourceId, reviewInstanceId
-            HAVING SUM(CASE WHEN decision <> 'NotReviewed' THEN 1 ELSE 0 END) = 0
-          ) x
-          GROUP BY resourceId
-        )`;
-      reviewJoin = `LEFT JOIN _LastReviewPerAP rev ON ap.id = rev.resourceId
-        LEFT JOIN _MissedReviewCount mrc ON ap.id = mrc.resourceId`;
-      reviewCols = ', rev.lastReviewDate, rev.lastReviewedBy, rev.complianceStatus, rev.deadline AS reviewDeadline, ISNULL(rev.daysOverdue, 0) AS daysOverdue, ISNULL(mrc.missedCount, 0) AS missedReviewsCount';
-    } else if (isReviewSort) {
-      // No review data — fall back to default sort
-      sortExpr = 'ap.displayName';
-    }
-
-    const result = await request.query(`
-      WITH _assignmentCounts AS (
-        SELECT resourceId, COUNT(*) AS cnt
-        FROM dbo.ResourceAssignments
-        WHERE (state = 'delivered' OR state IS NULL) AND assignmentType = 'Governed'
-        GROUP BY resourceId
-      ),
-      _policyCounts AS (
-        SELECT resourceId,
-               COUNT(*) AS policyCount,
-               SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAddCount,
-               SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnlyCount${
-                 hasReviewCol
-                   ? `,\n               MAX(CAST(ISNULL(hasAccessReview, 0) AS INT)) AS hasReviewConfigured`
-                   : `,\n               0 AS hasReviewConfigured`
-               }
-        FROM dbo.AssignmentPolicies
-        GROUP BY resourceId
-      )${hasReviewSettingsCol ? `,
-      _reviewerInfo AS (
-        SELECT p.resourceId,
-               STRING_AGG(
-                 CASE rv.[odata_type]
-                   WHEN '#microsoft.graph.singleUser'       THEN ISNULL(rv.[description], rv.[userId])
-                   WHEN '#microsoft.graph.requestorManager' THEN 'Requestor''s manager'
-                   WHEN '#microsoft.graph.targetManager'    THEN 'User''s manager'
-                   WHEN '#microsoft.graph.groupMembers'     THEN 'Group members'
-                   WHEN '#microsoft.graph.internalSponsors' THEN 'Internal sponsors'
-                   WHEN '#microsoft.graph.externalSponsors' THEN 'External sponsors'
-                   ELSE rv.[odata_type]
-                 END, ', '
-               ) AS reviewers
-        FROM dbo.AssignmentPolicies p
-        CROSS APPLY OPENJSON(JSON_QUERY(p.reviewSettings, '$.primaryReviewers'))
-          WITH (
-            [odata_type]  NVARCHAR(100) '$."@odata.type"',
-            [userId]      NVARCHAR(255) '$.userId',
-            [description] NVARCHAR(255) '$.description'
-          ) rv
-        WHERE p.reviewSettings IS NOT NULL
-        GROUP BY p.resourceId
-      )` : ''}
-      ${reviewCte}
-      SELECT ap.id, ap.displayName, ap.description,
-             c.displayName AS catalogName, c.id AS catalogId,
-             ISNULL(ac.cnt, 0) AS totalAssignments,
-             cat.id AS categoryId, cat.name AS categoryName, cat.color AS categoryColor,
-             ISNULL(pol.policyCount, 0) AS policyCount,
-             ISNULL(pol.autoAddCount, 0) AS autoAddCount,
-             ISNULL(pol.autoRemoveOnlyCount, 0) AS autoRemoveOnlyCount,
-             ISNULL(pol.hasReviewConfigured, 0) AS hasReviewConfigured
+    const dataSql = `
+      WITH ac AS (
+        SELECT "resourceId", COUNT(*)::int AS cnt
+          FROM "ResourceAssignments"
+         WHERE "assignmentType" = 'Governed'
+           AND (LOWER(state) = 'delivered' OR state IS NULL)
+         GROUP BY "resourceId"
+      ), pc AS (
+        SELECT "resourceId",
+               COUNT(*)::int AS "policyCount",
+               SUM(CASE WHEN "hasAutoAddRule" THEN 1 ELSE 0 END)::int AS "autoAddCount",
+               SUM(CASE WHEN COALESCE("hasAutoAddRule", false) = false AND "hasAutoRemoveRule" THEN 1 ELSE 0 END)::int AS "autoRemoveOnlyCount",
+               BOOL_OR(COALESCE("hasAccessReview", false)) AS "hasReviewConfigured"
+          FROM "AssignmentPolicies"
+         GROUP BY "resourceId"
+      )${reviewCte}
+      SELECT ap.id, ap."displayName", ap.description,
+             c."displayName" AS "catalogName", c.id AS "catalogId",
+             COALESCE(ac.cnt, 0) AS "totalAssignments",
+             cat.id AS "categoryId", cat.name AS "categoryName", cat.color AS "categoryColor",
+             COALESCE(pc."policyCount", 0) AS "policyCount",
+             COALESCE(pc."autoAddCount", 0) AS "autoAddCount",
+             COALESCE(pc."autoRemoveOnlyCount", 0) AS "autoRemoveOnlyCount",
+             COALESCE(pc."hasReviewConfigured", false) AS "hasReviewConfigured"
              ${reviewCols}
-             ${hasReviewSettingsCol ? ', ri.reviewers AS reviewerInfo' : ', NULL AS reviewerInfo'}
-      FROM dbo.Resources ap
-      LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
-      LEFT JOIN _assignmentCounts ac ON ap.id = ac.resourceId
-      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
-      LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-      LEFT JOIN _policyCounts pol ON ap.id = pol.resourceId
-      ${reviewJoin}
-      ${hasReviewSettingsCol ? 'LEFT JOIN _reviewerInfo ri ON ap.id = ri.resourceId' : ''}
-      WHERE ap.resourceType = 'BusinessRole' AND ${where}
-      ORDER BY ${sortExpr} ${sortDir}
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+        FROM "Resources" ap
+        LEFT JOIN "GovernanceCatalogs" c ON ap."catalogId" = c.id
+        LEFT JOIN ac ON ap.id::text = ac."resourceId"::text
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON LOWER(ap.id::text) = LOWER(ca."resourceId")
+        LEFT JOIN "GovernanceCategories" cat ON ca."categoryId" = cat.id
+        LEFT JOIN pc ON ap.id::text = pc."resourceId"::text
+        ${reviewJoin}
+       WHERE ${whereSql}
+       ORDER BY ${sortExpr} ${sortDir}
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}
+    `;
 
-      SELECT COUNT(*) AS total
-      FROM dbo.Resources ap
-      LEFT JOIN dbo.GovernanceCatalogs c ON ap.catalogId = c.id
-      LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
-      LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-      WHERE ap.resourceType = 'BusinessRole' AND ${where};
-    `);
+    const countSql = `
+      SELECT COUNT(*)::int AS total
+        FROM "Resources" ap
+        LEFT JOIN "GovernanceCatalogs" c ON ap."catalogId" = c.id
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON LOWER(ap.id::text) = LOWER(ca."resourceId")
+        LEFT JOIN "GovernanceCategories" cat ON ca."categoryId" = cat.id
+       WHERE ${whereSql}
+    `;
 
-    const data = result.recordsets[0].map(r => {
+    const dataRes = await db.query(dataSql, params);
+    const countRes = await db.query(countSql, params.slice(0, params.length - 2));
+
+    const data = dataRes.rows.map(r => {
       // Derive assignment type from policy counts
       let assignmentType = null;
       if (r.policyCount > 0) {
@@ -464,7 +356,7 @@ router.get('/access-packages', async (req, res) => {
       };
     });
 
-    res.json({ data, total: result.recordsets[1][0].total });
+    res.json({ data, total: countRes.rows[0]?.total || 0 });
   } catch (err) {
     console.error('GET /access-packages failed:', err.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -479,10 +371,10 @@ router.get('/category-assignments', async (req, res) => {
     const p = await db.getPool();
     await ensureCategoryTables(p);
     const result = await p.request().query(`
-      SELECT ca.resourceId, ca.resourceId AS businessRoleId, c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
-      FROM dbo.GovernanceCategoryAssignments ca
-      INNER JOIN dbo.GovernanceCategories c ON ca.categoryId = c.id
-      ORDER BY c.name, ca.resourceId
+      SELECT ca."resourceId", ca."resourceId" AS businessRoleId, c.id AS "categoryId", c.name AS categoryName, c.color AS categoryColor
+      FROM "GovernanceCategoryAssignments" ca
+      INNER JOIN "GovernanceCategories" c ON ca."categoryId" = c.id
+      ORDER BY c.name, ca."resourceId"
     `);
     res.json(result.recordset);
   } catch (err) {

@@ -1,10 +1,35 @@
-/**
- * Auto-bootstrap: creates the built-in worker crawler and infrastructure tables
- * on first startup. This enables the worker container to discover its API key
- * via SQL and the UI to submit jobs without manual crawler registration.
- */
+// Auto-bootstrap: runs DB migrations + creates the built-in worker crawler
+// on first startup. Idempotent — safe to run on every web container start.
+//
+// In v5 (postgres) the schema is created entirely by the migration files in
+// db/migrations/. This file no longer creates tables — it just runs the
+// migrations runner and seeds the built-in worker crawler if it's missing.
+// MVCC means we no longer need to enable snapshot isolation explicitly; it's
+// the default behavior in postgres.
+//
+// The built-in worker API key is also written to a file inside the shared
+// `job_data` volume so the worker container can pick it up on startup
+// without needing direct DB access. The file is written with restrictive
+// permissions and only contains the plaintext key — the same value the
+// worker would have read from WorkerConfig in v4.
+
 import crypto from 'crypto';
+import { writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import * as db from './db/connection.js';
+import { runMigrations } from './db/migrate.js';
+
+const WORKER_KEY_FILE = process.env.WORKER_KEY_FILE || '/data/uploads/.builtin-worker-key';
+
+function writeWorkerKeyFile(apiKey) {
+  try {
+    mkdirSync(dirname(WORKER_KEY_FILE), { recursive: true });
+    writeFileSync(WORKER_KEY_FILE, apiKey, { mode: 0o600, encoding: 'utf8' });
+    console.log(`Built-in worker key written to ${WORKER_KEY_FILE}`);
+  } catch (err) {
+    console.warn(`Could not write worker key file (${WORKER_KEY_FILE}): ${err.message}`);
+  }
+}
 
 const KEY_PREFIX = 'fgc_';
 const KEY_RANDOM_BYTES = 32;
@@ -19,204 +44,111 @@ function hashKey(apiKey, salt) {
   return crypto.createHash('sha256').update(Buffer.concat([salt, Buffer.from(apiKey, 'utf8')])).digest();
 }
 
-async function ensureTable(pool, tableName, createSql) {
-  const check = await pool.request()
-    .input('table', tableName)
-    .query(`SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @table AND TABLE_SCHEMA = 'dbo'`);
-  if (check.recordset.length === 0) {
-    await pool.request().query(createSql);
-  }
-}
+async function ensureBuiltinCrawler() {
+  const existing = await db.queryOne(
+    `SELECT id FROM "Crawlers" WHERE "displayName" = $1 AND "enabled" = TRUE`,
+    [BUILTIN_CRAWLER_NAME]
+  );
 
-async function ensureWorkerConfigTable(pool) {
-  await ensureTable(pool, 'WorkerConfig', `
-    CREATE TABLE dbo.WorkerConfig (
-      configKey   NVARCHAR(100) PRIMARY KEY,
-      configValue NVARCHAR(MAX) NOT NULL,
-      updatedAt   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+  if (existing) {
+    const cfg = await db.queryOne(
+      `SELECT "configValue" FROM "WorkerConfig" WHERE "configKey" = 'BUILTIN_CRAWLER_API_KEY'`
     );
-  `);
-}
-
-async function ensureCrawlerJobsTable(pool) {
-  await ensureTable(pool, 'CrawlerJobs', `
-    CREATE TABLE dbo.CrawlerJobs (
-      id            INT IDENTITY(1,1) PRIMARY KEY,
-      jobType       NVARCHAR(50) NOT NULL,
-      status        NVARCHAR(20) NOT NULL DEFAULT 'queued',
-      config        NVARCHAR(MAX),
-      progress      NVARCHAR(MAX),
-      result        NVARCHAR(MAX),
-      errorMessage  NVARCHAR(MAX),
-      createdAt     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-      startedAt     DATETIME2,
-      completedAt   DATETIME2,
-      createdBy     NVARCHAR(255) DEFAULT 'ui'
-    );
-  `);
-}
-
-async function ensureSyncLogTable(pool) {
-  await ensureTable(pool, 'GraphSyncLog', `
-    CREATE TABLE dbo.GraphSyncLog (
-      Id              INT IDENTITY(1,1) PRIMARY KEY,
-      SyncType        NVARCHAR(100) NOT NULL,
-      TableName       NVARCHAR(100),
-      StartTime       DATETIME2 NOT NULL,
-      EndTime         DATETIME2,
-      DurationSeconds INT,
-      RecordCount     INT,
-      Status          NVARCHAR(20) NOT NULL,
-      ErrorMessage    NVARCHAR(MAX),
-      CreatedAt       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
-    );
-    CREATE INDEX IX_GraphSyncLog_StartTime ON dbo.GraphSyncLog (StartTime DESC);
-  `);
-}
-
-async function ensureCrawlerConfigsTable(pool) {
-  await ensureTable(pool, 'CrawlerConfigs', `
-    CREATE TABLE dbo.CrawlerConfigs (
-      id            INT IDENTITY(1,1) PRIMARY KEY,
-      crawlerType   NVARCHAR(50) NOT NULL,
-      displayName   NVARCHAR(255) NOT NULL,
-      config        NVARCHAR(MAX) NOT NULL,
-      enabled       BIT NOT NULL DEFAULT 1,
-      lastRunAt     DATETIME2,
-      lastRunStatus NVARCHAR(20),
-      createdAt     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-      updatedAt     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
-    );
-  `);
-}
-
-async function ensureBuiltinCrawler(pool) {
-  // Check if built-in crawler already exists
-  const existing = await pool.request()
-    .input('name', BUILTIN_CRAWLER_NAME)
-    .query(`SELECT id FROM dbo.Crawlers WHERE displayName = @name AND enabled = 1`);
-
-  if (existing.recordset.length > 0) {
-    // Crawler exists — check if WorkerConfig has the key
-    const configCheck = await pool.request()
-      .input('key', 'BUILTIN_CRAWLER_API_KEY')
-      .query(`SELECT 1 FROM dbo.WorkerConfig WHERE configKey = @key`);
-
-    if (configCheck.recordset.length > 0) {
-      return; // Already bootstrapped
+    if (cfg) {
+      // Existing key — re-write the shared-volume file in case the volume
+      // was nuked since the last restart (common during dev iteration).
+      writeWorkerKeyFile(cfg.configValue);
+      return;
     }
 
-    // WorkerConfig missing — rotate key and store it
     console.log('Built-in Worker crawler exists but WorkerConfig key missing — rotating...');
-    const crawlerId = existing.recordset[0].id;
     const apiKey = generateApiKey();
     const salt = crypto.randomBytes(32);
     const hash = hashKey(apiKey, salt);
     const prefix = apiKey.slice(0, 8);
 
-    await pool.request()
-      .input('id', crawlerId)
-      .input('hash', hash)
-      .input('salt', salt)
-      .input('prefix', prefix)
-      .query(`UPDATE dbo.Crawlers
-              SET apiKeyHash = @hash, apiKeySalt = @salt, apiKeyPrefix = @prefix,
-                  lastRotatedAt = SYSUTCDATETIME()
-              WHERE id = @id`);
-
-    await pool.request()
-      .input('key', 'BUILTIN_CRAWLER_API_KEY')
-      .input('value', apiKey)
-      .query(`INSERT INTO dbo.WorkerConfig (configKey, configValue) VALUES (@key, @value)`);
-
+    await db.query(
+      `UPDATE "Crawlers"
+          SET "apiKeyHash" = $1, "apiKeySalt" = $2, "apiKeyPrefix" = $3,
+              "lastRotatedAt" = (now() AT TIME ZONE 'utc')
+        WHERE id = $4`,
+      [hash, salt, prefix, existing.id]
+    );
+    await db.query(
+      `INSERT INTO "WorkerConfig" ("configKey", "configValue") VALUES ('BUILTIN_CRAWLER_API_KEY', $1)`,
+      [apiKey]
+    );
+    writeWorkerKeyFile(apiKey);
     console.log('Built-in Worker key rotated and stored in WorkerConfig');
     return;
   }
 
-  // No built-in crawler — create one
   console.log('Creating Built-in Worker crawler...');
   const apiKey = generateApiKey();
   const salt = crypto.randomBytes(32);
   const hash = hashKey(apiKey, salt);
   const prefix = apiKey.slice(0, 8);
 
-  await pool.request()
-    .input('name', BUILTIN_CRAWLER_NAME)
-    .input('desc', 'Auto-created crawler for the Docker worker container. Do not delete.')
-    .input('hash', hash)
-    .input('salt', salt)
-    .input('prefix', prefix)
-    .input('createdBy', 'system-bootstrap')
-    .query(`INSERT INTO dbo.Crawlers
-            (displayName, description, apiKeyHash, apiKeySalt, apiKeyPrefix, createdBy)
-            VALUES (@name, @desc, @hash, @salt, @prefix, @createdBy)`);
+  await db.query(
+    `INSERT INTO "Crawlers"
+       ("displayName", "description", "apiKeyHash", "apiKeySalt", "apiKeyPrefix", "createdBy", "permissions")
+     VALUES ($1, $2, $3, $4, $5, 'system-bootstrap', '["ingest","refreshViews","admin"]'::jsonb)`,
+    [BUILTIN_CRAWLER_NAME, 'Auto-created crawler for the Docker worker container. Do not delete.',
+     hash, salt, prefix]
+  );
 
-  // Store plaintext key in WorkerConfig for the worker to discover
-  await pool.request()
-    .input('key', 'BUILTIN_CRAWLER_API_KEY')
-    .input('value', apiKey)
-    .query(`MERGE dbo.WorkerConfig AS t
-            USING (SELECT @key AS configKey) AS s ON t.configKey = s.configKey
-            WHEN MATCHED THEN UPDATE SET configValue = @value, updatedAt = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (configKey, configValue) VALUES (@key, @value);`);
+  await db.query(
+    `INSERT INTO "WorkerConfig" ("configKey", "configValue")
+     VALUES ('BUILTIN_CRAWLER_API_KEY', $1)
+     ON CONFLICT ("configKey") DO UPDATE
+       SET "configValue" = EXCLUDED."configValue", "updatedAt" = now()`,
+    [apiKey]
+  );
 
+  writeWorkerKeyFile(apiKey);
   console.log(`Built-in Worker crawler created (prefix: ${prefix})`);
 }
 
-/**
- * Run all bootstrap tasks. Called once after the server starts listening.
- * Failures are logged but do not crash the server.
- */
-// Enable Read Committed Snapshot Isolation on the GraphData database. This is
-// the single most important change for keeping the UI responsive while crawlers
-// run: with RCSI on, SELECT statements read the last-committed row version
-// instead of waiting for ongoing writes to commit. The crawler can MERGE 50k
-// memberships into a temporal table while the UI's matrix query against the
-// same table returns instantly from snapshots.
-//
-// RCSI cost: SQL Server keeps a row version in tempdb for the duration of any
-// reader. On a stack with one crawler + a handful of UI users that's
-// negligible. On a 1000-user deployment we'd revisit. For now: enable always.
-//
-// Idempotent — calling SET READ_COMMITTED_SNAPSHOT ON when it's already on is
-// a no-op. Requires no other connections, but we run this at bootstrap time
-// when only the web pool is connected; that single pool is fine because we're
-// not changing isolation level for our own connection (we ALTER from outside
-// of a transaction).
-async function ensureSnapshotIsolation(pool) {
-  try {
-    // ALLOW_SNAPSHOT_ISOLATION lets sessions opt into snapshot isolation
-    // explicitly. READ_COMMITTED_SNAPSHOT changes the *default* read committed
-    // behavior so all existing read queries automatically benefit without
-    // having to add SET TRANSACTION ISOLATION LEVEL on every endpoint.
-    // Both are required to fully decouple readers from writers.
-    const dbName = process.env.SQL_DATABASE || 'GraphData';
-    await pool.request().query(`
-      IF (SELECT snapshot_isolation_state FROM sys.databases WHERE name = '${dbName}') = 0
-        ALTER DATABASE [${dbName}] SET ALLOW_SNAPSHOT_ISOLATION ON;
-    `);
-    await pool.request().query(`
-      IF (SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = '${dbName}') = 0
-        ALTER DATABASE [${dbName}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-    `);
-    console.log('Snapshot isolation: enabled (readers no longer block on writers)');
-  } catch (err) {
-    // Non-fatal — the system still works without RCSI, just slower under load
-    console.warn('Could not enable snapshot isolation:', err.message);
+// Periodic prune of the `_history` audit table. Reads the retention setting
+// from WorkerConfig (default 180 days) and deletes anything older. Runs once
+// at startup (60s warm-up so it doesn't fight migrations) and then every 6 hours.
+// Setting retention to 0 disables pruning entirely.
+function startHistoryPruneJob() {
+  const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  const FIRST_RUN_DELAY_MS = 60 * 1000;
+  const DEFAULT_DAYS = 180;
+
+  async function prune() {
+    try {
+      const r = await db.queryOne(
+        `SELECT "configValue" FROM "WorkerConfig" WHERE "configKey" = $1`,
+        ['HISTORY_RETENTION_DAYS']
+      );
+      const days = r ? parseInt(r.configValue, 10) : DEFAULT_DAYS;
+      if (days <= 0) return; // disabled
+      const del = await db.query(
+        `DELETE FROM "_history" WHERE "changedAt" < now() - ($1::int * interval '1 day')`,
+        [days]
+      );
+      if (del.rowCount > 0) {
+        console.log(`History prune: deleted ${del.rowCount} row(s) older than ${days} days`);
+      }
+    } catch (err) {
+      console.error('History prune failed (will retry next interval):', err.message);
+    }
   }
+
+  setTimeout(prune, FIRST_RUN_DELAY_MS);
+  setInterval(prune, PRUNE_INTERVAL_MS);
 }
 
 export async function bootstrapWorker() {
   if (process.env.USE_SQL !== 'true') return;
-
   try {
     const pool = await db.getPool();
-    await ensureSnapshotIsolation(pool);
-    await ensureWorkerConfigTable(pool);
-    await ensureCrawlerJobsTable(pool);
-    await ensureCrawlerConfigsTable(pool);
-    await ensureSyncLogTable(pool);
-    await ensureBuiltinCrawler(pool);
+    await runMigrations(pool);
+    await ensureBuiltinCrawler();
+    startHistoryPruneJob();
     console.log('Bootstrap complete');
   } catch (err) {
     console.error('Bootstrap failed (will retry on next request):', err.message);

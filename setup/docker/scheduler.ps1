@@ -1,102 +1,90 @@
 <#
 .SYNOPSIS
-    PowerShell-based scheduler and job runner for the Identity Atlas worker container.
+    PowerShell scheduler / job runner for the Identity Atlas worker container.
 
 .DESCRIPTION
-    Two responsibilities:
-    1. Crontab scheduler — reads docker/crontab and executes matching jobs on schedule
-    2. Job queue poller  — picks up CrawlerJobs from SQL (created by the UI) and runs them
+    In v5 (postgres) the worker has NO direct database access. Everything goes
+    through the REST API:
+
+      1. Discover the built-in crawler API key from the shared volume file
+         /data/uploads/.builtin-worker-key (written by the web container's
+         bootstrap routine)
+      2. Poll /api/crawlers/jobs/claim every 30s to pick up queued jobs
+         atomically
+      3. Dispatch the job to Invoke-CrawlerJob.ps1 (passing the API key)
+      4. Mark complete via /api/crawlers/jobs/:id/complete (or .../fail)
+
+    Also runs a cron-style schedule from /app/setup/docker/crontab if present.
 
     The container stays alive for ad-hoc commands:
-        docker exec -it fortigigraph-worker-1 pwsh
-
-    Crontab format: minute hour day-of-month month day-of-week command
-    Lines starting with # are ignored. Empty lines are ignored.
-    Only supports exact numeric values and * (wildcards). No ranges or step values.
+        docker exec -it identityatlas-worker-1 pwsh
 #>
 
 $ErrorActionPreference = 'Continue'
 
-Write-Host "Identity Atlas Worker Container" -ForegroundColor Cyan
-Write-Host "===============================" -ForegroundColor Cyan
-Write-Host "  SQL:    $($env:SQL_SERVER)/$($env:SQL_DATABASE)" -ForegroundColor Gray
-Write-Host "  Time:   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" -ForegroundColor Gray
+$ApiBaseUrl = $env:WEB_API_URL
+if (-not $ApiBaseUrl) { $ApiBaseUrl = 'http://web:3001/api' }
+$ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
+
+$WorkerKeyFile = $env:WORKER_KEY_FILE
+if (-not $WorkerKeyFile) { $WorkerKeyFile = '/data/uploads/.builtin-worker-key' }
+
+Write-Host "Identity Atlas Worker Container (v5)" -ForegroundColor Cyan
+Write-Host "====================================" -ForegroundColor Cyan
+Write-Host "  API URL: $ApiBaseUrl"               -ForegroundColor Gray
+Write-Host "  Time:    $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" -ForegroundColor Gray
 Write-Host ""
 
 # Pre-load the module so it's ready for any job
 try {
     Import-Module /app/setup/IdentityAtlas.psd1 -Force
     Write-Host "  Module loaded successfully" -ForegroundColor Green
-}
-catch {
+} catch {
     Write-Host "  Module load failed: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
-# Set up SQL connection for direct-SQL jobs (risk scoring, account correlation)
-$Global:FGSQLConnectionString = "Server=$($env:SQL_SERVER);Database=$($env:SQL_DATABASE);User Id=$($env:SQL_USER);Password=$($env:SQL_PASSWORD);TrustServerCertificate=True"
-
-# ── Discover built-in API key ─────────────────────────────────────────────────
-# The backend auto-creates a Built-in Worker crawler and stores the plaintext key
-# in dbo.WorkerConfig. Poll until available (backend may still be starting).
-
+# ── Discover the built-in API key ─────────────────────────────────────────────
+# Read priority: env var → shared volume file → poll until file appears.
 $Global:BuiltinApiKey = $null
-
 if ($env:CRAWLER_API_KEY) {
     $Global:BuiltinApiKey = $env:CRAWLER_API_KEY
     Write-Host "  API key: from environment variable" -ForegroundColor Green
 } else {
-    Write-Host "  Discovering API key from WorkerConfig..." -ForegroundColor Gray
-    for ($i = 0; $i -lt 24; $i++) {
-        try {
-            $result = Invoke-FGSQLQuery -Query "SELECT configValue FROM dbo.WorkerConfig WHERE configKey = 'BUILTIN_CRAWLER_API_KEY'"
-            if ($result -and $result.configValue) {
-                $Global:BuiltinApiKey = $result.configValue
-                Write-Host "  API key: discovered from SQL (prefix: $($result.configValue.Substring(0, 8)))" -ForegroundColor Green
-                break
-            }
+    Write-Host "  Discovering API key from $WorkerKeyFile..." -ForegroundColor Gray
+    for ($i = 0; $i -lt 60; $i++) {
+        if (Test-Path $WorkerKeyFile) {
+            try {
+                $key = (Get-Content $WorkerKeyFile -Raw -ErrorAction Stop).Trim()
+                if ($key) {
+                    $Global:BuiltinApiKey = $key
+                    Write-Host "  API key: discovered (prefix: $($key.Substring(0, [Math]::Min(8, $key.Length))))" -ForegroundColor Green
+                    break
+                }
+            } catch { }
         }
-        catch {
-            # Table may not exist yet — backend hasn't bootstrapped
-        }
-        if ($i -lt 23) { Start-Sleep -Seconds 5 }
+        if ($i -lt 59) { Start-Sleep -Seconds 5 }
     }
     if (-not $Global:BuiltinApiKey) {
-        Write-Host "  API key: not found (job queue will not work until backend bootstraps)" -ForegroundColor Yellow
+        Write-Host "  API key: not found after 5 minutes (job queue will not work)" -ForegroundColor Yellow
     }
 }
 
-# ── Parse crontab ─────────────────────────────────────────────────────────────
-
+# ── Crontab parsing ───────────────────────────────────────────────────────────
 $crontabPath = '/app/setup/docker/crontab'
 $cronJobs = @()
-
 if (Test-Path $crontabPath) {
     $lines = Get-Content $crontabPath | Where-Object { $_ -and $_ -notmatch '^\s*#' -and $_.Trim() -ne '' }
     foreach ($line in $lines) {
         $parts = $line.Trim() -split '\s+', 6
         if ($parts.Count -ge 6) {
             $cronJobs += @{
-                Minute     = $parts[0]
-                Hour       = $parts[1]
-                DayOfMonth = $parts[2]
-                Month      = $parts[3]
-                DayOfWeek  = $parts[4]
-                Command    = $parts[5]
+                Minute = $parts[0]; Hour = $parts[1]; DayOfMonth = $parts[2]
+                Month = $parts[3]; DayOfWeek = $parts[4]; Command = $parts[5]
             }
         }
     }
     Write-Host "  Loaded $($cronJobs.Count) scheduled job(s) from crontab" -ForegroundColor Green
 }
-else {
-    Write-Host "  No crontab found at $crontabPath" -ForegroundColor Yellow
-}
-
-if ($cronJobs.Count -eq 0 -and -not $Global:BuiltinApiKey) {
-    Write-Host ""
-    Write-Host "  No cron jobs and no API key. Container stays running for ad-hoc commands." -ForegroundColor Yellow
-    Write-Host "  Use: docker exec -it fortigigraph-worker-1 pwsh" -ForegroundColor Yellow
-}
-
 Write-Host ""
 
 function Test-CronMatch {
@@ -108,192 +96,91 @@ function Test-CronMatch {
 # ── Job queue poller ──────────────────────────────────────────────────────────
 
 function Invoke-PendingJob {
-    <#
-    .SYNOPSIS
-        Atomically claims and executes the next queued CrawlerJob.
-    #>
     if (-not $Global:BuiltinApiKey) { return }
 
+    $headers = @{ 'Authorization' = "Bearer $Global:BuiltinApiKey" }
+
+    # 1. Atomically claim next job
+    $resp = $null
     try {
-        # Atomic claim: UPDATE...OUTPUT prevents double-pickup
-        # Use subquery because UPDATE TOP does not support ORDER BY in T-SQL
-        $job = Invoke-FGSQLQuery -Query "
-            UPDATE dbo.CrawlerJobs
-            SET status = 'running', startedAt = SYSUTCDATETIME()
-            OUTPUT INSERTED.id, INSERTED.jobType, INSERTED.config
-            WHERE id = (
-                SELECT TOP(1) id FROM dbo.CrawlerJobs
-                WHERE status = 'queued'
-                ORDER BY createdAt ASC
-            )"
+        $resp = Invoke-RestMethod -Uri "$ApiBaseUrl/crawlers/jobs/claim" `
+            -Method Post -Headers $headers -TimeoutSec 10 -ErrorAction Stop
+    } catch {
+        return
+    }
+    if (-not $resp -or -not $resp.job) { return }
 
-        if (-not $job) { return }
+    $job = $resp.job
+    $jobId = $job.id
+    $jobType = $job.jobType
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): starting..." -ForegroundColor Cyan
 
-        $jobId = $job.id
-        $jobType = $job.jobType
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): starting..." -ForegroundColor Cyan
-
-        # Parse config JSON
-        $config = @{}
-        if ($job.config) {
-            $config = $job.config | ConvertFrom-Json -AsHashtable
-        }
-
-        # Dispatch to the job runner script
+    # Parse config. The crawler dispatcher uses .ContainsKey() on hashtables,
+    # so we need a *recursive* conversion — top-level object → hashtable AND
+    # all nested objects → hashtables. Re-serialising to JSON and parsing with
+    # -AsHashtable is the simplest path that handles every shape Invoke-RestMethod
+    # might produce.
+    $config = @{}
+    if ($job.config) {
         try {
-            & /app/setup/docker/Invoke-CrawlerJob.ps1 `
-                -JobId $jobId `
-                -JobType $jobType `
-                -Config $config `
-                -ApiKey $Global:BuiltinApiKey
-
-            # Mark completed
-            Invoke-FGSQLQuery -Query "
-                UPDATE dbo.CrawlerJobs
-                SET status = 'completed', completedAt = SYSUTCDATETIME()
-                WHERE id = $jobId"
-
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): completed" -ForegroundColor Green
-        }
-        catch {
-            # Capture the full error including any inner exceptions
-            $errMsg = $_.Exception.Message
-            if ($_.ErrorDetails.Message) {
-                $errMsg = "$errMsg | $($_.ErrorDetails.Message)"
-            }
-            $errMsg = ($errMsg -replace "'", "''").Substring(0, [Math]::Min($errMsg.Length, 2000))
-            Invoke-FGSQLQuery -Query "
-                UPDATE dbo.CrawlerJobs
-                SET status = 'failed', completedAt = SYSUTCDATETIME(),
-                    errorMessage = '$errMsg'
-                WHERE id = $jobId"
-
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): FAILED — $($_.Exception.Message)" -ForegroundColor Red
+            $config = ($job.config | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-Json -AsHashtable
+        } catch {
+            Write-Host "  Warning: failed to parse job config — $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-    catch {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job queue poll error: $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
 
-# ── Scheduled crawlers from CrawlerConfigs ────────────────────────────────────
-
-function Invoke-ScheduledCrawlers {
-    <#
-    .SYNOPSIS
-        Checks CrawlerConfigs for scheduled crawlers and queues jobs when they match.
-        Schedule format in config JSON: { "schedule": { "enabled": true, "frequency": "daily", "hour": 2, "minute": 0 } }
-        Supported frequencies: hourly, daily, weekly (day 0-6, 0=Sunday)
-    #>
-    if (-not $Global:BuiltinApiKey) { return }
-
+    # 2. Dispatch to job runner
     try {
-        $configs = Invoke-FGSQLQuery -Query "
-            SELECT id, crawlerType, config
-            FROM dbo.CrawlerConfigs
-            WHERE enabled = 1"
+        & /app/setup/docker/Invoke-CrawlerJob.ps1 `
+            -JobId  $jobId `
+            -JobType $jobType `
+            -Config  $config `
+            -ApiKey  $Global:BuiltinApiKey
 
-        if (-not $configs) { return }
-        # Handle single row (not array)
-        if ($configs -isnot [array]) { $configs = @($configs) }
-
-        $now = Get-Date
-        foreach ($cfg in $configs) {
-            $parsed = $cfg.config | ConvertFrom-Json -AsHashtable
-
-            # Build list of schedules — supports both `schedules` (array) and legacy `schedule` (single)
-            $schedList = @()
-            if ($parsed['schedules'] -and $parsed['schedules'] -is [array]) {
-                $schedList = $parsed['schedules']
-            } elseif ($parsed['schedule']) {
-                $schedList = @($parsed['schedule'])
-            }
-            if ($schedList.Count -eq 0) { continue }
-
-            $shouldRun = $false
-            foreach ($sched in $schedList) {
-                if (-not $sched['enabled']) { continue }
-
-                $freq = $sched['frequency']
-                $schedHour = [int]($sched['hour'] ?? 2)
-                $schedMinute = [int]($sched['minute'] ?? 0)
-                $schedDay = [int]($sched['day'] ?? 0)
-
-                switch ($freq) {
-                    'hourly' {
-                        if ($now.Minute -eq $schedMinute) { $shouldRun = $true }
-                    }
-                    'daily' {
-                        if ($now.Hour -eq $schedHour -and $now.Minute -eq $schedMinute) { $shouldRun = $true }
-                    }
-                    'weekly' {
-                        if ([int]$now.DayOfWeek -eq $schedDay -and $now.Hour -eq $schedHour -and $now.Minute -eq $schedMinute) { $shouldRun = $true }
-                    }
-                }
-                if ($shouldRun) { break }
-            }
-
-            if ($shouldRun) {
-                # Check if a job for this config is already queued or running
-                $existing = Invoke-FGSQLQuery -Query "
-                    SELECT 1 FROM dbo.CrawlerJobs
-                    WHERE jobType = '$($cfg.crawlerType)' AND status IN ('queued','running')
-                    AND config LIKE '%""tenantId"":""$($parsed['tenantId'])%'"
-                if (-not $existing) {
-                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Schedule: queuing $($cfg.crawlerType) job (config $($cfg.id))" -ForegroundColor Cyan
-                    Invoke-FGSQLQuery -Query "
-                        INSERT INTO dbo.CrawlerJobs (jobType, config, createdBy)
-                        VALUES ('$($cfg.crawlerType)', '$($cfg.config -replace "'","''")', 'scheduler')"
-                    # Update lastRunAt
-                    Invoke-FGSQLQuery -Query "
-                        UPDATE dbo.CrawlerConfigs SET lastRunAt = SYSUTCDATETIME() WHERE id = $($cfg.id)"
-                }
-            }
+        # 3. Mark complete
+        try {
+            Invoke-RestMethod -Uri "$ApiBaseUrl/crawlers/jobs/$jobId/complete" `
+                -Method Post -Headers $headers -Body '{}' -ContentType 'application/json' `
+                -TimeoutSec 10 | Out-Null
+        } catch {
+            Write-Host "  Warning: failed to mark complete: $($_.Exception.Message)" -ForegroundColor Yellow
         }
-    }
-    catch {
-        # Non-critical — don't crash the loop
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Schedule check error: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): completed" -ForegroundColor Green
+    } catch {
+        $errMsg = $_.Exception.Message
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Job $jobId ($jobType): FAILED — $errMsg" -ForegroundColor Red
+        try {
+            $body = @{ errorMessage = $errMsg } | ConvertTo-Json -Compress
+            Invoke-RestMethod -Uri "$ApiBaseUrl/crawlers/jobs/$jobId/fail" `
+                -Method Post -Headers $headers -Body $body -ContentType 'application/json' `
+                -TimeoutSec 10 | Out-Null
+        } catch { }
     }
 }
 
-# ── Main loop — check schedules every minute, poll jobs every 30 seconds ──────
+# ── Main loop ─────────────────────────────────────────────────────────────────
 
 $lastMinute = -1
 while ($true) {
     $now = Get-Date
-    $currentMinute = $now.Minute
 
-    # Once per minute: check crontab + scheduled configs
-    if ($currentMinute -ne $lastMinute) {
-        $lastMinute = $currentMinute
-
-        # Legacy crontab
-        foreach ($cj in $cronJobs) {
-            $match = (Test-CronMatch $cj.Minute $now.Minute) -and
-                     (Test-CronMatch $cj.Hour $now.Hour) -and
-                     (Test-CronMatch $cj.DayOfMonth $now.Day) -and
-                     (Test-CronMatch $cj.Month $now.Month) -and
-                     (Test-CronMatch $cj.DayOfWeek ([int]$now.DayOfWeek))
-
-            if ($match) {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Cron: $($cj.Command)" -ForegroundColor Cyan
-                try {
-                    $cmd = [System.Environment]::ExpandEnvironmentVariables($cj.Command)
-                    Invoke-Expression $cmd 2>&1 | ForEach-Object { Write-Host "  $_" }
-                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Cron job completed" -ForegroundColor Green
-                }
-                catch {
-                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Cron job failed: $($_.Exception.Message)" -ForegroundColor Red
-                }
+    # Cron tick — once per minute
+    if ($now.Minute -ne $lastMinute) {
+        $lastMinute = $now.Minute
+        foreach ($cron in $cronJobs) {
+            if ((Test-CronMatch $cron.Minute $now.Minute) -and
+                (Test-CronMatch $cron.Hour $now.Hour) -and
+                (Test-CronMatch $cron.DayOfMonth $now.Day) -and
+                (Test-CronMatch $cron.Month $now.Month) -and
+                (Test-CronMatch $cron.DayOfWeek ([int]$now.DayOfWeek))) {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Cron: $($cron.Command)" -ForegroundColor Cyan
+                try { Invoke-Expression $cron.Command }
+                catch { Write-Host "  Cron job failed: $($_.Exception.Message)" -ForegroundColor Red }
             }
         }
-
-        # Scheduled crawler configs
-        Invoke-ScheduledCrawlers
     }
 
-    # Job queue check (every iteration)
+    # Job queue every loop
     Invoke-PendingJob
 
     Start-Sleep -Seconds 30

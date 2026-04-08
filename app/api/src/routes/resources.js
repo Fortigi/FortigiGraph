@@ -30,13 +30,8 @@ function parseTags(tagString) {
   });
 }
 
-async function getPermissionTable(pool) {
-  try {
-    await pool.request().query('SELECT TOP 0 * FROM mat_UserPermissionAssignments');
-    return 'mat_UserPermissionAssignments';
-  } catch {
-    return 'vw_UserPermissionAssignments';
-  }
+async function getPermissionTable(_pool) {
+  return '"vw_ResourceUserPermissionAssignments"';
 }
 
 // ─── GET /api/resources ─────────────────────────────────────────
@@ -86,35 +81,33 @@ router.get('/resources', async (req, res) => {
     for (const [field, value] of Object.entries(attrFilters)) {
       if (colNames.has(field) && value != null && String(value) !== '') {
         const paramName = `fl${idx}`;
-        filterWhere += ` AND CAST(r.[${field}] AS NVARCHAR(400)) = @${paramName}`;
+        filterWhere += ` AND r."${field}"::text = @${paramName}`;
         request.input(paramName, String(value));
         idx++;
       }
     }
 
-    let where = 'r.ValidTo = \'9999-12-31 23:59:59.9999999\'';
+    let where = '1=1';
     if (search) {
-      where += ` AND (r.displayName LIKE @search OR r.description LIKE @search)`;
+      where += ` AND (r."displayName" ILIKE @search OR r."description" ILIKE @search)`;
       request.input('search', `%${search}%`);
     }
     if (resourceType) {
-      where += ` AND r.resourceType = @resourceType`;
+      where += ` AND r."resourceType" = @resourceType`;
       request.input('resourceType', resourceType);
     } else {
-      // Exclude BusinessRole from the general resources list — they have their own dedicated tab
-      where += ` AND (r.resourceType IS NULL OR r.resourceType <> 'BusinessRole')`;
+      where += ` AND (r."resourceType" IS NULL OR r."resourceType" <> 'BusinessRole')`;
     }
-    if (systemId && UUID_RE.test(systemId)) {
-      where += ` AND r.systemId = @systemId`;
-      request.input('systemId', systemId);
+    if (systemId && /^\d+$/.test(systemId)) {
+      where += ` AND r."systemId" = @systemId`;
+      request.input('systemId', parseInt(systemId, 10));
     }
     if (tagId) {
-      // Support both 'resource' and 'group' entity types for backward compat
       where += ` AND EXISTS (
-        SELECT 1 FROM dbo.GraphTagAssignments ta
-        INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-        WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
-          AND t.entityType IN ('resource', 'group')
+        SELECT 1 FROM "GraphTagAssignments" ta
+        INNER JOIN "GraphTags" t ON ta."tagId" = t.id
+        WHERE ta."tagId" = @tagId AND ta."entityId" = UPPER(r.id::text)
+          AND t."entityType" IN ('resource', 'group')
       )`;
       request.input('tagId', tagId);
     }
@@ -122,35 +115,35 @@ router.get('/resources', async (req, res) => {
     let resourceTagJoin = '';
     if (resourceTagFilter) {
       resourceTagJoin = `
-        INNER JOIN dbo.GraphTagAssignments _rta ON _rta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
-        INNER JOIN dbo.GraphTags _rt ON _rta.tagId = _rt.id AND _rt.name = @__resourceTag AND _rt.entityType IN ('resource', 'group')`;
+        INNER JOIN "GraphTagAssignments" _rta ON _rta."entityId" = UPPER(r.id::text)
+        INNER JOIN "GraphTags" _rt ON _rta."tagId" = _rt.id AND _rt."name" = @__resourceTag AND _rt."entityType" IN ('resource', 'group')`;
       request.input('__resourceTag', resourceTagFilter);
     }
     where += filterWhere;
 
     const result = await request.query(`
-      SELECT r.id, r.displayName, r.description, r.resourceType, r.systemId, r.enabled,
-             r.createdDateTime, r.extendedAttributes, r.ValidFrom,
-             (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
-              FROM dbo.GraphTagAssignments ta
-              INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType IN ('resource', 'group')
-              WHERE ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
-             ) AS tagString
-      FROM dbo.Resources r
-      ${resourceTagJoin}
-      WHERE ${where}
-      ORDER BY r.displayName
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+      SELECT r.id, r."displayName", r."description", r."resourceType", r."systemId", r."enabled",
+             r."createdDateTime", r."extendedAttributes",
+             (SELECT string_agg(t.id::text || ':' || t."name" || ':' || t."color", '|')
+                FROM "GraphTagAssignments" ta
+                INNER JOIN "GraphTags" t ON ta."tagId" = t.id AND t."entityType" IN ('resource', 'group')
+               WHERE ta."entityId" = UPPER(r.id::text)
+             ) AS "tagString"
+        FROM "Resources" r
+        ${resourceTagJoin}
+       WHERE ${where}
+       ORDER BY r."displayName"
+       LIMIT @limit OFFSET @offset;
 
-      SELECT COUNT(*) AS total FROM dbo.Resources r ${resourceTagJoin} WHERE ${where};
+      SELECT COUNT(*)::int AS total FROM "Resources" r ${resourceTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(row => {
       const { tagString, extendedAttributes, ...rest } = row;
-      let parsedExtAttrs = null;
-      if (extendedAttributes) {
-        try { parsedExtAttrs = JSON.parse(extendedAttributes); } catch { /* ignore bad JSON */ }
-      }
+      // jsonb columns come back already-parsed from pg
+      const parsedExtAttrs = extendedAttributes && typeof extendedAttributes === 'string'
+        ? (() => { try { return JSON.parse(extendedAttributes); } catch { return null; } })()
+        : extendedAttributes;
       return {
         ...rest,
         extendedAttributes: parsedExtAttrs,
@@ -182,7 +175,7 @@ router.get('/resources/:id', async (req, res) => {
     // 1. Current attributes
     const resourceResult = await timedRequest(pool, 'resource-attributes', res)
       .input('id', resourceId)
-      .query(`SELECT * FROM Resources WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+      .query(`SELECT * FROM "Resources" WHERE id = @id`);
 
     if (resourceResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Resource not found' });
@@ -203,9 +196,9 @@ router.get('/resources/:id', async (req, res) => {
         .input('id', resourceId)
         .query(`
           SELECT t.id, t.name, t.color
-          FROM GraphTagAssignments ta
-          JOIN GraphTags t ON ta.tagId = t.id
-          WHERE ta.entityId = @id AND t.entityType IN ('resource', 'group')
+          FROM "GraphTagAssignments" ta
+          JOIN "GraphTags" t ON ta."tagId" = t.id
+          WHERE ta."entityId" = @id AND t."entityType" IN ('resource', 'group')
         `);
       tags = r.recordset;
     } catch { /* table may not exist */ }
@@ -216,9 +209,9 @@ router.get('/resources/:id', async (req, res) => {
       const r = await timedRequest(pool, 'resource-member-count', res)
         .input('id', resourceId)
         .query(`
-          SELECT COUNT(DISTINCT principalId) AS cnt
-          FROM ResourceAssignments
-          WHERE resourceId = @id AND ValidTo = '9999-12-31 23:59:59.9999999'
+          SELECT COUNT(DISTINCT "principalId") AS cnt
+          FROM "ResourceAssignments"
+          WHERE "resourceId" = @id
         `);
       memberCount = r.recordset[0].cnt;
     } catch {
@@ -227,7 +220,7 @@ router.get('/resources/:id', async (req, res) => {
         const table = await getPermissionTable(pool);
         const r = await timedRequest(pool, 'resource-member-count-view', res)
           .input('id', resourceId)
-          .query(`SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE resourceId = @id`);
+          .query(`SELECT COUNT(DISTINCT "memberId") AS cnt FROM ${table} WHERE "resourceId" = @id`);
         memberCount = r.recordset[0].cnt;
       } catch { /* view may not exist */ }
     }
@@ -238,24 +231,23 @@ router.get('/resources/:id', async (req, res) => {
       const r = await timedRequest(pool, 'resource-ap-count', res)
         .input('id', resourceId)
         .query(`
-          SELECT COUNT(DISTINCT rrs.parentResourceId) AS cnt
-          FROM ResourceRelationships rrs
-          WHERE UPPER(rrs.childResourceId) = UPPER(@id)
-            AND rrs.relationshipType = 'Contains'
+          SELECT COUNT(DISTINCT rrs."parentResourceId") AS cnt
+          FROM "ResourceRelationships" rrs
+          WHERE UPPER(rrs."childResourceId") = UPPER(@id)
+            AND rrs."relationshipType" = 'Contains'
         `);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
-    // 5. History check
+    // 5. History check (v5: queries the _history audit table)
     let hasHistory = false;
     try {
-      const r = await timedRequest(pool, 'resource-history-check', res)
-        .input('id', resourceId)
-        .query(`SELECT TOP 1 1 AS found FROM Resources FOR SYSTEM_TIME ALL WHERE id = @id AND ValidTo != '9999-12-31 23:59:59.9999999'`);
-      hasHistory = r.recordset.length > 0;
-    } catch {
-      hasHistory = false;
-    }
+      const r = await db.queryOne(
+        `SELECT 1 FROM "_history" WHERE "tableName" = 'Resources' AND "rowId" = $1 LIMIT 1`,
+        [resourceId]
+      );
+      hasHistory = !!r;
+    } catch { /* _history may not exist on older deployments */ }
 
     res.json({ attributes, tags, memberCount, accessPackageCount, hasHistory });
   } catch (err) {
@@ -274,12 +266,12 @@ router.get('/resources/:id/assignments', async (req, res) => {
     const r = await timedRequest(pool, 'resource-assignments', res)
       .input('id', req.params.id)
       .query(`
-        SELECT ra.principalId, p.displayName AS principalDisplayName, p.email,
-               p.principalType, ra.assignmentType, ra.state, ra.assignmentStatus
-        FROM dbo.ResourceAssignments ra
-        LEFT JOIN dbo.Principals p ON ra.principalId = p.id AND p.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE ra.resourceId = @id AND ra.ValidTo = '9999-12-31 23:59:59.9999999'
-        ORDER BY ra.assignmentType, p.displayName
+        SELECT ra."principalId", p."displayName" AS "principalDisplayName", p.email,
+               p."principalType", ra."assignmentType", ra.state, ra."assignmentStatus"
+        FROM "ResourceAssignments" ra
+        LEFT JOIN "Principals" p ON ra."principalId" = p.id
+        WHERE ra."resourceId" = @id
+        ORDER BY ra."assignmentType", p."displayName"
       `);
     res.json(r.recordset);
   } catch (err) {
@@ -298,14 +290,13 @@ router.get('/resources/:id/business-roles', async (req, res) => {
     const r = await timedRequest(pool, 'resource-business-roles', res)
       .input('id', req.params.id)
       .query(`
-        SELECT rr.parentResourceId AS businessRoleId, br.displayName AS businessRoleName,
-               rr.roleName, rr.relationshipType
-        FROM dbo.ResourceRelationships rr
-        INNER JOIN dbo.Resources br ON rr.parentResourceId = br.id
-          AND br.resourceType = 'BusinessRole' AND br.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE rr.childResourceId = @id AND rr.relationshipType = 'Contains'
-          AND rr.ValidTo = '9999-12-31 23:59:59.9999999'
-        ORDER BY br.displayName
+        SELECT rr."parentResourceId" AS businessRoleId, br."displayName" AS businessRoleName,
+               rr."roleName", rr."relationshipType"
+        FROM "ResourceRelationships" rr
+        INNER JOIN "Resources" br ON rr."parentResourceId" = br.id
+          AND br."resourceType" = 'BusinessRole'
+        WHERE rr."childResourceId" = @id AND rr."relationshipType" = 'Contains'
+        ORDER BY br."displayName"
       `);
     res.json(r.recordset);
   } catch (err) {
@@ -324,13 +315,12 @@ router.get('/resources/:id/parent-resources', async (req, res) => {
     const r = await timedRequest(pool, 'resource-parents', res)
       .input('id', req.params.id)
       .query(`
-        SELECT rr.parentResourceId, pr.displayName AS parentDisplayName,
-               pr.resourceType AS parentResourceType, rr.relationshipType, rr.roleName
-        FROM dbo.ResourceRelationships rr
-        INNER JOIN dbo.Resources pr ON rr.parentResourceId = pr.id
-          AND pr.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE rr.childResourceId = @id AND rr.ValidTo = '9999-12-31 23:59:59.9999999'
-        ORDER BY rr.relationshipType, pr.displayName
+        SELECT rr."parentResourceId", pr."displayName" AS parentDisplayName,
+               pr."resourceType" AS parentResourceType, rr."relationshipType", rr."roleName"
+        FROM "ResourceRelationships" rr
+        INNER JOIN "Resources" pr ON rr."parentResourceId" = pr.id
+        WHERE rr."childResourceId" = @id
+        ORDER BY rr."relationshipType", pr."displayName"
       `);
     res.json(r.recordset);
   } catch (err) {
@@ -350,13 +340,13 @@ router.get('/resources/:id/members', async (req, res) => {
     const r = await timedRequest(pool, 'resource-members', res)
       .input('id', req.params.id)
       .query(`
-        SELECT p.groupId AS resourceId, p.memberId,
-               u.displayName AS memberDisplayName, u.email AS memberUPN,
-               p.membershipType, p.managedByAccessPackage
-        FROM ${table} p
-        LEFT JOIN dbo.Principals u ON p.memberId = u.id AND u.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE p.groupId = @id
-        ORDER BY u.displayName, p.membershipType
+        SELECT p."resourceId", p."principalId" AS "memberId",
+               u."displayName" AS "memberDisplayName", u."email" AS "memberUPN",
+               p."membershipType", p."managedByAccessPackage"
+          FROM ${table} p
+          LEFT JOIN "Principals" u ON p."principalId" = u.id
+         WHERE p."resourceId"::text = @id
+         ORDER BY u."displayName", p."membershipType"
       `);
     res.json(r.recordset);
   } catch (err) {
@@ -366,22 +356,27 @@ router.get('/resources/:id/members', async (req, res) => {
 });
 
 // ─── GET /api/resources/:id/history ─────────────────────────────
-// Version history from temporal table
+// Version history from the v5 `_history` audit table.
 router.get('/resources/:id/history', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
-    const pool = await db.getPool();
-    const r = await timedRequest(pool, 'resource-history', res)
-      .input('id', req.params.id)
-      .query(`
-        SELECT * FROM Resources FOR SYSTEM_TIME ALL
-        WHERE id = @id
-        ORDER BY ValidFrom DESC
-      `);
-    res.json(r.recordset.map(cleanRow));
+    const r = await db.query(
+      `SELECT operation, "changedAt", "rowData"
+         FROM "_history"
+        WHERE "tableName" = 'Resources' AND "rowId" = $1
+        ORDER BY "changedAt" DESC`,
+      [req.params.id]
+    );
+    const rows = r.rows.map((row, idx) => ({
+      ...(row.rowData || {}),
+      ValidFrom: row.changedAt,
+      ValidTo: idx > 0 ? r.rows[idx - 1].changedAt : null,
+      _operation: row.operation,
+    }));
+    res.json(rows.map(cleanRow));
   } catch (err) {
-    // Not temporal or table doesn't exist — return empty
+    console.error('resource-history failed:', err.message);
     res.json([]);
   }
 });
@@ -407,9 +402,9 @@ router.get('/resource-columns', async (req, res) => {
       await ensureTagTables(p);
       const tagResult = await p.request().query(`
         SELECT t.name
-        FROM dbo.GraphTags t
-        WHERE t.entityType IN ('resource', 'group')
-          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        FROM "GraphTags" t
+        WHERE t."entityType" IN ('resource', 'group')
+          AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta WHERE ta."tagId" = t.id)
         ORDER BY t.name
       `);
       const resourceTags = tagResult.recordset.map(r => r.name);

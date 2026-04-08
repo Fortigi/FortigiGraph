@@ -1,189 +1,188 @@
-/**
- * Sync Session Management — Handles chunked multi-request sync operations.
- *
- * When a crawler sends data in multiple batches (start → continue → end),
- * the session keeps a temp table alive across requests.
- */
+// Multi-batch sync sessions for the ingest API.
+//
+// When a crawler sends data in chunks (start → continue → end), the session
+// keeps a temp table alive across calls so the final scoped delete operates
+// on the union of all batches. Without sessions, every batch would think it's
+// the full payload and delete everything not in the current chunk.
+//
+// In v5 (postgres) the session also keeps a *connection* checked out from the
+// pool for its entire lifetime — that's the only way the temp table survives
+// across requests, since postgres temp tables are session-local. The 30-min
+// timeout is a hard upper bound; idle sessions are reaped to free connections.
+
 import crypto from 'crypto';
-import { discoverColumns, ingest, writeSyncLog } from './engine.js';
-import sql from 'mssql';
+import { discoverColumns, writeSyncLog, scopedDelete } from './engine.js';
+import { from as copyFrom } from 'pg-copy-streams';
+import * as db from '../db/connection.js';
 
-// Active sessions: syncId → { tempTable, tableName, keyColumns, systemId, scope, startedAt, recordCount }
 const sessions = new Map();
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
-// Cleanup expired sessions every 5 minutes
-setInterval(() => {
+setInterval(async () => {
   const now = Date.now();
   for (const [id, session] of sessions) {
     if (now - session.startedAt > SESSION_TIMEOUT_MS) {
-      // Drop temp table if it still exists
-      session.pool?.request().query(`DROP TABLE IF EXISTS [${session.tempTable}]`).catch(() => {});
+      // Mark as released first so concurrent endSession doesn't double-release
+      if (session.released) continue;
+      session.released = true;
+      try { await session.client.query('ROLLBACK'); } catch { /* ignore */ }
+      try { session.client.release(); } catch { /* ignore */ }
       sessions.delete(id);
     }
   }
 }, 5 * 60 * 1000);
 
-/**
- * Start a new sync session.
- * Creates a temp table and merges the first batch.
- */
-export async function startSession(pool, tableName, keyColumns, records, options) {
-  const syncId = crypto.randomUUID();
-  const tempTable = `##TempSession_${syncId.replace(/-/g, '').slice(0, 16)}`;
+function escapeCopyText(s) {
+  return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+}
+function buildCopyRow(record, activeColumns) {
+  const fields = activeColumns.map(col => {
+    const v = record[col.name];
+    if (v === null || v === undefined) return '\\N';
+    if (col.sqlTypeName === 'jsonb' || col.sqlTypeName === 'json') {
+      return escapeCopyText(typeof v === 'string' ? v : JSON.stringify(v));
+    }
+    if (col.sqlTypeName === 'boolean') {
+      return v === true || v === 1 || v === '1' || v === 'true' || v === 't' ? 't' : 'f';
+    }
+    if (col.sqlTypeName.startsWith('timestamp')) {
+      return v instanceof Date ? v.toISOString() : escapeCopyText(String(v));
+    }
+    if (typeof v === 'number') return String(v);
+    return escapeCopyText(String(v));
+  });
+  return fields.join('\t') + '\n';
+}
 
-  // Discover columns and create temp table
-  const columns = await discoverColumns(pool, tableName);
+async function copyRows(client, tempTable, activeColumns, records) {
+  const colList = activeColumns.map(c => `"${c.name}"`).join(', ');
+  const stream = client.query(copyFrom(`COPY "${tempTable}" (${colList}) FROM STDIN`));
+  await new Promise((resolve, reject) => {
+    stream.on('error', reject);
+    stream.on('finish', resolve);
+    for (const rec of records) stream.write(buildCopyRow(rec, activeColumns));
+    stream.end();
+  });
+}
+
+export async function startSession(_pool, tableName, keyColumns, records, options = {}) {
+  const syncId = crypto.randomUUID();
+  const columns = await discoverColumns(null, tableName);
   const recordKeys = new Set();
   for (const rec of records) {
     for (const k of Object.keys(rec)) recordKeys.add(k);
   }
-  const activeColumns = columns.filter(c => recordKeys.has(c.name));
-  const colDefs = activeColumns.map(c => `[${c.name}] ${c.sqlTypeName.toUpperCase()}`).join(', ');
-  await pool.request().query(`CREATE TABLE [${tempTable}] (${colDefs})`);
+  const activeColumns = columns.filter(c =>
+    (recordKeys.has(c.name) || keyColumns.includes(c.name)) && !c.isIdentity
+  );
 
-  // Merge first batch into temp table (no delete yet)
-  const result = await ingest(pool, tableName, keyColumns, records, {
-    ...options,
-    syncMode: 'delta', // Never delete during session batches
-    tempTable,
-  });
+  const pool = await db.getPool();
+  const client = await pool.connect();
+  await client.query('BEGIN');
+
+  const tempTable = `_tmp_session_${syncId.replace(/-/g, '').slice(0, 16)}`;
+  const colDefs = activeColumns
+    .map(c => `"${c.name}" ${c.sqlTypeName === 'USER-DEFINED' ? 'text' : c.sqlTypeName}`)
+    .join(', ');
+  await client.query(`CREATE TEMP TABLE "${tempTable}" (${colDefs}) ON COMMIT DROP`);
+
+  await copyRows(client, tempTable, activeColumns, records);
 
   sessions.set(syncId, {
+    client,
     tempTable,
     tableName,
     keyColumns,
+    activeColumns,
+    columns,
     systemId: options.systemId,
     scope: options.scope || {},
     systemIdColumn: options.systemIdColumn || 'systemId',
-    pool,
     startedAt: Date.now(),
     recordCount: records.length,
-    inserted: result.inserted,
-    updated: result.updated,
   });
 
-  return { syncId, ...result };
+  return { syncId, inserted: 0, updated: 0, deleted: 0 };
 }
 
-/**
- * Continue an existing sync session with another batch.
- */
-export async function continueSession(syncId, pool, records, keyColumns) {
+export async function continueSession(syncId, _pool, records, _keyColumns) {
   const session = sessions.get(syncId);
-  if (!session) {
-    throw new Error(`Sync session '${syncId}' not found or expired`);
-  }
-
-  const result = await ingest(pool, session.tableName, keyColumns, records, {
-    syncMode: 'delta',
-    tempTable: session.tempTable,
-  });
-
+  if (!session) throw new Error(`Sync session '${syncId}' not found or expired`);
+  await copyRows(session.client, session.tempTable, session.activeColumns, records);
   session.recordCount += records.length;
-  session.inserted += result.inserted;
-  session.updated += result.updated;
-
-  return { syncId, ...result };
+  return { syncId, inserted: 0, updated: 0, deleted: 0 };
 }
 
-/**
- * End a sync session: merge final batch, run scoped delete, clean up.
- */
-export async function endSession(syncId, pool, records, keyColumns, options = {}) {
+export async function endSession(syncId, _pool, records, _keyColumns, options = {}) {
   const session = sessions.get(syncId);
-  if (!session) {
-    throw new Error(`Sync session '${syncId}' not found or expired`);
+  if (!session) throw new Error(`Sync session '${syncId}' not found or expired`);
+
+  try {
+    if (records && records.length > 0) {
+      await copyRows(session.client, session.tempTable, session.activeColumns, records);
+      session.recordCount += records.length;
+    }
+
+    const nonKeyCols = session.activeColumns.filter(c => !session.keyColumns.includes(c.name));
+    const insertCols = session.activeColumns.map(c => `"${c.name}"`).join(', ');
+    const onConflictCols = session.keyColumns.map(c => `"${c}"`).join(', ');
+
+    let upsertSql;
+    if (nonKeyCols.length > 0) {
+      const updateSet = nonKeyCols.map(c => `"${c.name}" = EXCLUDED."${c.name}"`).join(', ');
+      upsertSql = `
+        INSERT INTO "${session.tableName}" (${insertCols})
+        SELECT ${insertCols} FROM "${session.tempTable}"
+        ON CONFLICT (${onConflictCols}) DO UPDATE SET ${updateSet}
+        RETURNING (xmax = 0) AS "wasInsert"
+      `;
+    } else {
+      upsertSql = `
+        INSERT INTO "${session.tableName}" (${insertCols})
+        SELECT ${insertCols} FROM "${session.tempTable}"
+        ON CONFLICT (${onConflictCols}) DO NOTHING
+        RETURNING (xmax = 0) AS "wasInsert"
+      `;
+    }
+
+    const upsertRes = await session.client.query(upsertSql);
+    let inserted = 0, updated = 0;
+    for (const row of upsertRes.rows) {
+      if (row.wasInsert) inserted++; else updated++;
+    }
+
+    let deleted = 0;
+    const syncMode = options.syncMode || 'full';
+    if (syncMode === 'full') {
+      const tableColumnNames = new Set(session.columns.map(c => c.name));
+      deleted = await scopedDelete(
+        session.client, session.tableName, session.keyColumns, session.tempTable,
+        session.systemId, session.scope, session.systemIdColumn, tableColumnNames
+      );
+    }
+
+    await session.client.query('COMMIT');
+
+    const startTime = new Date(session.startedAt);
+    await writeSyncLog(null, `API-${session.tableName}`, session.tableName, startTime,
+                       session.recordCount, inserted, updated, deleted, null);
+
+    return {
+      syncId, inserted, updated, deleted,
+      totalRecords: session.recordCount,
+    };
+  } catch (err) {
+    try { await session.client.query('ROLLBACK'); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    if (!session.released) {
+      session.released = true;
+      try { session.client.release(); } catch { /* ignore */ }
+    }
+    sessions.delete(syncId);
   }
-
-  // Merge final batch
-  let finalResult = { inserted: 0, updated: 0 };
-  if (records && records.length > 0) {
-    finalResult = await ingest(pool, session.tableName, keyColumns, records, {
-      syncMode: 'delta',
-      tempTable: session.tempTable,
-    });
-    session.recordCount += records.length;
-  }
-
-  // Run scoped delete using the accumulated temp table
-  let deleted = 0;
-  const syncMode = options.syncMode || 'full';
-  if (syncMode === 'full') {
-    // Import scopedDelete by using the engine's ingest function with full mode
-    // We need to run the delete manually since we have a custom temp table
-    const { scopedDelete } = await import('./engine.js');
-
-    // The temp table already has all records from all batches merged into the target.
-    // But for delete detection, we need the IDs in the temp table.
-    // The engine's ingest function already merged into temp table, so it has all IDs.
-
-    // Run scoped delete
-    const notExistsJoin = session.keyColumns.map(k => `t.[${k}] = source.[${k}]`).join(' AND ');
-    let where = `t.ValidTo = '9999-12-31 23:59:59.9999999'`;
-
-    if (session.systemId !== null && session.systemId !== undefined) {
-      where += ` AND t.[${session.systemIdColumn}] = @systemId`;
-    }
-
-    const scopeParams = [];
-    let paramIndex = 0;
-    for (const [key, value] of Object.entries(session.scope)) {
-      if (value !== undefined && value !== null) {
-        const paramName = `scope${paramIndex}`;
-        where += ` AND t.[${key}] = @${paramName}`;
-        scopeParams.push({ name: paramName, value });
-        paramIndex++;
-      }
-    }
-
-    const deleteSql = `
-      DELETE t FROM dbo.[${session.tableName}] t
-      WHERE ${where}
-        AND NOT EXISTS (
-          SELECT 1 FROM [${session.tempTable}] source WHERE ${notExistsJoin}
-        )
-    `;
-
-    const request = pool.request();
-    if (session.systemId !== null && session.systemId !== undefined) {
-      request.input('systemId', session.systemId);
-    }
-    for (const p of scopeParams) {
-      request.input(p.name, p.value);
-    }
-
-    const deleteResult = await request.query(deleteSql);
-    deleted = deleteResult.rowsAffected[0] || 0;
-  }
-
-  // Drop temp table
-  await pool.request().query(`DROP TABLE IF EXISTS [${session.tempTable}]`).catch(() => {});
-
-  // Write sync log
-  const startTime = new Date(session.startedAt);
-  const totalInserted = session.inserted + finalResult.inserted;
-  const totalUpdated = session.updated + finalResult.updated;
-  await writeSyncLog(
-    pool, `API-${session.tableName}`, session.tableName, startTime,
-    session.recordCount, totalInserted, totalUpdated, deleted, null
-  );
-
-  // Clean up session
-  sessions.delete(syncId);
-
-  return {
-    syncId,
-    inserted: totalInserted,
-    updated: totalUpdated,
-    deleted,
-    totalRecords: session.recordCount,
-  };
 }
 
-/**
- * Check if a session exists.
- */
 export function hasSession(syncId) {
   return sessions.has(syncId);
 }

@@ -36,13 +36,19 @@ Param(
 )
 
 $ErrorActionPreference = 'Stop'
-$apiBaseUrl = 'http://web:3001/api'
+$apiBaseUrl = $env:WEB_API_URL
+if (-not $apiBaseUrl) { $apiBaseUrl = 'http://web:3001/api' }
+$apiBaseUrl = $apiBaseUrl.TrimEnd('/')
 
+# In v5 the dispatcher updates job progress and result via the REST API.
+# Both call the existing /api/crawlers/job-progress endpoint that the
+# crawler scripts already use for fine-grained progress reporting.
 function Update-JobProgress {
     param([string]$Step, [int]$Pct = 0, [string]$Detail = '')
-    $progressJson = (@{ step = $Step; pct = $Pct; detail = $Detail } | ConvertTo-Json -Compress) -replace "'", "''"
     try {
-        Invoke-FGSQLQuery -Query "UPDATE dbo.CrawlerJobs SET progress = '$progressJson' WHERE id = $JobId"
+        $headers = @{ Authorization = "Bearer $ApiKey"; 'Content-Type' = 'application/json' }
+        $body = @{ jobId = $JobId; step = $Step; pct = $Pct; detail = $Detail } | ConvertTo-Json -Compress
+        Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/job-progress" -Method Post -Headers $headers -Body $body -TimeoutSec 10 | Out-Null
     }
     catch {
         Write-Host "  Warning: failed to update progress — $($_.Exception.Message)" -ForegroundColor Yellow
@@ -51,13 +57,11 @@ function Update-JobProgress {
 
 function Set-JobResult {
     param([hashtable]$Result)
-    $resultJson = ($Result | ConvertTo-Json -Compress) -replace "'", "''"
-    try {
-        Invoke-FGSQLQuery -Query "UPDATE dbo.CrawlerJobs SET result = '$resultJson' WHERE id = $JobId"
-    }
-    catch {
-        Write-Host "  Warning: failed to update result — $($_.Exception.Message)" -ForegroundColor Yellow
-    }
+    # In v5 the result is set via /crawlers/jobs/:id/complete which the
+    # scheduler calls after this dispatcher returns. We can also call it now
+    # to attach a partial result; for simplicity we just log and let the
+    # scheduler do the final mark-complete.
+    Write-Host "  Job result: $($Result | ConvertTo-Json -Compress)" -ForegroundColor Gray
 }
 
 switch ($JobType) {

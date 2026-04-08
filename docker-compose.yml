@@ -1,93 +1,64 @@
 services:
 
-  # ── SQL Server 2022 ──────────────────────────────────────────────────────────
-  sql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+  # ── PostgreSQL 16 ───────────────────────────────────────────────────────────
+  # Replaced SQL Server in v5. Postgres has no licensing issues, no DB size cap,
+  # and no per-core licensing. The migrations runner inside the web container
+  # creates all tables on first startup, so there is no separate init step.
+  postgres:
+    image: postgres:16-alpine
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "FortigiGraph_Local1!"
-      MSSQL_PID: "Developer"
+      POSTGRES_DB:       "${POSTGRES_DB:-identity_atlas}"
+      POSTGRES_USER:     "${POSTGRES_USER:-identity_atlas}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-identity_atlas_local}"
     ports:
-      - "1433:1433"
+      - "5432:5432"
     volumes:
-      - sql_data:/var/opt/mssql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: >
-        /opt/mssql-tools18/bin/sqlcmd
-        -S localhost -U sa -P "FortigiGraph_Local1!"
-        -Q "SELECT 1" -b -No
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-identity_atlas} -d ${POSTGRES_DB:-identity_atlas}"]
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 60s
+      start_period: 30s
 
-  # ── One-time database creation ───────────────────────────────────────────────
-  sql-init:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    depends_on:
-      sql:
-        condition: service_healthy
-    command: >
-      /opt/mssql-tools18/bin/sqlcmd -S sql -U sa -P "FortigiGraph_Local1!" -b -No
-      -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'GraphData') CREATE DATABASE [GraphData];"
-    restart: "no"
-
-  # ── Table initialization (runs after DB creation) ────────────────────────────
-  sql-table-init:
-    build:
-      context: .
-      dockerfile: setup/docker/Dockerfile.powershell
-    environment:
-      SQL_SERVER: sql
-      SQL_DATABASE: GraphData
-      SQL_USER: sa
-      SQL_PASSWORD: "FortigiGraph_Local1!"
-    command: ["pwsh", "-File", "/app/setup/docker/init-tables.ps1"]
-    depends_on:
-      sql-init:
-        condition: service_completed_successfully
-    restart: "no"
-
-  # ── Web (serves built frontend + API) ────────────────────────────────────────
+  # ── Web (serves built frontend + API) ───────────────────────────────────────
   web:
     build:
       context: ./app
       dockerfile: api/Dockerfile
     environment:
-      NODE_ENV: production
-      USE_SQL: "true"
-      SQL_SERVER: sql
-      SQL_DATABASE: GraphData
-      SQL_USER: sa
-      SQL_PASSWORD: "FortigiGraph_Local1!"
-      SQL_TRUST_SERVER_CERT: "true"
+      NODE_ENV:    production
+      USE_SQL:     "true"  # legacy flag — still used by routes to enable DB-backed mode
+      DATABASE_URL: "postgres://${POSTGRES_USER:-identity_atlas}:${POSTGRES_PASSWORD:-identity_atlas_local}@postgres:5432/${POSTGRES_DB:-identity_atlas}"
       AUTH_ENABLED: "false"
-      PORT: "3001"
+      PORT:         "3001"
     ports:
       - "3001:3001"
     volumes:
       - job_data:/data/uploads
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      sql-table-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
-  # ── Worker (PowerShell — crawlers, risk scoring, account correlation, scheduling) ─
+  # ── Worker (PowerShell — crawlers, risk scoring, account correlation) ──────
+  # In v5 the worker container has NO database driver. It talks to the API
+  # for everything (job pickup, ingest, progress reporting).
   worker:
     build:
       context: .
       dockerfile: setup/docker/Dockerfile.powershell
     environment:
-      SQL_SERVER: sql
-      SQL_DATABASE: GraphData
-      SQL_USER: sa
-      SQL_PASSWORD: "${SQL_PASSWORD:-FortigiGraph_Local1!}"
-      CRAWLER_API_KEY: "${CRAWLER_API_KEY:-}"
-      GRAPH_TENANT_ID: "${GRAPH_TENANT_ID:-}"
-      GRAPH_CLIENT_ID: "${GRAPH_CLIENT_ID:-}"
+      # API URL for the worker scheduler. The web container is reachable via
+      # the docker network DNS name `web` on its internal port.
+      WEB_API_URL: "http://web:3001/api"
+      # Optional global crawler API key — overridden per-job via WorkerConfig.
+      CRAWLER_API_KEY:     "${CRAWLER_API_KEY:-}"
+      GRAPH_TENANT_ID:     "${GRAPH_TENANT_ID:-}"
+      GRAPH_CLIENT_ID:     "${GRAPH_CLIENT_ID:-}"
       GRAPH_CLIENT_SECRET: "${GRAPH_CLIENT_SECRET:-}"
-      LLM_PROVIDER: "${LLM_PROVIDER:-}"
-      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_PROVIDER:        "${LLM_PROVIDER:-}"
+      LLM_API_KEY:         "${LLM_API_KEY:-}"
     volumes:
       - ./setup/docker/crontab:/app/setup/docker/crontab:ro
       - job_data:/data/uploads
@@ -97,5 +68,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  sql_data:
+  postgres_data:
   job_data:

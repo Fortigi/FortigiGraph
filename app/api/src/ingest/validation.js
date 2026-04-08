@@ -204,7 +204,7 @@ const SCHEMAS = {
   },
 };
 
-// Table name mapping
+// Table name mapping. v5 keeps the v4 camelCase table names (double-quoted in postgres).
 export const ENTITY_TABLE_MAP = {
   'systems': 'Systems',
   'principals': 'Principals',

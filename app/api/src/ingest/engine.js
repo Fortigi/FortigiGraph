@@ -1,91 +1,98 @@
-/**
- * Ingest Engine — Core bulk MERGE + scoped delete logic.
- *
- * Replicates the PowerShell Invoke-FGSQLBulkMerge + scoped delete pattern
- * using the mssql npm package (native TDS bulk load).
- */
-import sql from 'mssql';
+// Identity Atlas v5 ingest engine — Postgres edition.
+//
+// Replaces the v4 mssql-based engine. Same external API: callers pass a target
+// table, key columns, an array of records, and options. The engine handles
+// bulk insert into a temp table and then upserts into the target table.
+//
+// Implementation notes:
+//   - Bulk loading uses `pg-copy-streams` (`COPY ... FROM STDIN`) which is the
+//     fastest path for inserting many rows in postgres. Comparable to SQL
+//     Server's SqlBulkCopy.
+//   - The upsert uses `INSERT ... ON CONFLICT (...) DO UPDATE ... RETURNING
+//     (xmax = 0) AS wasInsert` — the xmax trick lets us count inserted vs
+//     updated rows without a separate query.
+//   - Scoped deletes use `DELETE ... WHERE ... AND NOT EXISTS (SELECT 1 FROM
+//     temp_table WHERE key_match)` — postgres-friendly DELETE syntax.
+//   - All identifiers are camelCase double-quoted to match the v4 column
+//     names exactly. This minimises the route changes needed for v5.
+
+import { from as copyFrom } from 'pg-copy-streams';
+import crypto from 'crypto';
 import * as db from '../db/connection.js';
 
-const CURRENT_ROW = "'9999-12-31 23:59:59.9999999'";
+// Cache the schema per table for the lifetime of the process. v5 schema is
+// only changed by migrations at startup, so the cache is safe.
+const schemaCache = new Map();
 
-// Map JS types to SQL types for temp table creation
-const SQL_TYPE_MAP = {
-  'uniqueidentifier': sql.UniqueIdentifier,
-  'nvarchar(max)':    sql.NVarChar(sql.MAX),
-  'nvarchar(500)':    sql.NVarChar(500),
-  'nvarchar(255)':    sql.NVarChar(255),
-  'nvarchar(100)':    sql.NVarChar(100),
-  'nvarchar(50)':     sql.NVarChar(50),
-  'nvarchar(20)':     sql.NVarChar(20),
-  'nvarchar(8)':      sql.NVarChar(8),
-  'int':              sql.Int,
-  'bigint':           sql.BigInt,
-  'bit':              sql.Bit,
-  'datetime2':        sql.DateTime2,
-  'decimal':          sql.Decimal(10, 2),
-};
+export async function discoverColumns(_pool, tableName) {
+  if (schemaCache.has(tableName)) return schemaCache.get(tableName);
 
-function getSqlType(sqlTypeName) {
-  const key = sqlTypeName.toLowerCase().trim();
-  // Handle nvarchar(N) dynamically
-  const nvarcharMatch = key.match(/^nvarchar\((\d+)\)$/);
-  if (nvarcharMatch) {
-    const len = parseInt(nvarcharMatch[1], 10);
-    return sql.NVarChar(len);
+  const r = await db.query(
+    `SELECT column_name, data_type, is_nullable,
+            (column_default LIKE 'nextval(%' OR is_identity = 'YES') AS is_identity
+       FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position`,
+    [tableName]
+  );
+
+  if (r.rows.length === 0) {
+    throw new Error(`Table '${tableName}' not found`);
   }
-  if (key === 'nvarchar(max)') return sql.NVarChar(sql.MAX);
-  return SQL_TYPE_MAP[key] || sql.NVarChar(sql.MAX);
+
+  const cols = r.rows.map(row => ({
+    name: row.column_name,
+    sqlTypeName: row.data_type,
+    isNullable: row.is_nullable === 'YES',
+    isIdentity: !!row.is_identity,
+  }));
+
+  schemaCache.set(tableName, cols);
+  return cols;
+}
+
+// Encode a JS value into a postgres TEXT-format COPY field.
+// Special chars per the COPY spec: \\ → \\\\, \n → \\n, \r → \\r, \t → \\t,
+// NULL → \N. JSON columns get JSON.stringify-ed and then escaped.
+function encodeCopyValue(val, dataType) {
+  if (val === null || val === undefined) return '\\N';
+  if (dataType === 'jsonb' || dataType === 'json') {
+    if (typeof val === 'string') return escapeCopyText(val);
+    return escapeCopyText(JSON.stringify(val));
+  }
+  if (dataType === 'boolean') {
+    if (val === true || val === 1 || val === '1' || val === 'true' || val === 't') return 't';
+    if (val === false || val === 0 || val === '0' || val === 'false' || val === 'f') return 'f';
+    return '\\N';
+  }
+  if (typeof dataType === 'string' && dataType.startsWith('timestamp')) {
+    if (val instanceof Date) return val.toISOString();
+    return escapeCopyText(String(val));
+  }
+  if (dataType === 'integer' || dataType === 'bigint' || dataType === 'numeric' || dataType === 'real' || dataType === 'double precision') {
+    if (typeof val === 'number') return String(val);
+    if (typeof val === 'boolean') return val ? '1' : '0';
+    return escapeCopyText(String(val));
+  }
+  return escapeCopyText(String(val));
+}
+
+function escapeCopyText(s) {
+  return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+}
+
+function buildCopyRow(record, activeColumns) {
+  const fields = activeColumns.map(col =>
+    encodeCopyValue(record[col.name], col.sqlTypeName)
+  );
+  return fields.join('\t') + '\n';
 }
 
 /**
- * Discover the column schema for a target table.
- * Returns array of { name, sqlType, sqlTypeName, isNullable }.
+ * Core ingest operation. Bulk-COPY records into a temp table, then upsert
+ * from the temp table into the target.
  */
-export async function discoverColumns(pool, tableName) {
-  const result = await pool.request()
-    .input('table', tableName)
-    .query(`
-      SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH, c.IS_NULLABLE,
-             COLUMNPROPERTY(OBJECT_ID('dbo.' + @table), c.COLUMN_NAME, 'IsIdentity') AS IsIdentity
-      FROM INFORMATION_SCHEMA.COLUMNS c
-      WHERE c.TABLE_NAME = @table AND c.TABLE_SCHEMA = 'dbo'
-        AND c.COLUMN_NAME NOT IN ('ValidFrom', 'ValidTo')
-      ORDER BY c.ORDINAL_POSITION
-    `);
-
-  return result.recordset.map(r => {
-      let typeName = r.DATA_TYPE.toLowerCase();
-      if (typeName === 'nvarchar' || typeName === 'varchar') {
-        const len = r.CHARACTER_MAXIMUM_LENGTH === -1 ? 'max' : r.CHARACTER_MAXIMUM_LENGTH;
-        typeName = `${r.DATA_TYPE}(${len})`;
-      }
-      return {
-        name: r.COLUMN_NAME,
-        sqlType: getSqlType(typeName),
-        sqlTypeName: typeName,
-        isNullable: r.IS_NULLABLE === 'YES',
-        isIdentity: !!r.IsIdentity,
-      };
-    });
-}
-
-/**
- * Core ingest operation: bulk merge records into a target table with optional scoped delete.
- *
- * @param {object} pool - mssql connection pool
- * @param {string} tableName - Target table (e.g., 'Resources')
- * @param {string[]} keyColumns - Primary key columns (e.g., ['id'] or ['resourceId','principalId','assignmentType'])
- * @param {object[]} records - Array of record objects to merge
- * @param {object} options
- * @param {string} options.syncMode - 'full' (merge + delete) or 'delta' (merge only)
- * @param {number} options.systemId - System ID for scoped deletes
- * @param {object} options.scope - Additional scope filters (e.g., { resourceType: 'Group' })
- * @param {string} options.systemIdColumn - Column name for system scoping (default: 'systemId')
- * @param {string} [options.tempTable] - Existing temp table name (for sessions)
- * @returns {{ inserted: number, updated: number, deleted: number }}
- */
-export async function ingest(pool, tableName, keyColumns, records, options = {}) {
+export async function ingest(_pool, tableName, keyColumns, records, options = {}) {
   const {
     syncMode = 'delta',
     systemId = null,
@@ -98,171 +105,141 @@ export async function ingest(pool, tableName, keyColumns, records, options = {})
     return { inserted: 0, updated: 0, deleted: 0 };
   }
 
-  // Discover target table schema
-  const columns = await discoverColumns(pool, tableName);
-  if (columns.length === 0) {
-    throw new Error(`Table '${tableName}' not found or has no columns`);
-  }
+  const columns = await discoverColumns(null, tableName);
 
-  const columnMap = new Map(columns.map(c => [c.name, c]));
-
-  // Filter to columns present in the records
+  // Filter columns to those present in the records (or required as keys),
+  // excluding identity columns which postgres auto-generates.
   const recordKeys = new Set();
   for (const rec of records) {
-    for (const k of Object.keys(rec)) {
-      recordKeys.add(k);
+    for (const k of Object.keys(rec)) recordKeys.add(k);
+  }
+  const activeColumns = columns.filter(c =>
+    (recordKeys.has(c.name) || keyColumns.includes(c.name)) && !c.isIdentity
+  );
+
+  if (activeColumns.length === 0) {
+    throw new Error(`No matching columns for table '${tableName}' in records`);
+  }
+
+  const tempName = existingTempTable || `_tmp_ingest_${crypto.randomBytes(6).toString('hex')}`;
+
+  return await db.tx(async (client) => {
+    if (!existingTempTable) {
+      const colDefs = activeColumns
+        .map(c => `"${c.name}" ${c.sqlTypeName === 'USER-DEFINED' ? 'text' : c.sqlTypeName}`)
+        .join(', ');
+      await client.query(`CREATE TEMP TABLE "${tempName}" (${colDefs}) ON COMMIT DROP`);
     }
-  }
-  // Exclude IDENTITY columns — SQL auto-generates them, they can't be inserted
-  const activeColumns = columns.filter(c => recordKeys.has(c.name) && !c.isIdentity);
 
-  // Create temp table
-  const tempName = existingTempTable || `##TempIngest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Bulk insert via COPY FROM STDIN
+    const colList = activeColumns.map(c => `"${c.name}"`).join(', ');
+    const copyStream = client.query(copyFrom(`COPY "${tempName}" (${colList}) FROM STDIN`));
 
-  if (!existingTempTable) {
-    const colDefs = activeColumns.map(c => `[${c.name}] ${c.sqlTypeName.toUpperCase()}`).join(', ');
-    await pool.request().query(`CREATE TABLE [${tempName}] (${colDefs})`);
-  }
-
-  // Bulk insert into temp table
-  const table = new sql.Table(tempName);
-  table.create = false;
-  for (const col of activeColumns) {
-    table.columns.add(col.name, col.sqlType, { nullable: true });
-  }
-  for (const rec of records) {
-    const row = activeColumns.map(c => {
-      const val = rec[c.name];
-      if (val === undefined || val === null) return null;
-      return val;
+    await new Promise((resolve, reject) => {
+      copyStream.on('error', reject);
+      copyStream.on('finish', resolve);
+      for (const rec of records) {
+        copyStream.write(buildCopyRow(rec, activeColumns));
+      }
+      copyStream.end();
     });
-    table.rows.add(...row);
-  }
 
-  const bulkRequest = pool.request();
-  bulkRequest.timeout = 300000; // 5 minutes
-  await bulkRequest.bulk(table);
+    // Upsert from temp into target. xmax = 0 detects fresh inserts.
+    const nonKeyCols = activeColumns.filter(c => !keyColumns.includes(c.name));
+    const insertCols = activeColumns.map(c => `"${c.name}"`).join(', ');
+    const onConflictCols = keyColumns.map(c => `"${c}"`).join(', ');
 
-  // Build MERGE statement
-  const nonKeyColumns = activeColumns.filter(c => !keyColumns.includes(c.name));
-  const onClause = keyColumns.map(k => `target.[${k}] = source.[${k}]`).join(' AND ');
-  const updateSet = nonKeyColumns.map(c => `target.[${c.name}] = source.[${c.name}]`).join(', ');
-  const insertCols = activeColumns.map(c => `[${c.name}]`).join(', ');
-  const insertVals = activeColumns.map(c => `source.[${c.name}]`).join(', ');
-
-  let mergeSql = `
-    MERGE dbo.[${tableName}] AS target
-    USING [${tempName}] AS source
-    ON ${onClause}
-  `;
-
-  if (updateSet) {
-    mergeSql += `WHEN MATCHED THEN UPDATE SET ${updateSet}\n`;
-  }
-  mergeSql += `WHEN NOT MATCHED BY TARGET THEN INSERT (${insertCols}) VALUES (${insertVals})\n`;
-  mergeSql += `OUTPUT $action;`;
-
-  const mergeResult = await pool.request().query(mergeSql);
-
-  let inserted = 0;
-  let updated = 0;
-  if (mergeResult.recordset) {
-    for (const row of mergeResult.recordset) {
-      if (row['$action'] === 'INSERT') inserted++;
-      else if (row['$action'] === 'UPDATE') updated++;
+    let upsertSql;
+    if (nonKeyCols.length > 0) {
+      const updateSet = nonKeyCols.map(c => `"${c.name}" = EXCLUDED."${c.name}"`).join(', ');
+      upsertSql = `
+        INSERT INTO "${tableName}" (${insertCols})
+        SELECT ${insertCols} FROM "${tempName}"
+        ON CONFLICT (${onConflictCols}) DO UPDATE SET ${updateSet}
+        RETURNING (xmax = 0) AS "wasInsert"
+      `;
+    } else {
+      upsertSql = `
+        INSERT INTO "${tableName}" (${insertCols})
+        SELECT ${insertCols} FROM "${tempName}"
+        ON CONFLICT (${onConflictCols}) DO NOTHING
+        RETURNING (xmax = 0) AS "wasInsert"
+      `;
     }
-  }
 
-  // Scoped delete (only in full sync mode)
-  let deleted = 0;
-  if (syncMode === 'full') {
-    const tableColumnNames = new Set(columns.map(c => c.name));
-    deleted = await scopedDelete(pool, tableName, keyColumns, tempName, systemId, scope, systemIdColumn, tableColumnNames);
-  }
+    const upsertRes = await client.query(upsertSql);
+    let inserted = 0;
+    let updated = 0;
+    for (const row of upsertRes.rows) {
+      if (row.wasInsert) inserted++;
+      else updated++;
+    }
 
-  // Clean up temp table (only if we created it)
-  if (!existingTempTable) {
-    await pool.request().query(`DROP TABLE IF EXISTS [${tempName}]`).catch(() => {});
-  }
+    let deleted = 0;
+    if (syncMode === 'full') {
+      const tableColumnNames = new Set(columns.map(c => c.name));
+      deleted = await scopedDelete(client, tableName, keyColumns, tempName, systemId, scope, systemIdColumn, tableColumnNames);
+    }
 
-  return { inserted, updated, deleted };
+    return { inserted, updated, deleted };
+  });
 }
 
-/**
- * Scoped delete: remove records in the target table that are NOT in the temp table,
- * scoped by systemId and optional attribute filters.
- */
-async function scopedDelete(pool, tableName, keyColumns, tempTable, systemId, scope, systemIdColumn, tableColumnNames) {
-  // Build NOT EXISTS join on key columns
-  const notExistsJoin = keyColumns.map(k => `t.[${k}] = source.[${k}]`).join(' AND ');
-
-  let where = `t.ValidTo = ${CURRENT_ROW}`;
-
-  // System scope — only if the table actually has the systemId column
-  if (systemId !== null && systemId !== undefined && (!tableColumnNames || tableColumnNames.has(systemIdColumn))) {
-    where += ` AND t.[${systemIdColumn}] = @systemId`;
-  }
-
-  // Additional scope filters — only if the column exists on the table
-  const scopeParams = [];
-  let paramIndex = 0;
-  for (const [key, value] of Object.entries(scope)) {
-    if (value !== undefined && value !== null && (!tableColumnNames || tableColumnNames.has(key))) {
-      const paramName = `scope${paramIndex}`;
-      where += ` AND t.[${key}] = @${paramName}`;
-      scopeParams.push({ name: paramName, value, key });
-      paramIndex++;
-    }
-  }
-
-  const deleteSql = `
-    DELETE t FROM dbo.[${tableName}] t
-    WHERE ${where}
-      AND NOT EXISTS (
-        SELECT 1 FROM [${tempTable}] source WHERE ${notExistsJoin}
-      )
-  `;
-
-  const request = pool.request();
-  if (systemId !== null && systemId !== undefined) {
-    request.input('systemId', systemId);
-  }
-  for (const p of scopeParams) {
-    request.input(p.name, p.value);
-  }
-
-  const result = await request.query(deleteSql);
-  return result.rowsAffected[0] || 0;
-}
-
-/**
- * Write a sync log entry to GraphSyncLog.
- */
-export async function writeSyncLog(pool, syncType, tableName, startTime, recordCount, inserted, updated, deleted, error) {
-  const endTime = new Date();
-  const durationSeconds = Math.round((endTime - startTime) / 1000);
-  const status = error ? 'Failed' : 'Success';
-
+export async function scopedDelete(client, tableName, keyColumns, tempName, systemId, scope, systemIdColumn, tableColumnNames) {
+  // Before the DELETE: create a unique index on the temp table over the
+  // same key columns the NOT EXISTS uses, then ANALYZE so the planner has
+  // accurate row counts. Without these the planner does a sequential scan
+  // of the temp table for every target row — on a 250k × 250k workload
+  // that takes 20+ minutes. With them, the same query runs in seconds.
   try {
-    // Check if GraphSyncLog exists
-    const check = await pool.request().query(
-      `SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'GraphSyncLog' AND TABLE_SCHEMA = 'dbo'`
-    );
-    if (check.recordset.length === 0) return;
+    const tempIndexName = `${tempName}_keyidx`;
+    const tempIndexCols = keyColumns.map(k => `"${k}"`).join(', ');
+    await client.query(`CREATE INDEX IF NOT EXISTS "${tempIndexName}" ON "${tempName}" (${tempIndexCols})`);
+    await client.query(`ANALYZE "${tempName}"`);
+  } catch (err) {
+    console.warn(`scopedDelete: temp index/analyze failed (continuing): ${err.message}`);
+  }
 
-    await pool.request()
-      .input('syncType', syncType)
-      .input('startTime', startTime)
-      .input('endTime', endTime)
-      .input('durationSeconds', durationSeconds)
-      .input('recordCount', recordCount)
-      .input('status', status)
-      .input('errorMessage', error || null)
-      .input('tableName', tableName)
-      .query(`INSERT INTO dbo.GraphSyncLog
-              (SyncType, StartTime, EndTime, DurationSeconds, RecordCount, Status, ErrorMessage, TableName)
-              VALUES (@syncType, @startTime, @endTime, @durationSeconds, @recordCount, @status, @errorMessage, @tableName)`);
+  const params = [];
+  let where = '1=1';
+
+  if (systemId !== null && systemId !== undefined && tableColumnNames.has(systemIdColumn)) {
+    params.push(systemId);
+    where += ` AND t."${systemIdColumn}" = $${params.length}`;
+  }
+
+  for (const [key, value] of Object.entries(scope || {})) {
+    if (value === undefined || value === null) continue;
+    if (!tableColumnNames.has(key)) continue;
+    params.push(value);
+    where += ` AND t."${key}" = $${params.length}`;
+  }
+
+  const notExistsJoin = keyColumns.map(k => `t."${k}" = src."${k}"`).join(' AND ');
+  const sql = `
+    DELETE FROM "${tableName}" t
+     WHERE ${where}
+       AND NOT EXISTS (SELECT 1 FROM "${tempName}" src WHERE ${notExistsJoin})
+  `;
+  const res = await client.query(sql, params);
+  return res.rowCount || 0;
+}
+
+/**
+ * Append a row to GraphSyncLog. Best-effort — must not fail the ingest.
+ */
+export async function writeSyncLog(_pool, syncType, tableName, startTime, recordCount, _inserted, _updated, _deleted, error) {
+  try {
+    const endTime = new Date();
+    const duration = Math.round((endTime - startTime) / 1000);
+    const status = error ? 'Failed' : 'Success';
+    await db.query(
+      `INSERT INTO "GraphSyncLog"
+         ("SyncType", "TableName", "StartTime", "EndTime", "DurationSeconds", "RecordCount", "Status", "ErrorMessage")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [syncType, tableName, startTime, endTime, duration, recordCount, status, error || null]
+    );
   } catch {
-    // Sync log failure should not fail the ingest
+    // Sync log write must not fail the ingest
   }
 }

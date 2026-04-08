@@ -16,13 +16,45 @@ function cleanRow(row) {
   return clean;
 }
 
-async function getPermissionTable(pool) {
-  try {
-    await pool.request().query('SELECT TOP 0 * FROM mat_UserPermissionAssignments');
-    return 'mat_UserPermissionAssignments';
-  } catch {
-    return 'vw_UserPermissionAssignments';
-  }
+async function getPermissionTable(_pool) {
+  // v5: only the unified view exists. No materialized fallback needed.
+  return '"vw_ResourceUserPermissionAssignments"';
+}
+
+// Fetch the version history of a single row from the v5 `_history` audit table.
+// Returns rows shaped like the v4 SQL Server temporal-table query: each row has
+// every column of the source table at that point in time, plus ValidFrom and
+// (synthesised) ValidTo. Newest first. The frontend's diff logic compares
+// consecutive rows so the shape has to match what v4 returned.
+async function fetchHistory(tableName, rowId) {
+  const r = await db.query(
+    `SELECT operation, "changedAt", "rowData"
+       FROM "_history"
+      WHERE "tableName" = $1 AND "rowId" = $2
+      ORDER BY "changedAt" DESC`,
+    [tableName, rowId]
+  );
+  // Synthesise ValidFrom/ValidTo: ValidFrom is this row's changedAt, ValidTo
+  // is the *next* (newer) row's changedAt — i.e. the moment this version
+  // stopped being current. The newest row's ValidTo is left null (still current).
+  return r.rows.map((row, idx) => {
+    const data = row.rowData || {};
+    const newer = idx > 0 ? r.rows[idx - 1] : null;
+    return {
+      ...data,
+      ValidFrom: row.changedAt,
+      ValidTo: newer ? newer.changedAt : null,
+      _operation: row.operation,
+    };
+  });
+}
+
+async function rowExistsInHistory(tableName, rowId) {
+  const r = await db.query(
+    `SELECT 1 FROM "_history" WHERE "tableName" = $1 AND "rowId" = $2 LIMIT 1`,
+    [tableName, rowId]
+  );
+  return r.rows.length > 0;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -35,41 +67,22 @@ router.get('/user/:id', async (req, res) => {
     const pool = await db.getPool();
     const userId = req.params.id;
 
-    // 1. Current attributes — try Principals first, fall back to GraphUsers
-    let userResult;
-    let usingPrincipals = false;
-    try {
-      userResult = await timedRequest(pool, 'user-attributes', res)
-        .input('id', userId)
-        .query(`SELECT p.*, s.displayName AS systemDisplayName
-                FROM Principals p
-                LEFT JOIN Systems s ON p.systemId = s.id AND s.ValidTo = '9999-12-31 23:59:59.9999999'
-                WHERE p.id = @id AND p.ValidTo = '9999-12-31 23:59:59.9999999'`);
-      if (userResult.recordset.length > 0) {
-        usingPrincipals = true;
-      } else {
-        // Principals exists but user not found there — try GraphUsers
-        userResult = await timedRequest(pool, 'user-attributes-legacy', res)
-          .input('id', userId)
-          .query('SELECT * FROM GraphUsers WHERE id = @id');
-      }
-    } catch {
-      // Principals table doesn't exist — fall back to GraphUsers
-      userResult = await timedRequest(pool, 'user-attributes-legacy', res)
-        .input('id', userId)
-        .query('SELECT * FROM GraphUsers WHERE id = @id');
-    }
+    // 1. Current attributes from Principals (v5 has no GraphUsers fallback)
+    const userResult = await timedRequest(pool, 'user-attributes', res)
+      .input('id', userId)
+      .query(`SELECT p.*, s."displayName" AS "systemDisplayName"
+                FROM "Principals" p
+                LEFT JOIN "Systems" s ON p."systemId" = s.id
+                WHERE p.id = @id`);
 
     if (userResult.recordset.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
     const attributes = cleanRow(userResult.recordset[0]);
 
-    // Parse extendedAttributes JSON if present (Principals model)
+    // extendedAttributes is jsonb (already parsed)
     if (attributes.extendedAttributes) {
-      try {
-        attributes.extendedAttributesParsed = JSON.parse(attributes.extendedAttributes);
-      } catch { /* ignore bad JSON */ }
+      attributes.extendedAttributesParsed = attributes.extendedAttributes;
     }
 
     // 2. Tags
@@ -78,28 +91,22 @@ router.get('/user/:id', async (req, res) => {
       const r = await timedRequest(pool, 'user-tags', res)
         .input('id', userId)
         .query(`
-        SELECT t.id, t.name, t.color
-        FROM GraphTagAssignments ta
-        JOIN GraphTags t ON ta.tagId = t.id
-        WHERE ta.entityId = @id AND t.entityType = 'user'
-      `);
+          SELECT t.id, t."name", t."color"
+            FROM "GraphTagAssignments" ta
+            JOIN "GraphTags" t ON ta."tagId" = t.id
+           WHERE ta."entityId" = @id AND t."entityType" = 'user'
+        `);
       tags = r.recordset;
     } catch { /* table may not exist */ }
 
-    // 3. Counts only (fast)
+    // 3. Counts
     let membershipCount = 0;
     try {
-      const table = await getPermissionTable(pool);
-      let r;
-      try {
-        r = await timedRequest(pool, 'user-membership-count', res)
-          .input('id', userId)
-          .query(`SELECT COUNT(DISTINCT resourceId) AS cnt FROM ${table} WHERE memberId = @id`);
-      } catch {
-        r = await timedRequest(pool, 'user-membership-count-legacy', res)
-          .input('id', userId)
-          .query(`SELECT COUNT(DISTINCT groupId) AS cnt FROM ${table} WHERE memberId = @id`);
-      }
+      const r = await timedRequest(pool, 'user-membership-count', res)
+        .input('id', userId)
+        .query(`SELECT COUNT(DISTINCT "resourceId")::int AS cnt
+                  FROM "vw_ResourceUserPermissionAssignments"
+                 WHERE "principalId"::text = @id`);
       membershipCount = r.recordset[0].cnt;
     } catch { /* view may not exist */ }
 
@@ -107,46 +114,15 @@ router.get('/user/:id', async (req, res) => {
     try {
       const r = await timedRequest(pool, 'user-ap-count', res)
         .input('id', userId)
-        .query(`
-        SELECT COUNT(DISTINCT resourceId) AS cnt
-        FROM ResourceAssignments WHERE principalId = @id AND assignmentType = 'Governed'
-      `);
+        .query(`SELECT COUNT(DISTINCT "resourceId")::int AS cnt
+                  FROM "ResourceAssignments"
+                 WHERE "principalId"::text = @id AND "assignmentType" = 'Governed'`);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
     let hasHistory = false;
-    try {
-      if (usingPrincipals) {
-        const r = await timedRequest(pool, 'user-history-check', res)
-          .input('id', userId)
-          .query(`SELECT TOP 1 1 AS found FROM Principals FOR SYSTEM_TIME ALL WHERE id = @id AND ValidTo != '9999-12-31 23:59:59.9999999'`);
-        hasHistory = r.recordset.length > 0;
-      } else {
-        const r = await timedRequest(pool, 'user-history-check', res)
-          .input('id', userId)
-          .query(`SELECT TOP 1 1 AS found FROM GraphUsers_History WHERE id = @id`);
-        hasHistory = r.recordset.length > 0;
-      }
-    } catch {
-      hasHistory = false;
-    }
-
-    // Last sign-in activity from PrincipalActivity table
-    let lastActivity = null;
-    try {
-      const r = await timedRequest(pool, 'user-last-activity', res)
-        .input('id', userId)
-        .query(`
-        SELECT TOP 1 lastActivityDateTime, activityType, syncedAt
-        FROM dbo.PrincipalActivity
-        WHERE principalId = @id
-          AND resourceId = '00000000-0000-0000-0000-000000000000'
-          AND activityType = 'SignIn'
-      `);
-      if (r.recordset.length > 0) lastActivity = r.recordset[0];
-    } catch { /* table may not exist yet */ }
-
-    res.json({ attributes, tags, membershipCount, accessPackageCount, hasHistory, lastActivity });
+    try { hasHistory = await rowExistsInHistory('Principals', userId); } catch { /* _history may not exist */ }
+    res.json({ attributes, tags, membershipCount, accessPackageCount, hasHistory, lastActivity: null });
   } catch (err) {
     console.error('Error fetching user detail:', err.message);
     res.status(500).json({ error: 'Failed to fetch user details' });
@@ -161,36 +137,19 @@ router.get('/user/:id/memberships', async (req, res) => {
   if (!useSql) return res.json([]);
   try {
     const pool = await db.getPool();
-    const table = await getPermissionTable(pool);
-    let r;
-    try {
-      // Join materialized table to Resources for display name and type
-      r = await timedRequest(pool, 'user-memberships', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT p.groupId AS resourceId, p.groupId AS groupId,
-               r.displayName AS resourceDisplayName, r.displayName AS groupDisplayName,
-               r.resourceType, r.resourceType AS groupTypeCalculated,
-               p.membershipType, p.managedByAccessPackage
-        FROM ${table} p
-        LEFT JOIN dbo.Resources r ON p.groupId = r.id AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE p.memberId = @id
-        ORDER BY r.displayName, p.membershipType
-      `);
-    } catch {
-      // Fall back without Resources join
-      r = await timedRequest(pool, 'user-memberships-legacy', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT groupId, groupId AS resourceId,
-               NULL AS groupDisplayName, NULL AS resourceDisplayName,
-               NULL AS groupTypeCalculated, NULL AS resourceType,
-               membershipType, managedByAccessPackage
-        FROM ${table}
-        WHERE memberId = @id
-        ORDER BY membershipType
-      `);
-    }
+    // v5: query the unified view directly. Columns are camelCase double-quoted.
+    const r = await timedRequest(pool, 'user-memberships', res)
+      .input('id', req.params.id)
+      .query(`
+      SELECT p."resourceId", p."resourceId" AS "groupId",
+             r."displayName" AS "resourceDisplayName", r."displayName" AS "groupDisplayName",
+             r."resourceType", r."resourceType" AS "groupTypeCalculated",
+             p."membershipType", p."managedByAccessPackage"
+        FROM "vw_ResourceUserPermissionAssignments" p
+        LEFT JOIN "Resources" r ON p."resourceId" = r.id
+       WHERE p."principalId"::text = @id
+       ORDER BY r."displayName", p."membershipType"
+    `);
     res.json(r.recordset);
   } catch (err) {
     console.error('Error fetching user memberships:', err.message);
@@ -210,14 +169,14 @@ router.get('/user/:id/access-packages', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT DISTINCT
-        a.resourceId,
-        ap.displayName AS accessPackageName,
-        a.state,
-        a.assignedDateTime
-      FROM ResourceAssignments a
-      LEFT JOIN Resources ap ON a.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
-      WHERE a.principalId = @id AND a.assignmentType = 'Governed'
-      ORDER BY ap.displayName
+        a."resourceId",
+        ap."displayName" AS "accessPackageName",
+        a."state",
+        a."expirationDateTime"
+        FROM "ResourceAssignments" a
+        LEFT JOIN "Resources" ap ON a."resourceId" = ap.id AND ap."resourceType" = 'BusinessRole'
+       WHERE a."principalId"::text = @id AND a."assignmentType" = 'Governed'
+       ORDER BY ap."displayName"
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -233,30 +192,10 @@ router.get('/user/:id/history', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
-    const pool = await db.getPool();
-    let r;
-    try {
-      // Try Principals temporal table first (new model)
-      r = await timedRequest(pool, 'user-history', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT * FROM Principals FOR SYSTEM_TIME ALL
-        WHERE id = @id
-        ORDER BY ValidFrom DESC
-      `);
-    } catch {
-      // Fall back to GraphUsers temporal table (old model)
-      r = await timedRequest(pool, 'user-history-legacy', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT * FROM GraphUsers FOR SYSTEM_TIME ALL
-        WHERE id = @id
-        ORDER BY ValidFrom DESC
-      `);
-    }
-    res.json(r.recordset.map(cleanRow));
+    const rows = await fetchHistory('Principals', req.params.id);
+    res.json(rows.map(cleanRow));
   } catch (err) {
-    // Not temporal — return empty
+    console.error('user-history failed:', err.message);
     res.json([]);
   }
 });
@@ -278,7 +217,7 @@ router.get('/group/:id', async (req, res) => {
     try {
       groupResult = await timedRequest(pool, 'group-attributes', res)
         .input('id', groupId)
-        .query(`SELECT * FROM Resources WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+        .query(`SELECT * FROM "Resources" WHERE id = @id`);
       usingResources = true;
     } catch {
       groupResult = await timedRequest(pool, 'group-attributes-legacy', res)
@@ -305,9 +244,9 @@ router.get('/group/:id', async (req, res) => {
         .input('id', groupId)
         .query(`
         SELECT t.id, t.name, t.color
-        FROM GraphTagAssignments ta
-        JOIN GraphTags t ON ta.tagId = t.id
-        WHERE ta.entityId = @id AND t.entityType IN ('resource', 'group')
+        FROM "GraphTagAssignments" ta
+        JOIN "GraphTags" t ON ta."tagId" = t.id
+        WHERE ta."entityId" = @id AND t."entityType" IN ('resource', 'group')
       `);
       tags = r.recordset;
     } catch { /* table may not exist */ }
@@ -320,11 +259,11 @@ router.get('/group/:id', async (req, res) => {
       try {
         r = await timedRequest(pool, 'group-member-count', res)
           .input('id', groupId)
-          .query(`SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE resourceId = @id`);
+          .query(`SELECT COUNT(DISTINCT "memberId") AS cnt FROM ${table} WHERE "resourceId" = @id`);
       } catch {
         r = await timedRequest(pool, 'group-member-count-legacy', res)
           .input('id', groupId)
-          .query(`SELECT COUNT(DISTINCT memberId) AS cnt FROM ${table} WHERE groupId = @id`);
+          .query(`SELECT COUNT(DISTINCT "memberId") AS cnt FROM ${table} WHERE "groupId" = @id`);
       }
       memberCount = r.recordset[0].cnt;
     } catch { /* view may not exist */ }
@@ -334,30 +273,18 @@ router.get('/group/:id', async (req, res) => {
       const r = await timedRequest(pool, 'group-ap-count', res)
         .input('id', groupId)
         .query(`
-        SELECT COUNT(DISTINCT rrs.parentResourceId) AS cnt
-        FROM ResourceRelationships rrs
-        WHERE UPPER(rrs.childResourceId) = UPPER(@id)
-          AND rrs.relationshipType = 'Contains'
+        SELECT COUNT(DISTINCT rrs."parentResourceId") AS cnt
+        FROM "ResourceRelationships" rrs
+        WHERE UPPER(rrs."childResourceId") = UPPER(@id)
+          AND rrs."relationshipType" = 'Contains'
       `);
       accessPackageCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
 
     let hasHistory = false;
     try {
-      if (usingResources) {
-        const r = await timedRequest(pool, 'group-history-check', res)
-          .input('id', groupId)
-          .query(`SELECT TOP 1 1 AS found FROM Resources FOR SYSTEM_TIME ALL WHERE id = @id AND ValidTo != '9999-12-31 23:59:59.9999999'`);
-        hasHistory = r.recordset.length > 0;
-      } else {
-        const r = await timedRequest(pool, 'group-history-check', res)
-          .input('id', groupId)
-          .query(`SELECT TOP 1 1 AS found FROM GraphGroups_History WHERE id = @id`);
-        hasHistory = r.recordset.length > 0;
-      }
-    } catch {
-      hasHistory = false;
-    }
+      hasHistory = await rowExistsInHistory('Resources', groupId);
+    } catch { /* _history table may not exist on older deployments */ }
 
     res.json({ attributes, tags, memberCount, accessPackageCount, hasHistory });
   } catch (err) {
@@ -380,22 +307,22 @@ router.get('/group/:id/members', async (req, res) => {
       r = await timedRequest(pool, 'group-members', res)
         .input('id', req.params.id)
         .query(`
-        SELECT memberId, memberDisplayName, memberUPN,
-               membershipType, managedByAccessPackage
+        SELECT "memberId", memberDisplayName, memberUPN,
+               "membershipType", "managedByAccessPackage"
         FROM ${table}
-        WHERE resourceId = @id
-        ORDER BY memberDisplayName, membershipType
+        WHERE "resourceId" = @id
+        ORDER BY memberDisplayName, "membershipType"
       `);
     } catch {
       // Fall back to groupId column name
       r = await timedRequest(pool, 'group-members-legacy', res)
         .input('id', req.params.id)
         .query(`
-        SELECT memberId, memberDisplayName, memberUPN,
-               membershipType, managedByAccessPackage
+        SELECT "memberId", memberDisplayName, memberUPN,
+               "membershipType", "managedByAccessPackage"
         FROM ${table}
-        WHERE groupId = @id
-        ORDER BY memberDisplayName, membershipType
+        WHERE "groupId" = @id
+        ORDER BY memberDisplayName, "membershipType"
       `);
     }
     res.json(r.recordset);
@@ -417,14 +344,14 @@ router.get('/group/:id/access-packages', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT DISTINCT
-        rrs.parentResourceId AS resourceId,
-        ap.displayName AS accessPackageName,
+        rrs."parentResourceId" AS "resourceId",
+        ap."displayName" AS accessPackageName,
         rrs.roleName
-      FROM ResourceRelationships rrs
-      LEFT JOIN Resources ap ON rrs.parentResourceId = ap.id AND ap.resourceType = 'BusinessRole'
-      WHERE UPPER(rrs.childResourceId) = UPPER(@id)
-        AND rrs.relationshipType = 'Contains'
-      ORDER BY ap.displayName
+      FROM "ResourceRelationships" rrs
+      LEFT JOIN "Resources" ap ON rrs."parentResourceId" = ap.id AND ap."resourceType" = 'BusinessRole'
+      WHERE UPPER(rrs."childResourceId") = UPPER(@id)
+        AND rrs."relationshipType" = 'Contains'
+      ORDER BY ap."displayName"
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -440,29 +367,10 @@ router.get('/group/:id/history', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
-    const pool = await db.getPool();
-    let r;
-    try {
-      // Try Resources temporal table first (new model)
-      r = await timedRequest(pool, 'group-history', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT * FROM Resources FOR SYSTEM_TIME ALL
-        WHERE id = @id
-        ORDER BY ValidFrom DESC
-      `);
-    } catch {
-      // Fall back to GraphGroups temporal table (old model)
-      r = await timedRequest(pool, 'group-history-legacy', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT * FROM GraphGroups FOR SYSTEM_TIME ALL
-        WHERE id = @id
-        ORDER BY ValidFrom DESC
-      `);
-    }
-    res.json(r.recordset.map(cleanRow));
+    const rows = await fetchHistory('Resources', req.params.id);
+    res.json(rows.map(cleanRow));
   } catch (err) {
+    console.error('group-history failed:', err.message);
     res.json([]);
   }
 });
@@ -483,16 +391,16 @@ router.get('/access-package/:id', async (req, res) => {
       apResult = await timedRequest(pool, 'ap-attributes', res)
         .input('id', apId)
         .query(`
-        SELECT ap.*, c.displayName AS catalogName
-        FROM Resources ap
-        LEFT JOIN GovernanceCatalogs c ON ap.catalogId = c.id
-        WHERE ap.id = @id AND ap.resourceType = 'BusinessRole'
+        SELECT ap.*, c."displayName" AS catalogName
+        FROM "Resources" ap
+        LEFT JOIN "GovernanceCatalogs" c ON ap."catalogId" = c.id
+        WHERE ap.id = @id AND ap."resourceType" = 'BusinessRole'
       `);
     } catch {
       // GovernanceCatalogs may not exist — fall back to AP-only query
       apResult = await timedRequest(pool, 'ap-attributes', res)
         .input('id', apId)
-        .query(`SELECT * FROM Resources WHERE id = @id AND resourceType = 'BusinessRole'`);
+        .query(`SELECT * FROM "Resources" WHERE id = @id AND "resourceType" = 'BusinessRole'`);
     }
 
     if (apResult.recordset.length === 0) {
@@ -506,7 +414,7 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-assignment-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM ResourceAssignments WHERE resourceId = @id AND assignmentType = 'Governed'
+        SELECT COUNT(*) AS cnt FROM "ResourceAssignments" WHERE "resourceId" = @id AND "assignmentType" = 'Governed'
       `);
       assignmentCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -517,9 +425,9 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-group-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(DISTINCT childResourceId) AS cnt
-        FROM ResourceRelationships
-        WHERE parentResourceId = @id AND relationshipType = 'Contains'
+        SELECT COUNT(DISTINCT "childResourceId") AS cnt
+        FROM "ResourceRelationships"
+        WHERE "parentResourceId" = @id AND "relationshipType" = 'Contains'
       `);
       groupCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -530,7 +438,7 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-review-count', res)
         .input('id', apId)
         .query(`
-        SELECT COUNT(*) AS cnt FROM CertificationDecisions WHERE resourceId = @id
+        SELECT COUNT(*) AS cnt FROM "CertificationDecisions" WHERE "resourceId" = @id
       `);
       reviewCount = r.recordset[0].cnt;
     } catch { /* table may not exist */ }
@@ -546,10 +454,10 @@ router.get('/access-package/:id', async (req, res) => {
       const r = await timedRequest(pool, 'ap-last-review-date', res)
         .input('id', apId)
         .query(`
-        SELECT TOP 1 reviewedDateTime, reviewedByDisplayName
-        FROM CertificationDecisions
-        WHERE resourceId = @id AND decision IS NOT NULL AND decision <> 'NotReviewed'
-        ORDER BY reviewedDateTime DESC
+        SELECT "reviewedDateTime", "reviewedByDisplayName"
+        FROM "CertificationDecisions"
+        WHERE "resourceId" = @id AND decision IS NOT NULL AND decision <> 'NotReviewed'
+        ORDER BY "reviewedDateTime" DESC
       `);
       lastReviewDate = r.recordset[0]?.reviewedDateTime || null;
       lastReviewedBy = r.recordset[0]?.reviewedByDisplayName || null;
@@ -565,10 +473,10 @@ router.get('/access-package/:id', async (req, res) => {
         .query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN hasAutoAddRule = 1 THEN 1 ELSE 0 END) AS autoAdd,
-          SUM(CASE WHEN ISNULL(hasAutoAddRule, 0) = 0 AND hasAutoRemoveRule = 1 THEN 1 ELSE 0 END) AS autoRemoveOnly
-        FROM AssignmentPolicies
-        WHERE resourceId = @id
+          SUM(CASE WHEN "hasAutoAddRule" = TRUE THEN 1 ELSE 0 END) AS autoAdd,
+          SUM(CASE WHEN COALESCE("hasAutoAddRule", 0) = 0 AND "hasAutoRemoveRule" = TRUE THEN 1 ELSE 0 END) AS autoRemoveOnly
+        FROM "AssignmentPolicies"
+        WHERE "resourceId" = @id
       `);
       policyCount = r.recordset[0].total;
       autoAddPolicyCount = r.recordset[0].autoAdd;
@@ -599,28 +507,18 @@ router.get('/access-package/:id', async (req, res) => {
         .input('id', apId)
         .query(`
         SELECT cat.id, cat.name, cat.color
-        FROM dbo.GovernanceCategoryAssignments ca
-        INNER JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
-        WHERE ca.resourceId = LOWER(@id)
+        FROM "GovernanceCategoryAssignments" ca
+        INNER JOIN "GovernanceCategories" cat ON ca."categoryId" = cat.id
+        WHERE ca."resourceId" = LOWER(@id)
       `);
       if (r.recordset.length > 0) {
         category = r.recordset[0];
       }
     } catch { /* category tables may not exist */ }
 
-    // 7. History check
+    // 7. History check (v5: queries the _history audit table)
     let hasHistory = false;
-    try {
-      const r = await timedRequest(pool, 'ap-history-check', res)
-        .input('id', apId)
-        .query(`
-        SELECT TOP 1 1 AS found FROM Resources FOR SYSTEM_TIME ALL
-        WHERE id = @id AND resourceType = 'BusinessRole' AND ValidTo != '9999-12-31 23:59:59.9999999'
-      `);
-      hasHistory = r.recordset.length > 0;
-    } catch {
-      hasHistory = false;
-    }
+    try { hasHistory = await rowExistsInHistory('Resources', apId); } catch { /* _history may not exist */ }
 
     res.json({ attributes, assignmentCount, groupCount, reviewCount, pendingRequestCount, lastReviewDate, lastReviewedBy, hasHistory, policyCount, autoAddPolicyCount, assignmentType, category });
   } catch (err) {
@@ -639,41 +537,31 @@ router.get('/access-package/:id/assignments', async (req, res) => {
     const pool = await db.getPool();
     let r;
     try {
-      // Try Principals first (new model — email instead of userPrincipalName)
+      // v5: assignedDate comes from the _history audit table (earliest INSERT
+      // for this assignment row). Falls back to NULL when no history exists.
       r = await timedRequest(pool, 'ap-assignments', res)
         .input('id', req.params.id)
         .query(`
         SELECT
-          a.principalId, a.state, a.assignmentStatus,
-          u.displayName AS targetDisplayName,
-          u.email AS targetUPN,
-          a.ValidFrom AS assignedDate
-        FROM ResourceAssignments a
-        LEFT JOIN Principals u ON a.principalId = u.id AND u.ValidTo = '9999-12-31 23:59:59.9999999'
-        WHERE a.resourceId = @id
-          AND a.assignmentType = 'Governed'
-          AND a.ValidTo = '9999-12-31 23:59:59.9999999'
+          a."principalId", a.state, a."assignmentStatus",
+          u."displayName" AS "targetDisplayName",
+          u.email AS "targetUPN",
+          h.assigned AS "assignedDate"
+        FROM "ResourceAssignments" a
+        LEFT JOIN "Principals" u ON a."principalId" = u.id
+        LEFT JOIN LATERAL (
+          SELECT MIN("changedAt") AS assigned
+          FROM "_history"
+          WHERE "tableName" = 'ResourceAssignments' AND "rowId" = a.id::text
+        ) h ON true
+        WHERE a."resourceId" = @id
+          AND a."assignmentType" = 'Governed'
           AND (a.state = 'Delivered' OR a.state IS NULL)
-        ORDER BY u.displayName
+        ORDER BY u."displayName"
       `);
-    } catch {
-      // Fall back to GraphUsers (old model)
-      r = await timedRequest(pool, 'ap-assignments-legacy', res)
-        .input('id', req.params.id)
-        .query(`
-        SELECT
-          a.principalId, a.state, a.assignmentStatus,
-          u.displayName AS targetDisplayName,
-          u.userPrincipalName AS targetUPN,
-          a.ValidFrom AS assignedDate
-        FROM ResourceAssignments a
-        LEFT JOIN GraphUsers u ON a.principalId = u.id
-        WHERE a.resourceId = @id
-          AND a.assignmentType = 'Governed'
-          AND a.ValidTo = '9999-12-31 23:59:59.9999999'
-          AND (a.state = 'Delivered' OR a.state IS NULL)
-        ORDER BY u.displayName
-      `);
+    } catch (e) {
+      console.error('ap-assignments failed:', e.message);
+      r = { recordset: [] };
     }
     res.json(r.recordset);
   } catch (err) {
@@ -694,16 +582,14 @@ router.get('/access-package/:id/resource-roles', async (req, res) => {
       .query(`
       SELECT
         rrs.roleName, rrs.roleOriginSystem,
-        r.displayName AS scopeDisplayName, rrs.childResourceId, rrs.roleOriginSystem AS scopeOriginSystem,
-        COALESCE(r.displayName, rrs.roleName) AS groupDisplayName,
-        COALESCE(r.displayName, rrs.roleName) AS resourceDisplayName,
-        r.resourceType, r.systemId
-      FROM ResourceRelationships rrs
-      LEFT JOIN Resources r ON rrs.childResourceId = r.id
-        AND r.ValidTo = '9999-12-31 23:59:59.9999999'
-      WHERE rrs.parentResourceId = @id AND rrs.relationshipType = 'Contains'
-        AND rrs.ValidTo = '9999-12-31 23:59:59.9999999'
-      ORDER BY COALESCE(r.displayName, g.displayName), rrs.roleName
+        r."displayName" AS scopeDisplayName, rrs."childResourceId", rrs.roleOriginSystem AS scopeOriginSystem,
+        COALESCE(r."displayName", rrs.roleName) AS groupDisplayName,
+        COALESCE(r."displayName", rrs.roleName) AS "resourceDisplayName",
+        r."resourceType", r."systemId"
+      FROM "ResourceRelationships" rrs
+      LEFT JOIN "Resources" r ON rrs."childResourceId" = r.id
+      WHERE rrs."parentResourceId" = @id AND rrs."relationshipType" = 'Contains'
+      ORDER BY COALESCE(r."displayName", g."displayName"), rrs.roleName
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -723,15 +609,15 @@ router.get('/access-package/:id/reviews', async (req, res) => {
       .input('id', req.params.id)
       .query(`
       SELECT
-        id, reviewInstanceId, reviewDefinitionId,
-        principalDisplayName,
-        reviewedByDisplayName,
-        reviewedDateTime, decision, justification, recommendation,
-        reviewInstanceStartDateTime, reviewInstanceEndDateTime,
-        reviewInstanceStatus
-      FROM CertificationDecisions
-      WHERE resourceId = @id
-      ORDER BY reviewedDateTime DESC
+        id, "reviewInstanceId", "reviewDefinitionId",
+        "principalDisplayName",
+        "reviewedByDisplayName",
+        "reviewedDateTime", decision, justification, "recommendation",
+        "reviewInstanceStartDateTime", "reviewInstanceEndDateTime",
+        "reviewInstanceStatus"
+      FROM "CertificationDecisions"
+      WHERE "resourceId" = @id
+      ORDER BY "reviewedDateTime" DESC
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -754,14 +640,14 @@ router.get('/access-package/:id/requests', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          req.id, req.requestType, req.requestState, req.requestStatus,
-          req.justification, req.createdDateTime, req.completedDateTime,
-          u.displayName AS requestorDisplayName, u.email AS requestorUPN
-        FROM AssignmentRequests req
-        LEFT JOIN Principals u ON req.requestorId = u.id
-        WHERE req.resourceId = @id
-          AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
-        ORDER BY req.createdDateTime DESC
+          req.id, req."requestType", req."requestState", req."requestStatus",
+          req.justification, req."createdDateTime", req."completedDateTime",
+          u."displayName" AS requestorDisplayName, u.email AS requestorUPN
+        FROM "AssignmentRequests" req
+        LEFT JOIN "Principals" u ON req."requestorId" = u.id
+        WHERE req."resourceId" = @id
+          AND req."requestState" IN ('PendingApproval', 'Delivering', 'Accepted')
+        ORDER BY req."createdDateTime" DESC
       `);
     } catch {
       // Fall back to GraphUsers (old model)
@@ -769,14 +655,14 @@ router.get('/access-package/:id/requests', async (req, res) => {
         .input('id', req.params.id)
         .query(`
         SELECT
-          req.id, req.requestType, req.requestState, req.requestStatus,
-          req.justification, req.createdDateTime, req.completedDateTime,
-          u.displayName AS requestorDisplayName, u.userPrincipalName AS requestorUPN
-        FROM AssignmentRequests req
-        LEFT JOIN GraphUsers u ON req.requestorId = u.id
-        WHERE req.resourceId = @id
-          AND req.requestState IN ('PendingApproval', 'Delivering', 'Accepted')
-        ORDER BY req.createdDateTime DESC
+          req.id, req."requestType", req."requestState", req."requestStatus",
+          req.justification, req."createdDateTime", req."completedDateTime",
+          u."displayName" AS requestorDisplayName, u.userPrincipalName AS requestorUPN
+        FROM "AssignmentRequests" req
+        LEFT JOIN GraphUsers u ON req."requestorId" = u.id
+        WHERE req."resourceId" = @id
+          AND req."requestState" IN ('PendingApproval', 'Delivering', 'Accepted')
+        ORDER BY req."createdDateTime" DESC
       `);
     }
     res.json(r.recordset);
@@ -792,16 +678,12 @@ router.get('/access-package/:id/history', async (req, res) => {
   if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
   if (!useSql) return res.json([]);
   try {
-    const pool = await db.getPool();
-    const r = await timedRequest(pool, 'ap-history', res)
-      .input('id', req.params.id)
-      .query(`
-      SELECT * FROM Resources FOR SYSTEM_TIME ALL
-      WHERE id = @id AND resourceType = 'BusinessRole'
-      ORDER BY ValidFrom DESC
-    `);
-    res.json(r.recordset.map(cleanRow));
+    const rows = await fetchHistory('Resources', req.params.id);
+    // Only show history for rows that were business roles at some point
+    const filtered = rows.filter(r => r.resourceType === 'BusinessRole');
+    res.json(filtered.map(cleanRow));
   } catch (err) {
+    console.error('ap-history failed:', err.message);
     res.json([]);
   }
 });
@@ -817,14 +699,14 @@ router.get('/access-package/:id/policies', async (req, res) => {
     const r = await timedRequest(pool, 'ap-policies', res)
       .input('id', req.params.id)
       .query(`
-      SELECT id, displayName, description, allowedTargetScope,
-             ISNULL(hasAutoAddRule, CAST(0 AS BIT)) AS hasAutoAddRule,
-             ISNULL(hasAutoRemoveRule, CAST(0 AS BIT)) AS hasAutoRemoveRule,
-             JSON_VALUE(automaticRequestSettings, '$.filter.rule') AS autoAssignmentFilter,
-             createdDateTime, modifiedDateTime
-      FROM AssignmentPolicies
-      WHERE resourceId = @id
-      ORDER BY displayName
+      SELECT id, "displayName", description, "allowedTargetScope",
+             COALESCE("hasAutoAddRule", CAST(0 AS BOOLEAN)) AS "hasAutoAddRule",
+             COALESCE("hasAutoRemoveRule", CAST(0 AS BOOLEAN)) AS "hasAutoRemoveRule",
+             JSON_VALUE("automaticRequestSettings", '$.filter.rule') AS autoAssignmentFilter,
+             "createdDateTime", "modifiedDateTime"
+      FROM "AssignmentPolicies"
+      WHERE "resourceId" = @id
+      ORDER BY "displayName"
     `);
     res.json(r.recordset);
   } catch {

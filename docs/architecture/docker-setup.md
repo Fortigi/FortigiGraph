@@ -29,21 +29,19 @@ To connect your own Entra ID tenant, click **"Connect Entra ID"** on the Crawler
 
 For contributors who want to build and modify the code locally.
 
-## Architecture
+## Architecture (v5)
 
 ```mermaid
 graph TB
     subgraph Docker["docker-compose.yml"]
-        SQL[(SQL Server 2022<br/>port 1433)]
-        INIT[sql-init + sql-table-init<br/><i>one-shot: create DB + tables</i>]
+        PG[(PostgreSQL 16<br/>port 5432)]
         API[Backend + Frontend<br/>port 3001]
-        WORKER[Worker<br/><i>PowerShell 7: crawlers,<br/>risk scoring, scheduling</i>]
+        WORKER[Worker<br/><i>PowerShell 7: crawlers,<br/>scheduler — no DB driver</i>]
     end
 
-    INIT -->|creates DB + schema| SQL
-    API -->|reads/writes| SQL
-    WORKER -->|calls Ingest API| API
-    WORKER -->|direct SQL for risk scoring| SQL
+    API -->|migrations + reads/writes| PG
+    WORKER -->|claims jobs via API| API
+    WORKER -->|posts ingest data via API| API
 
     User[Browser] -->|http://localhost:3001| API
     Dev[Developer] -->|docker exec| WORKER
@@ -53,13 +51,16 @@ graph TB
 
 | Service | Image | Ports | Purpose |
 |---|---|---|---|
-| `sql` | SQL Server 2022 | 1433 | Database with temporal tables |
-| `sql-init` | SQL Server 2022 (one-shot) | — | Creates `GraphData` database |
-| `sql-table-init` | PowerShell 7 (one-shot) | — | Creates all application tables, views, indexes |
-| `web` | Node.js 20 | 3001 | Ingest API + Read API + served React frontend |
-| `worker` | PowerShell 7 | — | Crawlers, risk scoring, account correlation, scheduling |
+| `postgres` | postgres:16-alpine | 5432 | Database. No size limits, no licensing. |
+| `web` | Node.js 20 | 3001 | Migrations runner + Ingest API + Read API + served React frontend |
+| `worker` | PowerShell 7 | — | Crawlers, scheduler. **No database driver in v5.** |
 
-After startup, 3 containers remain running: `sql`, `web`, `worker`.
+After startup, 3 containers remain running: `postgres`, `web`, `worker`.
+
+The v4 `sql-init` and `sql-table-init` services are gone. Schema creation
+happens inside the web container at startup via the migrations runner
+(`app/api/src/db/migrate.js`) which applies any new files from
+`app/api/src/db/migrations/*.sql`.
 
 ---
 
@@ -94,20 +95,32 @@ docker compose -f docker-compose.yml down -v
 
 ---
 
-## Auto-Bootstrap
+## Auto-Bootstrap (v5)
 
-On first startup, the backend automatically:
+On first startup, the web container:
 
-1. Creates a **WorkerConfig** table (key-value store for worker settings)
-2. Creates a **CrawlerJobs** table (SQL-based job queue between UI and worker)
-3. Creates a **Built-in Worker** crawler with a generated API key
-4. Stores the API key in WorkerConfig for the worker to discover
+1. Runs the migrations in `app/api/src/db/migrations/*.sql` to create all
+   tables, views, and indexes (idempotent — re-runs are safe).
+2. Creates a **Built-in Worker** crawler row with a generated API key.
+3. Writes the plaintext key to `/data/uploads/.builtin-worker-key` (a file
+   inside the shared `job_data` volume) with `0600` permissions.
 
-The worker discovers the key on startup by polling WorkerConfig (retries for up to 2 minutes while the backend initializes). This means no manual crawler registration is needed — jobs submitted from the UI are automatically picked up and executed by the worker.
+The worker container reads the key file on startup. Both containers mount
+the same `job_data` volume so the file is visible to both. The API key is
+never exposed via an HTTP endpoint — the trust boundary is the docker host.
 
-## Job Queue
+## Job Queue (v5)
 
-The UI can submit crawler jobs (demo data, Entra ID sync, CSV import) via `POST /api/admin/crawler-jobs`. Jobs are stored in the `CrawlerJobs` SQL table and picked up by the worker every 30 seconds.
+The UI submits crawler jobs (demo data, Entra ID sync, CSV import) via
+`POST /api/admin/crawler-jobs`. Jobs are stored in the `CrawlerJobs` table.
+
+The worker polls `POST /api/crawlers/jobs/claim` every 30 seconds. The claim
+endpoint atomically marks the next queued job as `running` and returns it.
+The worker dispatches to the appropriate crawler script, then calls
+`POST /api/crawlers/jobs/:id/complete` (or `.../fail`) when done.
+
+In v5 the worker has **no direct database access at all**. Every read and
+write goes through the API.
 
 The `Invoke-CrawlerJob.ps1` dispatcher routes jobs to the appropriate crawler script:
 

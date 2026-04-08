@@ -8,11 +8,13 @@
 
 ## Project Overview
 
-Identity Atlas is a Docker-deployed application that pulls authorization data from Microsoft Graph (and other systems via CSV) into a temporal SQL Server database, then surfaces it through a React role-mining UI. The repo also ships PowerShell SDK functions for the Graph API and SQL operations, used internally by the worker container.
+Identity Atlas is a Docker-deployed application that pulls authorization data from Microsoft Graph (and other systems via CSV) into a **PostgreSQL** database, then surfaces it through a React role-mining UI. The worker container ships PowerShell crawler scripts but no longer touches the database directly — all persistence flows through the Node.js API.
+
+**v5 architectural change (April 2026):** The database backend moved from SQL Server to PostgreSQL. SQL Server Developer Edition is free for development but cannot be used in production per Microsoft's EULA, and SQL Server Express has a 10 GB hard cap that's too small for the tenants Identity Atlas targets. Postgres has no licensing surface and no size limits. Temporal tables were dropped — they had no native postgres equivalent and were unused in practice. The v4 schema files lived in `app/db/*.ps1` (deleted in v5); the new schema is a versioned set of `.sql` files in `app/api/src/db/migrations/` applied automatically by the web container at startup. See [docs/architecture/postgres-migration.md](docs/architecture/postgres-migration.md) for the full migration plan.
 
 **Key Information:**
-- **Language:** PowerShell
-- **Primary Purpose:** Microsoft Graph API wrapper with SQL Server data persistence (Docker-hosted)
+- **Languages:** PowerShell (crawlers), JavaScript (Node API + React UI), SQL (postgres migrations)
+- **Primary Purpose:** Microsoft Graph API wrapper with PostgreSQL data persistence (Docker-hosted)
 - **Author:** Wim van den Heijkant
 - **Company:** Fortigi
 - **GitHub:** https://github.com/Fortigi/FortigiGraph

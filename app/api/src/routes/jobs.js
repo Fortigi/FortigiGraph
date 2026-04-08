@@ -70,7 +70,7 @@ router.get('/admin/crawler-configs', async (req, res) => {
   try {
     const pool = await db.getPool();
     const result = await pool.request().query(
-      `SELECT * FROM dbo.CrawlerConfigs WHERE enabled = 1 ORDER BY createdAt DESC`
+      `SELECT * FROM "CrawlerConfigs" WHERE "enabled" = TRUE ORDER BY "createdAt" DESC`
     );
     const configs = result.recordset.map(r => ({
       ...r,
@@ -98,9 +98,9 @@ router.post('/admin/crawler-configs', async (req, res) => {
       .input('crawlerType', crawlerType)
       .input('displayName', displayName.trim().slice(0, 255))
       .input('config', JSON.stringify(config || {}))
-      .query(`INSERT INTO dbo.CrawlerConfigs (crawlerType, displayName, config)
-              OUTPUT INSERTED.*
-              VALUES (@crawlerType, @displayName, @config)`);
+      .query(`INSERT INTO "CrawlerConfigs" ("crawlerType", "displayName", config)
+              VALUES (@crawlerType, @displayName, @config)
+              RETURNING *`);
 
     const row = result.recordset[0];
     res.status(201).json({ ...row, config: maskConfig(row.config) });
@@ -119,7 +119,7 @@ router.get('/admin/crawler-configs/:id', async (req, res) => {
   try {
     const pool = await db.getPool();
     const result = await pool.request().input('id', id)
-      .query(`SELECT * FROM dbo.CrawlerConfigs WHERE id = @id`);
+      .query(`SELECT * FROM "CrawlerConfigs" WHERE id = @id`);
     if (result.recordset.length === 0) return res.status(404).json({ error: 'Config not found' });
     const row = result.recordset[0];
     res.json({ ...row, config: maskConfig(row.config) });
@@ -142,10 +142,10 @@ router.patch('/admin/crawler-configs/:id', async (req, res) => {
 
     // Read existing config to preserve secret if not provided
     const existing = await pool.request().input('id', id)
-      .query(`SELECT config FROM dbo.CrawlerConfigs WHERE id = @id`);
+      .query(`SELECT config FROM "CrawlerConfigs" WHERE id = @id`);
     if (existing.recordset.length === 0) return res.status(404).json({ error: 'Config not found' });
 
-    let mergedConfig = JSON.parse(existing.recordset[0].config);
+    let mergedConfig = (typeof existing.recordset[0].config === "string" ? JSON.parse(existing.recordset[0].config) : existing.recordset[0].config);
     if (config) {
       const incoming = { ...config };
       // If secret is the mask or empty, keep existing
@@ -159,12 +159,12 @@ router.patch('/admin/crawler-configs/:id', async (req, res) => {
     const request = pool.request().input('id', id).input('config', JSON.stringify(mergedConfig));
 
     if (displayName !== undefined) {
-      sets.push('displayName = @displayName');
+      sets.push('"displayName" = @displayName');
       request.input('displayName', displayName.trim().slice(0, 255));
     }
 
     const result = await request.query(
-      `UPDATE dbo.CrawlerConfigs SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`
+      `UPDATE "CrawlerConfigs" SET ${sets.join(', ')} WHERE id = @id RETURNING *`
     );
     const row = result.recordset[0];
     res.json({ ...row, config: maskConfig(row.config) });
@@ -183,7 +183,7 @@ router.delete('/admin/crawler-configs/:id', async (req, res) => {
   try {
     const pool = await db.getPool();
     const result = await pool.request().input('id', id)
-      .query(`DELETE FROM dbo.CrawlerConfigs WHERE id = @id`);
+      .query(`DELETE FROM "CrawlerConfigs" WHERE id = @id`);
     if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Config not found' });
     // Best-effort cleanup of any uploaded CSV files for this config
     deleteConfigFolder(id).catch(() => {});
@@ -375,9 +375,9 @@ router.post('/admin/discover-graph-attributes', async (req, res) => {
     try {
       const pool = await db.getPool();
       const cfgRes = await pool.request().input('id', configId)
-        .query(`SELECT config FROM dbo.CrawlerConfigs WHERE id = @id`);
+        .query(`SELECT config FROM "CrawlerConfigs" WHERE id = @id`);
       if (cfgRes.recordset.length === 0) return res.status(404).json({ error: 'Config not found' });
-      const cfg = JSON.parse(cfgRes.recordset[0].config);
+      const cfg = (typeof cfgRes.recordset[0].config === "string" ? JSON.parse(cfgRes.recordset[0].config) : cfgRes.recordset[0].config);
       tenantId = tenantId || cfg.tenantId;
       clientId = clientId || cfg.clientId;
       clientSecret = clientSecret || cfg.clientSecret;
@@ -604,7 +604,7 @@ router.post('/admin/crawler-jobs', async (req, res) => {
     // Prevent duplicate demo jobs
     if (jobType === 'demo') {
       const dup = await pool.request().query(
-        `SELECT 1 FROM dbo.CrawlerJobs WHERE jobType = 'demo' AND status IN ('queued', 'running')`
+        `SELECT 1 FROM "CrawlerJobs" WHERE "jobType" = 'demo' AND status IN ('queued', 'running')`
       );
       if (dup.recordset.length > 0) {
         return res.status(409).json({ error: 'A demo data job is already queued or running' });
@@ -615,11 +615,13 @@ router.post('/admin/crawler-jobs', async (req, res) => {
     let resolvedConfig = config || null;
     if (configId) {
       const cfgResult = await pool.request().input('configId', configId)
-        .query(`SELECT config FROM dbo.CrawlerConfigs WHERE id = @configId AND enabled = 1`);
+        .query(`SELECT config FROM "CrawlerConfigs" WHERE id = @configId AND "enabled" = TRUE`);
       if (cfgResult.recordset.length === 0) {
         return res.status(404).json({ error: 'Crawler config not found' });
       }
-      resolvedConfig = JSON.parse(cfgResult.recordset[0].config);
+      // jsonb is auto-parsed by pg; legacy string column may still appear in tests.
+      const raw = cfgResult.recordset[0].config;
+      resolvedConfig = (typeof raw === 'string') ? JSON.parse(raw) : raw;
     }
 
     // Validate entra-id has credentials
@@ -648,14 +650,14 @@ router.post('/admin/crawler-jobs', async (req, res) => {
       .input('jobType', jobType)
       .input('config', configJson)
       .input('createdBy', createdBy)
-      .query(`INSERT INTO dbo.CrawlerJobs (jobType, config, createdBy)
-              OUTPUT INSERTED.*
-              VALUES (@jobType, @config, @createdBy)`);
+      .query(`INSERT INTO "CrawlerJobs" ("jobType", config, "createdBy")
+              VALUES (@jobType, @config, @createdBy)
+              RETURNING *`);
 
     // Update lastRunAt on the source config
     if (configId) {
       await pool.request().input('configId', configId)
-        .query(`UPDATE dbo.CrawlerConfigs SET lastRunAt = SYSUTCDATETIME() WHERE id = @configId`);
+        .query(`UPDATE "CrawlerConfigs" SET "lastRunAt" = (now() AT TIME ZONE 'utc') WHERE id = @configId`);
     }
 
     res.status(201).json(result.recordset[0]);
@@ -674,7 +676,7 @@ router.get('/admin/crawler-jobs', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, MAX_RECENT_JOBS);
     const result = await pool.request()
       .input('limit', limit)
-      .query(`SELECT TOP (@limit) * FROM dbo.CrawlerJobs ORDER BY createdAt DESC`);
+      .query(`SELECT * FROM "CrawlerJobs" ORDER BY "createdAt" DESC LIMIT @limit`);
     res.json(result.recordset);
   } catch (err) {
     console.error('Error listing crawler jobs:', err.message);
@@ -692,7 +694,7 @@ router.get('/admin/crawler-jobs/:id', async (req, res) => {
     const pool = await db.getPool();
     const result = await pool.request()
       .input('id', id)
-      .query(`SELECT * FROM dbo.CrawlerJobs WHERE id = @id`);
+      .query(`SELECT * FROM "CrawlerJobs" WHERE id = @id`);
     if (result.recordset.length === 0) return res.status(404).json({ error: 'Job not found' });
     res.json(result.recordset[0]);
   } catch (err) {
@@ -711,7 +713,7 @@ router.delete('/admin/crawler-jobs/:id', async (req, res) => {
     const pool = await db.getPool();
     const result = await pool.request()
       .input('id', id)
-      .query(`UPDATE dbo.CrawlerJobs SET status = 'cancelled', completedAt = SYSUTCDATETIME()
+      .query(`UPDATE "CrawlerJobs" SET status = 'cancelled', "completedAt" = (now() AT TIME ZONE 'utc')
               WHERE id = @id AND status = 'queued'`);
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'Job not found or not in queued state' });
@@ -735,32 +737,21 @@ router.get('/admin/status', async (req, res) => {
 
   try {
     const pool = await db.getPool();
+    // Postgres: use to_regclass() instead of INFORMATION_SCHEMA EXISTS subqueries.
+    // After migrations have run all five tables exist, but we keep the safety
+    // checks so a stack started before migrations don't return 500.
     const result = await pool.request().query(`
       SELECT
-        (SELECT CASE WHEN EXISTS (
-          SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Principals' AND TABLE_SCHEMA = 'dbo'
-        ) THEN (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END FROM dbo.Principals)
-        ELSE 0 END) AS hasData,
-
-        (SELECT CASE WHEN EXISTS (
-          SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Crawlers' AND TABLE_SCHEMA = 'dbo'
-        ) THEN (SELECT COUNT(*) FROM dbo.Crawlers WHERE enabled = 1)
-        ELSE 0 END) AS crawlerCount,
-
-        (SELECT CASE WHEN EXISTS (
-          SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CrawlerConfigs' AND TABLE_SCHEMA = 'dbo'
-        ) THEN (SELECT COUNT(*) FROM dbo.CrawlerConfigs WHERE enabled = 1)
-        ELSE 0 END) AS configCount,
-
-        (SELECT CASE WHEN EXISTS (
-          SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CrawlerJobs' AND TABLE_SCHEMA = 'dbo'
-        ) THEN (SELECT COUNT(*) FROM dbo.CrawlerJobs WHERE status = 'queued')
-        ELSE 0 END) AS pendingJobs,
-
-        (SELECT CASE WHEN EXISTS (
-          SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CrawlerJobs' AND TABLE_SCHEMA = 'dbo'
-        ) THEN (SELECT COUNT(*) FROM dbo.CrawlerJobs WHERE status = 'running')
-        ELSE 0 END) AS runningJobs
+        CASE WHEN to_regclass('"Principals"')     IS NULL THEN 0
+             WHEN (SELECT COUNT(*) FROM "Principals") > 0 THEN 1 ELSE 0 END AS "hasData",
+        CASE WHEN to_regclass('"Crawlers"')       IS NULL THEN 0
+             ELSE (SELECT COUNT(*)::int FROM "Crawlers" WHERE "enabled" = TRUE) END AS "crawlerCount",
+        CASE WHEN to_regclass('"CrawlerConfigs"') IS NULL THEN 0
+             ELSE (SELECT COUNT(*)::int FROM "CrawlerConfigs" WHERE "enabled" = TRUE) END AS "configCount",
+        CASE WHEN to_regclass('"CrawlerJobs"')    IS NULL THEN 0
+             ELSE (SELECT COUNT(*)::int FROM "CrawlerJobs" WHERE "status" = 'queued') END AS "pendingJobs",
+        CASE WHEN to_regclass('"CrawlerJobs"')    IS NULL THEN 0
+             ELSE (SELECT COUNT(*)::int FROM "CrawlerJobs" WHERE "status" = 'running') END AS "runningJobs"
     `);
 
     const row = result.recordset[0];

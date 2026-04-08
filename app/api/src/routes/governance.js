@@ -15,66 +15,56 @@ async function safeQuery(pool, label, res, sql) {
   }
 }
 
-// ── Shared CTE: per-AP last review instance status ──────────
-// For each access package, finds the most recent review instance,
-// then summarizes decisions within that instance only.
-// Earlier instances are ignored — only the latest matters.
+// ── Shared CTE: per-AP last review instance status (postgres) ──────────
+// For each access package, picks the most recent review instance and
+// summarises decisions within that instance only. Date arithmetic uses
+// `(deadline::date < current_date)` and `(current_date - deadline::date)`
+// instead of T-SQL's CAST AS DATE / DATEDIFF / GETUTCDATE.
 const LAST_REVIEW_CTE = `
-WITH LatestInstance AS (
-  -- Find the most recent review instance per access package
-  SELECT
-    resourceId,
-    MAX(reviewInstanceId) AS reviewInstanceId,
-    MAX(reviewInstanceEndDateTime) AS reviewInstanceEndDateTime,
-    MAX(reviewInstanceStartDateTime) AS reviewInstanceStartDateTime,
-    MAX(reviewInstanceStatus) AS reviewInstanceStatus
-  FROM CertificationDecisions
-  WHERE reviewInstanceEndDateTime = (
-    SELECT MAX(r2.reviewInstanceEndDateTime)
-    FROM CertificationDecisions r2
-    WHERE r2.resourceId = CertificationDecisions.resourceId
-  )
-  GROUP BY resourceId
+WITH "LatestInstance" AS (
+  SELECT DISTINCT ON ("resourceId")
+         "resourceId",
+         "reviewInstanceId",
+         "reviewInstanceEndDateTime",
+         "reviewInstanceStartDateTime",
+         "reviewInstanceStatus"
+    FROM "CertificationDecisions"
+   ORDER BY "resourceId", "reviewInstanceEndDateTime" DESC NULLS LAST
 ),
-LastReviewPerAP AS (
-  -- Summarize decisions within the latest instance only
+"LastReviewPerAP" AS (
   SELECT
-    li.resourceId,
-    li.reviewInstanceEndDateTime AS deadline,
-    li.reviewInstanceStartDateTime AS reviewStart,
-    li.reviewInstanceStatus,
-    COUNT(*) AS totalDecisions,
-    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d.reviewedDateTime <= li.reviewInstanceEndDateTime THEN 1 ELSE 0 END) AS onTime,
-    SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) AS reviewedLate,
-    SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) AS notReviewed,
-    MAX(d.reviewedDateTime) AS lastReviewedDate,
-    MAX(d.reviewedByDisplayName) AS lastReviewedBy,
+    li."resourceId",
+    li."reviewInstanceEndDateTime"   AS deadline,
+    li."reviewInstanceStartDateTime" AS "reviewStart",
+    li."reviewInstanceStatus",
+    COUNT(*)::int AS "totalDecisions",
+    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d."reviewedDateTime" <= li."reviewInstanceEndDateTime" THEN 1 ELSE 0 END)::int AS "onTime",
+    SUM(CASE WHEN d.decision <> 'NotReviewed' AND d."reviewedDateTime"::date > li."reviewInstanceEndDateTime"::date THEN 1 ELSE 0 END)::int AS "reviewedLate",
+    SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END)::int AS "notReviewed",
+    MAX(d."reviewedDateTime") AS "lastReviewedDate",
+    MAX(d."reviewedByDisplayName") AS "lastReviewedBy",
     CASE
-      -- All decisions completed on time (same day or before deadline)
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) = 0
-       AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND CAST(d.reviewedDateTime AS DATE) > CAST(li.reviewInstanceEndDateTime AS DATE) THEN 1 ELSE 0 END) = 0
-      THEN 'Compliant'
-      -- Some decisions still pending but deadline day hasn't passed yet
+       AND SUM(CASE WHEN d.decision <> 'NotReviewed' AND d."reviewedDateTime"::date > li."reviewInstanceEndDateTime"::date THEN 1 ELSE 0 END) = 0
+        THEN 'Compliant'
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-       AND CAST(li.reviewInstanceEndDateTime AS DATE) >= CAST(GETUTCDATE() AS DATE)
-      THEN 'In Progress'
-      -- Deadline day passed with unreviewed decisions
+       AND li."reviewInstanceEndDateTime"::date >= current_date
+        THEN 'In Progress'
       WHEN SUM(CASE WHEN d.decision = 'NotReviewed' THEN 1 ELSE 0 END) > 0
-       AND CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-      THEN 'Missed'
-      -- All reviewed but some were late
+       AND li."reviewInstanceEndDateTime"::date < current_date
+        THEN 'Missed'
       ELSE 'Reviewed Late'
-    END AS complianceStatus,
+    END AS "complianceStatus",
     CASE
-      WHEN CAST(li.reviewInstanceEndDateTime AS DATE) < CAST(GETUTCDATE() AS DATE)
-      THEN DATEDIFF(DAY, CAST(li.reviewInstanceEndDateTime AS DATE), CAST(GETUTCDATE() AS DATE))
+      WHEN li."reviewInstanceEndDateTime"::date < current_date
+        THEN (current_date - li."reviewInstanceEndDateTime"::date)
       ELSE 0
-    END AS daysOverdue
-  FROM LatestInstance li
-    INNER JOIN CertificationDecisions d
-      ON d.resourceId = li.resourceId
-      AND d.reviewInstanceId = li.reviewInstanceId
-  GROUP BY li.resourceId, li.reviewInstanceEndDateTime, li.reviewInstanceStartDateTime, li.reviewInstanceStatus
+    END AS "daysOverdue"
+  FROM "LatestInstance" li
+    INNER JOIN "CertificationDecisions" d
+      ON d."resourceId" = li."resourceId"
+     AND d."reviewInstanceId" = li."reviewInstanceId"
+  GROUP BY li."resourceId", li."reviewInstanceEndDateTime", li."reviewInstanceStartDateTime", li."reviewInstanceStatus"
 )`;
 
 // ────────────────────────────────────────────────────────────────
@@ -88,12 +78,12 @@ router.get('/governance/summary', async (req, res) => {
     const rows = await safeQuery(pool, 'gov-summary', res,
       `${LAST_REVIEW_CTE}
       SELECT
-        COUNT(*) AS totalAPs,
-        SUM(CASE WHEN complianceStatus = 'Compliant' THEN 1 ELSE 0 END) AS compliant,
-        SUM(CASE WHEN complianceStatus = 'Missed' THEN 1 ELSE 0 END) AS overdue,
-        SUM(CASE WHEN complianceStatus = 'Reviewed Late' THEN 1 ELSE 0 END) AS reviewedLate,
-        SUM(CASE WHEN complianceStatus = 'In Progress' THEN 1 ELSE 0 END) AS inProgress
-      FROM LastReviewPerAP`);
+        COUNT(*)::int AS "totalAPs",
+        SUM(CASE WHEN "complianceStatus" = 'Compliant'    THEN 1 ELSE 0 END)::int AS compliant,
+        SUM(CASE WHEN "complianceStatus" = 'Missed'       THEN 1 ELSE 0 END)::int AS overdue,
+        SUM(CASE WHEN "complianceStatus" = 'Reviewed Late' THEN 1 ELSE 0 END)::int AS "reviewedLate",
+        SUM(CASE WHEN "complianceStatus" = 'In Progress'  THEN 1 ELSE 0 END)::int AS "inProgress"
+      FROM "LastReviewPerAP"`);
 
     const s = rows[0] || {};
 
@@ -124,61 +114,62 @@ router.get('/governance/review-compliance', async (req, res) => {
 
     let filterClause = '';
     if (filter === 'overdue') {
-      filterClause = "AND lr.complianceStatus = 'Missed'";
+      filterClause = `AND lr."complianceStatus" = 'Missed'`;
     } else if (filter === 'reviewed-late') {
-      filterClause = "AND lr.complianceStatus = 'Reviewed Late'";
+      filterClause = `AND lr."complianceStatus" = 'Reviewed Late'`;
     } else if (filter === 'compliant') {
-      filterClause = "AND lr.complianceStatus = 'Compliant'";
+      filterClause = `AND lr."complianceStatus" = 'Compliant'`;
     } else if (filter === 'in-progress') {
-      filterClause = "AND lr.complianceStatus = 'In Progress'";
+      filterClause = `AND lr."complianceStatus" = 'In Progress'`;
     }
 
     let categoryClause = '';
-    const request = timedRequest(pool, 'gov-review-compliance-detail', res);
+    const params = [];
     if (categoryId) {
       if (categoryId === 'uncategorized') {
-        categoryClause = 'AND ca.categoryId IS NULL';
+        categoryClause = `AND ca."categoryId" IS NULL`;
       } else {
-        categoryClause = 'AND ca.categoryId = @categoryId';
-        request.input('categoryId', categoryId);
+        params.push(parseInt(categoryId, 10));
+        categoryClause = `AND ca."categoryId" = $${params.length}`;
       }
     }
 
-    const result = await request.query(
+    const result = await db.query(
       `${LAST_REVIEW_CTE}
       SELECT
-        ap.id AS resourceId,
-        ap.displayName AS accessPackageName,
-        c.displayName AS catalogName,
-        cat.name AS categoryName,
-        cat.color AS categoryColor,
-        lr.complianceStatus,
+        ap.id AS "resourceId",
+        ap."displayName"   AS "accessPackageName",
+        c."displayName"    AS "catalogName",
+        cat.name           AS "categoryName",
+        cat.color          AS "categoryColor",
+        lr."complianceStatus",
         lr.deadline,
-        lr.daysOverdue,
-        lr.totalDecisions,
-        lr.onTime,
-        lr.reviewedLate,
-        lr.notReviewed,
-        lr.lastReviewedDate,
-        lr.lastReviewedBy,
-        lr.reviewInstanceStatus
-      FROM LastReviewPerAP lr
-        INNER JOIN Resources ap ON lr.resourceId = ap.id AND ap.resourceType = 'BusinessRole'
-        LEFT JOIN GovernanceCatalogs c ON ap.catalogId = c.id
-        LEFT JOIN dbo.GovernanceCategoryAssignments ca ON LOWER(ap.id) = ca.resourceId
-        LEFT JOIN dbo.GovernanceCategories cat ON ca.categoryId = cat.id
+        lr."daysOverdue",
+        lr."totalDecisions",
+        lr."onTime",
+        lr."reviewedLate",
+        lr."notReviewed",
+        lr."lastReviewedDate",
+        lr."lastReviewedBy",
+        lr."reviewInstanceStatus"
+      FROM "LastReviewPerAP" lr
+        INNER JOIN "Resources" ap ON lr."resourceId" = ap.id AND ap."resourceType" = 'BusinessRole'
+        LEFT JOIN "GovernanceCatalogs" c ON ap."catalogId" = c.id
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON LOWER(ap.id::text) = LOWER(ca."resourceId")
+        LEFT JOIN "GovernanceCategories" cat ON ca."categoryId" = cat.id
       WHERE 1=1 ${filterClause} ${categoryClause}
       ORDER BY
-        CASE lr.complianceStatus
-          WHEN 'Missed' THEN 1
+        CASE lr."complianceStatus"
+          WHEN 'Missed'        THEN 1
           WHEN 'Reviewed Late' THEN 2
-          WHEN 'In Progress' THEN 3
-          WHEN 'Compliant' THEN 4
+          WHEN 'In Progress'   THEN 3
+          WHEN 'Compliant'     THEN 4
           ELSE 5
         END,
-        lr.daysOverdue DESC`);
-    res.json(result.recordset);
+        lr."daysOverdue" DESC`, params);
+    res.json(result.rows);
   } catch (err) {
+    console.error('review-compliance failed:', err.message);
     res.json([]);
   }
 });
@@ -191,7 +182,7 @@ router.get('/governance/categories', async (req, res) => {
   try {
     const pool = await db.getPool();
     const rows = await safeQuery(pool, 'gov-categories', res,
-      `SELECT id, name, color FROM dbo.GovernanceCategories ORDER BY name`);
+      `SELECT id, name, color FROM "GovernanceCategories" ORDER BY name`);
     res.json(rows);
   } catch {
     res.json([]);

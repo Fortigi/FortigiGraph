@@ -68,13 +68,12 @@ function parseRoles(v) {
 async function readFromDb() {
   if (!useSql) return {};
   try {
-    const pool = await db.getPool();
-    const result = await pool.request().query(
-      `SELECT configKey, configValue FROM dbo.WorkerConfig
-       WHERE configKey IN ('AUTH_ENABLED','AUTH_TENANT_ID','AUTH_CLIENT_ID','AUTH_REQUIRED_ROLES')`
+    const r = await db.query(
+      `SELECT "configKey", "configValue" FROM "WorkerConfig"
+        WHERE "configKey" IN ('AUTH_ENABLED','AUTH_TENANT_ID','AUTH_CLIENT_ID','AUTH_REQUIRED_ROLES')`
     );
     const out = {};
-    for (const row of result.recordset) out[row.configKey] = row.configValue;
+    for (const row of r.rows) out[row.configKey] = row.configValue;
     return out;
   } catch (err) {
     // Table might not exist yet on a fresh stack — fail silent and rely on env vars.

@@ -34,7 +34,7 @@ async function checkContexts(pool) {
   if (hasContextsTable !== null && now - contextsCheckTime < 300000) return hasContextsTable;
   try {
     const r = await pool.request().query(`
-      SELECT OBJECT_ID('dbo.Contexts', 'U') AS contextsExists
+      SELECT to_regclass('"Contexts"') AS contextsExists
     `);
     hasContextsTable = !!r.recordset[0].contextsExists;
     contextsCheckTime = now;
@@ -56,14 +56,14 @@ router.get('/contexts', async (req, res) => {
 
     const result = await timedRequest(p, 'contexts-list', res).query(`
       SELECT ctx.*,
-          mgr.displayName AS managerDisplayName,
+          mgr."displayName" AS managerDisplayName,
           mgr.email AS managerEmail,
-          parent.displayName AS parentDisplayName
-      FROM Contexts ctx
-      LEFT JOIN Principals mgr ON ctx.managerId = mgr.id AND mgr.ValidTo = '9999-12-31 23:59:59.9999999'
-      LEFT JOIN Contexts parent ON ctx.parentContextId = parent.id AND parent.ValidTo = '9999-12-31 23:59:59.9999999'
-      WHERE ctx.ValidTo = '9999-12-31 23:59:59.9999999'
-      ORDER BY ctx.displayName
+          parent."displayName" AS parentDisplayName
+      FROM "Contexts" ctx
+      LEFT JOIN "Principals" mgr ON ctx."managerId" = mgr.id
+      LEFT JOIN "Contexts" parent ON ctx."parentContextId" = parent.id
+      WHERE 1=1
+      ORDER BY ctx."displayName"
     `);
 
     res.json({ data: result.recordset, total: result.recordset.length, available: true });
@@ -84,13 +84,13 @@ router.get('/contexts/tree', async (req, res) => {
     }
 
     const result = await timedRequest(p, 'contexts-tree', res).query(`
-      SELECT ctx.id, ctx.displayName, ctx.contextType, ctx.parentContextId,
-             ctx.memberCount, ctx.totalMemberCount, ctx.managerId, ctx.department,
-             mgr.displayName AS managerDisplayName
-      FROM Contexts ctx
-      LEFT JOIN Principals mgr ON ctx.managerId = mgr.id AND mgr.ValidTo = '9999-12-31 23:59:59.9999999'
-      WHERE ctx.ValidTo = '9999-12-31 23:59:59.9999999'
-      ORDER BY ctx.displayName
+      SELECT ctx.id, ctx."displayName", ctx."contextType", ctx."parentContextId",
+             ctx."memberCount", ctx."totalMemberCount", ctx."managerId", ctx.department,
+             mgr."displayName" AS managerDisplayName
+      FROM "Contexts" ctx
+      LEFT JOIN "Principals" mgr ON ctx."managerId" = mgr.id
+      WHERE 1=1
+      ORDER BY ctx."displayName"
     `);
 
     const rows = result.recordset;
@@ -139,7 +139,7 @@ router.get('/contexts/:id', async (req, res) => {
     // 1. Context attributes
     const attrResult = await timedRequest(p, 'context-detail', res)
       .input('id', req.params.id)
-      .query(`SELECT * FROM Contexts WHERE id = @id AND ValidTo = '9999-12-31 23:59:59.9999999'`);
+      .query(`SELECT * FROM "Contexts" WHERE id = @id`);
 
     if (attrResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Context not found' });
@@ -151,12 +151,12 @@ router.get('/contexts/:id', async (req, res) => {
       const membersResult = await timedRequest(p, 'context-members', res)
         .input('id', req.params.id)
         .query(`
-          SELECT p.id, p.displayName, p.email, p.jobTitle, p.accountEnabled, p.principalType
-          FROM Identities i
-          INNER JOIN IdentityMembers im ON im.identityId = i.id
-          INNER JOIN Principals p ON p.id = im.principalId AND p.ValidTo = '9999-12-31 23:59:59.9999999'
-          WHERE i.contextId = @id AND i.ValidTo = '9999-12-31 23:59:59.9999999'
-          ORDER BY p.displayName
+          SELECT p.id, p."displayName", p.email, p."jobTitle", p."accountEnabled", p."principalType"
+          FROM "Identities" i
+          INNER JOIN "IdentityMembers" im ON im."identityId" = i.id
+          INNER JOIN "Principals" p ON p.id = im."principalId"
+          WHERE i."contextId" = @id
+          ORDER BY p."displayName"
         `);
       members = membersResult.recordset;
     } catch { /* IdentityMembers table may not exist yet */ }
@@ -167,10 +167,10 @@ router.get('/contexts/:id', async (req, res) => {
       const subResult = await timedRequest(p, 'context-subcontexts', res)
         .input('id', req.params.id)
         .query(`
-          SELECT id, displayName, memberCount
-          FROM Contexts
-          WHERE parentContextId = @id AND ValidTo = '9999-12-31 23:59:59.9999999'
-          ORDER BY displayName
+          SELECT id, "displayName", "memberCount"
+          FROM "Contexts"
+          WHERE "parentContextId" = @id
+          ORDER BY "displayName"
         `);
       subContexts = subResult.recordset;
     } catch { /* ignore */ }
@@ -215,18 +215,18 @@ router.get('/contexts/:id/members', async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT p.id, p.displayName, p.email, p.jobTitle, p.accountEnabled, p.principalType
-      FROM Identities i
-      INNER JOIN IdentityMembers im ON im.identityId = i.id
-      INNER JOIN Principals p ON p.id = im.principalId AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+      SELECT p.id, p."displayName", p.email, p."jobTitle", p."accountEnabled", p."principalType"
+      FROM "Identities" i
+      INNER JOIN "IdentityMembers" im ON im."identityId" = i.id
+      INNER JOIN "Principals" p ON p.id = im."principalId"
       WHERE ${where}
-      ORDER BY p.displayName
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+      ORDER BY p."displayName"
+      LIMIT @limit OFFSET @offset;
 
       SELECT COUNT(*) AS total
-      FROM Identities i
-      INNER JOIN IdentityMembers im ON im.identityId = i.id
-      INNER JOIN Principals p ON p.id = im.principalId AND p.ValidTo = '9999-12-31 23:59:59.9999999'
+      FROM "Identities" i
+      INNER JOIN "IdentityMembers" im ON im."identityId" = i.id
+      INNER JOIN "Principals" p ON p.id = im."principalId"
       WHERE ${where};
     `);
 

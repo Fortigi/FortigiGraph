@@ -50,7 +50,7 @@ router.get('/identities', async (req, res) => {
     // Check if HR columns exist (schema may be pre-1.1)
     const colCheck = await p.request().query(`
       SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'Identities' AND COLUMN_NAME IN ('isHrAnchored', 'orphanStatus')
+      WHERE TABLE_NAME = '"Identities"' AND COLUMN_NAME IN ('"isHrAnchored"', '"orphanStatus"')
     `);
     const hasHrCols = colCheck.recordset.length >= 2;
 
@@ -58,12 +58,12 @@ router.get('/identities', async (req, res) => {
       .query(`
         SELECT
           COUNT(*) AS totalIdentities,
-          SUM(CASE WHEN accountCount > 1 THEN 1 ELSE 0 END) AS multiAccountIdentities,
-          SUM(CASE WHEN accountCount = 1 THEN 1 ELSE 0 END) AS singleAccountIdentities,
-          SUM(accountCount) AS totalAccounts,
-          SUM(CASE WHEN analystVerified = 1 THEN 1 ELSE 0 END) AS verifiedCount,
-          AVG(CAST(correlationConfidence AS FLOAT)) AS avgConfidence,
-          MAX(correlatedAt) AS lastCorrelatedAt
+          SUM(CASE WHEN "accountCount" > 1 THEN 1 ELSE 0 END) AS multiAccountIdentities,
+          SUM(CASE WHEN "accountCount" = 1 THEN 1 ELSE 0 END) AS singleAccountIdentities,
+          SUM("accountCount") AS totalAccounts,
+          SUM(CASE WHEN "analystVerified" = TRUE THEN 1 ELSE 0 END) AS verifiedCount,
+          AVG(CAST("correlationConfidence" AS FLOAT)) AS avgConfidence,
+          MAX("correlatedAt") AS lastCorrelatedAt
           ${hasHrCols ? `, SUM(CASE WHEN isHrAnchored = 1 THEN 1 ELSE 0 END) AS hrAnchoredCount,
           SUM(CASE WHEN orphanStatus IS NOT NULL THEN 1 ELSE 0 END) AS orphanCount` : ''}
         FROM dbo.Identities
@@ -73,9 +73,9 @@ router.get('/identities', async (req, res) => {
     // Account type distribution
     const typeDistResult = await timedRequest(p, 'identity-type-dist', res)
       .query(`
-        SELECT accountType, COUNT(*) AS cnt
-        FROM dbo.IdentityMembers
-        GROUP BY accountType
+        SELECT "accountType", COUNT(*) AS cnt
+        FROM "IdentityMembers"
+        GROUP BY "accountType"
         ORDER BY cnt DESC
       `);
     summary.accountTypeDistribution = typeDistResult.recordset;
@@ -132,7 +132,7 @@ router.get('/identities', async (req, res) => {
     // Count
     const countReq = timedRequest(p, 'identity-count', res);
     for (const [k, v] of Object.entries(inputs)) countReq.input(k, v);
-    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM dbo.Identities ${where}`);
+    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM "Identities" ${where}`);
     const total = countResult.recordset[0].total;
 
     // Sort
@@ -151,18 +151,18 @@ router.get('/identities', async (req, res) => {
     dataReq.input('pageOffset', pageOffset);
     dataReq.input('pageLimit', pageLimit);
     const dataResult = await dataReq.query(`
-      SELECT id, displayName, primaryPrincipalId AS primaryAccountId, email AS primaryAccountUpn,
-        accountCount, NULL AS accountTypes,
-        correlationConfidence, NULL AS correlationSignals, NULL AS department, jobTitle,
-        NULL AS managerId, email AS mail,
-        givenName, surname, employeeId, NULL AS companyName, NULL AS employeeType,
-        NULL AS city, NULL AS country, NULL AS officeLocation,
-        NULL AS accountEnabled, correlatedAt, analystVerified, analystNotes
-        ${hasHrCols ? ', isHrAnchored, NULL AS hrAccountId, orphanStatus' : ''}
-      FROM dbo.Identities
+      SELECT id, "displayName", "primaryPrincipalId" AS primaryAccountId, email AS primaryAccountUpn,
+        "accountCount", NULL AS "accountTypes",
+        "correlationConfidence", NULL AS "correlationSignals", NULL AS department, "jobTitle",
+        NULL AS "managerId", email AS mail,
+        "givenName", surname, "employeeId", NULL AS "companyName", NULL AS employeeType,
+        NULL AS city, NULL AS country, NULL AS "officeLocation",
+        NULL AS "accountEnabled", "correlatedAt", "analystVerified", "analystNotes"
+        ${hasHrCols ? ', "isHrAnchored", NULL AS "hrAccountId", "orphanStatus"' : ''}
+      FROM "Identities"
       ${where}
       ORDER BY ${orderBy}
-      OFFSET @pageOffset ROWS FETCH NEXT @pageLimit ROWS ONLY
+      LIMIT @pageLimit OFFSET @pageOffset
     `);
 
     res.json({
@@ -191,9 +191,9 @@ router.get('/identities/:id', async (req, res) => {
     // Fetch identity with context name
     const identityResult = await timedRequest(p, 'identity-detail', res)
       .input('id', identityId)
-      .query(`SELECT i.*, c.displayName AS contextDisplayName
-              FROM dbo.Identities i
-              LEFT JOIN dbo.Contexts c ON i.contextId = c.id AND c.ValidTo = '9999-12-31 23:59:59.9999999'
+      .query(`SELECT i.*, c."displayName" AS contextDisplayName
+              FROM "Identities" i
+              LEFT JOIN "Contexts" c ON i."contextId" = c.id
               WHERE i.id = @id`);
 
     if (identityResult.recordset.length === 0) {
@@ -208,21 +208,21 @@ router.get('/identities/:id', async (req, res) => {
       membersResult = await timedRequest(p, 'identity-members', res)
         .input('identityId', identityId)
         .query(`
-          SELECT m.*, u.department, u.jobTitle, u.createdDateTime, u.accountEnabled AS userAccountEnabled
-          FROM dbo.IdentityMembers m
-          LEFT JOIN dbo.Principals u ON m.principalId = u.id
-          WHERE m.identityId = @identityId
-          ORDER BY m.isPrimary DESC, m.accountType ASC
+          SELECT m.*, u.department, u."jobTitle", u."createdDateTime", u."accountEnabled" AS userAccountEnabled
+          FROM "IdentityMembers" m
+          LEFT JOIN "Principals" u ON m."principalId" = u.id
+          WHERE m."identityId" = @identityId
+          ORDER BY m."isPrimary" DESC, m."accountType" ASC
         `);
     } catch {
       membersResult = await timedRequest(p, 'identity-members-legacy', res)
         .input('identityId', identityId)
         .query(`
-          SELECT m.*, u.department, u.jobTitle, u.lastSignInDateTime, u.createdDateTime, u.accountEnabled AS userAccountEnabled
-          FROM dbo.IdentityMembers m
-          LEFT JOIN dbo.GraphUsers u ON m.principalId = u.id
-          WHERE m.identityId = @identityId
-          ORDER BY m.isPrimary DESC, m.accountType ASC
+          SELECT m.*, u.department, u."jobTitle", u.lastSignInDateTime, u."createdDateTime", u."accountEnabled" AS userAccountEnabled
+          FROM "IdentityMembers" m
+          LEFT JOIN GraphUsers u ON m."principalId" = u.id
+          WHERE m."identityId" = @identityId
+          ORDER BY m."isPrimary" DESC, m."accountType" ASC
         `);
     }
 
@@ -234,19 +234,19 @@ router.get('/identities/:id', async (req, res) => {
         riskResult = await timedRequest(p, 'identity-member-risks', res)
           .input('identityId', identityId)
           .query(`
-            SELECT m.principalId, u.riskScore, u.riskTier
-            FROM dbo.IdentityMembers m
-            LEFT JOIN dbo.Principals u ON m.principalId = u.id
-            WHERE m.identityId = @identityId
+            SELECT m."principalId", u."riskScore", u."riskTier"
+            FROM "IdentityMembers" m
+            LEFT JOIN "Principals" u ON m."principalId" = u.id
+            WHERE m."identityId" = @identityId
           `);
       } catch {
         riskResult = await timedRequest(p, 'identity-member-risks-legacy', res)
           .input('identityId', identityId)
           .query(`
-            SELECT m.principalId, u.riskScore, u.riskTier
-            FROM dbo.IdentityMembers m
-            LEFT JOIN dbo.GraphUsers u ON m.principalId = u.id
-            WHERE m.identityId = @identityId
+            SELECT m."principalId", u."riskScore", u."riskTier"
+            FROM "IdentityMembers" m
+            LEFT JOIN GraphUsers u ON m."principalId" = u.id
+            WHERE m."identityId" = @identityId
           `);
       }
       for (const r of riskResult.recordset) {
@@ -260,11 +260,11 @@ router.get('/identities/:id', async (req, res) => {
       const groupCountResult = await timedRequest(p, 'identity-member-groups', res)
         .input('identityId', identityId)
         .query(`
-          SELECT m.principalId, COUNT(DISTINCT gm.resourceId) AS groupCount
-          FROM dbo.IdentityMembers m
-          LEFT JOIN dbo.ResourceAssignments gm ON m.principalId = gm.principalId AND gm.assignmentType = 'Direct' AND gm.ValidTo = '9999-12-31 23:59:59.9999999'
-          WHERE m.identityId = @identityId
-          GROUP BY m.principalId
+          SELECT m."principalId", COUNT(DISTINCT gm."resourceId") AS groupCount
+          FROM "IdentityMembers" m
+          LEFT JOIN "ResourceAssignments" gm ON m."principalId" = gm."principalId" AND gm."assignmentType" = 'Direct'
+          WHERE m."identityId" = @identityId
+          GROUP BY m."principalId"
         `);
       memberGroupCounts = groupCountResult.recordset;
     } catch {
@@ -311,7 +311,7 @@ router.put('/identities/:id/verify', async (req, res) => {
     await timedRequest(p, 'identity-verify', res)
       .input('id', identityId)
       .input('notes', notes || null)
-      .query(`UPDATE dbo.Identities SET analystVerified = 1, analystNotes = @notes WHERE id = @id`);
+      .query(`UPDATE "Identities" SET "analystVerified" = TRUE, "analystNotes" = @notes WHERE id = @id`);
 
     res.json({ success: true });
   } catch (err) {
@@ -331,7 +331,7 @@ router.delete('/identities/:id/verify', async (req, res) => {
     const p = await db.getPool();
     await timedRequest(p, 'identity-unverify', res)
       .input('id', identityId)
-      .query(`UPDATE dbo.Identities SET analystVerified = 0, analystNotes = NULL WHERE id = @id`);
+      .query(`UPDATE "Identities" SET "analystVerified" = FALSE, "analystNotes" = NULL WHERE id = @id`);
 
     res.json({ success: true });
   } catch (err) {
@@ -368,9 +368,9 @@ router.put('/identities/:id/members/:userId/override', async (req, res) => {
       .input('action', action)
       .input('reason', reason.trim())
       .query(`
-        UPDATE dbo.IdentityMembers
-        SET analystOverride = @action, analystReason = @reason
-        WHERE identityId = @identityId AND userId = @userId
+        UPDATE "IdentityMembers"
+        SET "analystOverride" = @action, analystReason = @reason
+        WHERE "identityId" = @identityId AND "userId" = @userId
       `);
 
     res.json({ success: true, action, reason: reason.trim() });
@@ -398,13 +398,13 @@ router.get('/identities/by-user/:userId', async (req, res) => {
     const memberResult = await timedRequest(p, 'identity-by-user-member', res)
       .input('userId', userId)
       .query(`
-        SELECT i.id AS identityId, i.displayName AS identityDisplayName, i.accountCount,
-          i.primaryAccountUpn, i.primaryAccountId, i.correlationConfidence, i.isHrAnchored,
-          m.accountType, m.isPrimary, m.isHrAuthoritative, m.hrScore, m.signalConfidence,
-          m.correlationSignals, m.analystOverride
-        FROM dbo.IdentityMembers m
-        JOIN dbo.Identities i ON i.id = m.identityId
-        WHERE m.principalId = @userId
+        SELECT i.id AS "identityId", i."displayName" AS identityDisplayName, i."accountCount",
+          i.primaryAccountUpn, i.primaryAccountId, i."correlationConfidence", i."isHrAnchored",
+          m."accountType", m."isPrimary", m."isHrAuthoritative", m."hrScore", m."signalConfidence",
+          m."correlationSignals", m."analystOverride"
+        FROM "IdentityMembers" m
+        JOIN "Identities" i ON i.id = m."identityId"
+        WHERE m."principalId" = @userId
       `);
 
     if (memberResult.recordset.length === 0) {
@@ -436,11 +436,11 @@ router.get('/identities/by-user/:userId', async (req, res) => {
       .input('identityId', row.identityId)
       .input('userId', userId)
       .query(`
-        SELECT userId, displayName, userPrincipalName, accountType, isPrimary,
-          isHrAuthoritative, accountEnabled
-        FROM dbo.IdentityMembers
-        WHERE identityId = @identityId AND userId <> @userId
-        ORDER BY isPrimary DESC, accountType ASC
+        SELECT "userId", "displayName", userPrincipalName, "accountType", "isPrimary",
+          "isHrAuthoritative", "accountEnabled"
+        FROM "IdentityMembers"
+        WHERE "identityId" = @identityId AND "userId" <> @userId
+        ORDER BY "isPrimary" DESC, "accountType" ASC
       `);
 
     res.json({ identity, memberInfo, otherMembers: othersResult.recordset });
@@ -465,9 +465,9 @@ router.delete('/identities/:id/members/:userId/override', async (req, res) => {
       .input('identityId', identityId)
       .input('userId', userId)
       .query(`
-        UPDATE dbo.IdentityMembers
-        SET analystOverride = NULL, analystReason = NULL
-        WHERE identityId = @identityId AND userId = @userId
+        UPDATE "IdentityMembers"
+        SET "analystOverride" = NULL, analystReason = NULL
+        WHERE "identityId" = @identityId AND "userId" = @userId
       `);
 
     res.json({ success: true });

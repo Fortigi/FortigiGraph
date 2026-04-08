@@ -883,6 +883,109 @@ if ($SyncGovernance) {
         catch {
             Write-Host "  Access Package assignments sync failed: $($_.Exception.Message)" -ForegroundColor Yellow
         }
+
+        # ── Access Package Assignment Policies ───────────────────────
+        # Drives the "Type" column on the Business Roles page (Auto-assigned vs
+        # Request-based) and the hasReviewConfigured flag. Without this the page
+        # shows blank type/review badges even when policies exist in Graph.
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing governance (assignment policies)..." -ForegroundColor Cyan
+        try {
+            $policies = Invoke-FGGetRequest -URI "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/assignmentPolicies?`$expand=accessPackage&`$top=999"
+            $polRecords = @()
+            foreach ($pol in $policies) {
+                $apId = if ($pol.accessPackage) { $pol.accessPackage.id } else { $pol.accessPackageId }
+                if (-not $apId) { continue }
+                $hasAutoAdd = $false
+                $hasAutoRemove = $false
+                if ($pol.automaticRequestSettings) {
+                    $hasAutoAdd    = [bool]$pol.automaticRequestSettings.requestAccessForAllowedTargets
+                    $hasAutoRemove = [bool]$pol.automaticRequestSettings.removeAccessWhenTargetLeavesAllowedTargets
+                }
+                $hasReview = $false
+                if ($pol.reviewSettings) {
+                    $hasReview = [bool]$pol.reviewSettings.isEnabled
+                }
+                $polRecords += @{
+                    id                 = $pol.id
+                    resourceId         = $apId
+                    displayName        = $pol.displayName
+                    description        = $pol.description
+                    allowedTargetScope = $pol.allowedTargetScope
+                    hasAutoAddRule     = $hasAutoAdd
+                    hasAutoRemoveRule  = $hasAutoRemove
+                    hasAccessReview    = $hasReview
+                    reviewSettings     = $pol.reviewSettings
+                    policyConditions   = $pol.requestorSettings
+                }
+            }
+            if ($polRecords.Count -gt 0) {
+                Send-IngestBatch -Endpoint 'ingest/governance/policies' -SystemId $systemId -SyncMode 'full' -Records $polRecords
+            } else {
+                Write-Host "  No assignment policies found" -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "  Assignment policy sync failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
+        # ── Access Reviews → CertificationDecisions ──────────────────
+        # Drives the Last Review / Reviewer / Compliance columns on the Business
+        # Roles page. Walks all access review definitions whose scope targets an
+        # access package, then pulls instance decisions. Best-effort: tenant may
+        # not use access reviews at all, in which case this is a no-op.
+        Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing governance (access review decisions)..." -ForegroundColor Cyan
+        try {
+            $reviewDefs = Invoke-FGGetRequest -URI "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions?`$top=100"
+            $certRecords = @()
+            foreach ($def in $reviewDefs) {
+                $scopeQuery = if ($def.scope) { $def.scope.query } else { $null }
+                if (-not $scopeQuery -or $scopeQuery -notmatch 'accessPackages') { continue }
+                # Extract the access package id from the scope query
+                $apId = $null
+                if ($scopeQuery -match "accessPackages/([0-9a-fA-F-]{36})") { $apId = $Matches[1] }
+                if (-not $apId) { continue }
+                try {
+                    $instances = Invoke-FGGetRequest -URI "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($def.id)/instances?`$top=100"
+                    foreach ($inst in $instances) {
+                        try {
+                            $decisions = Invoke-FGGetRequest -URI "https://graph.microsoft.com/beta/identityGovernance/accessReviews/definitions/$($def.id)/instances/$($inst.id)/decisions?`$top=999"
+                            foreach ($d in $decisions) {
+                                $certRecords += @{
+                                    id                          = $d.id
+                                    resourceId                  = $apId
+                                    principalId                 = if ($d.principal) { $d.principal.id } else { $null }
+                                    principalDisplayName        = if ($d.principal) { $d.principal.displayName } else { $null }
+                                    decision                    = $d.decision
+                                    recommendation              = $d.recommendation
+                                    justification               = $d.justification
+                                    reviewedBy                  = if ($d.reviewedBy) { $d.reviewedBy.id } else { $null }
+                                    reviewedByDisplayName       = if ($d.reviewedBy) { $d.reviewedBy.displayName } else { $null }
+                                    reviewedDateTime            = $d.reviewedDateTime
+                                    reviewDefinitionId          = $def.id
+                                    reviewInstanceId            = $inst.id
+                                    reviewInstanceStatus        = $inst.status
+                                    reviewInstanceStartDateTime = $inst.startDateTime
+                                    reviewInstanceEndDateTime   = $inst.endDateTime
+                                }
+                            }
+                        } catch {
+                            Write-Host "    Skipping instance $($inst.id): $($_.Exception.Message)" -ForegroundColor Yellow
+                        }
+                    }
+                } catch {
+                    Write-Host "  Skipping review definition $($def.id): $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+            if ($certRecords.Count -gt 0) {
+                Send-IngestBatch -Endpoint 'ingest/governance/certifications' -SystemId $systemId -SyncMode 'full' -Records $certRecords
+            } else {
+                Write-Host "  No access review decisions found" -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "  Access review sync failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "  This tenant may not use access reviews on access packages." -ForegroundColor Yellow
+        }
     }
     catch {
         Write-Host "  Governance sync skipped: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -907,3 +1010,19 @@ if ($RefreshViews) {
 $elapsed = (Get-Date) - $syncStart
 Write-Host "`n=== Sync Complete ===" -ForegroundColor Green
 Write-Host "Duration: $([Math]::Round($elapsed.TotalSeconds)) seconds" -ForegroundColor Gray
+
+# Write a single sync log entry covering the full crawler runtime so the
+# Sync Log page reflects the actual end-to-end duration (not just the per-batch
+# bulk insert timings written by individual ingest endpoints).
+try {
+    Invoke-IngestAPI -Endpoint 'ingest/sync-log' -Body @{
+        syncType    = 'EntraID-FullCrawl'
+        tableName   = $null
+        startTime   = $syncStart.ToString('o')
+        endTime     = (Get-Date).ToString('o')
+        recordCount = 0
+        status      = 'Success'
+    } | Out-Null
+} catch {
+    Write-Host "  (sync log write failed: $($_.Exception.Message))" -ForegroundColor DarkGray
+}

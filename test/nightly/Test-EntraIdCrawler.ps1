@@ -385,9 +385,15 @@ foreach ($scenario in $Scenarios) {
                     directoryRoles     = $true
                 } `
                 -ExtraAssertions {
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/UsersExist'     -Path '/users?pageSize=1'     -MinExpected 1
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/ResourcesExist' -Path '/resources?pageSize=1' -MinExpected 1
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/SystemsExist'   -Path '/systems'              -MinExpected 1
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/UsersExist'         -Path '/users?pageSize=1'           -MinExpected 1
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/ResourcesExist'     -Path '/resources?pageSize=1'       -MinExpected 1
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/SystemsExist'       -Path '/systems'                    -MinExpected 1
+                    # Regression checks for the three areas the UI exposes after a crawler run.
+                    # These caught a real outage in April 2026 where the routes were silently
+                    # returning empty results due to T-SQL leftovers / wrong column-name casing.
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/BusinessRolesPage'  -Path '/access-packages?limit=1'    -MinExpected 1
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/SyncLogPage'        -Path '/sync-log?limit=1'           -MinExpected 1
+                    Assert-ApiCount -Name 'EntraID/Full-Sync/MatrixHasData'      -Path '/permissions?userLimit=5'    -MinExpected 1
                 }
         }
 

@@ -1,40 +1,24 @@
-// SQL query timer — wraps mssql pool.request() to capture per-query
-// execution time without changing any calling code.
+// SQL query timer — wraps the (compat) pool.request() to capture per-query
+// execution time. In v5 the underlying driver is pg, but the public surface
+// is the same as v4 so route handlers don't need to change.
 //
 // Usage in a route handler:
-//   import { timedRequest, getQueryTimings } from '../perf/sqlTimer.js';
-//
-//   // Instead of pool.request():
-//   const req = timedRequest(pool, 'user-attributes');
-//   req.input('id', userId);
-//   await req.query('SELECT * FROM GraphUsers WHERE id = @id');
-//
-//   // At the end of the handler, collect all timings:
-//   const sqlQueries = getQueryTimings(res);  // [{ label, ms }]
+//   const r = timedRequest(pool, 'user-attributes', res);
+//   r.input('id', userId);
+//   await r.query('SELECT ...');
 
 import { isEnabled } from './collector.js';
 
 const TIMINGS_KEY = Symbol('sqlTimings');
 
-/**
- * Create a timed wrapper around pool.request().
- * When perf is disabled, returns the plain request (zero overhead).
- *
- * @param {import('mssql').ConnectionPool} pool
- * @param {string} label - Human-readable label for this query (e.g. 'user-attributes')
- * @param {import('express').Response} res - Express response (timings are attached here)
- * @returns {import('mssql').Request}
- */
 export function timedRequest(pool, label, res) {
   const request = pool.request();
 
   if (!isEnabled() || !res) return request;
 
-  // Initialize timings array on the response object
   if (!res[TIMINGS_KEY]) res[TIMINGS_KEY] = [];
   const timings = res[TIMINGS_KEY];
 
-  // Wrap .query() to capture duration
   const originalQuery = request.query.bind(request);
   request.query = async function (sqlText) {
     const start = performance.now();
@@ -53,10 +37,6 @@ export function timedRequest(pool, label, res) {
   return request;
 }
 
-/**
- * Retrieve collected query timings from the response object.
- * Returns empty array when perf is disabled or no queries were timed.
- */
 export function getQueryTimings(res) {
   return res?.[TIMINGS_KEY] || [];
 }

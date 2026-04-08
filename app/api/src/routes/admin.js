@@ -41,12 +41,15 @@ const useSql = process.env.USE_SQL === 'true';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-async function tableExists(pool, tableName) {
-  // Use OBJECT_ID — more reliable than INFORMATION_SCHEMA for temporal tables
-  const r = await pool.request().query(
-    `SELECT OBJECT_ID('dbo.${tableName}', 'U') AS oid`
+async function tableExists(_pool, tableName) {
+  // Postgres: use to_regclass() instead of OBJECT_ID. Returns NULL when the
+  // table doesn't exist, otherwise the OID. The script translation broke the
+  // template literal interpolation here — restored manually.
+  const r = await db.query(
+    `SELECT to_regclass($1) AS oid`,
+    ['"' + tableName + '"']
   );
-  return r.recordset[0].oid !== null;
+  return r.rows[0].oid !== null;
 }
 
 function safeParseJson(str) {
@@ -54,41 +57,43 @@ function safeParseJson(str) {
 }
 
 // ── GET /api/admin/risk-profile ───────────────────────────────────
-// Returns the most recently saved risk profile from GraphRiskProfiles.
+// Returns the most recently saved risk profile. In v5 the schema only has
+// id/profileJson/generatedAt/llmProvider/llmModel/version columns; the legacy
+// domain/industry/country fields live inside profileJson now.
 router.get('/admin/risk-profile', async (req, res) => {
   if (!useSql) return res.json({ available: false });
 
   try {
-    const pool = await db.getPool();
-    if (!await tableExists(pool, 'GraphRiskProfiles')) {
-      return res.json({ available: true, source: 'defaults', multipliers: DEFAULT_MULTIPLIERS, propagation: DEFAULT_PROPAGATION });
-    }
-
-    const r = await pool.request().query(`
-      SELECT TOP 1 id, domain, industry, country, llmProvider, generatedAt, profileJson
-      FROM dbo.GraphRiskProfiles
-      ORDER BY generatedAt DESC
+    const r = await db.query(`
+      SELECT id, "llmProvider", "llmModel", "version", "generatedAt", "profileJson"
+        FROM "GraphRiskProfiles"
+        ORDER BY "generatedAt" DESC
+        LIMIT 1
     `);
 
-    if (r.recordset.length === 0) {
+    if (r.rows.length === 0) {
       return res.json({ available: true, source: 'defaults', multipliers: DEFAULT_MULTIPLIERS, propagation: DEFAULT_PROPAGATION });
     }
 
-    const row = r.recordset[0];
+    const row = r.rows[0];
+    const profile = row.profileJson; // jsonb returns parsed object directly
     res.json({
       available: true,
       source: 'sql',
       id: row.id,
-      domain: row.domain,
-      industry: row.industry,
-      country: row.country,
+      domain: profile?.domain || null,
+      industry: profile?.industry || null,
+      country: profile?.country || null,
       llmProvider: row.llmProvider,
+      llmModel: row.llmModel,
+      version: row.version,
       generatedAt: row.generatedAt,
-      profile: safeParseJson(row.profileJson),
+      profile,
     });
   } catch (err) {
+    // Fall back to defaults on any error (table empty, schema drift, etc.)
     console.error('Error fetching risk profile:', err.message);
-    res.status(500).json({ error: 'Failed to load risk profile' });
+    res.json({ available: true, source: 'defaults', multipliers: DEFAULT_MULTIPLIERS, propagation: DEFAULT_PROPAGATION });
   }
 });
 
@@ -104,35 +109,35 @@ router.get('/admin/classifiers', async (req, res) => {
   }
 
   try {
-    const pool = await db.getPool();
-    if (await tableExists(pool, 'GraphRiskClassifiers')) {
-      const r = await pool.request().query(`
-        SELECT TOP 1 id, version, customer, generatedAt, llmProvider, classifierJson
-        FROM dbo.GraphRiskClassifiers
-        ORDER BY generatedAt DESC
-      `);
-      if (r.recordset.length > 0) {
-        const row = r.recordset[0];
-        return res.json({
-          available: true,
-          source: 'sql',
-          id: row.id,
-          version: row.version,
-          customer: row.customer,
-          generatedAt: row.generatedAt,
-          llmProvider: row.llmProvider,
-          classifiers: safeParseJson(row.classifierJson),
-        });
-      }
+    const r = await db.query(`
+      SELECT id, "version", "generatedAt", "llmProvider", "llmModel", "classifiersJson"
+        FROM "GraphRiskClassifiers"
+        ORDER BY "generatedAt" DESC
+        LIMIT 1
+    `);
+    if (r.rows.length > 0) {
+      const row = r.rows[0];
+      return res.json({
+        available: true,
+        source: 'sql',
+        id: row.id,
+        version: row.version,
+        generatedAt: row.generatedAt,
+        llmProvider: row.llmProvider,
+        llmModel: row.llmModel,
+        classifiers: row.classifiersJson, // jsonb returns parsed object
+      });
     }
 
-    // Fall back to universal classifiers (what Invoke-FGRiskScoring used)
+    // Fall back to universal classifiers
     const uc = getUniversalClassifiers();
     if (uc) return res.json({ available: true, source: 'universal', classifiers: uc });
     return res.json({ available: false });
   } catch (err) {
     console.error('Error fetching classifiers:', err.message);
-    res.status(500).json({ error: 'Failed to load classifiers' });
+    const uc = getUniversalClassifiers();
+    if (uc) return res.json({ available: true, source: 'universal', classifiers: uc });
+    return res.json({ available: false });
   }
 });
 
@@ -148,9 +153,9 @@ router.get('/admin/correlation-ruleset', async (req, res) => {
     }
 
     const r = await pool.request().query(`
-      SELECT TOP 1 id, version, generatedAt, rulesetJson
-      FROM dbo.GraphCorrelationRulesets
-      ORDER BY generatedAt DESC
+      SELECT id, version, "generatedAt", "rulesetJson"
+      FROM "GraphCorrelationRulesets"
+      ORDER BY "generatedAt" DESC
     `);
 
     if (r.recordset.length === 0) return res.json({ available: false });
@@ -185,30 +190,30 @@ router.get('/admin/export/curated', async (req, res) => {
       const hasPrincipals = await tableExists(pool, 'Principals');
       const hasResources  = await tableExists(pool, 'Resources');
 
+      // Postgres: tag entityIds are stored as text. Cast to uuid only when the
+      // value is shaped like a uuid, otherwise the cast errors out and breaks
+      // the whole query. uuid_or_null() is a tiny inline plpgsql helper.
       const userJoin = hasPrincipals
-        ? `LEFT JOIN dbo.Principals       gu  ON t.entityType = 'user'
-             AND gu.id = TRY_CAST(ta.entityId AS UNIQUEIDENTIFIER)
-             AND gu.ValidTo = '9999-12-31 23:59:59.9999999'`
-        : `LEFT JOIN dbo.GraphUsers        gu  ON t.entityType = 'user'
-             AND gu.id = TRY_CAST(ta.entityId AS UNIQUEIDENTIFIER)`;
-
+        ? `LEFT JOIN "Principals" gu ON t."entityType" = 'user'
+             AND ta."entityId" ~* '^[0-9a-f-]{36}$'
+             AND gu.id = ta."entityId"::uuid`
+        : '';
       const resourceJoin = hasResources
-        ? `LEFT JOIN dbo.Resources          r   ON t.entityType IN ('resource','group')
-             AND r.id = TRY_CAST(ta.entityId AS UNIQUEIDENTIFIER)
-             AND r.ValidTo = '9999-12-31 23:59:59.9999999'`
-        : `LEFT JOIN dbo.GraphGroups        r   ON t.entityType IN ('group','resource')
-             AND r.id = TRY_CAST(ta.entityId AS UNIQUEIDENTIFIER)`;
+        ? `LEFT JOIN "Resources" r ON t."entityType" IN ('resource','group')
+             AND ta."entityId" ~* '^[0-9a-f-]{36}$'
+             AND r.id = ta."entityId"::uuid`
+        : '';
 
       const tagRows = await pool.request().query(`
-        SELECT t.id, t.name, t.color, t.entityType,
-               ta.entityId,
-               COALESCE(gu.displayName, r.displayName) AS entityDisplayName,
-               ${hasResources ? 'r.resourceType' : 'NULL'} AS resourceType
-        FROM dbo.GraphTags t
-        LEFT JOIN dbo.GraphTagAssignments ta ON ta.tagId = t.id
+        SELECT t.id, t.name, t.color, t."entityType",
+               ta."entityId",
+               COALESCE(gu."displayName", r."displayName") AS entityDisplayName,
+               ${hasResources ? 'r."resourceType"' : 'NULL'} AS "resourceType"
+        FROM "GraphTags" t
+        LEFT JOIN "GraphTagAssignments" ta ON ta."tagId" = t.id
         ${userJoin}
         ${resourceJoin}
-        ORDER BY t.entityType, t.name, ta.entityId
+        ORDER BY t."entityType", t.name, ta."entityId"
       `);
 
       // Group into tag objects
@@ -233,14 +238,13 @@ router.get('/admin/export/curated', async (req, res) => {
     let categories = [];
     if (await tableExists(pool, 'GovernanceCategories')) {
       const catRows = await pool.request().query(`
-        SELECT c.id, c.name, c.color, ca.resourceId, ap.displayName AS businessRoleDisplayName
-        FROM dbo.GovernanceCategories c
-        LEFT JOIN dbo.GovernanceCategoryAssignments ca ON ca.categoryId = c.id
-        LEFT JOIN dbo.Resources ap
-          ON LOWER(ap.id) = ca.resourceId
-          AND ap.resourceType = 'BusinessRole'
-          AND ap.ValidTo = '9999-12-31 23:59:59.9999999'
-        ORDER BY c.name, ca.resourceId
+        SELECT c.id, c.name, c.color, ca."resourceId", ap."displayName" AS businessRoleDisplayName
+        FROM "GovernanceCategories" c
+        LEFT JOIN "GovernanceCategoryAssignments" ca ON ca."categoryId" = c.id
+        LEFT JOIN "Resources" ap
+          ON LOWER(ap.id) = ca."resourceId"
+          AND ap."resourceType" = 'BusinessRole'
+        ORDER BY c.name, ca."resourceId"
       `);
 
       const byCatId = new Map();
@@ -324,14 +328,14 @@ router.post('/admin/import/curated', async (req, res) => {
           const vtFilter = hasPrincipals ? `AND ValidTo = '9999-12-31 23:59:59.9999999'` : '';
           const r = await pool.request()
             .input('id', entityId)
-            .query(`SELECT COUNT(*) AS n FROM dbo.${tbl} WHERE UPPER(CAST(id AS NVARCHAR(36))) = UPPER(@id) ${vtFilter}`);
+            .query(`SELECT COUNT(*) AS n FROM ${tbl} WHERE UPPER((id)::text) = UPPER(@id) ${vtFilter}`);
           exists = r.recordset[0].n > 0;
         } else {
           const tbl = hasResources ? 'Resources' : 'GraphGroups';
           const vtFilter = hasResources ? `AND ValidTo = '9999-12-31 23:59:59.9999999'` : '';
           const r = await pool.request()
             .input('id', entityId)
-            .query(`SELECT COUNT(*) AS n FROM dbo.${tbl} WHERE UPPER(CAST(id AS NVARCHAR(36))) = UPPER(@id) ${vtFilter}`);
+            .query(`SELECT COUNT(*) AS n FROM ${tbl} WHERE UPPER((id)::text) = UPPER(@id) ${vtFilter}`);
           exists = r.recordset[0].n > 0;
         }
       } catch { /* table might not exist */ }
@@ -346,8 +350,8 @@ router.post('/admin/import/curated', async (req, res) => {
           const vtFilter = hasPrincipals ? `AND ValidTo = '9999-12-31 23:59:59.9999999'` : '';
           const r = await pool.request()
             .input('displayName', displayName)
-            .query(`SELECT TOP 1 UPPER(CAST(id AS NVARCHAR(36))) AS id FROM dbo.${tbl}
-                    WHERE displayName = @displayName ${vtFilter}`);
+            .query(`SELECT UPPER((id)::text) AS id FROM ${tbl}
+                    WHERE "displayName" = @displayName ${vtFilter}`);
           if (r.recordset.length > 0) return { id: r.recordset[0].id, softMatched: true };
         } else {
           // group / resource — match on displayName + resourceType if available
@@ -360,8 +364,8 @@ router.post('/admin/import/curated', async (req, res) => {
             rtClause = 'AND resourceType = @resourceType';
           }
           const r = await req2.query(
-            `SELECT TOP 1 UPPER(CAST(id AS NVARCHAR(36))) AS id FROM dbo.${tbl}
-             WHERE displayName = @displayName ${rtClause} ${vtFilter}`
+            `SELECT UPPER((id)::text) AS id FROM ${tbl}
+             WHERE "displayName" = @displayName ${rtClause} ${vtFilter}`
           );
           if (r.recordset.length > 0) return { id: r.recordset[0].id, softMatched: true };
         }
@@ -375,62 +379,32 @@ router.post('/admin/import/curated', async (req, res) => {
       if (!tag.name || !tag.entityType) continue;
       const color = HEX_COLOR_RE.test(tag.color || '') ? tag.color : '#3b82f6';
 
-      // Upsert tag (name + entityType is unique)
-      const tagResult = await pool.request()
-        .input('name', String(tag.name).slice(0, 100))
-        .input('color', color)
-        .input('entityType', tag.entityType)
-        .query(`
-          MERGE dbo.GraphTags AS target
-          USING (SELECT @name AS name, @entityType AS entityType) AS source
-          ON target.name = source.name AND target.entityType = source.entityType
-          WHEN NOT MATCHED THEN
-            INSERT (name, color, entityType) VALUES (@name, @color, @entityType);
-          SELECT id FROM dbo.GraphTags WHERE name = @name AND entityType = @entityType;
-        `);
-
-      const tagId = tagResult.recordset[0]?.id;
+      // Upsert tag (name + entityType unique). xmax = 0 → fresh INSERT, otherwise UPDATE.
+      const upsert = await db.query(
+        `INSERT INTO "GraphTags" (name, color, "entityType")
+         VALUES ($1, $2, $3)
+         ON CONFLICT (name, "entityType") DO UPDATE SET color = EXCLUDED.color
+         RETURNING id, (xmax = 0) AS "wasInsert"`,
+        [String(tag.name).slice(0, 100), color, tag.entityType]
+      );
+      const tagId = upsert.rows[0]?.id;
       if (!tagId) continue;
-
-      // Track inserted vs skipped (tag itself)
-      // A simple check: re-query to see if it was just created
-      // (MERGE OUTPUT would be cleaner but mssql handles OUTPUT differently)
-      const tagCheck = await pool.request()
-        .input('name', String(tag.name).slice(0, 100))
-        .input('entityType', tag.entityType)
-        .query(`SELECT createdAt FROM dbo.GraphTags WHERE name = @name AND entityType = @entityType`);
-
-      // We can't distinguish insert vs update in the MERGE without OUTPUT.
-      // Count assignments instead — always bump tagsSkipped if already existed.
-      // Track tag inserts via a secondary check.
-      const wasNew = await pool.request()
-        .input('tagId', tagId)
-        .query(`SELECT COUNT(*) AS n FROM dbo.GraphTagAssignments WHERE tagId = @tagId`);
-      if (wasNew.recordset[0].n === 0 && (!tag.assignments || tag.assignments.length === 0)) {
-        stats.tagsInserted++;
-      } else {
-        stats.tagsSkipped++;
-      }
+      if (upsert.rows[0].wasInsert) stats.tagsInserted++;
+      else stats.tagsSkipped++;
 
       for (const a of (tag.assignments || [])) {
         if (!a.entityId) continue;
         const resolved = await resolveEntity(a.entityId, tag.entityType, a.displayName, a.resourceType);
         if (!resolved) { stats.assignmentsNotFound++; continue; }
 
-        // Insert assignment if not already there
-        const r = await pool.request()
-          .input('tagId', tagId)
-          .input('entityId', resolved.id)
-          .query(`
-            IF NOT EXISTS (SELECT 1 FROM dbo.GraphTagAssignments WHERE tagId = @tagId AND entityId = @entityId)
-            BEGIN
-              INSERT INTO dbo.GraphTagAssignments (tagId, entityId) VALUES (@tagId, @entityId);
-              SELECT 1 AS inserted;
-            END ELSE SELECT 0 AS inserted;
-          `);
-
-        const inserted = r.recordset[0]?.inserted === 1;
-        if (inserted) {
+        const ins = await db.query(
+          `INSERT INTO "GraphTagAssignments" ("tagId", "entityId")
+           VALUES ($1, $2)
+           ON CONFLICT ("tagId", "entityId") DO NOTHING
+           RETURNING 1 AS inserted`,
+          [tagId, resolved.id]
+        );
+        if (ins.rows.length > 0) {
           stats.assignmentsInserted++;
           if (resolved.softMatched) stats.assignmentsSoftMatched++;
         } else {
@@ -445,21 +419,16 @@ router.post('/admin/import/curated', async (req, res) => {
       const color = HEX_COLOR_RE.test(cat.color || '') ? cat.color : '#3b82f6';
 
       // Upsert category (name is unique)
-      await pool.request()
-        .input('name', String(cat.name).slice(0, 100))
-        .input('color', color)
-        .query(`
-          MERGE dbo.GovernanceCategories AS target
-          USING (SELECT @name AS name) AS source ON target.name = source.name
-          WHEN NOT MATCHED THEN INSERT (name, color) VALUES (@name, @color);
-        `);
-
-      const catResult = await pool.request()
-        .input('name', String(cat.name).slice(0, 100))
-        .query(`SELECT id FROM dbo.GovernanceCategories WHERE name = @name`);
-      const catId = catResult.recordset[0]?.id;
+      const catUp = await db.query(
+        `INSERT INTO "GovernanceCategories" (name, color)
+         VALUES ($1, $2)
+         ON CONFLICT (name) DO UPDATE SET color = EXCLUDED.color
+         RETURNING id`,
+        [String(cat.name).slice(0, 100), color]
+      );
+      const catId = catUp.rows[0]?.id;
       if (!catId) continue;
-      stats.catsInserted++; // simplified: count all as processed
+      stats.catsInserted++;
 
       for (const a of (cat.assignments || [])) {
         if (!a.accessPackageId) continue;
@@ -467,47 +436,41 @@ router.post('/admin/import/curated', async (req, res) => {
         // 1. GUID match
         let apId = null;
         try {
-          const r = await pool.request()
-            .input('apId', a.accessPackageId.toLowerCase())
-            .query(`SELECT TOP 1 LOWER(CAST(id AS NVARCHAR(36))) AS id
-                    FROM dbo.Resources
-                    WHERE LOWER(CAST(id AS NVARCHAR(36))) = @apId
-                      AND resourceType = 'BusinessRole'
-                      AND ValidTo = '9999-12-31 23:59:59.9999999'`);
-          if (r.recordset.length > 0) apId = r.recordset[0].id;
+          const r = await db.query(
+            `SELECT LOWER(id::text) AS id FROM "Resources"
+              WHERE LOWER(id::text) = $1 AND "resourceType" = 'BusinessRole'`,
+            [a.accessPackageId.toLowerCase()]
+          );
+          if (r.rows.length > 0) apId = r.rows[0].id;
         } catch { /* ignore */ }
 
         let softMatched = false;
-        // 2. Soft-match by displayName
         if (!apId && a.accessPackageDisplayName) {
           try {
-            const r = await pool.request()
-              .input('displayName', a.accessPackageDisplayName)
-              .query(`SELECT TOP 1 LOWER(CAST(id AS NVARCHAR(36))) AS id
-                      FROM dbo.Resources
-                      WHERE displayName = @displayName
-                        AND resourceType = 'BusinessRole'
-                        AND ValidTo = '9999-12-31 23:59:59.9999999'`);
-            if (r.recordset.length > 0) { apId = r.recordset[0].id; softMatched = true; }
+            const r = await db.query(
+              `SELECT LOWER(id::text) AS id FROM "Resources"
+                WHERE "displayName" = $1 AND "resourceType" = 'BusinessRole'`,
+              [a.accessPackageDisplayName]
+            );
+            if (r.rows.length > 0) { apId = r.rows[0].id; softMatched = true; }
           } catch { /* ignore */ }
         }
 
         if (!apId) { stats.catAssignNotFound++; continue; }
 
-        // Insert or skip (AP can only have one category — MERGE replaces)
-        const existing = await pool.request()
-          .input('apId', apId)
-          .query(`SELECT categoryId FROM dbo.GovernanceCategoryAssignments WHERE resourceId = @apId`);
-
-        if (existing.recordset.length > 0) {
-          stats.catAssignSkipped++;
-        } else {
-          await pool.request()
-            .input('catId', catId)
-            .input('apId', apId)
-            .query(`INSERT INTO dbo.GovernanceCategoryAssignments (resourceId, categoryId) VALUES (@apId, @catId)`);
+        // Insert or skip (AP can only have one category — caller must remove first)
+        const ins = await db.query(
+          `INSERT INTO "GovernanceCategoryAssignments" ("resourceId", "categoryId")
+           VALUES ($1, $2)
+           ON CONFLICT ("resourceId", "categoryId") DO NOTHING
+           RETURNING 1 AS inserted`,
+          [apId, catId]
+        );
+        if (ins.rows.length > 0) {
           stats.catAssignInserted++;
           if (softMatched) stats.catAssignSoftMatched++;
+        } else {
+          stats.catAssignSkipped++;
         }
       }
     }
@@ -570,15 +533,15 @@ router.post('/admin/clean-database', async (req, res) => {
 
         if (isTemporal) {
           // Disable versioning, delete from main + history, re-enable
-          await pool.request().query(`ALTER TABLE dbo.[${table}] SET (SYSTEM_VERSIONING = OFF)`);
-          const delMain = await pool.request().query(`DELETE FROM dbo.[${table}]`);
+          await pool.request().query(`ALTER TABLE [${table}] SET (SYSTEM_VERSIONING = OFF)`);
+          const delMain = await pool.request().query(`DELETE FROM [${table}]`);
           // Try to find and clear the history table
           try {
             const histRes = await pool.request().input('t', table)
               .query(`SELECT name FROM sys.tables WHERE object_id = (SELECT history_table_id FROM sys.tables WHERE name = @t AND schema_id = SCHEMA_ID('dbo'))`);
             const histName = histRes.recordset[0]?.name;
             if (histName) {
-              await pool.request().query(`DELETE FROM dbo.[${histName}]`);
+              await pool.request().query(`DELETE FROM [${histName}]`);
             }
           } catch {}
           // Re-enable versioning
@@ -587,12 +550,12 @@ router.post('/admin/clean-database', async (req, res) => {
               .query(`SELECT name FROM sys.tables WHERE name = @t + 'History' AND schema_id = SCHEMA_ID('dbo')`);
             const histName = histRes2.recordset[0]?.name;
             if (histName) {
-              await pool.request().query(`ALTER TABLE dbo.[${table}] SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.[${histName}]))`);
+              await pool.request().query(`ALTER TABLE [${table}] SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = [${histName}]))`);
             }
           } catch {}
           wiped.push({ table, rowsAffected: delMain.rowsAffected[0], temporal: true });
         } else {
-          const result = await pool.request().query(`DELETE FROM dbo.[${table}]`);
+          const result = await pool.request().query(`DELETE FROM [${table}]`);
           wiped.push({ table, rowsAffected: result.rowsAffected[0], temporal: false });
         }
       } catch (err) {
@@ -602,7 +565,7 @@ router.post('/admin/clean-database', async (req, res) => {
 
     // Reset lastRunAt on crawler configs so the UI shows them as "never run"
     try {
-      await pool.request().query(`UPDATE dbo.CrawlerConfigs SET lastRunAt = NULL, lastRunStatus = NULL`);
+      await pool.request().query(`UPDATE "CrawlerConfigs" SET "lastRunAt" = NULL, "lastRunStatus" = NULL`);
     } catch {}
 
     res.json({ message: 'Database cleaned', wiped, skipped });
@@ -626,18 +589,144 @@ router.post('/admin/features/toggle', async (req, res) => {
   if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
 
   try {
-    const pool = await db.getPool();
-    await pool.request()
-      .input('k', key)
-      .input('v', enabled ? 'true' : 'false')
-      .query(`MERGE dbo.WorkerConfig AS t
-              USING (SELECT @k AS configKey) AS s ON t.configKey = s.configKey
-              WHEN MATCHED THEN UPDATE SET configValue = @v, updatedAt = SYSUTCDATETIME()
-              WHEN NOT MATCHED THEN INSERT (configKey, configValue) VALUES (@k, @v);`);
+    await db.query(
+      `INSERT INTO "WorkerConfig" ("configKey", "configValue")
+       VALUES ($1, $2)
+       ON CONFLICT ("configKey") DO UPDATE
+         SET "configValue" = EXCLUDED."configValue",
+             "updatedAt"   = now() AT TIME ZONE 'utc'`,
+      [key, enabled ? 'true' : 'false']
+    );
     res.json({ feature, enabled });
   } catch (err) {
     console.error('Feature toggle failed:', err.message);
     res.status(500).json({ error: 'Feature toggle failed' });
+  }
+});
+
+// ─── Refresh derived OrgUnit contexts ───────────────────────────────────────
+// Replaces v4's Build-FGContexts.ps1 (which talked directly to SQL Server).
+// Recomputes the Contexts table from Principals: one row per (systemId, department)
+// for users that have a department set. Members get a managerId derived from
+// the most common manager in the department. Idempotent — safe to call after
+// every sync. The crawler/dispatcher calls this once at end-of-sync.
+router.post('/admin/refresh-contexts', async (req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  if (!isAdminRequest(req)) {
+    // Allow when called from a crawler with the 'admin' permission too
+    if (!req.crawler || !(req.crawler.permissions || []).includes('admin')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+  try {
+    const start = Date.now();
+    // Wipe and rebuild — Contexts is fully derived, no manual edits to preserve.
+    // The unique key on (systemId, department) keeps the table small (a few hundred rows).
+    const r = await db.tx(async (client) => {
+      await client.query(`DELETE FROM "Contexts"`);
+      const ins = await client.query(`
+        INSERT INTO "Contexts" (id, "systemId", "contextType", "displayName", department, "memberCount", "lastCalculatedAt", "sourceType")
+        SELECT
+          gen_random_uuid(),
+          "systemId",
+          'Department',
+          department,
+          department,
+          COUNT(*)::int,
+          now(),
+          'derived'
+        FROM "Principals"
+        WHERE department IS NOT NULL AND department <> ''
+          AND "systemId" IS NOT NULL
+        GROUP BY "systemId", department
+        RETURNING id
+      `);
+      return ins.rowCount;
+    });
+    return res.json({ ok: true, contextsCreated: r, durationMs: Date.now() - start });
+  } catch (err) {
+    console.error('refresh-contexts failed:', err.message);
+    return res.status(500).json({ error: 'refresh-contexts failed', message: err.message });
+  }
+});
+
+// Helper: detect whether the request came from an interactive admin user.
+// In v5, the only mutation surface for admin endpoints is either an authenticated
+// UI session or a crawler with the 'admin' permission. We check both.
+function isAdminRequest(req) {
+  return !!req.user; // any signed-in UI user
+}
+
+// ─── History retention setting ──────────────────────────────────────────────
+// Controls how long rows in the `_history` audit table are kept before being
+// pruned. Default is 180 days. Setting to 0 disables pruning entirely.
+//
+// The setting is persisted in WorkerConfig under "HISTORY_RETENTION_DAYS"
+// and read by the periodic prune job (started in bootstrap.js).
+const HISTORY_RETENTION_KEY = 'HISTORY_RETENTION_DAYS';
+const HISTORY_RETENTION_DEFAULT = 180;
+
+router.get('/admin/history-retention', async (_req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  try {
+    const r = await db.queryOne(
+      `SELECT "configValue" FROM "WorkerConfig" WHERE "configKey" = $1`,
+      [HISTORY_RETENTION_KEY]
+    );
+    const days = r ? parseInt(r.configValue, 10) : HISTORY_RETENTION_DEFAULT;
+    // Best-effort current row count for the UI
+    let totalRows = null;
+    try {
+      const c = await db.queryOne(`SELECT count(*)::bigint AS n FROM "_history"`);
+      totalRows = Number(c?.n || 0);
+    } catch { /* table may not exist on very old deployments */ }
+    res.json({ retentionDays: days, totalRows });
+  } catch (err) {
+    console.error('history-retention read failed:', err.message);
+    res.status(500).json({ error: 'Failed to read history retention' });
+  }
+});
+
+router.put('/admin/history-retention', async (req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  const { retentionDays } = req.body || {};
+  const days = parseInt(retentionDays, 10);
+  if (isNaN(days) || days < 0 || days > 3650) {
+    return res.status(400).json({ error: 'retentionDays must be an integer between 0 and 3650' });
+  }
+  try {
+    await db.query(
+      `INSERT INTO "WorkerConfig" ("configKey","configValue")
+       VALUES ($1, $2)
+       ON CONFLICT ("configKey") DO UPDATE
+         SET "configValue" = EXCLUDED."configValue",
+             "updatedAt"   = now() AT TIME ZONE 'utc'`,
+      [HISTORY_RETENTION_KEY, String(days)]
+    );
+    res.json({ retentionDays: days });
+  } catch (err) {
+    console.error('history-retention write failed:', err.message);
+    res.status(500).json({ error: 'Failed to save history retention' });
+  }
+});
+
+router.post('/admin/history-retention/prune', async (_req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  try {
+    const r = await db.queryOne(
+      `SELECT "configValue" FROM "WorkerConfig" WHERE "configKey" = $1`,
+      [HISTORY_RETENTION_KEY]
+    );
+    const days = r ? parseInt(r.configValue, 10) : HISTORY_RETENTION_DEFAULT;
+    if (days <= 0) return res.json({ deleted: 0, message: 'Retention disabled (0 days) — nothing pruned' });
+    const del = await db.query(
+      `DELETE FROM "_history" WHERE "changedAt" < now() - ($1::int * interval '1 day')`,
+      [days]
+    );
+    res.json({ deleted: del.rowCount || 0, retentionDays: days });
+  } catch (err) {
+    console.error('history-retention prune failed:', err.message);
+    res.status(500).json({ error: 'Prune failed' });
   }
 });
 

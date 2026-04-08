@@ -15,45 +15,19 @@ if (useSql) {
 // ─── Auto-create tag tables if they don't exist ──────────────────
 let tablesReady = false;
 
-async function ensureTagTables(pool) {
-  if (tablesReady) return;
-  await pool.request().query(`
-    IF OBJECT_ID('dbo.GraphTags', 'U') IS NULL
-    CREATE TABLE dbo.GraphTags (
-      id INT IDENTITY(1,1) PRIMARY KEY,
-      name NVARCHAR(100) NOT NULL,
-      color NVARCHAR(7) NOT NULL DEFAULT '#3b82f6',
-      entityType NVARCHAR(10) NOT NULL,
-      createdAt DATETIME2 DEFAULT GETUTCDATE(),
-      CONSTRAINT UQ_GraphTags_Name_Type UNIQUE(name, entityType),
-      CONSTRAINT CK_GraphTags_EntityType CHECK(entityType IN ('user', 'group', 'resource'))
-    );
-    IF OBJECT_ID('dbo.GraphTagAssignments', 'U') IS NULL
-    CREATE TABLE dbo.GraphTagAssignments (
-      tagId INT NOT NULL,
-      entityId NVARCHAR(36) NOT NULL,
-      PRIMARY KEY (tagId, entityId),
-      CONSTRAINT FK_TagAssignment_Tag FOREIGN KEY (tagId) REFERENCES dbo.GraphTags(id) ON DELETE CASCADE
-    );
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_GraphTagAssignments_entityId' AND object_id = OBJECT_ID('dbo.GraphTagAssignments'))
-      CREATE INDEX IX_GraphTagAssignments_entityId ON dbo.GraphTagAssignments(entityId) INCLUDE(tagId);
-  `);
-  tablesReady = true;
-}
-
-// Re-export for other routes to use
+// In v5 the tags + tag-assignments tables are created by the migrations
+// runner at startup. This function is a no-op kept for backward compatibility.
+async function ensureTagTables(_pool) { tablesReady = true; }
 export { ensureTagTables };
 
-// ─── Column discovery helpers (shared TTL cache from db/columnCache.js) ──
-
-// Build parameterized WHERE clause from filters object, validating against actual columns
+// Build parameterized WHERE clause from filters object, validating against actual columns.
 function buildFilterWhere(requestObj, filters, validColNames, alias, paramPrefix = 'fl') {
   let where = '';
   let idx = 0;
   for (const [field, value] of Object.entries(filters)) {
     if (validColNames.has(field) && value != null && String(value) !== '') {
       const paramName = `${paramPrefix}${idx}`;
-      where += ` AND CAST(${alias}.[${field}] AS NVARCHAR(400)) = @${paramName}`;
+      where += ` AND ${alias}."${field}"::text = @${paramName}`;
       requestObj.input(paramName, String(value));
       idx++;
     }
@@ -70,16 +44,17 @@ router.get('/tags', async (req, res) => {
     const { entityType } = req.query;
     const request = p.request();
     let sql = `
-      SELECT t.*, ISNULL(COUNT(ta.tagId), 0) AS assignmentCount
-      FROM dbo.GraphTags t
-      LEFT JOIN dbo.GraphTagAssignments ta ON ta.tagId = t.id
+      SELECT t.id, t."name", t."color", t."entityType", t."createdAt",
+             COALESCE(COUNT(ta."tagId"), 0)::int AS "assignmentCount"
+        FROM "GraphTags" t
+        LEFT JOIN "GraphTagAssignments" ta ON ta."tagId" = t.id
     `;
     if (entityType) {
-      sql += ` WHERE t.entityType = @entityType`;
+      sql += ` WHERE t."entityType" = @entityType`;
       request.input('entityType', entityType);
     }
-    sql += ` GROUP BY t.id, t.name, t.color, t.entityType, t.createdAt`;
-    sql += ` ORDER BY t.name`;
+    sql += ` GROUP BY t.id, t."name", t."color", t."entityType", t."createdAt"`;
+    sql += ` ORDER BY t."name"`;
     const result = await request.query(sql);
     res.json(result.recordset);
   } catch (err) {
@@ -104,9 +79,9 @@ router.post('/tags', async (req, res) => {
       .input('color', color || '#3b82f6')
       .input('entityType', entityType)
       .query(`
-        INSERT INTO dbo.GraphTags (name, color, entityType)
-        OUTPUT INSERTED.*
-        VALUES (@name, @color, @entityType)
+        INSERT INTO "GraphTags" (name, color, "entityType")
+              VALUES (@name, @color, @entityType)
+              RETURNING *
       `);
     res.status(201).json(result.recordset[0]);
   } catch (err) {
@@ -130,11 +105,11 @@ router.patch('/tags/:id', async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid tag ID' });
     const request = p.request().input('id', id);
     const sets = [];
-    if (name) { sets.push('name = @name'); request.input('name', name.trim()); }
-    if (color) { sets.push('color = @color'); request.input('color', color); }
+    if (name) { sets.push('"name" = @name'); request.input('name', name.trim()); }
+    if (color) { sets.push('"color" = @color'); request.input('color', color); }
     if (sets.length === 0) return res.status(400).json({ error: 'Nothing to update' });
     const result = await request.query(
-      `UPDATE dbo.GraphTags SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`
+      `UPDATE "GraphTags" SET ${sets.join(', ')} WHERE id = @id RETURNING *`
     );
     res.json(result.recordset[0] || null);
   } catch (err) {
@@ -153,7 +128,7 @@ router.delete('/tags/:id', async (req, res) => {
     await ensureTagTables(p);
     await p.request()
       .input('id', id)
-      .query('DELETE FROM dbo.GraphTags WHERE id = @id');
+      .query('DELETE FROM GraphTags WHERE id = @id');
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /tags failed:', err.message);
@@ -184,10 +159,10 @@ router.post('/tags/:id/assign', async (req, res) => {
       return `@eid${i}`;
     });
     const result = await request.query(`
-      INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
+      INSERT INTO "GraphTagAssignments" ("tagId", "entityId")
       SELECT @tagId, eid FROM (VALUES ${valueParams.map(p => `(${p})`).join(',')}) AS t(eid)
       WHERE NOT EXISTS (
-        SELECT 1 FROM dbo.GraphTagAssignments WHERE tagId = @tagId AND entityId = t.eid
+        SELECT 1 FROM GraphTagAssignments WHERE tagId = @tagId AND entityId = t.eid
       );
       SELECT @@ROWCOUNT AS inserted;
     `);
@@ -221,8 +196,8 @@ router.post('/tags/:id/unassign', async (req, res) => {
       return `@eid${i}`;
     });
     const result = await request.query(`
-      DELETE FROM dbo.GraphTagAssignments
-      WHERE tagId = @tagId AND entityId IN (${idParams.join(',')});
+      DELETE FROM "GraphTagAssignments"
+      WHERE "tagId" = @tagId AND "entityId" IN (${idParams.join(',')});
       SELECT @@ROWCOUNT AS deleted;
     `);
     res.json({ ok: true, deleted: result.recordset[0]?.deleted || 0 });
@@ -248,7 +223,7 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
     let userTableForTags = 'GraphUsers';
     if (entityType === 'user') {
       try {
-        const tc = await p.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
+        const tc = await p.request().query(`SELECT to_regclass('"Principals"') AS principalsExists`);
         if (tc.recordset[0].principalsExists) userTableForTags = 'Principals';
       } catch { /* ignore */ }
     }
@@ -282,12 +257,12 @@ router.post('/tags/:id/assign-by-filter', async (req, res) => {
 
     // Safety cap: limit bulk assignment to 50,000 rows to prevent runaway operations
     const result = await request.query(`
-      INSERT INTO dbo.GraphTagAssignments (tagId, entityId)
-      SELECT TOP 50000 @tagId, UPPER(CAST(${alias}.id AS NVARCHAR(36)))
-      FROM dbo.${table} ${alias}
+      INSERT INTO "GraphTagAssignments" ("tagId", "entityId")
+      SELECT @tagId, UPPER((${alias}.id)::text)
+      FROM ${table} ${alias}
       WHERE (${where})
-        AND UPPER(CAST(${alias}.id AS NVARCHAR(36))) NOT IN (
-          SELECT entityId FROM dbo.GraphTagAssignments WHERE tagId = @tagId
+        AND UPPER((${alias}.id)::text) NOT IN (
+          SELECT "entityId" FROM "GraphTagAssignments" WHERE "tagId" = @tagId
         );
       SELECT @@ROWCOUNT AS inserted;
     `);
@@ -322,9 +297,9 @@ router.get('/user-columns-page', async (req, res) => {
       await ensureTagTables(p);
       const tagResult = await p.request().query(`
         SELECT t.name
-        FROM dbo.GraphTags t
-        WHERE t.entityType = 'user'
-          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        FROM "GraphTags" t
+        WHERE t."entityType" = 'user'
+          AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta WHERE ta."tagId" = t.id)
         ORDER BY t.name
       `);
       const userTags = tagResult.recordset.map(r => r.name);
@@ -382,9 +357,9 @@ async function groupColumnsHandler(req, res) {
       await ensureTagTables(p);
       const tagResult = await p.request().query(`
         SELECT t.name
-        FROM dbo.GraphTags t
-        WHERE t.entityType IN ('resource', 'group')
-          AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = t.id)
+        FROM "GraphTags" t
+        WHERE t."entityType" IN ('resource', 'group')
+          AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta WHERE ta."tagId" = t.id)
         ORDER BY t.name
       `);
       const groupTags = tagResult.recordset.map(r => r.name);
@@ -408,13 +383,10 @@ router.get('/users', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
-    // Parse attribute filters
     let attrFilters = {};
     if (req.query.filters) {
       try { attrFilters = JSON.parse(req.query.filters); } catch { /* ignore bad JSON */ }
     }
-
-    // Extract virtual tag filter before column validation
     let userTagFilter = null;
     if (attrFilters['__userTag']) {
       userTagFilter = String(attrFilters['__userTag']);
@@ -424,62 +396,50 @@ router.get('/users', async (req, res) => {
     const p = await db.getPool();
     await ensureTagTables(p);
 
-    // Determine user table: prefer Principals, fall back to GraphUsers
-    let usePrincipals = false;
-    try {
-      const tableCheck = await p.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
-      usePrincipals = !!tableCheck.recordset[0].principalsExists;
-    } catch { /* ignore */ }
-    const userTableName = usePrincipals ? 'Principals' : 'GraphUsers';
-    const upnColumn = usePrincipals ? 'email' : 'userPrincipalName';
-
     const request = p.request();
     request.input('limit', limit);
     request.input('offset', offset);
 
-    // Validate attribute filters against actual columns
     const cols = await getPrincipalOrUserColumns(p);
     const colNames = new Set(cols.map(c => c.name));
     const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'u');
 
     let where = '1=1';
-    // For Principals table, add ValidTo filter for temporal table
-    if (usePrincipals) {
-      where += ` AND u.ValidTo = '9999-12-31 23:59:59.9999999'`;
-    }
     if (search) {
-      where += ` AND (u.displayName LIKE @search OR u.${upnColumn} LIKE @search)`;
+      where += ` AND (u."displayName" ILIKE @search OR u."email" ILIKE @search)`;
       request.input('search', `%${search}%`);
     }
     if (tagId) {
-      where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36))))`;
+      where += ` AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta WHERE ta."tagId" = @tagId AND ta."entityId" = UPPER(u.id::text))`;
       request.input('tagId', tagId);
     }
     let userTagJoin = '';
     if (userTagFilter) {
       userTagJoin = `
-        INNER JOIN dbo.GraphTagAssignments _uta ON _uta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
-        INNER JOIN dbo.GraphTags _ut ON _uta.tagId = _ut.id AND _ut.name = @__userTag AND _ut.entityType = 'user'`;
+        INNER JOIN "GraphTagAssignments" _uta ON _uta."entityId" = UPPER(u.id::text)
+        INNER JOIN "GraphTags" _ut ON _uta."tagId" = _ut.id AND _ut."name" = @__userTag AND _ut."entityType" = 'user'`;
       request.input('__userTag', userTagFilter);
     }
     where += filterWhere;
 
+    // Two-statement query: data + count, returned as recordsets[0] and [1]
+    // by the mssql-compat shim.
     const result = await request.query(`
-      SELECT u.id, u.displayName, u.${upnColumn} AS userPrincipalName, u.department, u.jobTitle,
-             u.companyName, u.accountEnabled,
-             ${usePrincipals ? `u.principalType, u.systemId, u.externalId,` : ''}
-             (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
-              FROM dbo.GraphTagAssignments ta
-              INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType = 'user'
-              WHERE ta.entityId = UPPER(CAST(u.id AS NVARCHAR(36)))
-             ) AS tagString
-      FROM dbo.${userTableName} u
-      ${userTagJoin}
-      WHERE ${where}
-      ORDER BY u.displayName
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+      SELECT u.id, u."displayName", u."email" AS "userPrincipalName",
+             u."department", u."jobTitle", u."companyName", u."accountEnabled",
+             u."principalType", u."systemId", u."externalId",
+             (SELECT string_agg(t.id::text || ':' || t."name" || ':' || t."color", '|')
+                FROM "GraphTagAssignments" ta
+                INNER JOIN "GraphTags" t ON ta."tagId" = t.id AND t."entityType" = 'user'
+               WHERE ta."entityId" = UPPER(u.id::text)
+             ) AS "tagString"
+        FROM "Principals" u
+        ${userTagJoin}
+       WHERE ${where}
+       ORDER BY u."displayName"
+       LIMIT @limit OFFSET @offset;
 
-      SELECT COUNT(*) AS total FROM dbo.${userTableName} u ${userTagJoin} WHERE ${where};
+      SELECT COUNT(*)::int AS total FROM "Principals" u ${userTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(r => {
@@ -532,103 +492,48 @@ router.get('/groups', async (req, res) => {
     request.input('limit', limit);
     request.input('offset', offset);
 
-    // Try Resources table first, fall back to GraphGroups
-    let useResources = false;
-    try {
-      await p.request().query('SELECT TOP 0 * FROM Resources');
-      useResources = true;
-    } catch { /* Resources table doesn't exist */ }
-
-    if (useResources) {
-      // Validate attribute filters against Resources columns
-      const cols = await getResourceCols(p);
-      const colNames = new Set(cols.map(c => c.name));
-      const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'r');
-
-      let where = `r.ValidTo = '9999-12-31 23:59:59.9999999'`;
-      if (search) {
-        where += ` AND (r.displayName LIKE @search OR r.description LIKE @search)`;
-        request.input('search', `%${search}%`);
-      }
-      if (resourceType) {
-        where += ` AND r.resourceType = @resourceType`;
-        request.input('resourceType', resourceType);
-      }
-      if (tagId) {
-        where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta INNER JOIN dbo.GraphTags t ON ta.tagId = t.id WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36))) AND t.entityType IN ('resource', 'group'))`;
-        request.input('tagId', tagId);
-      }
-      let groupTagJoin = '';
-      if (groupTagFilter) {
-        groupTagJoin = `
-          INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
-          INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType IN ('resource', 'group')`;
-        request.input('__groupTag', groupTagFilter);
-      }
-      where += filterWhere;
-
-      const result = await request.query(`
-        SELECT r.id, r.displayName, r.resourceType, r.resourceType AS groupTypeCalculated,
-               r.description, r.systemId, r.enabled,
-               (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
-                FROM dbo.GraphTagAssignments ta
-                INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType IN ('resource', 'group')
-                WHERE ta.entityId = UPPER(CAST(r.id AS NVARCHAR(36)))
-               ) AS tagString
-        FROM dbo.Resources r
-        ${groupTagJoin}
-        WHERE ${where}
-        ORDER BY r.displayName
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
-
-        SELECT COUNT(*) AS total FROM dbo.Resources r ${groupTagJoin} WHERE ${where};
-      `);
-
-      const data = result.recordsets[0].map(r => {
-        const { tagString, ...rest } = r;
-        return { ...rest, tags: parseTags(tagString) };
-      });
-
-      return res.json({ data, total: result.recordsets[1][0].total });
-    }
-
-    // Fall back to GraphGroups (old model)
-    const cols = await getGroupCols(p);
+    // v5: only the Resources table exists. The v4 GraphGroups fallback is gone.
+    const cols = await getResourceCols(p);
     const colNames = new Set(cols.map(c => c.name));
-    const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'g');
+    const filterWhere = buildFilterWhere(request, attrFilters, colNames, 'r');
 
     let where = '1=1';
     if (search) {
-      where += ` AND (g.displayName LIKE @search OR g.description LIKE @search)`;
+      where += ` AND (r."displayName" ILIKE @search OR r."description" ILIKE @search)`;
       request.input('search', `%${search}%`);
     }
+    if (resourceType) {
+      where += ` AND r."resourceType" = @resourceType`;
+      request.input('resourceType', resourceType);
+    }
     if (tagId) {
-      where += ` AND EXISTS (SELECT 1 FROM dbo.GraphTagAssignments ta WHERE ta.tagId = @tagId AND ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36))))`;
+      where += ` AND EXISTS (SELECT 1 FROM "GraphTagAssignments" ta INNER JOIN "GraphTags" t ON ta."tagId" = t.id WHERE ta."tagId" = @tagId AND ta."entityId" = UPPER(r.id::text) AND t."entityType" IN ('resource', 'group'))`;
       request.input('tagId', tagId);
     }
     let groupTagJoin = '';
     if (groupTagFilter) {
       groupTagJoin = `
-        INNER JOIN dbo.GraphTagAssignments _gta ON _gta.entityId = UPPER(CAST(g.id AS NVARCHAR(36)))
-        INNER JOIN dbo.GraphTags _gt ON _gta.tagId = _gt.id AND _gt.name = @__groupTag AND _gt.entityType = 'group'`;
+        INNER JOIN "GraphTagAssignments" _gta ON _gta."entityId" = UPPER(r.id::text)
+        INNER JOIN "GraphTags" _gt ON _gta."tagId" = _gt.id AND _gt."name" = @__groupTag AND _gt."entityType" IN ('resource', 'group')`;
       request.input('__groupTag', groupTagFilter);
     }
     where += filterWhere;
 
     const result = await request.query(`
-      SELECT g.id, g.displayName, g.groupTypeCalculated, g.description,
-             (SELECT STRING_AGG(CONCAT(CAST(t.id AS NVARCHAR(10)), ':', t.name, ':', t.color), '|')
-              FROM dbo.GraphTagAssignments ta
-              INNER JOIN dbo.GraphTags t ON ta.tagId = t.id AND t.entityType = 'group'
-              WHERE ta.entityId = UPPER(CAST(g.id AS NVARCHAR(36)))
-             ) AS tagString
-      FROM dbo.GraphGroups g
-      ${groupTagJoin}
-      WHERE ${where}
-      ORDER BY g.displayName
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+      SELECT r.id, r."displayName", r."resourceType", r."resourceType" AS "groupTypeCalculated",
+             r."description", r."systemId", r."enabled",
+             (SELECT string_agg(t.id::text || ':' || t."name" || ':' || t."color", '|')
+                FROM "GraphTagAssignments" ta
+                INNER JOIN "GraphTags" t ON ta."tagId" = t.id AND t."entityType" IN ('resource', 'group')
+               WHERE ta."entityId" = UPPER(r.id::text)
+             ) AS "tagString"
+        FROM "Resources" r
+        ${groupTagJoin}
+       WHERE ${where}
+       ORDER BY r."displayName"
+       LIMIT @limit OFFSET @offset;
 
-      SELECT COUNT(*) AS total FROM dbo.GraphGroups g ${groupTagJoin} WHERE ${where};
+      SELECT COUNT(*)::int AS total FROM "Resources" r ${groupTagJoin} WHERE ${where};
     `);
 
     const data = result.recordsets[0].map(r => {
@@ -657,11 +562,11 @@ router.get('/entity-tags', async (req, res) => {
     const p = await db.getPool();
     await ensureTagTables(p);
     const result = await p.request().input('entityType', entityType).query(`
-      SELECT ta.entityId, t.id AS tagId, t.name AS tagName, t.color AS tagColor
-      FROM dbo.GraphTagAssignments ta
-      INNER JOIN dbo.GraphTags t ON ta.tagId = t.id
-      WHERE t.entityType = @entityType
-      ORDER BY ta.entityId, t.name
+      SELECT ta."entityId", t.id AS "tagId", t.name AS tagName, t.color AS tagColor
+      FROM "GraphTagAssignments" ta
+      INNER JOIN "GraphTags" t ON ta."tagId" = t.id
+      WHERE t."entityType" = @entityType
+      ORDER BY ta."entityId", t.name
     `);
     res.json(result.recordset);
   } catch (err) {

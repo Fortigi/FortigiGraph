@@ -56,7 +56,7 @@ async function riskTableExists(pool, res) {
   }
   try {
     const result = await timedRequest(pool, 'risk-table-check', res).query(`
-      SELECT OBJECT_ID('dbo.RiskScores', 'U') AS tbl
+      SELECT to_regclass('"RiskScores"') AS tbl
     `);
     _riskTableExists = result.recordset[0].tbl != null;
   } catch {
@@ -66,15 +66,21 @@ async function riskTableExists(pool, res) {
   return _riskTableExists;
 }
 
-// Parse JSON columns and compute effective score
+// Parse JSON columns and compute effective score.
+// In v5 these are jsonb columns — pg returns them already-parsed, so we only
+// need JSON.parse when the value is a legacy string.
 function parseJsonColumns(row) {
   const r = { ...row };
-  try { r.classifierMatches = r.riskClassifierMatches ? JSON.parse(r.riskClassifierMatches) : []; }
-  catch { r.classifierMatches = []; }
+  const cm = r.riskClassifierMatches;
+  r.classifierMatches = (cm && typeof cm === 'string')
+    ? (() => { try { return JSON.parse(cm); } catch { return []; } })()
+    : (cm || []);
   delete r.riskClassifierMatches;
 
-  try { r.explanation = r.riskExplanation ? JSON.parse(r.riskExplanation) : null; }
-  catch { r.explanation = null; }
+  const exp = r.riskExplanation;
+  r.explanation = (exp && typeof exp === 'string')
+    ? (() => { try { return JSON.parse(exp); } catch { return null; } })()
+    : (exp || null);
   delete r.riskExplanation;
 
   r.riskOverride = r.riskOverride ?? null;
@@ -96,8 +102,9 @@ function computeTier(score) {
   return 'None';
 }
 
-// Temporal table filter for JOINed entity tables
-const TEMPORAL_FILTER = "ValidTo = '9999-12-31 23:59:59.9999999'";
+// In v5 (postgres) temporal tables are gone, so the ValidTo filter is a no-op.
+// Constant kept so all the JOIN clauses that reference it still compile.
+const TEMPORAL_FILTER = "1=1";
 
 // ─── GET /api/risk-scores ─────────────────────────────────────────────
 router.get('/risk-scores', async (req, res) => {
@@ -113,56 +120,56 @@ router.get('/risk-scores', async (req, res) => {
 
     // Tier distribution by entity type
     const tierResult = await timedRequest(p, 'risk-tier-distribution', res).query(`
-      SELECT entityType, riskTier, COUNT(*) AS count
-      FROM dbo.RiskScores
-      GROUP BY entityType, riskTier
+      SELECT "entityType", "riskTier", COUNT(*) AS count
+      FROM "RiskScores"
+      GROUP BY "entityType", "riskTier"
     `);
 
     // Top 10 principals by score
     const topUsers = await timedRequest(p, 'risk-top-users', res).query(`
-      SELECT TOP 10 rs.*, p.displayName, p.email AS userPrincipalName, p.department
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
-      WHERE rs.entityType = 'Principal'
-      ORDER BY rs.riskScore DESC
+      SELECT rs.*, p."displayName", p.email AS userPrincipalName, p.department
+      FROM "RiskScores" rs
+      INNER JOIN "Principals" p ON rs."entityId" = p.id AND ${TEMPORAL_FILTER}
+      WHERE rs."entityType" = 'Principal'
+      ORDER BY rs."riskScore" DESC
     `);
 
     // Top 10 resources by score
     const topResources = await timedRequest(p, 'risk-top-resources', res).query(`
-      SELECT TOP 10 rs.*, r.displayName, r.resourceType, r.description
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
-      WHERE rs.entityType = 'Resource'
-      ORDER BY rs.riskScore DESC
+      SELECT rs.*, r."displayName", r."resourceType", r.description
+      FROM "RiskScores" rs
+      INNER JOIN "Resources" r ON rs."entityId" = r.id AND ${TEMPORAL_FILTER}
+      WHERE rs."entityType" = 'Resource'
+      ORDER BY rs."riskScore" DESC
     `);
 
     // Totals and override counts
     const totals = await timedRequest(p, 'risk-totals', res).query(`
       SELECT
-        entityType,
+        "entityType",
         COUNT(*) AS total,
-        SUM(CASE WHEN riskOverride IS NOT NULL THEN 1 ELSE 0 END) AS overrides
-      FROM dbo.RiskScores
-      GROUP BY entityType
+        SUM(CASE WHEN "riskOverride" IS NOT NULL THEN 1 ELSE 0 END) AS overrides
+      FROM "RiskScores"
+      GROUP BY "entityType"
     `);
 
     // Most recent scored-at timestamp
     const tsResult = await timedRequest(p, 'risk-scored-at', res).query(`
-      SELECT TOP 1 riskScoredAt FROM dbo.RiskScores
-      WHERE riskScoredAt IS NOT NULL
-      ORDER BY riskScoredAt DESC
+      SELECT "riskScoredAt" FROM "RiskScores"
+      WHERE "riskScoredAt" IS NOT NULL
+      ORDER BY "riskScoredAt" DESC
     `);
 
     // Resource type breakdown
     let resourceTypeBreakdown = null;
     try {
       const typeResult = await timedRequest(p, 'risk-resource-types', res).query(`
-        SELECT r.resourceType, COUNT(*) AS count, AVG(CAST(rs.riskScore AS FLOAT)) AS avgScore
-        FROM dbo.RiskScores rs
-        INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
-        WHERE rs.entityType = 'Resource'
-        GROUP BY r.resourceType
-        ORDER BY AVG(CAST(rs.riskScore AS FLOAT)) DESC
+        SELECT r."resourceType", COUNT(*) AS count, AVG(CAST(rs."riskScore" AS FLOAT)) AS avgScore
+        FROM "RiskScores" rs
+        INNER JOIN "Resources" r ON rs."entityId" = r.id AND ${TEMPORAL_FILTER}
+        WHERE rs."entityType" = 'Resource'
+        GROUP BY r."resourceType"
+        ORDER BY AVG(CAST(rs."riskScore" AS FLOAT)) DESC
       `);
       resourceTypeBreakdown = typeResult.recordset;
     } catch { resourceTypeBreakdown = null; }
@@ -225,11 +232,11 @@ router.get('/risk-scores/users', async (req, res) => {
     const department = req.query.department || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'Principal'`;
+    let whereClause = `WHERE rs."entityType" = 'Principal'`;
     const request = timedRequest(p, 'risk-users-list', res);
 
     if (tier) {
-      whereClause += ' AND rs.riskTier = @tier';
+      whereClause += ' AND rs."riskTier" = @tier';
       request.input('tier', tier);
     }
     if (search) {
@@ -241,18 +248,18 @@ router.get('/risk-scores/users', async (req, res) => {
       request.input('department', department);
     }
     if (overridesOnly) {
-      whereClause += ' AND rs.riskOverride IS NOT NULL';
+      whereClause += ' AND rs."riskOverride" IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT rs.*, p.displayName, p.email AS userPrincipalName, p.department, p.jobTitle, p.companyName
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
+      SELECT rs.*, p."displayName", p.email AS userPrincipalName, p.department, p."jobTitle", p."companyName"
+      FROM "RiskScores" rs
+      INNER JOIN "Principals" p ON rs."entityId" = p.id AND ${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY rs.riskScore DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY rs."riskScore" DESC
+      LIMIT @limit OFFSET @offset
     `);
 
     const countReq = timedRequest(p, 'risk-users-count', res);
@@ -261,8 +268,8 @@ router.get('/risk-scores/users', async (req, res) => {
     if (department) countReq.input('department', department);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Principals p ON rs.entityId = p.id AND p.${TEMPORAL_FILTER}
+      FROM "RiskScores" rs
+      INNER JOIN "Principals" p ON rs."entityId" = p.id AND ${TEMPORAL_FILTER}
       ${whereClause}
     `);
 
@@ -292,11 +299,11 @@ router.get('/risk-scores/groups', async (req, res) => {
     const resourceType = req.query.resourceType || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'Resource'`;
+    let whereClause = `WHERE rs."entityType" = 'Resource'`;
     const request = timedRequest(p, 'risk-groups-list', res);
 
     if (tier) {
-      whereClause += ' AND rs.riskTier = @tier';
+      whereClause += ' AND rs."riskTier" = @tier';
       request.input('tier', tier);
     }
     if (search) {
@@ -308,18 +315,18 @@ router.get('/risk-scores/groups', async (req, res) => {
       request.input('resourceType', resourceType);
     }
     if (overridesOnly) {
-      whereClause += ' AND rs.riskOverride IS NOT NULL';
+      whereClause += ' AND rs."riskOverride" IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT rs.*, r.displayName, r.description, r.resourceType, r.mail
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+      SELECT rs.*, r."displayName", r.description, r."resourceType", r.mail
+      FROM "RiskScores" rs
+      INNER JOIN "Resources" r ON rs."entityId" = r.id AND ${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY rs.riskScore DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY rs."riskScore" DESC
+      LIMIT @limit OFFSET @offset
     `);
 
     const countReq = timedRequest(p, 'risk-groups-count', res);
@@ -328,8 +335,8 @@ router.get('/risk-scores/groups', async (req, res) => {
     if (resourceType) countReq.input('resourceType', resourceType);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Resources r ON rs.entityId = r.id AND r.${TEMPORAL_FILTER}
+      FROM "RiskScores" rs
+      INNER JOIN "Resources" r ON rs."entityId" = r.id AND ${TEMPORAL_FILTER}
       ${whereClause}
     `);
 
@@ -359,11 +366,11 @@ router.get('/risk-scores/business-roles', async (req, res) => {
     const search = req.query.search || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'BusinessRole'`;
+    let whereClause = `WHERE rs."entityType" = 'BusinessRole'`;
     const request = timedRequest(p, 'risk-business-roles-list', res);
 
     if (tier) {
-      whereClause += ' AND rs.riskTier = @tier';
+      whereClause += ' AND rs."riskTier" = @tier';
       request.input('tier', tier);
     }
     if (search) {
@@ -371,20 +378,20 @@ router.get('/risk-scores/business-roles', async (req, res) => {
       request.input('search', `%${search}%`);
     }
     if (overridesOnly) {
-      whereClause += ' AND rs.riskOverride IS NOT NULL';
+      whereClause += ' AND rs."riskOverride" IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT rs.*, br.displayName, br.description, br.catalogId,
-             c.displayName AS catalogName
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Resources br ON rs.entityId = br.id AND br.resourceType = 'BusinessRole' AND br.${TEMPORAL_FILTER}
-      LEFT JOIN dbo.GovernanceCatalogs c ON br.catalogId = c.id AND c.${TEMPORAL_FILTER}
+      SELECT rs.*, br."displayName", br.description, br."catalogId",
+             c."displayName" AS catalogName
+      FROM "RiskScores" rs
+      INNER JOIN "Resources" br ON rs."entityId" = br.id AND br."resourceType" = 'BusinessRole' AND ${TEMPORAL_FILTER}
+      LEFT JOIN "GovernanceCatalogs" c ON br."catalogId" = c.id AND ${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY rs.riskScore DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY rs."riskScore" DESC
+      LIMIT @limit OFFSET @offset
     `);
 
     const countReq = timedRequest(p, 'risk-business-roles-count', res);
@@ -392,9 +399,9 @@ router.get('/risk-scores/business-roles', async (req, res) => {
     if (search) countReq.input('search', `%${search}%`);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Resources br ON rs.entityId = br.id AND br.resourceType = 'BusinessRole' AND br.${TEMPORAL_FILTER}
-      LEFT JOIN dbo.GovernanceCatalogs c ON br.catalogId = c.id AND c.${TEMPORAL_FILTER}
+      FROM "RiskScores" rs
+      INNER JOIN "Resources" br ON rs."entityId" = br.id AND br."resourceType" = 'BusinessRole' AND ${TEMPORAL_FILTER}
+      LEFT JOIN "GovernanceCatalogs" c ON br."catalogId" = c.id AND ${TEMPORAL_FILTER}
       ${whereClause}
     `);
 
@@ -423,11 +430,11 @@ router.get('/risk-scores/contexts', async (req, res) => {
     const search = req.query.search || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'Context'`;
+    let whereClause = `WHERE rs."entityType" = 'Context'`;
     const request = timedRequest(p, 'risk-contexts-list', res);
 
     if (tier) {
-      whereClause += ' AND rs.riskTier = @tier';
+      whereClause += ' AND rs."riskTier" = @tier';
       request.input('tier', tier);
     }
     if (search) {
@@ -435,20 +442,20 @@ router.get('/risk-scores/contexts', async (req, res) => {
       request.input('search', `%${search}%`);
     }
     if (overridesOnly) {
-      whereClause += ' AND rs.riskOverride IS NOT NULL';
+      whereClause += ' AND rs."riskOverride" IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT rs.*, ou.displayName, ou.department, ou.memberCount, ou.managerId,
-             p.displayName AS managerName
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Contexts ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
-      LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
+      SELECT rs.*, ou."displayName", ou.department, ou."memberCount", ou."managerId",
+             p."displayName" AS managerName
+      FROM "RiskScores" rs
+      INNER JOIN "Contexts" ou ON rs."entityId" = ou.id AND ${TEMPORAL_FILTER}
+      LEFT JOIN "Principals" p ON ou."managerId" = p.id AND ${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY rs.riskScore DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY rs."riskScore" DESC
+      LIMIT @limit OFFSET @offset
     `);
 
     const countReq = timedRequest(p, 'risk-contexts-count', res);
@@ -456,9 +463,9 @@ router.get('/risk-scores/contexts', async (req, res) => {
     if (search) countReq.input('search', `%${search}%`);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Contexts ou ON rs.entityId = ou.id AND ou.${TEMPORAL_FILTER}
-      LEFT JOIN dbo.Principals p ON ou.managerId = p.id AND p.${TEMPORAL_FILTER}
+      FROM "RiskScores" rs
+      INNER JOIN "Contexts" ou ON rs."entityId" = ou.id AND ${TEMPORAL_FILTER}
+      LEFT JOIN "Principals" p ON ou."managerId" = p.id AND ${TEMPORAL_FILTER}
       ${whereClause}
     `);
 
@@ -487,11 +494,11 @@ router.get('/risk-scores/identities', async (req, res) => {
     const search = req.query.search || '';
     const overridesOnly = req.query.overridesOnly === 'true';
 
-    let whereClause = `WHERE rs.entityType = 'Identity'`;
+    let whereClause = `WHERE rs."entityType" = 'Identity'`;
     const request = timedRequest(p, 'risk-identities-list', res);
 
     if (tier) {
-      whereClause += ' AND rs.riskTier = @tier';
+      whereClause += ' AND rs."riskTier" = @tier';
       request.input('tier', tier);
     }
     if (search) {
@@ -499,19 +506,19 @@ router.get('/risk-scores/identities', async (req, res) => {
       request.input('search', `%${search}%`);
     }
     if (overridesOnly) {
-      whereClause += ' AND rs.riskOverride IS NOT NULL';
+      whereClause += ' AND rs."riskOverride" IS NOT NULL';
     }
 
     request.input('offset', offset);
     request.input('limit', limit);
     const result = await request.query(`
-      SELECT rs.*, i.displayName, i.accountCount, i.correlationConfidence, i.department,
-             i.jobTitle, i.email
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Identities i ON rs.entityId = i.id AND i.${TEMPORAL_FILTER}
+      SELECT rs.*, i."displayName", i."accountCount", i."correlationConfidence", i.department,
+             i."jobTitle", i.email
+      FROM "RiskScores" rs
+      INNER JOIN "Identities" i ON rs."entityId" = i.id AND ${TEMPORAL_FILTER}
       ${whereClause}
-      ORDER BY rs.riskScore DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY rs."riskScore" DESC
+      LIMIT @limit OFFSET @offset
     `);
 
     const countReq = timedRequest(p, 'risk-identities-count', res);
@@ -519,8 +526,8 @@ router.get('/risk-scores/identities', async (req, res) => {
     if (search) countReq.input('search', `%${search}%`);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
-      FROM dbo.RiskScores rs
-      INNER JOIN dbo.Identities i ON rs.entityId = i.id AND i.${TEMPORAL_FILTER}
+      FROM "RiskScores" rs
+      INNER JOIN "Identities" i ON rs."entityId" = i.id AND ${TEMPORAL_FILTER}
       ${whereClause}
     `);
 
@@ -559,8 +566,8 @@ router.get('/risk-scores/:type/:id', async (req, res) => {
     request.input('entityType', entityType);
     const result = await request.query(`
       SELECT rs.*
-      FROM dbo.RiskScores rs
-      WHERE rs.entityId = @id AND rs.entityType = @entityType
+      FROM "RiskScores" rs
+      WHERE rs."entityId" = @id AND rs."entityType" = @entityType
     `);
 
     if (result.recordset.length === 0) {
@@ -583,7 +590,7 @@ router.get('/risk-scores/:type/:id', async (req, res) => {
       try {
         const ent = await timedRequest(p, 'risk-score-entity-name', res)
           .input('id', id)
-          .query(`SELECT displayName FROM dbo.[${tableName}] WHERE id = @id AND ${TEMPORAL_FILTER}`);
+          .query(`SELECT "displayName" FROM [${"tableName"}] WHERE id = @id AND ${TEMPORAL_FILTER}`);
         displayName = ent.recordset[0]?.displayName || null;
       } catch { /* entity table may not exist */ }
     }
@@ -634,9 +641,9 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
       .input('id', id)
       .input('entityType', entityType)
       .query(`
-        SELECT riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore
-        FROM dbo.RiskScores
-        WHERE entityId = @id AND entityType = @entityType
+        SELECT "riskDirectScore", "riskMembershipScore", "riskStructuralScore", "riskPropagatedScore"
+        FROM "RiskScores"
+        WHERE "entityId" = @id AND "entityType" = @entityType
       `);
 
     if (current.recordset.length === 0) {
@@ -658,12 +665,12 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
       .input('newScore', newScore)
       .input('newTier', newTier)
       .query(`
-        UPDATE dbo.RiskScores
-        SET riskOverride = @adjustment,
-            riskOverrideReason = @reason,
-            riskScore = @newScore,
-            riskTier = @newTier
-        WHERE entityId = @id AND entityType = @entityType
+        UPDATE "RiskScores"
+        SET "riskOverride" = @adjustment,
+            "riskOverrideReason" = @reason,
+            "riskScore" = @newScore,
+            "riskTier" = @newTier
+        WHERE "entityId" = @id AND "entityType" = @entityType
       `);
 
     // Denormalize to entity table
@@ -671,11 +678,11 @@ router.put('/risk-scores/:type/:id/override', async (req, res) => {
       if (entityType === 'Principal') {
         await timedRequest(p, 'risk-override-denorm', res)
           .input('id', id).input('newScore', newScore).input('newTier', newTier)
-          .query(`UPDATE dbo.Principals SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+          .query(`UPDATE "Principals" SET "riskScore" = @newScore, "riskTier" = @newTier WHERE id = @id`);
       } else if (entityType === 'Resource') {
         await timedRequest(p, 'risk-override-denorm', res)
           .input('id', id).input('newScore', newScore).input('newTier', newTier)
-          .query(`UPDATE dbo.Resources SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+          .query(`UPDATE "Resources" SET "riskScore" = @newScore, "riskTier" = @newTier WHERE id = @id`);
       }
     } catch { /* entity table may not have risk columns yet */ }
 
@@ -712,9 +719,9 @@ router.delete('/risk-scores/:type/:id/override', async (req, res) => {
       .input('id', id)
       .input('entityType', entityType)
       .query(`
-        SELECT riskDirectScore, riskMembershipScore, riskStructuralScore, riskPropagatedScore
-        FROM dbo.RiskScores
-        WHERE entityId = @id AND entityType = @entityType
+        SELECT "riskDirectScore", "riskMembershipScore", "riskStructuralScore", "riskPropagatedScore"
+        FROM "RiskScores"
+        WHERE "entityId" = @id AND "entityType" = @entityType
       `);
 
     if (current.recordset.length === 0) {
@@ -734,12 +741,12 @@ router.delete('/risk-scores/:type/:id/override', async (req, res) => {
       .input('newScore', newScore)
       .input('newTier', newTier)
       .query(`
-        UPDATE dbo.RiskScores
-        SET riskOverride = 0,
-            riskOverrideReason = NULL,
-            riskScore = @newScore,
-            riskTier = @newTier
-        WHERE entityId = @id AND entityType = @entityType
+        UPDATE "RiskScores"
+        SET "riskOverride" = 0,
+            "riskOverrideReason" = NULL,
+            "riskScore" = @newScore,
+            "riskTier" = @newTier
+        WHERE "entityId" = @id AND "entityType" = @entityType
       `);
 
     // Denormalize to entity table
@@ -747,11 +754,11 @@ router.delete('/risk-scores/:type/:id/override', async (req, res) => {
       if (entityType === 'Principal') {
         await timedRequest(p, 'risk-override-denorm', res)
           .input('id', id).input('newScore', newScore).input('newTier', newTier)
-          .query(`UPDATE dbo.Principals SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+          .query(`UPDATE "Principals" SET "riskScore" = @newScore, "riskTier" = @newTier WHERE id = @id`);
       } else if (entityType === 'Resource') {
         await timedRequest(p, 'risk-override-denorm', res)
           .input('id', id).input('newScore', newScore).input('newTier', newTier)
-          .query(`UPDATE dbo.Resources SET riskScore = @newScore, riskTier = @newTier WHERE id = @id`);
+          .query(`UPDATE "Resources" SET "riskScore" = @newScore, "riskTier" = @newTier WHERE id = @id`);
       }
     } catch { /* entity table may not have risk columns yet */ }
 

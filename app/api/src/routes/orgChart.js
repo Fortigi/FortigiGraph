@@ -42,7 +42,7 @@ async function checkContexts(pool) {
   if (hasContextsTable !== null && now - contextsCheckTime < 300000) return hasContextsTable;
   try {
     const r = await pool.request().query(`
-      SELECT OBJECT_ID('dbo.Contexts', 'U') AS contextsExists
+      SELECT to_regclass('"Contexts"') AS contextsExists
     `);
     hasContextsTable = !!r.recordset[0].contextsExists;
     contextsCheckTime = now;
@@ -63,7 +63,7 @@ async function getOrgUserTable(pool) {
   const now = Date.now();
   if (_orgUserTable && (now - _orgUserTableTime) < ORG_TABLE_TTL) return _orgUserTable;
   try {
-    const r = await pool.request().query(`SELECT OBJECT_ID('dbo.Principals', 'U') AS principalsExists`);
+    const r = await pool.request().query(`SELECT to_regclass('"Principals"') AS principalsExists`);
     _orgUserTable = r.recordset[0].principalsExists ? 'Principals' : 'GraphUsers';
   } catch {
     _orgUserTable = 'GraphUsers';
@@ -81,7 +81,7 @@ async function hasManagerColumn(pool, res) {
       .input('tableName', table)
       .query(`
         SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'managerId'
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = '"managerId"'
       `);
     return result.recordset.length > 0;
   } catch {
@@ -96,7 +96,7 @@ async function hasRiskColumns(pool, res) {
       .input('tableName', table)
       .query(`
         SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = 'riskScore'
+        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = '"riskScore"'
       `);
     return result.recordset.length > 0;
   } catch {
@@ -222,7 +222,7 @@ async function fetchUsers(pool, res) {
   const whereClause = userTable === 'Principals' ? `WHERE ValidTo = '9999-12-31 23:59:59.9999999'` : '';
 
   const result = await timedRequest(pool, 'org-chart-users', res).query(`
-    SELECT ${cols} FROM dbo.${userTable} ${whereClause}
+    SELECT ${cols} FROM ${userTable} ${whereClause}
   `);
 
   return result.recordset;
@@ -344,8 +344,8 @@ router.get('/org-chart/user/:id/manager', async (req, res) => {
 
     const result = await request.query(`
       SELECT ${managerCols}
-      FROM dbo.${userTable} u
-      INNER JOIN dbo.${userTable} m ON u.managerId = m.id
+      FROM ${userTable} u
+      INNER JOIN ${userTable} m ON u."managerId" = m.id
       WHERE u.id = @id
     `);
 
@@ -390,9 +390,9 @@ router.get('/org-chart/user/:id/reports', async (req, res) => {
 
     const result = await request.query(`
       SELECT ${cols}
-      FROM dbo.${userTable}
-      WHERE managerId = @id
-      ORDER BY displayName
+      FROM ${userTable}
+      WHERE "managerId" = @id
+      ORDER BY "displayName"
     `);
 
     return res.json({

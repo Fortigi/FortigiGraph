@@ -3,6 +3,17 @@ import { useAuth } from '../auth/AuthGate';
 
 const SECRET_MASK = '••••••••';
 
+// Format a duration in seconds as e.g. "1h 37m 17s" / "2m 8s" / "12s".
+function formatDurationHMS(seconds) {
+  if (seconds == null || isNaN(seconds)) return '—';
+  if (seconds < 60) return `${seconds}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return s > 0 ? `${h}h ${m}m ${s}s` : `${h}h ${m}m`;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
 // ─── Crawler type catalog ─────────────────────────────────────────────────────
 const CRAWLER_TYPES = [
   {
@@ -1228,7 +1239,7 @@ function RecentJobs({ jobs }) {
           <tbody className="divide-y dark:divide-gray-700">
             {jobs.map(j => {
               const duration = j.startedAt && j.completedAt
-                ? `${Math.round((new Date(j.completedAt) - new Date(j.startedAt)) / 1000)}s`
+                ? formatDurationHMS(Math.round((new Date(j.completedAt) - new Date(j.startedAt)) / 1000))
                 : j.startedAt ? 'running...' : '—';
               return (
                 <tr key={j.id}>

@@ -1,18 +1,21 @@
-# PowerShell runner for FortigiGraph crawlers, risk scoring, and account correlation.
+# PowerShell runner for Identity Atlas crawlers, risk scoring, and account
+# correlation.
+#
+# In v5 (postgres) the worker container does NOT install any database driver.
+# All persistence happens via the Identity Atlas REST API; the worker only
+# needs PowerShell + Microsoft Graph access. This removes the SqlServer
+# PowerShell module dependency and shrinks the image substantially.
+#
 # Build context: repo root
 
 FROM mcr.microsoft.com/powershell:7.4-ubuntu-22.04
 
-# Install SqlClient for direct SQL access (used by Initialize-FG* and risk scoring)
-RUN pwsh -Command "Install-Module -Name SqlServer -Force -Scope AllUsers -AcceptLicense" 2>/dev/null || true
-
 WORKDIR /app
 
-# Copy module loader
+# Copy module loader (manifest + module file).
 COPY setup/IdentityAtlas.psd1 setup/IdentityAtlas.psm1 ./setup/
 
-# Copy all PowerShell code (using lowercase paths for Linux case-sensitivity)
-COPY app/db/ ./app/db/
+# Copy crawler scripts and the worker scheduler.
 COPY tools/ ./tools/
 COPY setup/ ./setup/
 COPY test/demo-dataset/ ./test/demo-dataset/

@@ -1,14 +1,9 @@
-/**
- * Ingest API Routes — All 12 entity type endpoints.
- *
- * Each endpoint follows the same pattern:
- * 1. Validate envelope (systemId, syncMode, records)
- * 2. Validate records against entity schema
- * 3. Normalize records (type coercion, GUID generation, extendedAttributes)
- * 4. Delegate to engine (merge + optional scoped delete)
- * 5. Write sync log
- * 6. Return summary
- */
+// Ingest API routes — translates HTTP requests into engine.ingest() calls.
+//
+// Same external contract as v4: { systemId, syncMode, records, scope?,
+// syncSession?, syncId? } → { inserted, updated, deleted, durationMs }.
+// The crawlers don't need to change.
+
 import { Router } from 'express';
 import * as db from '../db/connection.js';
 import { ingest, writeSyncLog } from '../ingest/engine.js';
@@ -20,64 +15,59 @@ import { crawlerHasSystemAccess, crawlerHasPermission } from '../middleware/craw
 const router = Router();
 const useSql = process.env.USE_SQL === 'true';
 
-/**
- * Generic ingest handler factory — creates the route handler for any entity type.
- */
 function createIngestHandler(entityType) {
-  const tableName = ENTITY_TABLE_MAP[entityType];
-  const keyColumns = ENTITY_KEY_MAP[entityType];
+  const tableName = ENTITY_TABLE_MAP[entityType];   // snake_case in v5
+  const keyColumns = ENTITY_KEY_MAP[entityType];     // camelCase from caller; engine converts
   const scopeColumns = ENTITY_SCOPE_MAP[entityType] || [];
 
   return async (req, res) => {
     if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
 
-    // Check permission
     if (!crawlerHasPermission(req, 'ingest')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     const body = req.body;
 
-    // Validate envelope
     const envResult = validateEnvelope(body, entityType);
     if (!envResult.valid) {
-      console.warn(`Ingest validation failed [${entityType}]: envelope errors:`, envResult.errors);
+      console.warn(`Ingest validation failed [${entityType}]:`, envResult.errors);
       return res.status(400).json({ error: 'Validation failed', details: envResult.errors });
     }
 
-    // Check system access
     if (entityType !== 'systems' && !crawlerHasSystemAccess(req, body.systemId)) {
       return res.status(403).json({ error: `Crawler does not have access to system ${body.systemId}` });
     }
 
-    // Validate records
     const recResult = validateRecords(body.records, entityType, body.idGeneration);
     if (!recResult.valid) {
-      console.warn(`Ingest validation failed [${entityType}]: ${recResult.errors.length} record error(s):`, recResult.errors.slice(0, 5));
+      console.warn(`Ingest validation failed [${entityType}]: ${recResult.errors.length} record error(s)`);
       return res.status(400).json({ error: 'Record validation failed', details: recResult.errors });
     }
 
     const startTime = new Date();
 
     try {
-      const pool = await db.getPool();
+      // Discover target columns for normalisation. The engine also discovers
+      // these on its own; we read them here to know which fields are "core"
+      // (real columns) vs which should go into extendedAttributes JSON.
+      const colResult = await db.query(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1`,
+        [tableName]
+      );
+      // The schema columns are snake_case; convert back to camelCase for the
+      // normalizer (the records arrive in camelCase).
+      const coreColumns = colResult.rows.map(r =>
+        r.column_name.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+      );
 
-      // Discover target table columns for normalization
-      const colResult = await pool.request()
-        .input('table', tableName)
-        .query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = @table AND TABLE_SCHEMA = 'dbo'
-                  AND COLUMN_NAME NOT IN ('ValidFrom', 'ValidTo')`);
-      const coreColumns = colResult.recordset.map(r => r.COLUMN_NAME);
-
-      // Normalize records
       const normalized = normalizeRecords(body.records, coreColumns, {
         idGeneration: body.idGeneration || 'native',
         idPrefix: body.idPrefix || '',
         systemId: body.systemId,
       });
 
-      // Build scope from request
       const scope = {};
       if (body.scope) {
         for (const col of scopeColumns) {
@@ -85,108 +75,81 @@ function createIngestHandler(entityType) {
         }
       }
 
-      // Handle sync sessions
+      // ── Session paths ─────────────────────────────────────────────
       if (body.syncSession === 'start') {
-        const result = await startSession(pool, tableName, keyColumns, normalized, {
-          systemId: body.systemId,
-          scope,
-          syncMode: body.syncMode || 'full',
+        const result = await startSession(null, tableName, keyColumns, normalized, {
+          systemId: body.systemId, scope, syncMode: body.syncMode || 'full',
         });
         return res.status(201).json({
-          syncId: result.syncId,
-          table: tableName,
-          inserted: result.inserted,
-          updated: result.updated,
-          session: 'started',
+          syncId: result.syncId, table: tableName,
+          inserted: result.inserted, updated: result.updated, session: 'started',
         });
       }
-
       if (body.syncSession === 'continue') {
         if (!body.syncId || !hasSession(body.syncId)) {
           return res.status(400).json({ error: 'Invalid or expired syncId' });
         }
-        const result = await continueSession(body.syncId, pool, normalized, keyColumns);
+        const result = await continueSession(body.syncId, null, normalized, keyColumns);
         return res.status(200).json({
-          syncId: result.syncId,
-          table: tableName,
-          inserted: result.inserted,
-          updated: result.updated,
-          session: 'continued',
+          syncId: result.syncId, table: tableName,
+          inserted: result.inserted, updated: result.updated, session: 'continued',
         });
       }
-
       if (body.syncSession === 'end') {
         if (!body.syncId || !hasSession(body.syncId)) {
           return res.status(400).json({ error: 'Invalid or expired syncId' });
         }
-        const result = await endSession(body.syncId, pool, normalized, keyColumns, {
+        const result = await endSession(body.syncId, null, normalized, keyColumns, {
           syncMode: body.syncMode || 'full',
         });
         return res.status(200).json({
-          syncId: result.syncId,
-          table: tableName,
-          inserted: result.inserted,
-          updated: result.updated,
-          deleted: result.deleted,
-          totalRecords: result.totalRecords,
-          session: 'completed',
+          syncId: result.syncId, table: tableName,
+          inserted: result.inserted, updated: result.updated, deleted: result.deleted,
+          totalRecords: result.totalRecords, session: 'completed',
         });
       }
 
-      // Single-batch ingest (no session)
-      const result = await ingest(pool, tableName, keyColumns, normalized, {
+      // ── Single-batch path ─────────────────────────────────────────
+      const result = await ingest(null, tableName, keyColumns, normalized, {
         syncMode: body.syncMode || 'delta',
         systemId: body.systemId,
         scope,
       });
 
-      // Write sync log
-      const syncType = `API-${entityType}`;
-      await writeSyncLog(pool, syncType, tableName, startTime, body.records.length,
-        result.inserted, result.updated, result.deleted, null);
+      await writeSyncLog(null, `API-${entityType}`, tableName, startTime,
+                         body.records.length, result.inserted, result.updated, result.deleted, null);
 
-      // Log to crawler audit
+      // Audit log (best effort)
       if (req.crawler) {
-        pool.request()
-          .input('crawlerId', req.crawler.id)
-          .input('endpoint', req.originalUrl)
-          .input('recordCount', body.records.length)
-          .input('ipAddress', (req.ip || '').slice(0, 45))
-          .query(`INSERT INTO dbo.CrawlerAuditLog (crawlerId, action, endpoint, recordCount, statusCode, ipAddress)
-                  VALUES (@crawlerId, 'ingest', @endpoint, @recordCount, 201, @ipAddress)`)
-          .catch(() => {});
+        db.query(
+          `INSERT INTO crawler_audit_log (crawler_id, "action", "endpoint", record_count, status_code, ip_address)
+           VALUES ($1, 'ingest', $2, $3, 201, $4)`,
+          [req.crawler.id, req.originalUrl, body.records.length, (req.ip || '').slice(0, 45)]
+        ).catch(() => {});
       }
 
       const durationMs = Date.now() - startTime.getTime();
 
-      // For the systems endpoint, look up the system IDs of the records we just merged
-      // and return them so the crawler can use them in subsequent calls (no more hardcoded systemId=1).
-      let systemIds = undefined;
+      // Systems endpoint: look up the resulting system IDs and return them so
+      // crawlers can use them in subsequent calls without hardcoding.
+      let systemIds;
       if (entityType === 'systems' && body.records.length > 0) {
         try {
-          const lookup = body.records.map(r => ({
-            tenantId: r.tenantId || null,
-            systemType: r.systemType || null,
-            displayName: r.displayName || null,
-          }));
           const ids = [];
-          for (const rec of lookup) {
-            // Match on (tenantId + systemType) when both present, else by displayName + systemType
-            let q;
-            const reqq = pool.request();
+          for (const rec of body.records) {
+            let row;
             if (rec.tenantId && rec.systemType) {
-              reqq.input('tenantId', rec.tenantId).input('systemType', rec.systemType);
-              q = `SELECT TOP 1 id FROM dbo.Systems WHERE tenantId = @tenantId AND systemType = @systemType
-                   AND ValidTo = '9999-12-31 23:59:59.9999999' ORDER BY id DESC`;
+              row = await db.queryOne(
+                `SELECT id FROM "Systems" WHERE "tenantId" = $1 AND "systemType" = $2 ORDER BY id DESC LIMIT 1`,
+                [rec.tenantId, rec.systemType]
+              );
             } else if (rec.displayName) {
-              reqq.input('displayName', rec.displayName).input('systemType', rec.systemType || '');
-              q = `SELECT TOP 1 id FROM dbo.Systems WHERE displayName = @displayName
-                   AND ValidTo = '9999-12-31 23:59:59.9999999' ORDER BY id DESC`;
-            } else {
-              continue;
+              row = await db.queryOne(
+                `SELECT id FROM "Systems" WHERE "displayName" = $1 ORDER BY id DESC LIMIT 1`,
+                [rec.displayName]
+              );
             }
-            const r2 = await reqq.query(q);
-            if (r2.recordset.length > 0) ids.push(r2.recordset[0].id);
+            if (row) ids.push(row.id);
           }
           if (ids.length > 0) systemIds = ids;
         } catch (lookupErr) {
@@ -203,20 +166,14 @@ function createIngestHandler(entityType) {
         durationMs,
         ...(systemIds ? { systemIds } : {}),
       });
-
     } catch (err) {
       console.error(`Ingest error (${entityType}):`, err.message);
-      await writeSyncLog(
-        await db.getPool().catch(() => null),
-        `API-${entityType}`, tableName, startTime, body.records?.length || 0,
-        0, 0, 0, err.message
-      ).catch(() => {});
+      await writeSyncLog(null, `API-${entityType}`, tableName, startTime,
+                         body.records?.length || 0, 0, 0, 0, err.message).catch(() => {});
       return res.status(500).json({ error: 'Ingest failed', message: err.message });
     }
   };
 }
-
-// ─── Register all entity endpoints ───────────────────────────────
 
 router.post('/ingest/systems',                  createIngestHandler('systems'));
 router.post('/ingest/principals',               createIngestHandler('principals'));
@@ -231,43 +188,85 @@ router.post('/ingest/governance/policies',      createIngestHandler('governance/
 router.post('/ingest/governance/requests',      createIngestHandler('governance/requests'));
 router.post('/ingest/governance/certifications', createIngestHandler('governance/certifications'));
 
-// ─── Utility endpoints ───────────────────────────────────────────
-
-// POST /api/ingest/refresh-views — Trigger materialized view refresh
-router.post('/ingest/refresh-views', async (req, res) => {
+// POST /api/ingest/refresh-views — no-op in v5.
+//
+// In v4 we had a materialised table `mat_UserPermissionAssignments` that the
+// crawler refreshed at end-of-sync. In postgres we don't need it: the views
+// are unmaterialised, postgres MVCC keeps reads cheap during writes, and the
+// recursive CTE is fast enough at our scale. The endpoint is kept for
+// backward compatibility with crawler scripts that still call it.
+// POST /api/ingest/sync-log — write a single GraphSyncLog row.
+//
+// Per-entity ingest calls already write their own GraphSyncLog rows (via
+// writeSyncLog inside each handler), but those reflect only the *bulk insert*
+// time, not the time the crawler spent fetching from Microsoft Graph. The
+// crawler script calls this endpoint at the end of a run to record one row
+// covering the *full* sync duration so the Sync Log page reflects reality.
+router.post('/ingest/sync-log', async (req, res) => {
   if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  if (!crawlerHasPermission(req, 'ingest')) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  const { syncType, tableName, startTime, endTime, recordCount, status, errorMessage } = req.body || {};
+  if (!syncType || !startTime) {
+    return res.status(400).json({ error: 'syncType and startTime are required' });
+  }
+  try {
+    const start = new Date(startTime);
+    const end = endTime ? new Date(endTime) : new Date();
+    const duration = Math.max(0, Math.round((end - start) / 1000));
+    await db.query(
+      `INSERT INTO "GraphSyncLog"
+         ("SyncType", "TableName", "StartTime", "EndTime", "DurationSeconds", "RecordCount", "Status", "ErrorMessage")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [syncType, tableName || null, start, end, duration, recordCount || 0, status || 'Success', errorMessage || null]
+    );
+    return res.status(201).json({ ok: true, durationSeconds: duration });
+  } catch (err) {
+    console.error('sync-log write failed:', err.message);
+    return res.status(500).json({ error: 'Failed to write sync log' });
+  }
+});
+
+// POST /api/ingest/refresh-contexts — recompute derived OrgUnit contexts.
+//
+// Same logic as the admin endpoint at /api/admin/refresh-contexts, but
+// mounted under the ingest router so the worker can call it with its
+// X-API-Key (crawler auth) instead of needing a UI session. Idempotent:
+// rebuilds Contexts from Principals.department on every call.
+router.post('/ingest/refresh-contexts', async (req, res) => {
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  if (!crawlerHasPermission(req, 'admin') && !crawlerHasPermission(req, 'ingest')) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  try {
+    const start = Date.now();
+    const created = await db.tx(async (client) => {
+      await client.query(`DELETE FROM "Contexts"`);
+      const ins = await client.query(`
+        INSERT INTO "Contexts" (id, "systemId", "contextType", "displayName", department, "memberCount", "lastCalculatedAt", "sourceType")
+        SELECT gen_random_uuid(), "systemId", 'Department', department, department,
+               COUNT(*)::int, now(), 'derived'
+          FROM "Principals"
+         WHERE department IS NOT NULL AND department <> ''
+           AND "systemId" IS NOT NULL
+         GROUP BY "systemId", department
+        RETURNING id
+      `);
+      return ins.rowCount;
+    });
+    return res.json({ ok: true, contextsCreated: created, durationMs: Date.now() - start });
+  } catch (err) {
+    console.error('refresh-contexts (ingest) failed:', err.message);
+    return res.status(500).json({ error: 'refresh-contexts failed', message: err.message });
+  }
+});
+
+router.post('/ingest/refresh-views', (req, res) => {
   if (!crawlerHasPermission(req, 'refreshViews') && !crawlerHasPermission(req, 'admin')) {
     return res.status(403).json({ error: 'Insufficient permissions (requires refreshViews)' });
   }
-
-  try {
-    const pool = await db.getPool();
-
-    // Check if materialized table exists
-    const check = await pool.request().query(
-      `SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'mat_UserPermissionAssignments' AND TABLE_SCHEMA = 'dbo'`
-    );
-
-    if (check.recordset.length > 0) {
-      // Truncate and repopulate from view
-      const viewCheck = await pool.request().query(
-        `SELECT 1 FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'vw_ResourceUserPermissionAssignments' AND TABLE_SCHEMA = 'dbo'`
-      );
-      if (viewCheck.recordset.length > 0) {
-        await pool.request().query(`
-          TRUNCATE TABLE dbo.mat_UserPermissionAssignments;
-          INSERT INTO dbo.mat_UserPermissionAssignments
-          SELECT * FROM dbo.vw_ResourceUserPermissionAssignments;
-        `);
-        return res.json({ message: 'Materialized views refreshed' });
-      }
-    }
-
-    res.json({ message: 'No materialized views to refresh' });
-  } catch (err) {
-    console.error('View refresh error:', err.message);
-    res.status(500).json({ error: 'Failed to refresh views' });
-  }
+  res.json({ message: 'No materialized views in v5 — recursive CTEs are computed on read' });
 });
 
 export default router;

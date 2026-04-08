@@ -18,48 +18,10 @@ function hashKey(apiKey, salt) {
   return crypto.createHash('sha256').update(Buffer.concat([salt, Buffer.from(apiKey, 'utf8')])).digest();
 }
 
-async function ensureCrawlerTables(pool) {
-  const result = await pool.request().query(
-    `SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Crawlers' AND TABLE_SCHEMA = 'dbo'`
-  );
-  if (result.recordset.length === 0) {
-    await pool.request().query(`
-      CREATE TABLE dbo.Crawlers (
-        id              INT IDENTITY(1,1) PRIMARY KEY,
-        displayName     NVARCHAR(255) NOT NULL,
-        description     NVARCHAR(MAX),
-        apiKeyHash      VARBINARY(64) NOT NULL,
-        apiKeySalt      VARBINARY(32) NOT NULL,
-        apiKeyPrefix    NVARCHAR(8) NOT NULL,
-        systemIds       NVARCHAR(MAX),
-        permissions     NVARCHAR(MAX) NOT NULL DEFAULT '["ingest"]',
-        enabled         BIT NOT NULL DEFAULT 1,
-        createdAt       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-        createdBy       NVARCHAR(255),
-        lastUsedAt      DATETIME2,
-        lastRotatedAt   DATETIME2,
-        expiresAt       DATETIME2,
-        rateLimit       INT NOT NULL DEFAULT 100
-      );
-      CREATE NONCLUSTERED INDEX IX_Crawlers_ApiKeyPrefix
-      ON dbo.Crawlers (apiKeyPrefix) INCLUDE (apiKeyHash, apiKeySalt, enabled, expiresAt);
-    `);
-    await pool.request().query(`
-      CREATE TABLE dbo.CrawlerAuditLog (
-        id              INT IDENTITY(1,1) PRIMARY KEY,
-        crawlerId       INT NOT NULL,
-        action          NVARCHAR(50) NOT NULL,
-        endpoint        NVARCHAR(255),
-        recordCount     INT,
-        statusCode      INT,
-        ipAddress       NVARCHAR(45),
-        timestamp       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
-      );
-      CREATE NONCLUSTERED INDEX IX_CrawlerAuditLog_CrawlerId
-      ON dbo.CrawlerAuditLog (crawlerId, timestamp DESC);
-    `);
-  }
-}
+// In v5 the schema is created by the migrations runner at startup. This
+// function is a no-op kept for backward compatibility with the existing
+// callers — it used to lazily CREATE TABLE on first request.
+async function ensureCrawlerTables(_pool) { /* no-op in v5 */ }
 
 // ─── Admin endpoints (Entra ID auth) ─────────────────────────────
 
@@ -70,10 +32,10 @@ adminCrawlersRouter.get('/admin/crawlers', async (req, res) => {
     const pool = await db.getPool();
     await ensureCrawlerTables(pool);
     const result = await pool.request().query(`
-      SELECT id, displayName, description, apiKeyPrefix, systemIds, permissions,
-             enabled, createdAt, createdBy, lastUsedAt, lastRotatedAt, expiresAt, rateLimit
-      FROM dbo.Crawlers
-      ORDER BY createdAt DESC
+      SELECT id, "displayName", description, "apiKeyPrefix", "systemIds", permissions,
+             enabled, "createdAt", "createdBy", "lastUsedAt", "lastRotatedAt", "expiresAt", "rateLimit"
+      FROM "Crawlers"
+      ORDER BY "createdAt" DESC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -112,10 +74,10 @@ adminCrawlersRouter.post('/admin/crawlers', async (req, res) => {
       .input('createdBy', createdBy)
       .input('expiresAt', expiresAt || null)
       .input('rateLimit', rateLimit || 100)
-      .query(`INSERT INTO dbo.Crawlers
-              (displayName, description, apiKeyHash, apiKeySalt, apiKeyPrefix, systemIds, permissions, createdBy, expiresAt, rateLimit)
-              OUTPUT INSERTED.id, INSERTED.displayName, INSERTED.apiKeyPrefix, INSERTED.createdAt
-              VALUES (@displayName, @description, @apiKeyHash, @apiKeySalt, @apiKeyPrefix, @systemIds, @permissions, @createdBy, @expiresAt, @rateLimit)`);
+      .query(`INSERT INTO "Crawlers"
+              ("displayName", "description", "apiKeyHash", "apiKeySalt", "apiKeyPrefix", "systemIds", "permissions", "createdBy", "expiresAt", "rateLimit")
+              VALUES (@displayName, @description, @apiKeyHash, @apiKeySalt, @apiKeyPrefix, @systemIds::jsonb, @permissions::jsonb, @createdBy, @expiresAt, @rateLimit)
+              RETURNING id, "displayName", "apiKeyPrefix", "createdAt"`);
 
     const crawler = result.recordset[0];
 
@@ -141,38 +103,38 @@ adminCrawlersRouter.patch('/admin/crawlers/:id', async (req, res) => {
   const request = (await db.getPool()).request().input('id', id);
 
   if (displayName !== undefined) {
-    sets.push('displayName = @displayName');
+    sets.push('"displayName" = @displayName');
     request.input('displayName', String(displayName).slice(0, 255));
   }
   if (description !== undefined) {
-    sets.push('description = @description');
+    sets.push('"description" = @description');
     request.input('description', String(description).slice(0, 4000));
   }
   if (enabled !== undefined) {
-    sets.push('enabled = @enabled');
+    sets.push('"enabled" = @enabled');
     request.input('enabled', enabled ? 1 : 0);
   }
   if (systemIds !== undefined) {
-    sets.push('systemIds = @systemIds');
+    sets.push('"systemIds" = @systemIds');
     request.input('systemIds', systemIds ? JSON.stringify(systemIds) : null);
   }
   if (permissions !== undefined) {
-    sets.push('permissions = @permissions');
+    sets.push('"permissions" = @permissions');
     request.input('permissions', JSON.stringify(permissions));
   }
   if (expiresAt !== undefined) {
-    sets.push('expiresAt = @expiresAt');
+    sets.push('"expiresAt" = @expiresAt');
     request.input('expiresAt', expiresAt || null);
   }
   if (rateLimit !== undefined) {
-    sets.push('rateLimit = @rateLimit');
+    sets.push('"rateLimit" = @rateLimit');
     request.input('rateLimit', parseInt(rateLimit, 10) || 100);
   }
 
   if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
   try {
-    const result = await request.query(`UPDATE dbo.Crawlers SET ${sets.join(', ')} OUTPUT INSERTED.* WHERE id = @id`);
+    const result = await request.query(`UPDATE "Crawlers" SET ${sets.join(', ')} WHERE id = @id RETURNING *`);
     if (result.recordset.length === 0) return res.status(404).json({ error: 'Crawler not found' });
     const row = result.recordset[0];
     // Strip sensitive fields
@@ -231,12 +193,12 @@ adminCrawlersRouter.get('/admin/crawlers/:id/audit', async (req, res) => {
       .input('id', id)
       .input('limit', limit)
       .input('offset', offset)
-      .query(`SELECT action, endpoint, recordCount, statusCode, ipAddress, timestamp
-              FROM dbo.CrawlerAuditLog
-              WHERE crawlerId = @id
+      .query(`SELECT action, endpoint, "recordCount", "statusCode", "ipAddress", timestamp
+              FROM "CrawlerAuditLog"
+              WHERE "crawlerId" = @id
               ORDER BY timestamp DESC
-              OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
-              SELECT COUNT(*) AS total FROM dbo.CrawlerAuditLog WHERE crawlerId = @id;`);
+              LIMIT @limit OFFSET @offset;
+              SELECT COUNT(*) AS total FROM "CrawlerAuditLog" WHERE "crawlerId" = @id;`);
     res.json({
       data: result.recordsets[0],
       total: result.recordsets[1][0].total,
@@ -265,10 +227,10 @@ adminCrawlersRouter.post('/admin/crawlers/:id/reset', async (req, res) => {
       .input('apiKeyHash', hash)
       .input('apiKeySalt', salt)
       .input('apiKeyPrefix', prefix)
-      .query(`UPDATE dbo.Crawlers
-              SET apiKeyHash = @apiKeyHash, apiKeySalt = @apiKeySalt, apiKeyPrefix = @apiKeyPrefix,
-                  lastRotatedAt = SYSUTCDATETIME()
-              WHERE id = @id AND enabled = 1`);
+      .query(`UPDATE "Crawlers"
+              SET "apiKeyHash" = @apiKeyHash, "apiKeySalt" = @apiKeySalt, "apiKeyPrefix" = @apiKeyPrefix,
+                  "lastRotatedAt" = (now() AT TIME ZONE 'utc')
+              WHERE id = @id AND "enabled" = TRUE`);
 
     if (result.rowsAffected[0] === 0) return res.status(404).json({ error: 'Crawler not found or disabled' });
 
@@ -309,16 +271,16 @@ selfServiceCrawlersRouter.post('/crawlers/rotate', async (req, res) => {
       .input('apiKeyHash', hash)
       .input('apiKeySalt', salt)
       .input('apiKeyPrefix', prefix)
-      .query(`UPDATE dbo.Crawlers
-              SET apiKeyHash = @apiKeyHash, apiKeySalt = @apiKeySalt, apiKeyPrefix = @apiKeyPrefix,
-                  lastRotatedAt = SYSUTCDATETIME()
+      .query(`UPDATE "Crawlers"
+              SET "apiKeyHash" = @apiKeyHash, "apiKeySalt" = @apiKeySalt, "apiKeyPrefix" = @apiKeyPrefix,
+                  "lastRotatedAt" = (now() AT TIME ZONE 'utc')
               WHERE id = @id`);
 
     // Log rotation
     await pool.request()
       .input('crawlerId', req.crawler.id)
       .input('ipAddress', (req.ip || '').slice(0, 45))
-      .query(`INSERT INTO dbo.CrawlerAuditLog (crawlerId, action, statusCode, ipAddress)
+      .query(`INSERT INTO "CrawlerAuditLog" ("crawlerId", action, "statusCode", "ipAddress")
               VALUES (@crawlerId, 'key_rotated', 200, @ipAddress)`);
 
     res.json({
@@ -357,7 +319,7 @@ selfServiceCrawlersRouter.post('/crawlers/job-progress', async (req, res) => {
     // Read existing progress, merge in the new fields, write back. Doing the merge
     // server-side keeps the crawler's payload tiny — it only sends what changed.
     const cur = await pool.request().input('id', id)
-      .query(`SELECT progress, status FROM dbo.CrawlerJobs WHERE id = @id`);
+      .query(`SELECT progress, status FROM "CrawlerJobs" WHERE id = @id`);
     if (cur.recordset.length === 0) return res.status(404).json({ error: 'Job not found' });
     if (cur.recordset[0].status !== 'running' && cur.recordset[0].status !== 'queued') {
       // Don't keep updating finished/failed/cancelled jobs
@@ -376,12 +338,96 @@ selfServiceCrawlersRouter.post('/crawlers/job-progress', async (req, res) => {
     await pool.request()
       .input('id', id)
       .input('progress', JSON.stringify(merged))
-      .query(`UPDATE dbo.CrawlerJobs SET progress = @progress WHERE id = @id`);
+      .query(`UPDATE "CrawlerJobs" SET progress = @progress WHERE id = @id`);
 
     res.json({ ok: true });
   } catch (err) {
     console.error('Job progress update failed:', err.message);
     res.status(500).json({ error: 'Failed to update progress' });
+  }
+});
+
+// ─── Worker job-claiming endpoints ──────────────────────────────────────────
+// In v5 the worker container has no database access. It calls these endpoints
+// to claim and complete jobs. The web container handles all SQL.
+//
+// Auth: crawler API key (the built-in worker holds the only valid one).
+
+selfServiceCrawlersRouter.post('/crawlers/jobs/claim', async (req, res) => {
+  if (!req.crawler) return res.status(401).json({ error: 'Not authenticated' });
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+
+  try {
+    // Atomic claim using FOR UPDATE SKIP LOCKED — postgres-native pattern that
+    // lets multiple workers (if we ever scale out) safely contend for the next
+    // queued job without double-pickup.
+    const r = await db.query(`
+      WITH next_job AS (
+        SELECT id FROM "CrawlerJobs"
+         WHERE "status" = 'queued'
+         ORDER BY "createdAt" ASC
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "CrawlerJobs" cj
+         SET "status" = 'running', "startedAt" = (now() AT TIME ZONE 'utc')
+        FROM next_job
+       WHERE cj.id = next_job.id
+       RETURNING cj.id, cj."jobType", cj."config"
+    `);
+    if (r.rows.length === 0) {
+      return res.json({ job: null });
+    }
+    res.json({ job: r.rows[0] });
+  } catch (err) {
+    console.error('Job claim failed:', err.message);
+    res.status(500).json({ error: 'Failed to claim job' });
+  }
+});
+
+selfServiceCrawlersRouter.post('/crawlers/jobs/:id/complete', async (req, res) => {
+  if (!req.crawler) return res.status(401).json({ error: 'Not authenticated' });
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid job id' });
+
+  const { result } = req.body || {};
+  try {
+    await db.query(
+      `UPDATE "CrawlerJobs"
+          SET "status" = 'completed',
+              "completedAt" = (now() AT TIME ZONE 'utc'),
+              "result" = COALESCE($2::jsonb, "result")
+        WHERE id = $1`,
+      [id, result ? JSON.stringify(result) : null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Job complete failed:', err.message);
+    res.status(500).json({ error: 'Failed to complete job' });
+  }
+});
+
+selfServiceCrawlersRouter.post('/crawlers/jobs/:id/fail', async (req, res) => {
+  if (!req.crawler) return res.status(401).json({ error: 'Not authenticated' });
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid job id' });
+
+  const errorMessage = req.body?.errorMessage ? String(req.body.errorMessage).slice(0, 4000) : null;
+  try {
+    await db.query(
+      `UPDATE "CrawlerJobs"
+          SET "status" = 'failed',
+              "completedAt" = (now() AT TIME ZONE 'utc'),
+              "errorMessage" = $2
+        WHERE id = $1`,
+      [id, errorMessage]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Job fail failed:', err.message);
+    res.status(500).json({ error: 'Failed to mark job failed' });
   }
 });
 

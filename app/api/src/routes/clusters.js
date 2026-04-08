@@ -73,7 +73,7 @@ router.get('/risk-scores/clusters', async (req, res) => {
     // Count total
     const countReq = timedRequest(p, 'cluster-count', res);
     for (const [k, v] of Object.entries(inputs)) countReq.input(k, v);
-    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM dbo.GraphResourceClusters ${where}`);
+    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM "GraphResourceClusters" ${where}`);
     const total = countResult.recordset[0].total;
 
     // Fetch page
@@ -83,15 +83,15 @@ router.get('/risk-scores/clusters', async (req, res) => {
     dataReq.input('offset', pageOffset);
 
     const dataResult = await dataReq.query(`
-      SELECT id, displayName, description, clusterType, sourceClassifierId, sourceClassifierCategory,
-             matchPatterns, memberCount, memberCountProd, memberCountNonProd,
+      SELECT id, "displayName", description, "clusterType", sourceClassifierId, sourceClassifierCategory,
+             matchPatterns, "memberCount", memberCountProd, memberCountNonProd,
              aggregateRiskScore, maxMemberRiskScore, avgMemberRiskScore,
-             riskTier, tierDistribution,
-             ownerUserId, ownerDisplayName, ownerAssignedAt, ownerAssignedBy, scoredAt
-      FROM dbo.GraphResourceClusters
+             "riskTier", tierDistribution,
+             ownerUserId, ownerDisplayName, "ownerAssignedAt", "ownerAssignedBy", scoredAt
+      FROM "GraphResourceClusters"
       ${where}
       ${orderBy}
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      LIMIT @limit OFFSET @offset
     `);
 
     const data = dataResult.recordset.map(row => {
@@ -175,11 +175,11 @@ router.put('/risk-scores/clusters/:id/owner', async (req, res) => {
       .input('ownerDisplayName', displayName)
       .input('ownerAssignedBy', assignedBy)
       .query(`
-        UPDATE dbo.GraphResourceClusters
+        UPDATE "GraphResourceClusters"
         SET ownerUserId = @ownerUserId,
             ownerDisplayName = @ownerDisplayName,
-            ownerAssignedAt = GETUTCDATE(),
-            ownerAssignedBy = @ownerAssignedBy
+            "ownerAssignedAt" = now() AT TIME ZONE 'utc',
+            "ownerAssignedBy" = @ownerAssignedBy
         WHERE id = @id
       `);
 
@@ -205,11 +205,11 @@ router.delete('/risk-scores/clusters/:id/owner', async (req, res) => {
     const result = await timedRequest(p, 'cluster-remove-owner', res)
       .input('id', clusterId)
       .query(`
-        UPDATE dbo.GraphResourceClusters
+        UPDATE "GraphResourceClusters"
         SET ownerUserId = NULL,
             ownerDisplayName = NULL,
-            ownerAssignedAt = NULL,
-            ownerAssignedBy = NULL
+            "ownerAssignedAt" = NULL,
+            "ownerAssignedBy" = NULL
         WHERE id = @id
       `);
 
@@ -240,15 +240,15 @@ router.get('/risk-scores/cluster-summary', async (req, res) => {
         COUNT(*) AS total,
         SUM(CASE WHEN ownerUserId IS NULL THEN 1 ELSE 0 END) AS unowned,
         MAX(scoredAt) AS lastScoredAt
-      FROM dbo.GraphResourceClusters
-      WHERE memberCount > 0
+      FROM "GraphResourceClusters"
+      WHERE "memberCount" > 0
     `);
 
     const tiers = await timedRequest(p, 'cluster-tiers', res).query(`
-      SELECT riskTier, COUNT(*) AS count
-      FROM dbo.GraphResourceClusters
-      WHERE memberCount > 0
-      GROUP BY riskTier
+      SELECT "riskTier", COUNT(*) AS count
+      FROM "GraphResourceClusters"
+      WHERE "memberCount" > 0
+      GROUP BY "riskTier"
     `);
 
     const s = stats.recordset[0];

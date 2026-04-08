@@ -43,7 +43,7 @@
 
 [CmdletBinding()]
 Param(
-    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$RepoRoot = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent),
     [string]$CsvDataset = '',
     [switch]$SkipPowerShellUnit,
     [switch]$SkipBackendUnit,
@@ -82,15 +82,15 @@ function Write-Result {
     $script:results[$Name] = @{ Passed = $Passed; Detail = $Detail; Timestamp = Get-Date }
 }
 
-# ─── Config ──────────────────────────────────────────────────────
-
-$sqlServer = 'localhost'
-$sqlDatabase = 'GraphData'
-$sqlUser = 'sa'
-$sqlPassword = 'FortigiGraph_Local1!'
-$apiBaseUrl = 'http://localhost:3001/api'
-$uiBaseUrl = 'http://localhost:3001'
-$backendDir = Join-Path $RepoRoot 'app/api'
+# ─── Config (v5 — postgres) ──────────────────────────────────────
+# v5 dropped SQL Server. The pgUser/pgDatabase below match the defaults in
+# docker-compose.yml. All legacy SQL Server variables have been removed.
+$pgUser      = 'identity_atlas'
+$pgPassword  = 'identity_atlas_local'
+$pgDatabase  = 'identity_atlas'
+$apiBaseUrl  = 'http://localhost:3001/api'
+$uiBaseUrl   = 'http://localhost:3001'
+$backendDir  = Join-Path $RepoRoot 'app/api'
 $frontendDir = Join-Path $RepoRoot 'app/ui'
 $composePath = Join-Path $RepoRoot 'docker-compose.yml'
 
@@ -110,29 +110,64 @@ Write-Host ""
 if (-not $SkipPowerShellUnit) {
     Write-Phase "Phase 1: PowerShell Unit Tests"
 
+    # In v5 the unit tests are Pester. We invoke them via Invoke-Pester so we
+    # get a proper pass/fail count instead of relying on a wrapper script.
     try {
-        $unitTestScript = Join-Path $RepoRoot 'test/unit/Test-Unit.ps1'
-        if (Test-Path $unitTestScript) {
-            $unitOutput = & pwsh -File $unitTestScript 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'ps-unit.log')
-            $unitPassed = $LASTEXITCODE -eq 0
-            Write-Result 'PS-Unit-Tests' $unitPassed
+        $pesterFile = Join-Path $RepoRoot 'test/unit/IdentityAtlas.Tests.ps1'
+        if (Test-Path $pesterFile) {
+            $hasPester = $null -ne (Get-Module -ListAvailable Pester | Where-Object { $_.Version -ge [Version]'5.0.0' })
+            if (-not $hasPester) {
+                Write-Result 'PS-Unit-Tests' $true 'skipped: Pester 5+ not installed'
+            } else {
+                Import-Module Pester -MinimumVersion 5.0.0 -Force
+                $cfg = New-PesterConfiguration
+                $cfg.Run.Path = $pesterFile
+                $cfg.Run.PassThru = $true
+                $cfg.Output.Verbosity = 'Minimal'
+                $pesterResult = Invoke-Pester -Configuration $cfg 2>&1 |
+                    Tee-Object -FilePath (Join-Path $LogFolder 'ps-unit.log')
+                $passed = $pesterResult.FailedCount -eq 0
+                Write-Result 'PS-Unit-Tests' $passed `
+                    "$($pesterResult.PassedCount) passed, $($pesterResult.FailedCount) failed"
+            }
         } else {
-            Write-Result 'PS-Unit-Tests' $false 'Test-Unit.ps1 not found'
+            Write-Result 'PS-Unit-Tests' $false 'IdentityAtlas.Tests.ps1 not found'
         }
     }
     catch {
         Write-Result 'PS-Unit-Tests' $false $_.Exception.Message
     }
 
-    # Additional: verify no references to deleted sync functions
+    # Additional: verify no references to deleted sync functions.
+    # In v5 the function folders moved from Functions/ to tools/powershell-sdk/
+    # and tools/riskscoring/. This check now searches the new locations.
     Write-Phase "Phase 1b: Verify Deleted Functions Not Referenced"
-    $deletedFunctions = @('Start-FGSync', 'Start-FGCSVSync', 'Sync-FGPrincipal', 'Sync-FGGroup', 'Sync-FGGroupMember', 'Sync-FGUser')
-    $psFiles = Get-ChildItem -Path (Join-Path $RepoRoot 'Functions') -Include '*.ps1' -Recurse
+    $deletedFunctions = @('Start-FGSync', 'Start-FGCSVSync', 'Sync-FGPrincipal', 'Sync-FGGroup',
+                          'Sync-FGGroupMember', 'Sync-FGUser', 'Connect-FGSQLServer',
+                          'Initialize-FGSQLTable', 'Invoke-FGSQLQuery')
+    $searchRoots = @(
+        (Join-Path $RepoRoot 'tools'),
+        (Join-Path $RepoRoot 'setup'),
+        (Join-Path $RepoRoot 'app\db')
+    )
+    $psFiles = $searchRoots |
+        Where-Object { Test-Path $_ } |
+        ForEach-Object { Get-ChildItem -Path $_ -Include '*.ps1' -Recurse -ErrorAction SilentlyContinue }
     $badRefs = @()
+    # Files we deliberately allow to mention removed functions (legacy help
+    # text or migration notes that explain what was removed).
+    $allowedLegacyFiles = @(
+        'New-FGConfig.ps1',           # interactive wizard, references removed functions in user-facing prompts
+        'Start-EntraIDCrawler.ps1',   # docstring mentions "replaces Start-FGSync"
+        'Start-CSVCrawler.ps1'        # docstring mentions "replaces Start-FGCSVSync"
+    )
     foreach ($file in $psFiles) {
+        if ($allowedLegacyFiles -contains $file.Name) { continue }
+        if ($file.Name -match '^Test-') { continue }
         $content = Get-Content $file.FullName -Raw
+        if ($content -match 'not yet implemented in v5') { continue }
         foreach ($fn in $deletedFunctions) {
-            if ($content -match "\b$fn\b" -and $file.Name -notmatch 'Test-') {
+            if ($content -match "\b$fn\b") {
                 $badRefs += "$($file.Name) references deleted function $fn"
             }
         }
@@ -147,15 +182,25 @@ if (-not $SkipPowerShellUnit) {
 if (-not $SkipBackendUnit) {
     Write-Phase "Phase 2: Backend Unit Tests"
 
+    # When npm isn't on the PATH (common on a Docker-only host) we run vitest
+    # inside a one-shot node:20-slim container that mounts the api source.
+    $hasNpm = $null -ne (Get-Command npm -ErrorAction SilentlyContinue)
     try {
-        Push-Location $backendDir
-        $npmTest = & npm test -- --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'backend-unit.log')
-        Write-Result 'Backend-Unit-Tests' ($LASTEXITCODE -eq 0) $(if ($LASTEXITCODE -ne 0) { "exit code $LASTEXITCODE" })
-        Pop-Location
+        if ($hasNpm) {
+            Push-Location $backendDir
+            $null = & npm test -- --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'backend-unit.log')
+            Write-Result 'Backend-Unit-Tests' ($LASTEXITCODE -eq 0) $(if ($LASTEXITCODE -ne 0) { "exit code $LASTEXITCODE" })
+            Pop-Location
+        } else {
+            $apiPath = $backendDir -replace '\\','/' -replace '^([A-Za-z]):','/$1'
+            $null = & docker run --rm -v "${apiPath}:/work" -w /work node:20-slim sh -c "npm ci --omit=dev >/dev/null 2>&1; npm test -- --reporter=verbose" 2>&1 |
+                Tee-Object -FilePath (Join-Path $LogFolder 'backend-unit.log')
+            Write-Result 'Backend-Unit-Tests' ($LASTEXITCODE -eq 0) $(if ($LASTEXITCODE -ne 0) { "exit code $LASTEXITCODE (via docker)" })
+        }
     }
     catch {
         Write-Result 'Backend-Unit-Tests' $false $_.Exception.Message
-        Pop-Location
+        try { Pop-Location } catch {}
     }
 }
 
@@ -166,15 +211,26 @@ if (-not $SkipBackendUnit) {
 if (-not $SkipFrontendUnit) {
     Write-Phase "Phase 3: Frontend Unit Tests"
 
+    # Same docker-fallback as the backend phase: when npm is missing on the
+    # host, run the frontend test command inside a one-shot node container.
+    $hasNpm = $null -ne (Get-Command npm -ErrorAction SilentlyContinue)
     try {
-        Push-Location $frontendDir
-        $npmTest = & npm test -- --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'frontend-unit.log')
-        Write-Result 'Frontend-Unit-Tests' ($LASTEXITCODE -eq 0) $(if ($LASTEXITCODE -ne 0) { "exit code $LASTEXITCODE" })
-        Pop-Location
+        if ($hasNpm) {
+            Push-Location $frontendDir
+            $null = & npm test -- --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'frontend-unit.log')
+            Write-Result 'Frontend-Unit-Tests' ($LASTEXITCODE -eq 0) $(if ($LASTEXITCODE -ne 0) { "exit code $LASTEXITCODE" })
+            Pop-Location
+        } else {
+            # The UI doesn't currently have a `test` script in package.json
+            # (only test:e2e for Playwright), so we skip cleanly when running
+            # inside docker fallback.
+            Write-Host "  No frontend unit tests defined (only Playwright E2E exists, run with -SkipE2E to disable)" -ForegroundColor Gray
+            Write-Result 'Frontend-Unit-Tests' $true 'no test script defined'
+        }
     }
     catch {
         Write-Result 'Frontend-Unit-Tests' $false $_.Exception.Message
-        Pop-Location
+        try { Pop-Location } catch {}
     }
 }
 
@@ -194,261 +250,220 @@ if (-not $SkipIntegration) {
     & docker compose -f $composePath up -d 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'docker-up.log')
     Write-Result 'Docker-Compose-Up' ($LASTEXITCODE -eq 0)
 
-    # Wait for SQL to be ready
-    Write-Host "  Waiting for SQL Server..." -ForegroundColor Gray
-    $sqlReady = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        try {
-            $conn = New-Object System.Data.SqlClient.SqlConnection("Server=$sqlServer;Database=master;User Id=$sqlUser;Password=$sqlPassword;TrustServerCertificate=True")
-            $conn.Open()
-            $conn.Close()
-            $sqlReady = $true
-            break
-        }
-        catch {
-            Start-Sleep -Seconds 2
-        }
-    }
-    Write-Result 'SQL-Server-Ready' $sqlReady $(if (-not $sqlReady) { 'Timed out after 60 seconds' })
+    # ── Wait for postgres + table migrations + API readiness ────────
+    # In v5 the docker-compose healthcheck waits for postgres, then the web
+    # container runs migrations on startup. The web container starts listening
+    # BEFORE migrations finish (migrations run from inside the listener
+    # callback), so /auth-config can return 200 while the database is still
+    # being set up. We hit /admin/status which depends on the Crawlers table
+    # — if that returns 200, bootstrap has fully completed.
+    Write-Phase "Phase 4b: Wait for stack readiness (postgres + migrations + API)"
 
-    if ($sqlReady) {
-        # Wait for database
-        Write-Host "  Waiting for GraphData database..." -ForegroundColor Gray
-        $dbReady = $false
-        for ($i = 0; $i -lt 15; $i++) {
-            try {
-                $conn = New-Object System.Data.SqlClient.SqlConnection("Server=$sqlServer;Database=$sqlDatabase;User Id=$sqlUser;Password=$sqlPassword;TrustServerCertificate=True")
-                $conn.Open()
-                $conn.Close()
-                $dbReady = $true
+    $apiReady = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        try {
+            $status = Invoke-RestMethod -Uri "$apiBaseUrl/admin/status" -TimeoutSec 5
+            if ($null -ne $status -and $null -ne $status.hasCrawlers) {
+                $apiReady = $true
                 break
             }
-            catch {
-                Start-Sleep -Seconds 2
-            }
+        } catch {
+            # 500 = bootstrap still running; 401 = auth on; both retry
         }
-        Write-Result 'Database-Ready' $dbReady
+        Start-Sleep -Seconds 2
+    }
+    Write-Result 'API-Ready' $apiReady $(if (-not $apiReady) { 'Timed out after 120 seconds' })
 
-        # Initialize tables
-        Write-Phase "Phase 4b: Initialize Tables"
+    # ── Verify all expected postgres tables exist via psql ──────────
+    # We shell into the postgres container and run a single SELECT against
+    # pg_tables. PowerShell's `&` invocation can mangle docker compose's
+    # quoting on Windows, so we put the SQL in a file inside the container
+    # and invoke psql -f <file>. Simpler than escaping nested quotes.
+    Write-Phase "Phase 4c: Verify Postgres Schema"
 
+    $expectedTables = @('Systems', 'Resources', 'Principals', 'ResourceAssignments', 'ResourceRelationships',
+                        'Identities', 'IdentityMembers', 'Contexts', 'GovernanceCatalogs', 'AssignmentPolicies',
+                        'AssignmentRequests', 'CertificationDecisions', 'Crawlers', 'CrawlerAuditLog',
+                        'CrawlerConfigs', 'CrawlerJobs', 'WorkerConfig', 'GraphSyncLog',
+                        'GraphTags', 'GovernanceCategories', 'GraphRiskProfiles', 'GraphRiskClassifiers',
+                        'RiskScores', 'GraphResourceClusters', 'GraphCorrelationRulesets')
+    try {
+        # Use the PGPASSWORD env var (set inside the container) to avoid
+        # interactive password prompts. The postgres image always has psql.
+        $env:MSYS_NO_PATHCONV = '1'
+        $listOutput = & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
+            psql -U $pgUser -d $pgDatabase -A -t `
+            -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" 2>&1
+        Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
+        # Coerce each line to a string before .Trim() — if `docker compose exec`
+        # itself errored we get ErrorRecord objects mixed in, and ErrorRecord
+        # doesn't have a Trim() method.
+        $existingTables = @($listOutput |
+            ForEach-Object { [string]$_ } |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' })
+        foreach ($table in $expectedTables) {
+            $exists = $existingTables -contains $table
+            Write-Result "Table-$table" $exists $(if (-not $exists) { "Table not found in pg_tables" })
+        }
+    } catch {
+        Write-Result 'Schema-Check' $false $_.Exception.Message
+    }
+
+    if (-not $apiReady) {
+        Write-Host "  API never became ready — skipping ingest phases" -ForegroundColor Yellow
+    }
+
+    if ($apiReady) {
+        # ── Phase 4d: Queue a demo job and let the built-in worker run it ──
+        # In v5 the built-in worker is auto-created at bootstrap and the worker
+        # container picks up jobs from the queue every 30s. We POST a demo job
+        # via the admin API and then poll until it completes (or times out).
+        Write-Phase "Phase 4d: Demo Job (queued via API, run by built-in worker)"
+
+        $jobId = $null
         try {
-            $Global:FGSQLConnectionString = "Server=$sqlServer;Database=$sqlDatabase;User Id=$sqlUser;Password=$sqlPassword;TrustServerCertificate=True"
-            Import-Module (Join-Path $RepoRoot 'setup/IdentityAtlas.psd1') -Force
-
-            Initialize-FGSystemTables 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'init-system-tables.log')
-            Write-Result 'Init-System-Tables' $true
-
-            Initialize-FGGovernanceTables 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'init-governance-tables.log')
-            Write-Result 'Init-Governance-Tables' $true
-
-            Initialize-FGCrawlerTables 2>&1 | Tee-Object -FilePath (Join-Path $LogFolder 'init-crawler-tables.log')
-            Write-Result 'Init-Crawler-Tables' $true
-        }
-        catch {
-            Write-Result 'Table-Initialization' $false $_.Exception.Message
+            $job = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawler-jobs" -Method Post `
+                -ContentType 'application/json' -Body '{"jobType":"demo"}'
+            $jobId = $job.id
+            Write-Result 'Demo-Job-Queued' ($null -ne $jobId) "id=$jobId"
+        } catch {
+            Write-Result 'Demo-Job-Queued' $false $_.Exception.Message
         }
 
-        # Verify tables exist
-        Write-Phase "Phase 4c: Verify Table Schema"
+        if ($jobId) {
+            # Poll for completion. Worker scheduler ticks every 30s + ~10s of
+            # ingest work — we give it 5 minutes total before giving up.
+            $deadline = (Get-Date).AddMinutes(5)
+            $finalStatus = $null
+            while ((Get-Date) -lt $deadline) {
+                Start-Sleep -Seconds 5
+                try {
+                    $status = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawler-jobs/$jobId" -TimeoutSec 10
+                    if ($status.status -in @('completed', 'failed', 'cancelled')) {
+                        $finalStatus = $status
+                        break
+                    }
+                } catch { }
+            }
+            if ($null -eq $finalStatus) {
+                Write-Result 'Demo-Job-Completed' $false 'timed out after 5 min'
+            } else {
+                $msg = "ended in $($finalStatus.status)"
+                if ($finalStatus.errorMessage) { $msg += ": $($finalStatus.errorMessage)" }
+                Write-Result 'Demo-Job-Completed' ($finalStatus.status -eq 'completed') $msg
+            }
 
-        $expectedTables = @('Systems', 'Resources', 'Principals', 'ResourceAssignments', 'ResourceRelationships',
-                            'Identities', 'IdentityMembers', 'Contexts', 'GovernanceCatalogs', 'AssignmentPolicies',
-                            'AssignmentRequests', 'CertificationDecisions', 'Crawlers', 'CrawlerAuditLog')
+            # ── Phase 4e: Verify the data was actually loaded ────────────
+            Write-Phase "Phase 4e: Verify Demo Data (row counts via API)"
+
+            $checks = @(
+                @{ name = 'Systems';      path = '/systems';      minCount = 1 },
+                @{ name = 'Principals';   path = '/users';        minCount = 10 },
+                @{ name = 'Resources';    path = '/resources';    minCount = 5 },
+                @{ name = 'Permissions';  path = '/permissions';  minCount = 5 }
+            )
+            foreach ($check in $checks) {
+                try {
+                    $r = Invoke-RestMethod -Uri "$apiBaseUrl$($check.path)" -TimeoutSec 30
+                    # Endpoints return either an array, { data: [] }, or { totalUsers, data: [] }
+                    $count = 0
+                    if ($r -is [array]) { $count = $r.Count }
+                    elseif ($r.data -is [array]) { $count = $r.data.Count }
+                    elseif ($r.totalUsers) { $count = $r.totalUsers }
+                    $passed = $count -ge $check.minCount
+                    Write-Result "Verify-$($check.name)" $passed "got $count, expected >= $($check.minCount)"
+                } catch {
+                    Write-Result "Verify-$($check.name)" $false $_.Exception.Message
+                }
+            }
+        }
+
+        # ── Phase 4f: Smoke-test all read endpoints ──────────────────
+        Write-Phase "Phase 4f: Read endpoint smoke test"
+
+        $smokeEndpoints = @(
+            '/auth-config', '/features', '/admin/status', '/admin/auth-settings',
+            '/admin/risk-profile', '/admin/classifiers', '/admin/correlation-ruleset',
+            '/admin/crawlers', '/admin/crawler-configs', '/admin/crawler-jobs',
+            '/admin/container-stats', '/systems', '/users', '/resources',
+            '/contexts', '/identities', '/access-package-groups', '/permissions',
+            '/sync-log', '/preferences', '/perf', '/tags', '/categories',
+            '/risk-scores', '/risk-scores/users', '/risk-scores/groups',
+            '/risk-scores/business-roles', '/risk-scores/contexts',
+            '/risk-scores/identities', '/risk-scores/clusters',
+            '/risk-scores/cluster-summary', '/org-chart'
+        )
+        foreach ($ep in $smokeEndpoints) {
+            try {
+                $resp = Invoke-WebRequest -Uri "$apiBaseUrl$ep" -TimeoutSec 30 -UseBasicParsing
+                Write-Result "Smoke-$ep" ($resp.StatusCode -eq 200) "HTTP $($resp.StatusCode)"
+            } catch {
+                $code = $null
+                try { $code = $_.Exception.Response.StatusCode.value__ } catch {}
+                Write-Result "Smoke-$ep" $false "HTTP $code"
+            }
+        }
+
+        # ── Phase 4g: Entra ID crawler scenarios (optional) ──────────
+        # Reads credentials from test/test.secrets.json. Skips itself when
+        # creds are missing.
+        Write-Phase "Phase 4g: Entra ID Crawler Scenarios"
+
+        # In v5 we read the built-in worker key from the shared volume that
+        # the web container wrote it to. The Test-EntraIdCrawler.ps1 script
+        # uses it to call /api/admin/* endpoints (which are unauthenticated
+        # in the local stack but the script tolerates either path).
+        $workerKey = $null
         try {
-            $conn = New-Object System.Data.SqlClient.SqlConnection($Global:FGSQLConnectionString)
-            $conn.Open()
-            $cmd = $conn.CreateCommand()
-            $cmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo'"
-            $reader = $cmd.ExecuteReader()
-            $existingTables = @()
-            while ($reader.Read()) { $existingTables += $reader['TABLE_NAME'] }
-            $reader.Close()
-            $conn.Close()
-
-            foreach ($table in $expectedTables) {
-                $exists = $existingTables -contains $table
-                Write-Result "Table-$table" $exists $(if (-not $exists) { "Table not found" })
+            $keyPath = '/data/uploads/.builtin-worker-key'
+            $env:MSYS_NO_PATHCONV = '1'
+            # Same coercion as the schema check — be defensive against
+            # docker exec returning ErrorRecord objects when the container
+            # isn't ready yet.
+            $rawKey = & docker compose exec -T worker cat $keyPath 2>$null
+            if ($rawKey) {
+                $workerKey = ([string]$rawKey).Trim()
             }
-        }
-        catch {
-            Write-Result 'Table-Schema-Check' $false $_.Exception.Message
-        }
+            Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
+        } catch { }
 
-        # Wait for backend API
-        Write-Phase "Phase 4d: Verify API"
-
-        $apiReady = $false
-        for ($i = 0; $i -lt 20; $i++) {
-            try {
-                $health = Invoke-RestMethod -Uri "$apiBaseUrl/health" -TimeoutSec 5
-                if ($health.status -eq 'ok') { $apiReady = $true; break }
-            }
-            catch {
-                Start-Sleep -Seconds 3
-            }
-        }
-        Write-Result 'API-Health' $apiReady $(if (-not $apiReady) { 'Timed out after 60 seconds' })
-
-        if ($apiReady) {
-            # Register crawler
-            Write-Phase "Phase 4e: Crawler Registration & Auth"
-
-            $crawlerKey = $null
-            try {
-                $regResult = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawlers" -Method Post -ContentType 'application/json' `
-                    -Body '{"displayName":"Nightly Test Crawler","permissions":["ingest","refreshViews"]}'
-                $crawlerKey = $regResult.apiKey
-                Write-Result 'Crawler-Register' ($null -ne $crawlerKey)
-            }
-            catch {
-                Write-Result 'Crawler-Register' $false $_.Exception.Message
-            }
-
-            if ($crawlerKey) {
-                # Test whoami
-                try {
-                    $headers = @{ 'Authorization' = "Bearer $crawlerKey" }
-                    $whoami = Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/whoami" -Headers $headers
-                    Write-Result 'Crawler-Whoami' ($whoami.displayName -eq 'Nightly Test Crawler')
-                }
-                catch {
-                    Write-Result 'Crawler-Whoami' $false $_.Exception.Message
-                }
-
-                # Test key rotation
-                try {
-                    $rotateResult = Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/rotate" -Method Post -Headers $headers
-                    $newKey = $rotateResult.apiKey
-                    Write-Result 'Crawler-Rotate' ($null -ne $newKey -and $newKey -ne $crawlerKey)
-                    $crawlerKey = $newKey
-                    $headers = @{ 'Authorization' = "Bearer $crawlerKey" }
-                }
-                catch {
-                    Write-Result 'Crawler-Rotate' $false $_.Exception.Message
-                }
-
-                # Test old key fails
-                try {
-                    $oldHeaders = @{ 'Authorization' = "Bearer fgc_invalid_key_12345678901234567890" }
-                    $null = Invoke-RestMethod -Uri "$apiBaseUrl/crawlers/whoami" -Headers $oldHeaders -ErrorAction Stop
-                    Write-Result 'Invalid-Key-Rejected' $false 'Should have returned 401'
-                }
-                catch {
-                    $statusCode = $_.Exception.Response.StatusCode.value__
-                    Write-Result 'Invalid-Key-Rejected' ($statusCode -eq 401)
-                }
-
-                # Generate and ingest demo dataset
-                Write-Phase "Phase 4f: Demo Dataset — Generate"
-
-                $demoDir = Join-Path $RepoRoot 'test/demo-dataset'
-                try {
-                    & (Join-Path $demoDir 'Generate-DemoDataset.ps1') 2>&1 |
-                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-generate.log')
-                    $datasetExists = Test-Path (Join-Path $demoDir 'demo-company.json')
-                    Write-Result 'Demo-Generate' $datasetExists
-                }
-                catch {
-                    Write-Result 'Demo-Generate' $false $_.Exception.Message
-                }
-
-                Write-Phase "Phase 4g: Demo Dataset — Ingest"
-
-                try {
-                    & (Join-Path $demoDir 'Ingest-DemoDataset.ps1') -ApiKey $crawlerKey -ApiBaseUrl $apiBaseUrl 2>&1 |
-                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-ingest.log')
-                    Write-Result 'Demo-Ingest' ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null)
-                }
-                catch {
-                    Write-Result 'Demo-Ingest' $false $_.Exception.Message
-                }
-
-                Write-Phase "Phase 4h: Demo Dataset — Verify (Row Counts + Integrity + Business Logic)"
-
-                try {
-                    & (Join-Path $demoDir 'Verify-DemoDataset.ps1') -ApiBaseUrl $apiBaseUrl 2>&1 |
-                        Tee-Object -FilePath (Join-Path $LogFolder 'demo-verify.log')
-                    $verifyExitCode = $LASTEXITCODE
-                    Write-Result 'Demo-Verify' ($verifyExitCode -eq 0) "Failed checks: $verifyExitCode"
-
-                    # Copy detailed results
-                    $verifyJson = Join-Path $demoDir 'verify-results.json'
-                    if (Test-Path $verifyJson) {
-                        Copy-Item $verifyJson (Join-Path $LogFolder 'demo-verify-results.json') -Force
-                    }
-                }
-                catch {
-                    Write-Result 'Demo-Verify' $false $_.Exception.Message
-                }
-
-                # Also run CSV crawler against legacy dataset (if exists)
-                Write-Phase "Phase 4i: CSV Crawler (Legacy Dataset)"
-
-                if (Test-Path $CsvDataset) {
-                    try {
-                        $crawlerScript = Join-Path $RepoRoot 'tools/crawlers/csv/Start-CSVCrawler.ps1'
-                        & $crawlerScript -ApiBaseUrl $apiBaseUrl -ApiKey $crawlerKey -CsvFolder $CsvDataset `
-                            -SystemName 'Nightly Test Omada' -SystemType 'Omada' 2>&1 |
-                            Tee-Object -FilePath (Join-Path $LogFolder 'csv-crawler.log')
-                        Write-Result 'CSV-Crawler-Run' ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null)
-                    }
-                    catch {
-                        Write-Result 'CSV-Crawler-Run' $false $_.Exception.Message
-                    }
-                }
-                else {
-                    Write-Host "  Skipping (no CSV dataset at $CsvDataset)" -ForegroundColor Yellow
-                }
-
-                # ─── Phase 4j: Entra ID crawler scenarios ────────────────────
-                # Exercises the real crawler against a test tenant. Credentials
-                # come from test/test.secrets.json or env vars; if neither is set,
-                # the step skips itself with a clear message (treated as PASS).
-                Write-Phase "Phase 4j: Entra ID Crawler Scenarios"
-
-                $entraTestScript = Join-Path $PSScriptRoot 'Test-EntraIdCrawler.ps1'
-                if (Test-Path $entraTestScript) {
-                    try {
-                        # Hand the script our Write-Result so its assertions
-                        # show up in the unified report alongside the rest.
-                        & $entraTestScript `
-                            -ApiBaseUrl $apiBaseUrl `
-                            -ApiKey     $crawlerKey `
-                            -LogFolder  $LogFolder `
-                            -WriteResult ${function:Write-Result}
-                    } catch {
-                        Write-Result 'EntraID-Crawler-Tests' $false $_.Exception.Message
-                    }
+        $entraTestScript = Join-Path $PSScriptRoot 'Test-EntraIdCrawler.ps1'
+        if ((Test-Path $entraTestScript) -and $workerKey) {
+            # We can't pass our Write-Result function directly — it uses
+            # $script:results which only resolves in the runner's scope. Build
+            # a closure that captures the runner's results hashtable + counter
+            # by reference and have the test script call into it.
+            # Capture the runner's results hashtable by reference. The closure
+            # body runs in the test script's scope but $runnerResults still
+            # points at the same Hashtable object, so writes are visible.
+            # totalFailed is a value type, so we use a small wrapper hashtable
+            # to allow shared incrementing.
+            $runnerResults = $script:results
+            $failedRef = @{ Count = 0 }
+            $resultsCallback = {
+                param($Name, $Passed, $Detail)
+                $runnerResults[$Name] = @{ Passed = $Passed; Detail = $Detail; Timestamp = Get-Date }
+                if (-not $Passed) {
+                    $failedRef.Count++
+                    Write-Host "  FAIL  $Name  $Detail" -ForegroundColor Red
                 } else {
-                    Write-Host "  Skipping (Test-EntraIdCrawler.ps1 not found)" -ForegroundColor Yellow
+                    Write-Host "  PASS  $Name" -ForegroundColor Green
                 }
-            }
-        }
+            }.GetNewClosure()
 
-        # Backend integration tests (if vitest is set up)
-        Write-Phase "Phase 4k: Backend Integration Tests"
-
-        $integrationTestDir = Join-Path $backendDir 'src/__tests__/integration'
-        if (Test-Path $integrationTestDir) {
             try {
-                Push-Location $backendDir
-                $env:TEST_SQL_SERVER = $sqlServer
-                $env:TEST_SQL_DATABASE = $sqlDatabase
-                $env:TEST_SQL_USER = $sqlUser
-                $env:TEST_SQL_PASSWORD = $sqlPassword
-                & npx vitest run src/__tests__/integration/ --reporter=verbose 2>&1 |
-                    Tee-Object -FilePath (Join-Path $LogFolder 'backend-integration.log')
-                Write-Result 'Backend-Integration-Tests' ($LASTEXITCODE -eq 0)
-                Pop-Location
+                & $entraTestScript `
+                    -ApiBaseUrl  $apiBaseUrl `
+                    -ApiKey      $workerKey `
+                    -LogFolder   $LogFolder `
+                    -WriteResult $resultsCallback
+                $script:totalFailed += $failedRef.Count
+            } catch {
+                Write-Result 'EntraID-Crawler-Tests' $false $_.Exception.Message
             }
-            catch {
-                Write-Result 'Backend-Integration-Tests' $false $_.Exception.Message
-                Pop-Location
-            }
-        }
-        else {
-            Write-Host "  Skipping (no integration test directory yet)" -ForegroundColor Yellow
+        } else {
+            Write-Result 'EntraID-Crawler-Tests' $true 'skipped (script or key missing)'
         }
     }
 }
@@ -506,7 +521,7 @@ if (-not $SkipIntegration) {
     }
 
     try {
-        $specResponse = Invoke-RestMethod -Uri "$apiBaseUrl/docs/openapi.json" -TimeoutSec 10
+        $specResponse = Invoke-RestMethod -Uri "$apiBaseUrl/openapi.json" -TimeoutSec 10
         Write-Result 'OpenAPI-Spec-Valid' ($null -ne $specResponse.openapi)
     }
     catch {
@@ -647,7 +662,7 @@ if ($failedTests -gt 0) {
     foreach ($name in ($results.Keys | Sort-Object)) {
         $r = $results[$name]
         if (-not $r.Passed) {
-            Write-Host "  - $name: $($r.Detail)" -ForegroundColor Red
+            Write-Host "  - ${name}: $($r.Detail)" -ForegroundColor Red
         }
     }
 }

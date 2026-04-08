@@ -50,7 +50,7 @@ async function assertCsvConfig(configId, res) {
   try {
     const pool = await db.getPool();
     const r = await pool.request().input('id', configId)
-      .query(`SELECT crawlerType FROM dbo.CrawlerConfigs WHERE id = @id`);
+      .query(`SELECT "crawlerType" FROM "CrawlerConfigs" WHERE id = @id`);
     if (r.recordset.length === 0) {
       res.status(404).json({ error: 'Crawler config not found' });
       return false;

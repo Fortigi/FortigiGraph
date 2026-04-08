@@ -12,7 +12,7 @@ import permissionsRouter from './routes/permissions.js';
 import tagsRouter from './routes/tags.js';
 import categoriesRouter from './routes/categories.js';
 import detailsRouter from './routes/details.js';
-// import governanceRouter from './routes/governance.js'; // temporarily disabled
+import governanceRouter from './routes/governance.js';
 import perfRouter from './routes/perf.js';
 import riskRouter from './routes/riskScores.js';
 import orgChartRouter from './routes/orgChart.js';
@@ -217,7 +217,7 @@ app.use('/api', authMiddleware, contextsRouter);
 app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit for import payloads
 app.use('/api', authMiddleware, adminRouter);
 app.use('/api', authMiddleware, csvUploadsRouter);
-// app.use('/api', authMiddleware, governanceRouter); // temporarily disabled
+app.use('/api', authMiddleware, governanceRouter);
 
 // ─── Crawler & job routes ───────────────────────────────────────
 // Admin crawler management (Entra ID auth) — /api/admin/crawlers/*
