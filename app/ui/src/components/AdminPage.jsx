@@ -6,6 +6,7 @@ const CrawlersPage = lazy(() => import('./CrawlersPage'));
 const ContainerStatsPage = lazy(() => import('./ContainerStatsPage'));
 const AuthSettingsPage = lazy(() => import('./AuthSettingsPage'));
 const PerfPage = lazy(() => import('./PerfPage'));
+const RiskProfileWizard = lazy(() => import('./RiskProfileWizard'));
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -951,10 +952,296 @@ const ADMIN_TABS = [
   { key: 'data',         label: 'Data',                description: 'Export/import curated data and clean the database' },
   { key: 'correlation',  label: 'Account Correlation', description: 'Rules for linking accounts to identities' },
   { key: 'risk-scoring', label: 'Risk Scoring',        description: 'Risk profile, classifiers and feature toggle' },
+  { key: 'llm',          label: 'LLM Settings',        description: 'Configure the LLM provider used by risk scoring and account correlation' },
   { key: 'performance',  label: 'Performance',         description: 'API and SQL performance metrics' },
   { key: 'containers',   label: 'Containers',          description: 'Live CPU, memory and network for the Docker stack' },
   { key: 'auth',         label: 'Authentication',      description: 'Configure Entra ID single sign-on' },
 ];
+
+// ─── LLM Settings sub-tab ────────────────────────────────────────────────────
+// Configures the LLM provider used by risk scoring, classifier generation and
+// (future) account correlation. The API key never leaves the server — the GET
+// returns `apiKeySet: true|false` and the form lets you re-type a new key when
+// rotating. The Test button does a single ping with the live or unsaved config
+// so the user can verify credentials before clicking Save.
+function LLMSettingsSection() {
+  const { authFetch } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState([]);
+  const [defaultModels, setDefaultModels] = useState({});
+  const [config, setConfig] = useState({
+    provider: 'anthropic',
+    model: '',
+    endpoint: '',
+    deployment: '',
+    apiVersion: '',
+    apiKey: '',
+  });
+  const [apiKeySet, setApiKeySet] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await authFetch('/api/admin/llm/config');
+      if (r.ok) {
+        const j = await r.json();
+        setProviders(j.providers || []);
+        setDefaultModels(j.defaultModels || {});
+        setApiKeySet(!!j.apiKeySet);
+        if (j.config) {
+          setConfig(c => ({
+            ...c,
+            provider:   j.config.provider   || 'anthropic',
+            model:      j.config.model      || '',
+            endpoint:   j.config.endpoint   || '',
+            deployment: j.config.deployment || '',
+            apiVersion: j.config.apiVersion || '',
+            apiKey:     '', // never returned from server
+          }));
+        }
+      }
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isAzure = config.provider === 'azure-openai';
+  const placeholderModel = defaultModels[config.provider] || '';
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage(null);
+    setTestResult(null);
+    try {
+      const body = {
+        provider:   config.provider,
+        model:      config.model || null,
+        endpoint:   isAzure ? (config.endpoint || null) : null,
+        deployment: isAzure ? (config.deployment || null) : null,
+        apiVersion: isAzure ? (config.apiVersion || null) : null,
+      };
+      if (config.apiKey) body.apiKey = config.apiKey;
+      const r = await authFetch('/api/admin/llm/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (r.ok) {
+        setMessage({ kind: 'ok', text: 'LLM settings saved' });
+        setConfig(c => ({ ...c, apiKey: '' }));
+        load();
+      } else {
+        setMessage({ kind: 'err', text: j.error || `HTTP ${r.status}` });
+      }
+    } finally { setSaving(false); }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setMessage(null);
+    try {
+      const body = {
+        provider:   config.provider,
+        model:      config.model || null,
+        endpoint:   isAzure ? (config.endpoint || null) : null,
+        deployment: isAzure ? (config.deployment || null) : null,
+        apiVersion: isAzure ? (config.apiVersion || null) : null,
+      };
+      // If user has typed a key in the form, use it. Otherwise the server will use the saved one.
+      if (config.apiKey) body.apiKey = config.apiKey;
+      const r = await authFetch('/api/admin/llm/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      setTestResult(j);
+    } finally { setTesting(false); }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Clear the LLM configuration and stored API key?')) return;
+    await authFetch('/api/admin/llm/config', { method: 'DELETE' });
+    setConfig({ provider: 'anthropic', model: '', endpoint: '', deployment: '', apiVersion: '', apiKey: '' });
+    setApiKeySet(false);
+    setMessage({ kind: 'ok', text: 'LLM configuration cleared' });
+  };
+
+  if (loading) return <div className="text-sm text-gray-500 p-6">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border p-5">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">LLM Provider</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Used by risk profiling, classifier generation and conversational refinement.
+          The API key is encrypted at rest with envelope encryption — only the masked status is visible after saving.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Provider */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Provider</label>
+            <select
+              value={config.provider}
+              onChange={e => setConfig(c => ({ ...c, provider: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+            >
+              {providers.map(p => (
+                <option key={p} value={p}>{p === 'azure-openai' ? 'Azure OpenAI' : p === 'anthropic' ? 'Anthropic Claude' : 'OpenAI'}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Model */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {isAzure ? 'Deployment name (model field for Azure)' : 'Model'}
+            </label>
+            <input
+              type="text"
+              value={config.model}
+              onChange={e => setConfig(c => ({ ...c, model: e.target.value }))}
+              placeholder={placeholderModel || (isAzure ? 'e.g. gpt-4o-prod' : '')}
+              className="w-full px-3 py-1.5 text-sm border rounded font-mono dark:bg-gray-700 dark:border-gray-600"
+            />
+          </div>
+
+          {/* Azure-only fields */}
+          {isAzure && (
+            <>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Azure endpoint</label>
+                <input
+                  type="text"
+                  value={config.endpoint}
+                  onChange={e => setConfig(c => ({ ...c, endpoint: e.target.value }))}
+                  placeholder="https://my-resource.openai.azure.com"
+                  className="w-full px-3 py-1.5 text-sm border rounded font-mono dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Deployment</label>
+                <input
+                  type="text"
+                  value={config.deployment}
+                  onChange={e => setConfig(c => ({ ...c, deployment: e.target.value }))}
+                  placeholder="gpt-4o-prod"
+                  className="w-full px-3 py-1.5 text-sm border rounded font-mono dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">API version</label>
+                <input
+                  type="text"
+                  value={config.apiVersion}
+                  onChange={e => setConfig(c => ({ ...c, apiVersion: e.target.value }))}
+                  placeholder="2024-08-01-preview"
+                  className="w-full px-3 py-1.5 text-sm border rounded font-mono dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+            </>
+          )}
+
+          {/* API key */}
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              API key {apiKeySet && <span className="ml-2 text-green-600">• stored</span>}
+            </label>
+            <input
+              type="password"
+              value={config.apiKey}
+              onChange={e => setConfig(c => ({ ...c, apiKey: e.target.value }))}
+              placeholder={apiKeySet ? '••••••••  (leave blank to keep existing)' : 'sk-...'}
+              autoComplete="new-password"
+              className="w-full px-3 py-1.5 text-sm border rounded font-mono dark:bg-gray-700 dark:border-gray-600"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-1.5 text-sm font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={testing}
+            className="px-4 py-1.5 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50"
+          >
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+          {apiKeySet && (
+            <button
+              onClick={handleClear}
+              className="px-4 py-1.5 text-sm font-medium rounded border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {message && (
+          <div className={`mt-3 text-sm ${message.kind === 'ok' ? 'text-green-700' : 'text-red-700'}`}>
+            {message.text}
+          </div>
+        )}
+        {testResult && (
+          <div className={`mt-3 text-sm rounded border p-3 ${testResult.ok ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900 dark:border-green-700 dark:text-green-200' : 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900 dark:border-red-700 dark:text-red-200'}`}>
+            {testResult.ok ? (
+              <>
+                <div className="font-medium">Connection OK</div>
+                <div className="text-xs mt-1">model: <code>{testResult.model}</code> · {testResult.latencyMs}ms</div>
+                {testResult.sample && <div className="text-xs mt-1">sample: <code>{testResult.sample}</code></div>}
+              </>
+            ) : (
+              <>
+                <div className="font-medium">Connection failed</div>
+                <div className="text-xs mt-1">{testResult.error}</div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── New-profile launcher (opens the wizard) ────────────────────────────────
+function NewRiskProfileLauncher() {
+  const [open, setOpen] = useState(false);
+  const [bumpKey, setBumpKey] = useState(0);
+  return (
+    <div className="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 rounded-lg p-4 flex items-center justify-between">
+      <div>
+        <div className="text-sm font-medium text-indigo-900 dark:text-indigo-100">Create a new risk profile</div>
+        <div className="text-xs text-indigo-700 dark:text-indigo-300 mt-0.5">
+          Walks you through generating an organisational profile and classifier set with the LLM, then optionally runs a scoring pass.
+        </div>
+      </div>
+      <button onClick={() => setOpen(true)} className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
+        New profile
+      </button>
+      {open && (
+        <Suspense fallback={null}>
+          <RiskProfileWizard
+            key={bumpKey}
+            onClose={() => setOpen(false)}
+            onSaved={() => { setBumpKey(k => k + 1); }}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+}
 
 // ─── Risk Scoring sub-tab — combines profile + classifiers + feature toggle ──
 function RiskScoringSection() {
@@ -1039,6 +1326,7 @@ function RiskScoringSection() {
       {/* Risk profile + classifiers — only render when feature is enabled */}
       {enabled ? (
         <>
+          <NewRiskProfileLauncher />
           <RiskProfileSection />
           <ClassifiersSection />
         </>
@@ -1129,6 +1417,7 @@ export default function AdminPage({ onNavigate }) {
 
         {activeTab === 'correlation' && <CorrelationSection />}
         {activeTab === 'risk-scoring' && <RiskScoringSection />}
+        {activeTab === 'llm' && <LLMSettingsSection />}
 
         {activeTab === 'performance' && (
           <Suspense fallback={<div className="text-sm text-gray-500 p-6">Loading…</div>}>

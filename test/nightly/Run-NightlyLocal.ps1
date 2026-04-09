@@ -103,6 +103,29 @@ Write-Host "Dataset:  $CsvDataset"
 Write-Host "Logs:     $LogFolder"
 Write-Host ""
 
+# ─── Git pull (fetch latest code before building images) ──────────
+# On a dedicated test VM the working tree should be clean. On a dev machine
+# this is a no-op (already on the latest commit). If there are local changes
+# the pull will fast-forward only and refuse to merge — that's the safe
+# default for unattended operation.
+try {
+    Push-Location $RepoRoot
+    $branch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim()
+    Write-Host "Git: branch '$branch', pulling latest..." -ForegroundColor Gray
+    $pullOutput = git pull --ff-only 2>&1
+    $pullExit = $LASTEXITCODE
+    if ($pullExit -eq 0) {
+        $head = (git rev-parse --short HEAD 2>$null).Trim()
+        Write-Host "Git: up to date at $head" -ForegroundColor Green
+    } else {
+        Write-Host "Git: pull --ff-only failed (exit $pullExit). Continuing with current HEAD." -ForegroundColor Yellow
+        Write-Host "     $pullOutput" -ForegroundColor Yellow
+    }
+    Pop-Location
+} catch {
+    Write-Host "Git pull skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # PHASE 1: POWERSHELL UNIT TESTS (no dependencies)
 # ═══════════════════════════════════════════════════════════════════
@@ -286,14 +309,18 @@ if (-not $SkipIntegration) {
                         'AssignmentRequests', 'CertificationDecisions', 'Crawlers', 'CrawlerAuditLog',
                         'CrawlerConfigs', 'CrawlerJobs', 'WorkerConfig', 'GraphSyncLog',
                         'GraphTags', 'GovernanceCategories', 'GraphRiskProfiles', 'GraphRiskClassifiers',
-                        'RiskScores', 'GraphResourceClusters', 'GraphCorrelationRulesets')
+                        'RiskScores', 'GraphResourceClusters', 'GraphCorrelationRulesets',
+                        # Added by migration 009 (history) and 010 (secrets + risk v2)
+                        '_history', 'Secrets', 'RiskProfiles', 'RiskClassifiers', 'ScoringRuns')
     try {
-        # Use the PGPASSWORD env var (set inside the container) to avoid
-        # interactive password prompts. The postgres image always has psql.
+        # Pipe the SQL via stdin to avoid nested-quote hell in the
+        # PowerShell → cmd → docker → sh → psql chain on Windows. The -c flag
+        # with embedded single quotes inside double quotes breaks ~50% of the
+        # time depending on which shell layer strips them.
         $env:MSYS_NO_PATHCONV = '1'
-        $listOutput = & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
-            psql -U $pgUser -d $pgDatabase -A -t `
-            -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" 2>&1
+        $sql = "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+        $listOutput = $sql | & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
+            psql -U $pgUser -d $pgDatabase -A -t 2>&1
         Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
         # Coerce each line to a string before .Trim() — if `docker compose exec`
         # itself errored we get ErrorRecord objects mixed in, and ErrorRecord
@@ -302,9 +329,31 @@ if (-not $SkipIntegration) {
             ForEach-Object { [string]$_ } |
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' })
-        foreach ($table in $expectedTables) {
-            $exists = $existingTables -contains $table
-            Write-Result "Table-$table" $exists $(if (-not $exists) { "Table not found in pg_tables" })
+
+        if ($existingTables.Count -eq 0) {
+            # Fallback: try the -c approach in case piping didn't work
+            Write-Host "  (pipe approach returned 0 tables — falling back to -c)" -ForegroundColor DarkGray
+            $env:MSYS_NO_PATHCONV = '1'
+            $listOutput = & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
+                psql -U $pgUser -d $pgDatabase -A -t `
+                -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" 2>&1
+            Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
+            $existingTables = @($listOutput |
+                ForEach-Object { [string]$_ } |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' })
+        }
+
+        if ($existingTables.Count -eq 0) {
+            # Last resort: use the API's own admin status endpoint to confirm
+            # the database is at least reachable. Report a single failure
+            # rather than 25 table-not-found lines that obscure the real issue.
+            Write-Result 'Schema-Check' $false "psql returned no tables (docker exec may have failed — check docker-up.log)"
+        } else {
+            foreach ($table in $expectedTables) {
+                $exists = $existingTables -contains $table
+                Write-Result "Table-$table" $exists $(if (-not $exists) { "Table not found in pg_tables" })
+            }
         }
     } catch {
         Write-Result 'Schema-Check' $false $_.Exception.Message
@@ -377,6 +426,61 @@ if (-not $SkipIntegration) {
                     Write-Result "Verify-$($check.name)" $false $_.Exception.Message
                 }
             }
+        }
+
+        # ── Phase 4e2: Clean database and verify it's empty ─────────
+        # This caught a real bug in April 2026 where the clean-database
+        # endpoint used T-SQL (INFORMATION_SCHEMA with dbo schema, sys.tables,
+        # SYSTEM_VERSIONING) that silently returned "does not exist" for every
+        # table in postgres. The data appeared to wipe but actually didn't.
+        Write-Phase "Phase 4e2: Clean Database (wipe + verify empty)"
+
+        try {
+            $cleanResp = Invoke-RestMethod -Uri "$apiBaseUrl/admin/clean-database" `
+                -Method Post -ContentType 'application/json' -TimeoutSec 30
+            $wipedCount = @($cleanResp.wiped).Count
+            $wipedRows  = ($cleanResp.wiped | Measure-Object -Property rowsAffected -Sum).Sum
+            Write-Result 'Clean-Database-API' ($wipedCount -gt 0) "wiped $wipedCount tables, $wipedRows rows"
+
+            # Verify the important tables are actually empty now
+            $postCleanChecks = @(
+                @{ name = 'Principals-Empty';  path = '/users';     maxCount = 0 },
+                @{ name = 'Resources-Empty';   path = '/resources'; maxCount = 0 },
+                @{ name = 'Systems-Empty';     path = '/systems';   maxCount = 0 }
+            )
+            foreach ($check in $postCleanChecks) {
+                try {
+                    $r = Invoke-RestMethod -Uri "$apiBaseUrl$($check.path)" -TimeoutSec 30
+                    $count = 0
+                    if ($r -is [array]) { $count = $r.Count }
+                    elseif ($r.data -is [array]) { $count = $r.data.Count }
+                    elseif ($r.totalUsers) { $count = $r.totalUsers }
+                    $passed = $count -le $check.maxCount
+                    Write-Result "Verify-$($check.name)" $passed "got $count, expected 0"
+                } catch {
+                    Write-Result "Verify-$($check.name)" $false $_.Exception.Message
+                }
+            }
+        } catch {
+            Write-Result 'Clean-Database-API' $false $_.Exception.Message
+        }
+
+        # Reload demo data for the rest of the test phases (smoke tests,
+        # crawler scenarios) that expect a populated database.
+        Write-Host "  Reloading demo data after clean..." -ForegroundColor Gray
+        try {
+            $reloadJob = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawler-jobs" `
+                -Method Post -ContentType 'application/json' -Body '{"jobType":"demo"}' -TimeoutSec 30
+            $reloadId = $reloadJob.id
+            for ($i = 0; $i -lt 30; $i++) {
+                Start-Sleep -Seconds 3
+                try {
+                    $st = Invoke-RestMethod -Uri "$apiBaseUrl/admin/crawler-jobs/$reloadId" -TimeoutSec 10
+                    if ($st.status -eq 'completed') { break }
+                } catch {}
+            }
+        } catch {
+            Write-Host "  Demo reload failed (non-critical): $($_.Exception.Message)" -ForegroundColor Yellow
         }
 
         # ── Phase 4f: Smoke-test all read endpoints ──────────────────
@@ -464,6 +568,35 @@ if (-not $SkipIntegration) {
             }
         } else {
             Write-Result 'EntraID-Crawler-Tests' $true 'skipped (script or key missing)'
+        }
+
+        # ── Phase 4h: LLM / risk-scoring substrate smoke test ──────
+        # Runs regardless of whether the Entra crawler ran. Doesn't require
+        # an LLM API key — verifies the routes/secrets vault are wired up.
+        Write-Phase "Phase 4h: LLM / Risk-scoring substrate"
+        $llmTestScript = Join-Path $PSScriptRoot 'Test-LLMSubstrate.ps1'
+        if (Test-Path $llmTestScript) {
+            $runnerResults2 = $script:results
+            $failedRef2 = @{ Count = 0 }
+            $llmCallback = {
+                param($Name, $Passed, $Detail)
+                $runnerResults2[$Name] = @{ Passed = $Passed; Detail = $Detail; Timestamp = Get-Date }
+                if (-not $Passed) {
+                    $failedRef2.Count++
+                    Write-Host "  FAIL  $Name  $Detail" -ForegroundColor Red
+                } else {
+                    Write-Host "  PASS  $Name" -ForegroundColor Green
+                }
+            }.GetNewClosure()
+
+            try {
+                & $llmTestScript -ApiBaseUrl $apiBaseUrl -WriteResult $llmCallback
+                $script:totalFailed += $failedRef2.Count
+            } catch {
+                Write-Result 'LLM-Substrate-Tests' $false $_.Exception.Message
+            }
+        } else {
+            Write-Result 'LLM-Substrate-Tests' $true 'skipped (script missing)'
         }
     }
 }

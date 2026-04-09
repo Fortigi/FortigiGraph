@@ -203,29 +203,94 @@ $headers = @{ 'Authorization' = "Bearer $ApiKey" }
 $whoami = Invoke-RestMethod -Uri "$ApiBaseUrl/crawlers/whoami" -Headers $headers
 Write-Host "Connected as: $($whoami.displayName)" -ForegroundColor Green
 
-# Register system
-Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Registering system..." -ForegroundColor Cyan
+# ─── Register the fallback system (from Step 1 of the wizard) ────
+# This system always gets created. Resources/principals that don't specify
+# a system in the CSV data get linked to this one.
+Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Registering fallback system ($SystemName)..." -ForegroundColor Cyan
 $systemResult = Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
     syncMode = 'delta'
     records  = @(@{ systemType = $SystemType; displayName = $SystemName; enabled = $true; syncEnabled = $true })
 }
-# Read the assigned system ID back from the ingest response so downstream batches
-# get scoped to the right system. Falls back to 2 if the response shape is unexpected
-# (older API versions); a warning is printed so the operator notices.
-$systemId = $null
-if ($systemResult -and $systemResult.systemId) { $systemId = [int]$systemResult.systemId }
-elseif ($systemResult -and $systemResult.records -and $systemResult.records.Count -gt 0 -and $systemResult.records[0].systemId) {
-    $systemId = [int]$systemResult.records[0].systemId
+$fallbackSystemId = $null
+if ($systemResult -and $systemResult.systemIds -and $systemResult.systemIds.Count -gt 0) {
+    $fallbackSystemId = [int]$systemResult.systemIds[0]
+} elseif ($systemResult -and $systemResult.systemId) {
+    $fallbackSystemId = [int]$systemResult.systemId
 }
-if (-not $systemId) {
+if (-not $fallbackSystemId) {
     Write-Host "  WARNING: ingest/systems did not return a systemId — falling back to 2" -ForegroundColor Yellow
-    $systemId = 2
+    $fallbackSystemId = 2
 }
-Write-Host "  System ID: $systemId" -ForegroundColor Gray
+Write-Host "  Fallback system ID: $fallbackSystemId" -ForegroundColor Gray
+
+# Build a lookup table: systemName → systemId. The fallback system is always
+# in here. If Systems.csv is provided, those systems get added too.
+$systemLookup = @{}
+$systemLookup[$SystemName] = $fallbackSystemId
 
 $syncStart = Get-Date
 
-Update-CrawlerProgress -Step 'Reading CSV files' -Pct 12 -Detail "Folder: $CsvFolder"
+Update-CrawlerProgress -Step 'Reading CSV files' -Pct 8 -Detail "Folder: $CsvFolder"
+
+# ─── Systems.csv (optional — additional systems) ─────────────────
+# Expected columns: DisplayName, SystemType, Description (all optional except DisplayName)
+# Each row becomes a System record. The systemId is returned by the ingest API.
+# Resources/principals can reference a system by name (SystemName column);
+# unmatched ones fall back to the Step 1 system.
+Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking for Systems.csv..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Processing systems' -Pct 10 -Detail 'Reading Systems.csv'
+$systemsCsv = Read-CsvFile 'Systems.csv'
+if ($systemsCsv) {
+    Write-Host "  Found $($systemsCsv.Count) system(s) in Systems.csv" -ForegroundColor Gray
+    foreach ($sysRow in $systemsCsv) {
+        $sName = if ($sysRow.PSObject.Properties.Name -contains 'DisplayName') { $sysRow.DisplayName } else { $null }
+        $sType = if ($sysRow.PSObject.Properties.Name -contains 'SystemType') { $sysRow.SystemType } else { $SystemType }
+        $sDesc = if ($sysRow.PSObject.Properties.Name -contains 'Description') { $sysRow.Description } else { $null }
+        if (-not $sName) { continue }
+
+        try {
+            $sResult = Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
+                syncMode = 'delta'
+                records  = @(@{
+                    systemType  = $sType
+                    displayName = $sName
+                    description = $sDesc
+                    enabled     = $true
+                    syncEnabled = $true
+                })
+            }
+            $sId = $null
+            if ($sResult -and $sResult.systemIds -and $sResult.systemIds.Count -gt 0) {
+                $sId = [int]$sResult.systemIds[0]
+            }
+            if ($sId) {
+                $systemLookup[$sName] = $sId
+                Write-Host "  System '$sName' → ID $sId" -ForegroundColor Gray
+            } else {
+                Write-Host "  System '$sName' registered (no ID returned — will use fallback)" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "  System '$sName' registration failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    Write-Host "  System lookup: $($systemLookup.Count) system(s) available" -ForegroundColor Gray
+} else {
+    Write-Host "  No Systems.csv — all data scoped to fallback system ($SystemName)" -ForegroundColor Gray
+}
+
+# Helper: resolve a system name from a CSV row to a systemId. Falls back to the
+# Step 1 system when the column is missing or the name doesn't match any known system.
+function Resolve-SystemId {
+    param($Row)
+    $sName = $null
+    if ($Row.PSObject.Properties.Name -contains 'SystemName') { $sName = $Row.SystemName }
+    elseif ($Row.PSObject.Properties.Name -contains 'System') { $sName = $Row.System }
+    if ($sName -and $systemLookup.ContainsKey($sName)) { return $systemLookup[$sName] }
+    return $fallbackSystemId
+}
+
+# For backward compat, $systemId points to the fallback
+$systemId = $fallbackSystemId
 
 # ─── OrgUnits / Contexts ─────────────────────────────────────────
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing contexts (org units)..." -ForegroundColor Cyan

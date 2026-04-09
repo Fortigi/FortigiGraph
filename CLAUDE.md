@@ -136,16 +136,20 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Performance Monitoring**: ON by default (Performance page in Admin); `PERF_METRICS_ENABLED=false` opts out at startup. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance sub-tab shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
 - **Deployment**: `docker compose up -d` — all services run in containers, configured via the in-browser wizard (Admin → Crawlers)
 
-### 7. Identity Risk Scoring
-- **LLM-Assisted Profiling**: `New-FGRiskProfile` discovers organizational context from public domain info (no sensitive identity data sent to LLM)
-- **Industry-Specific Classifiers**: `New-FGRiskClassifiers` generates regex-based detection patterns tuned to the organization
-- **4-Layer Scoring Engine**: `Invoke-FGRiskScoring` applies Direct match → Membership analysis → Structural hygiene → Cross-entity propagation
-- **Risk Tiers**: Critical (80-100), High (60-79), Medium (40-59), Low (20-39), Minimal (1-19), None (0)
-- **Resource Clustering**: `Save-FGResourceClusters` groups related resources by classifier or name-stem, with owner assignment
-- **Analyst Overrides**: Humans-in-the-loop score adjustments (-50 to +50) with required reasoning
-- **SQL Persistence**: All risk data stored in temporal tables for audit trail
-- **Data Privacy**: Only Phase 1 contacts LLM (public org context only); all identity scoring runs locally
-- **LLM Providers**: Supports Anthropic Claude (default: claude-sonnet-4-20250514) and OpenAI (default: gpt-4o)
+### 7. Identity Risk Scoring (v5 — in-app)
+**v5 architecture (April 2026):** Risk scoring is now driven entirely from the
+UI. The PowerShell helpers were retired during the postgres rewrite. The new
+flow lives behind Admin → Risk Scoring → "New profile" and runs through a
+multi-step wizard. See [docs/architecture/llm-and-risk-scoring.md](docs/architecture/llm-and-risk-scoring.md) for the full design.
+
+- **In-browser wizard**: Sources → Generate & Refine → Save Profile → Classifiers → Run Scoring. Conversational refinement lets the user iterate ("drop NIS2", "add the medical-device division", "we don't actually use SAP") before saving.
+- **Multi-provider LLM**: Anthropic Claude, OpenAI, **and Azure OpenAI** are supported via a single provider abstraction (`app/api/src/llm/providers.js`). Configure per-tenant on Admin → LLM Settings.
+- **Secrets vault**: All credentials (LLM API keys, per-URL scraper credentials) live in an envelope-encrypted `Secrets` table. AES-256-GCM with per-row data keys wrapped by a master key from `IDENTITY_ATLAS_MASTER_KEY`. The vault module ([app/api/src/secrets/vault.js](app/api/src/secrets/vault.js)) is general-purpose — other parts of the app can adopt the same pattern.
+- **URL scraping**: Risk profile generation accepts internal URLs (wiki, ISMS, intranet) as additional context. Optional per-URL Basic or Bearer credentials live in the same vault. Scraping is fetch-on-create — no long-term indexing in v1.
+- **Postgres-native scoring engine**: [app/api/src/riskscoring/engine.js](app/api/src/riskscoring/engine.js). Layer 1 (direct classifier match, weight 0.60) and a lightweight Layer 2 (small-group bonus, weight 0.25) are implemented. Layers 3 and 4 (structural hygiene, cross-entity propagation) are placeholders kept in the formula for future extension.
+- **Background scoring runs**: `POST /api/risk-scoring/runs` queues a run, the engine executes in the same Node process, the wizard polls `GET /api/risk-scoring/runs/:id` for progress.
+- **Risk Tiers**: Critical (90-100), High (70-89), Medium (40-69), Low (20-39), Minimal (1-19), None (0).
+- **Worker dependency**: zero. The worker container has no LLM SDK and no API key — risk scoring runs in the web container.
 
 ### 8. Universal Data Model (v3.1)
 

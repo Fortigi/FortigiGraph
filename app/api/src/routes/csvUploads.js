@@ -22,6 +22,7 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT || '/data/uploads';
 // these slots based on filename match (case-insensitive). Users can manually fix
 // mismatches in the wizard before saving.
 export const CSV_FILE_SLOTS = [
+  { key: 'systems',           file: 'Systems.csv',           label: 'Systems',                  required: false },
   { key: 'orgUnits',          file: 'Orgunits.csv',          label: 'Org Units / Contexts',     required: false },
   { key: 'permissions',       file: 'Permissions.csv',       label: 'Resources (Permissions)',  required: true  },
   { key: 'permissionNesting', file: 'Permission-Nesting.csv',label: 'Resource Relationships',   required: false },

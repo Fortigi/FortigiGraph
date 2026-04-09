@@ -347,6 +347,207 @@ function Assert-ApiCount {
     }
 }
 
+# ─── Deep matrix assertion ────────────────────────────────────────
+#
+# The naive "count > 0" check passed yesterday even though the matrix was
+# rendering empty in the UI, because the bug was in the column/AP-mapping
+# pieces, not the row count. This check exercises the same shape the
+# frontend consumes:
+#   - GET /api/permissions?userLimit=N → must return data + non-zero
+#                                        totalUsers + at least one resource
+#                                        per row + at least one principal
+#   - GET /api/access-package-groups   → AP→group mapping (used to render
+#                                        the AP coloring on cells). Must
+#                                        respond 200 with an array.
+#   - GET /api/groups-with-nested      → group nesting metadata
+#                                        (matrix toolbar uses it)
+function Assert-MatrixWorks {
+    param([string]$NamePrefix, [int]$MinUsers = 1, [int]$MinRows = 1)
+    try {
+        $perm = Invoke-LocalApi -Path '/permissions?userLimit=25'
+        $rows = if ($perm -and $perm.data) { @($perm.data).Count } else { 0 }
+        $totalUsers = if ($perm.PSObject.Properties.Name -contains 'totalUsers') { [int]$perm.totalUsers } else { 0 }
+
+        if ($rows -lt $MinRows) {
+            Report-Result "$NamePrefix/MatrixRowCount" $false "expected >=$MinRows rows, got $rows"
+            return
+        }
+        Report-Result "$NamePrefix/MatrixRowCount" $true "rows=$rows"
+
+        if ($totalUsers -lt $MinUsers) {
+            Report-Result "$NamePrefix/MatrixTotalUsers" $false "expected >=$MinUsers users, got $totalUsers"
+        } else {
+            Report-Result "$NamePrefix/MatrixTotalUsers" $true "totalUsers=$totalUsers"
+        }
+
+        # Sanity-check the row shape — the frontend reads these specific fields
+        $first = $perm.data | Select-Object -First 1
+        $hasResource = $first -and ($first.PSObject.Properties.Name -contains 'resourceId') -and $first.resourceId
+        $hasMember   = $first -and ($first.PSObject.Properties.Name -contains 'memberId')   -and $first.memberId
+        $hasType     = $first -and ($first.PSObject.Properties.Name -contains 'membershipType')
+        if ($hasResource -and $hasMember -and $hasType) {
+            Report-Result "$NamePrefix/MatrixRowShape" $true 'has resourceId/memberId/membershipType'
+        } else {
+            Report-Result "$NamePrefix/MatrixRowShape" $false "missing fields (res=$hasResource mem=$hasMember type=$hasType)"
+        }
+
+        # AP→group mapping endpoint — drives the AP coloring on cells
+        try {
+            $apGroups = Invoke-LocalApi -Path '/access-package-groups'
+            if ($apGroups -is [array] -or ($apGroups -and $apGroups.GetType().Name -eq 'Object[]')) {
+                Report-Result "$NamePrefix/MatrixAPMapping" $true "ap-group-rows=$($apGroups.Count)"
+            } else {
+                Report-Result "$NamePrefix/MatrixAPMapping" $false "unexpected response type: $($apGroups.GetType().Name)"
+            }
+        } catch {
+            Report-Result "$NamePrefix/MatrixAPMapping" $false $_.Exception.Message
+        }
+
+        # Group-nesting metadata — matrix toolbar uses this
+        try {
+            $nested = Invoke-LocalApi -Path '/groups-with-nested'
+            if ($nested -and $nested.PSObject.Properties.Name -contains 'groupIds') {
+                Report-Result "$NamePrefix/MatrixGroupsWithNested" $true "groupIds=$(@($nested.groupIds).Count)"
+            } else {
+                Report-Result "$NamePrefix/MatrixGroupsWithNested" $false 'response missing groupIds'
+            }
+        } catch {
+            Report-Result "$NamePrefix/MatrixGroupsWithNested" $false $_.Exception.Message
+        }
+    } catch {
+        Report-Result "$NamePrefix/MatrixWorks" $false $_.Exception.Message
+    }
+}
+
+# ─── Deep Business Roles assertion ────────────────────────────────
+#
+# Yesterday's bug returned the rows but with totalAssignments: 0 because the
+# `state` filter used lowercase 'delivered' while the column stores 'Delivered'.
+# This check verifies at least one BR has a non-zero assignment count, AND
+# that the per-AP detail endpoint is reachable for the first row.
+function Assert-BusinessRolesWork {
+    param([string]$NamePrefix, [int]$MinAssignments = 1)
+    try {
+        $resp = Invoke-LocalApi -Path '/access-packages?limit=200'
+        $rows = if ($resp -and $resp.data) { @($resp.data) } else { @() }
+        if ($rows.Count -eq 0) {
+            Report-Result "$NamePrefix/BusinessRolesList" $false 'no rows returned'
+            return
+        }
+        Report-Result "$NamePrefix/BusinessRolesList" $true "rows=$($rows.Count)"
+
+        # At least one row should have totalAssignments >= MinAssignments
+        $withAssign = @($rows | Where-Object { $_.totalAssignments -ge $MinAssignments })
+        if ($withAssign.Count -gt 0) {
+            $maxAssign = ($rows | Measure-Object -Property totalAssignments -Maximum).Maximum
+            Report-Result "$NamePrefix/BusinessRolesAssignments" $true "withAssign=$($withAssign.Count) max=$maxAssign"
+        } else {
+            Report-Result "$NamePrefix/BusinessRolesAssignments" $false "no row has totalAssignments >= $MinAssignments (this was the April 2026 regression)"
+        }
+
+        # Per-AP detail endpoint reachable for the first row
+        $firstId = $rows[0].id
+        try {
+            $detail = Invoke-LocalApi -Path "/access-package/$firstId"
+            if ($detail) {
+                Report-Result "$NamePrefix/BusinessRoleDetail" $true 'detail endpoint reachable'
+            }
+        } catch {
+            Report-Result "$NamePrefix/BusinessRoleDetail" $false $_.Exception.Message
+        }
+    } catch {
+        Report-Result "$NamePrefix/BusinessRolesWork" $false $_.Exception.Message
+    }
+}
+
+# ─── Sync log assertion ───────────────────────────────────────────
+#
+# Verifies the GraphSyncLog table contains both the per-batch ingest rows AND
+# the full-crawler row that the crawler script writes at end-of-run. The
+# full-crawler row was added in April 2026 because per-batch rows undercount
+# the real sync duration (they only measure the ingest API time, not the
+# Microsoft Graph fetch time).
+function Assert-SyncLogShape {
+    param(
+        [string]$NamePrefix,
+        [switch]$ExpectFullCrawlerEntry  # only true after Entra Full-Sync runs
+    )
+    try {
+        $entries = Invoke-LocalApi -Path '/sync-log?limit=50'
+        $count = if ($entries -is [array]) { $entries.Count } else { 0 }
+        if ($count -lt 1) {
+            Report-Result "$NamePrefix/SyncLogEntries" $false 'no entries'
+            return
+        }
+        Report-Result "$NamePrefix/SyncLogEntries" $true "entries=$count"
+
+        if ($ExpectFullCrawlerEntry) {
+            # The Entra crawler script writes one EntraID-FullCrawl entry at the
+            # end of a successful run summarising the full sync duration. We
+            # only assert this after a real Entra Full-Sync — other paths (demo
+            # data loader, CSV import) don't and shouldn't.
+            $fullRows = @($entries | Where-Object { $_.SyncType -like '*FullCrawl*' -or $_.SyncType -like 'EntraID-*' })
+            if ($fullRows.Count -gt 0) {
+                Report-Result "$NamePrefix/SyncLogFullCrawlerEntry" $true "found ($($fullRows[0].SyncType))"
+            } else {
+                Report-Result "$NamePrefix/SyncLogFullCrawlerEntry" $false 'no EntraID-FullCrawl entry — crawler did not write end-of-sync log row'
+            }
+        }
+
+        # All entries should have a numeric DurationSeconds (the UI formats it h/m/s)
+        $bad = @($entries | Where-Object { $null -eq $_.DurationSeconds })
+        if ($bad.Count -eq 0) {
+            Report-Result "$NamePrefix/SyncLogDurations" $true 'all rows have DurationSeconds'
+        } else {
+            Report-Result "$NamePrefix/SyncLogDurations" $false "$($bad.Count) rows missing DurationSeconds"
+        }
+    } catch {
+        Report-Result "$NamePrefix/SyncLogShape" $false $_.Exception.Message
+    }
+}
+
+# ─── Governance + LLM substrate assertions ────────────────────────
+#
+# The governance routes were the most-broken set after the postgres rewrite
+# (T-SQL leftovers). These checks make sure they at least respond with the
+# expected shape — they don't validate the values, since some endpoints
+# correctly return zeros until classifiers are configured.
+function Assert-PostSyncEndpoints {
+    param([string]$NamePrefix)
+
+    $endpoints = @(
+        @{ Path = '/governance/summary';            Field = 'totalAPs' }
+        @{ Path = '/governance/categories';         Field = $null }
+        @{ Path = '/governance/review-compliance';  Field = $null }
+        @{ Path = '/admin/llm/status';              Field = 'configured' }
+        @{ Path = '/admin/llm/config';              Field = 'providers' }
+        @{ Path = '/admin/history-retention';       Field = 'retentionDays' }
+        @{ Path = '/risk-profiles';                 Field = 'data' }
+        @{ Path = '/risk-classifiers';              Field = 'data' }
+        @{ Path = '/risk-scoring/runs';             Field = 'data' }
+    )
+    foreach ($ep in $endpoints) {
+        try {
+            $r = Invoke-LocalApi -Path $ep.Path
+            if ($null -eq $r) {
+                Report-Result "$NamePrefix/Endpoint$($ep.Path)" $false 'null response'
+                continue
+            }
+            if ($ep.Field) {
+                if ($r.PSObject.Properties.Name -contains $ep.Field) {
+                    Report-Result "$NamePrefix/Endpoint$($ep.Path)" $true "has $($ep.Field)"
+                } else {
+                    Report-Result "$NamePrefix/Endpoint$($ep.Path)" $false "missing field $($ep.Field)"
+                }
+            } else {
+                Report-Result "$NamePrefix/Endpoint$($ep.Path)" $true 'reachable'
+            }
+        } catch {
+            Report-Result "$NamePrefix/Endpoint$($ep.Path)" $false $_.Exception.Message
+        }
+    }
+}
+
 # ─── Run requested scenarios ──────────────────────────────────────
 foreach ($scenario in $Scenarios) {
     Write-Host "`n  ── Scenario: $scenario ──" -ForegroundColor Cyan
@@ -385,15 +586,19 @@ foreach ($scenario in $Scenarios) {
                     directoryRoles     = $true
                 } `
                 -ExtraAssertions {
+                    # Basic existence checks
                     Assert-ApiCount -Name 'EntraID/Full-Sync/UsersExist'         -Path '/users?pageSize=1'           -MinExpected 1
                     Assert-ApiCount -Name 'EntraID/Full-Sync/ResourcesExist'     -Path '/resources?pageSize=1'       -MinExpected 1
                     Assert-ApiCount -Name 'EntraID/Full-Sync/SystemsExist'       -Path '/systems'                    -MinExpected 1
-                    # Regression checks for the three areas the UI exposes after a crawler run.
-                    # These caught a real outage in April 2026 where the routes were silently
-                    # returning empty results due to T-SQL leftovers / wrong column-name casing.
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/BusinessRolesPage'  -Path '/access-packages?limit=1'    -MinExpected 1
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/SyncLogPage'        -Path '/sync-log?limit=1'           -MinExpected 1
-                    Assert-ApiCount -Name 'EntraID/Full-Sync/MatrixHasData'      -Path '/permissions?userLimit=5'    -MinExpected 1
+
+                    # Deep regression checks. These exist because the naive
+                    # "did anything come back" assertion silently passed during
+                    # the April 2026 outage where the routes returned non-empty
+                    # responses with broken contents.
+                    Assert-MatrixWorks         -NamePrefix 'EntraID/Full-Sync'
+                    Assert-BusinessRolesWork   -NamePrefix 'EntraID/Full-Sync'
+                    Assert-SyncLogShape        -NamePrefix 'EntraID/Full-Sync' -ExpectFullCrawlerEntry
+                    Assert-PostSyncEndpoints   -NamePrefix 'EntraID/Full-Sync'
                 }
         }
 

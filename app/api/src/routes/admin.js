@@ -512,52 +512,29 @@ router.post('/admin/clean-database', async (req, res) => {
   ];
 
   try {
-    const pool = await db.getPool();
     const wiped = [];
     const skipped = [];
 
     for (const table of TABLES_TO_WIPE) {
       try {
-        // Check if table exists
-        const check = await pool.request().input('t', table)
-          .query(`SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @t AND TABLE_SCHEMA = 'dbo'`);
-        if (check.recordset.length === 0) {
+        // Check if table exists (postgres: to_regclass returns null when missing)
+        const check = await db.queryOne(
+          `SELECT to_regclass($1) AS t`,
+          [`public."${table}"`]
+        );
+        if (!check?.t) {
           skipped.push({ table, reason: 'does not exist' });
           continue;
         }
 
-        // Detect temporal table (system-versioned) — must disable versioning before DELETE
-        const tempCheck = await pool.request().input('t', table)
-          .query(`SELECT temporal_type FROM sys.tables WHERE name = @t AND schema_id = SCHEMA_ID('dbo')`);
-        const isTemporal = tempCheck.recordset[0]?.temporal_type === 2;
+        // v5 postgres — no temporal tables. Also clear any related _history rows.
+        const result = await db.query(`DELETE FROM "${table}"`);
+        wiped.push({ table, rowsAffected: result.rowCount || 0 });
 
-        if (isTemporal) {
-          // Disable versioning, delete from main + history, re-enable
-          await pool.request().query(`ALTER TABLE [${table}] SET (SYSTEM_VERSIONING = OFF)`);
-          const delMain = await pool.request().query(`DELETE FROM [${table}]`);
-          // Try to find and clear the history table
-          try {
-            const histRes = await pool.request().input('t', table)
-              .query(`SELECT name FROM sys.tables WHERE object_id = (SELECT history_table_id FROM sys.tables WHERE name = @t AND schema_id = SCHEMA_ID('dbo'))`);
-            const histName = histRes.recordset[0]?.name;
-            if (histName) {
-              await pool.request().query(`DELETE FROM [${histName}]`);
-            }
-          } catch {}
-          // Re-enable versioning
-          try {
-            const histRes2 = await pool.request().input('t', table)
-              .query(`SELECT name FROM sys.tables WHERE name = @t + 'History' AND schema_id = SCHEMA_ID('dbo')`);
-            const histName = histRes2.recordset[0]?.name;
-            if (histName) {
-              await pool.request().query(`ALTER TABLE [${table}] SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = [${histName}]))`);
-            }
-          } catch {}
-          wiped.push({ table, rowsAffected: delMain.rowsAffected[0], temporal: true });
-        } else {
-          const result = await pool.request().query(`DELETE FROM [${table}]`);
-          wiped.push({ table, rowsAffected: result.rowsAffected[0], temporal: false });
-        }
+        // Clean the _history audit table for this table too
+        try {
+          await db.query(`DELETE FROM "_history" WHERE "tableName" = $1`, [table]);
+        } catch { /* _history may not exist on older deployments */ }
       } catch (err) {
         skipped.push({ table, reason: err.message });
       }
@@ -565,7 +542,7 @@ router.post('/admin/clean-database', async (req, res) => {
 
     // Reset lastRunAt on crawler configs so the UI shows them as "never run"
     try {
-      await pool.request().query(`UPDATE "CrawlerConfigs" SET "lastRunAt" = NULL, "lastRunStatus" = NULL`);
+      await db.query(`UPDATE "CrawlerConfigs" SET "lastRunAt" = NULL, "lastRunStatus" = NULL`);
     } catch {}
 
     res.json({ message: 'Database cleaned', wiped, skipped });

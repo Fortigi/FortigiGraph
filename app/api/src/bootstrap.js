@@ -18,6 +18,7 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import * as db from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
+import { selfTest as vaultSelfTest } from './secrets/vault.js';
 
 const WORKER_KEY_FILE = process.env.WORKER_KEY_FILE || '/data/uploads/.builtin-worker-key';
 
@@ -142,9 +143,58 @@ function startHistoryPruneJob() {
   setInterval(prune, PRUNE_INTERVAL_MS);
 }
 
+// Verify the secrets vault has a usable master key. Resolution order:
+//   1. IDENTITY_ATLAS_MASTER_KEY env var (preferred — user controls it)
+//   2. /data/uploads/.master-key file (auto-generated on first boot, persisted
+//      across restarts in the same docker volume as the worker key)
+//
+// The file fallback exists so the docker-compose stack works out of the box
+// without requiring the operator to set an env var before first start. The file
+// has 0600 perms and lives inside the same volume that already holds other
+// secrets-equivalent data (the built-in worker API key). For real production
+// deployments, setting IDENTITY_ATLAS_MASTER_KEY explicitly is still preferred
+// (so it can be sourced from a real secret store) and the file fallback never
+// kicks in.
+import { readFileSync, existsSync } from 'fs';
+const MASTER_KEY_FILE = process.env.MASTER_KEY_FILE || '/data/uploads/.master-key';
+
+function ensureVaultKey() {
+  if (process.env.IDENTITY_ATLAS_MASTER_KEY) {
+    if (!vaultSelfTest()) throw new Error('Secrets vault self-test failed — check IDENTITY_ATLAS_MASTER_KEY');
+    return;
+  }
+  if (existsSync(MASTER_KEY_FILE)) {
+    try {
+      const key = readFileSync(MASTER_KEY_FILE, 'utf8').trim();
+      if (key) {
+        process.env.IDENTITY_ATLAS_MASTER_KEY = key;
+        if (!vaultSelfTest()) throw new Error('Secrets vault self-test failed — master key file is corrupt');
+        console.log(`Master key loaded from ${MASTER_KEY_FILE}`);
+        return;
+      }
+    } catch (err) {
+      console.warn(`Failed to read ${MASTER_KEY_FILE}: ${err.message}`);
+    }
+  }
+  // First boot — generate a key and persist it
+  const key = crypto.randomBytes(32).toString('base64');
+  process.env.IDENTITY_ATLAS_MASTER_KEY = key;
+  try {
+    mkdirSync(dirname(MASTER_KEY_FILE), { recursive: true });
+    writeFileSync(MASTER_KEY_FILE, key, { mode: 0o600, encoding: 'utf8' });
+    console.log(`Master key generated and persisted to ${MASTER_KEY_FILE}`);
+    console.log('For production, prefer setting IDENTITY_ATLAS_MASTER_KEY explicitly so the key can be backed up.');
+  } catch (err) {
+    console.warn(`Could not persist master key (${MASTER_KEY_FILE}): ${err.message}`);
+    console.warn('Generated an ephemeral master key — secrets will be lost on container restart.');
+  }
+  if (!vaultSelfTest()) throw new Error('Secrets vault self-test failed after key generation');
+}
+
 export async function bootstrapWorker() {
   if (process.env.USE_SQL !== 'true') return;
   try {
+    ensureVaultKey();
     const pool = await db.getPool();
     await runMigrations(pool);
     await ensureBuiltinCrawler();

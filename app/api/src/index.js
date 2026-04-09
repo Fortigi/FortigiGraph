@@ -23,6 +23,9 @@ import systemsRouter from './routes/systems.js';
 import resourcesRouter from './routes/resources.js';
 import contextsRouter from './routes/contexts.js';
 import adminRouter from './routes/admin.js';
+import llmRouter from './routes/llm.js';
+import riskProfilesRouter from './routes/riskProfiles.js';
+import riskScoringRunsRouter from './routes/riskScoringRuns.js';
 import { adminCrawlersRouter, selfServiceCrawlersRouter } from './routes/crawlers.js';
 import { crawlerAuthMiddleware } from './middleware/crawlerAuth.js';
 import ingestRouter from './routes/ingest.js';
@@ -216,6 +219,9 @@ app.use('/api', authMiddleware, resourcesRouter);
 app.use('/api', authMiddleware, contextsRouter);
 app.use('/api/admin/import', express.json({ limit: '2mb' }));  // larger limit for import payloads
 app.use('/api', authMiddleware, adminRouter);
+app.use('/api', authMiddleware, llmRouter);
+app.use('/api', authMiddleware, riskProfilesRouter);
+app.use('/api', authMiddleware, riskScoringRunsRouter);
 app.use('/api', authMiddleware, csvUploadsRouter);
 app.use('/api', authMiddleware, governanceRouter);
 

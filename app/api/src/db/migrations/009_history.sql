@@ -1,6 +1,6 @@
 -- Identity Atlas v5 — version history (replacement for v4 SQL Server temporal tables).
 --
--- v4 used SYSTEM_VERSIONING on every interesting table (Principals, Resources,
+-- v4 used SQL Server temporal tables on every interesting table (Principals, Resources,
 -- ResourceAssignments, AssignmentPolicies, ...). The detail pages used
 -- "FOR SYSTEM_TIME ALL" to show diffs between sync runs.
 --
