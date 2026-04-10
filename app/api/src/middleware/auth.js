@@ -38,6 +38,12 @@ export function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.split(' ')[1];
+
+  // Crawler API keys start with 'fgc_'. Skip JWT validation and let the
+  // request fall through to the crawler auth middleware which handles these.
+  if (token.startsWith('fgc_')) {
+    return next();
+  }
   const tenantId = getTenantId();
   const clientId = getClientId();
 
