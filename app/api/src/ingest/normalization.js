@@ -70,17 +70,38 @@ export function normalizeRecords(records, coreColumns, options = {}) {
     // them to deterministic UUIDs using the same prefix namespace so the FKs
     // match the IDs generated for the parent/child entities.
     if (idGeneration === 'deterministic') {
+      // Cross-entity ID resolution: derive the prefix used to generate the
+      // target entity's deterministic GUID. The convention is that the ingest
+      // caller sets idPrefix = "<systemType>-<endpointSuffix>", e.g.:
+      //   resources:              "CSV-resources"
+      //   principals:             "CSV-principals"
+      //   resource-assignments:   "CSV-resource-assignments"
+      //   resource-relationships: "CSV-resource-relationships"
+      //   certifications:         "CSV-certifications"
+      //
+      // To resolve a resourceExternalId we need "CSV-resources" — i.e. keep
+      // the system prefix (everything before the first hyphen) and swap the
+      // entity suffix. Same for principals.
+      const sysPrefix = idPrefix.split('-')[0]; // e.g. "CSV", "Omada"
+
       if (rec.parentExternalId && !normalized.parentResourceId) {
-        normalized.parentResourceId = deterministicGuid(idPrefix.replace(/resource-relationships$/, 'resources'), String(rec.parentExternalId));
+        normalized.parentResourceId = deterministicGuid(`${sysPrefix}-resources`, String(rec.parentExternalId));
       }
       if (rec.childExternalId && !normalized.childResourceId) {
-        normalized.childResourceId = deterministicGuid(idPrefix.replace(/resource-relationships$/, 'resources'), String(rec.childExternalId));
+        normalized.childResourceId = deterministicGuid(`${sysPrefix}-resources`, String(rec.childExternalId));
+      }
+      // Identity-member external IDs
+      if (rec.identityExternalId && !normalized.identityId) {
+        normalized.identityId = deterministicGuid(`${sysPrefix}-identities`, String(rec.identityExternalId));
+      }
+      if (rec.userExternalId && !normalized.principalId) {
+        normalized.principalId = deterministicGuid(`${sysPrefix}-principals`, String(rec.userExternalId));
       }
       if (rec.resourceExternalId && !normalized.resourceId) {
-        normalized.resourceId = deterministicGuid(idPrefix.replace(/resource-assignments$/, 'resources'), String(rec.resourceExternalId));
+        normalized.resourceId = deterministicGuid(`${sysPrefix}-resources`, String(rec.resourceExternalId));
       }
       if (rec.principalExternalId && !normalized.principalId) {
-        normalized.principalId = deterministicGuid(idPrefix.replace(/resource-assignments$/, 'principals'), String(rec.principalExternalId));
+        normalized.principalId = deterministicGuid(`${sysPrefix}-principals`, String(rec.principalExternalId));
       }
     }
 

@@ -23,8 +23,8 @@ if (useSql) {
 async function hasTable(pool, tableName) {
   const result = await pool.request()
     .input('tableName', tableName)
-    .query(`SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'`);
-  return result.recordset[0].cnt > 0;
+    .query(`SELECT to_regclass('public.' || '"' || @tableName || '"') AS t`);
+  return !!result.recordset[0].t;
 }
 
 // GET /api/risk-scores/clusters — list all clusters
@@ -125,7 +125,7 @@ router.get('/risk-scores/clusters/:id', async (req, res) => {
     // Fetch cluster
     const clusterResult = await timedRequest(p, 'cluster-detail', res)
       .input('id', clusterId)
-      .query('SELECT * FROM dbo.GraphResourceClusters WHERE id = @id');
+      .query('SELECT * FROM "GraphResourceClusters" WHERE id = @id');
 
     if (clusterResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Cluster not found' });
@@ -142,7 +142,7 @@ router.get('/risk-scores/clusters/:id', async (req, res) => {
     if (await hasTable(p, 'GraphResourceClusterMembers')) {
       const memberResult = await timedRequest(p, 'cluster-members', res)
         .input('clusterId', clusterId)
-        .query('SELECT * FROM dbo.GraphResourceClusterMembers WHERE clusterId = @clusterId ORDER BY resourceRiskScore DESC');
+        .query('SELECT * FROM "GraphResourceClusterMembers" WHERE clusterId = @clusterId ORDER BY resourceRiskScore DESC');
       members = memberResult.recordset;
     }
 

@@ -199,6 +199,22 @@ export async function bootstrapWorker() {
     await runMigrations(pool);
     await ensureBuiltinCrawler();
     startHistoryPruneJob();
+    // Reap stale jobs: on every web container start, mark ALL jobs stuck in
+    // 'running' or 'queued' as failed. After a container restart, no worker
+    // process is continuing these jobs — they're dead. The old 2-hour
+    // threshold missed jobs from crashes/reboots that happened recently.
+    try {
+      const reaped = await db.query(`
+        UPDATE "CrawlerJobs"
+           SET status = 'failed',
+               "errorMessage" = 'Marked as failed by bootstrap — container restarted while job was running',
+               "completedAt" = now()
+         WHERE status IN ('running', 'queued')
+      `);
+      if (reaped.rowCount > 0) {
+        console.log(`Reaped ${reaped.rowCount} stale running job(s)`);
+      }
+    } catch { /* CrawlerJobs table may not exist on first boot */ }
     console.log('Bootstrap complete');
   } catch (err) {
     console.error('Bootstrap failed (will retry on next request):', err.message);

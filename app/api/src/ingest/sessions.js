@@ -60,8 +60,20 @@ async function copyRows(client, tempTable, activeColumns, records) {
   await new Promise((resolve, reject) => {
     stream.on('error', reject);
     stream.on('finish', resolve);
-    for (const rec of records) stream.write(buildCopyRow(rec, activeColumns));
-    stream.end();
+    let i = 0;
+    function writeNext() {
+      let ok = true;
+      while (i < records.length && ok) {
+        ok = stream.write(buildCopyRow(records[i], activeColumns));
+        i++;
+      }
+      if (i < records.length) {
+        stream.once('drain', writeNext);
+      } else {
+        stream.end();
+      }
+    }
+    writeNext();
   });
 }
 

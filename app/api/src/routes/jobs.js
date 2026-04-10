@@ -637,9 +637,12 @@ router.post('/admin/crawler-jobs', async (req, res) => {
       if (!configId) {
         return res.status(400).json({ error: 'CSV jobs require a configId — inline configs are not supported' });
       }
-      const folder = getCsvFolderPath(configId);
+      // Use the config's stored csvFolder if it exists (e.g. pointing to a
+      // pre-transformed folder), otherwise fall back to the standard upload path.
+      const configCsvFolder = resolvedConfig?.csvFolder;
+      const folder = configCsvFolder && existsSync(configCsvFolder) ? configCsvFolder : getCsvFolderPath(configId);
       if (!existsSync(folder) || readdirSync(folder).length === 0) {
-        return res.status(400).json({ error: 'No CSV files have been uploaded for this config yet' });
+        return res.status(400).json({ error: 'No CSV files found. Upload files or configure the CSV folder path.' });
       }
       resolvedConfig = { ...(resolvedConfig || {}), csvFolder: folder };
     }
@@ -704,24 +707,60 @@ router.get('/admin/crawler-jobs/:id', async (req, res) => {
 });
 
 // DELETE /api/admin/crawler-jobs/:id — Cancel a queued job
+// DELETE /api/admin/crawler-jobs/:id — cancel a queued job
 router.delete('/admin/crawler-jobs/:id', async (req, res) => {
   if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid job ID' });
 
   try {
-    const pool = await db.getPool();
-    const result = await pool.request()
-      .input('id', id)
-      .query(`UPDATE "CrawlerJobs" SET status = 'cancelled', "completedAt" = (now() AT TIME ZONE 'utc')
-              WHERE id = @id AND status = 'queued'`);
-    if (result.rowsAffected[0] === 0) {
+    const result = await db.query(
+      `UPDATE "CrawlerJobs" SET status = 'cancelled', "completedAt" = now()
+        WHERE id = $1 AND status = 'queued'`,
+      [id]
+    );
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Job not found or not in queued state' });
     }
     res.json({ message: 'Job cancelled' });
   } catch (err) {
     console.error('Error cancelling job:', err.message);
     res.status(500).json({ error: 'Failed to cancel job' });
+  }
+});
+
+// POST /api/admin/crawler-jobs/:id/force-stop — force-stop a running job.
+//
+// This marks the job as failed in the database. The worker process will notice
+// the status change on its next progress-report cycle and stop. If the worker
+// has already crashed (the most common reason to use this), the job just gets
+// marked failed so the UI stops showing it as running.
+//
+// This does NOT kill the PowerShell process — there's no clean way to do that
+// from the web container. The worker's scheduler.ps1 checks job status before
+// starting new work, so a force-stopped job won't block the next run.
+router.post('/admin/crawler-jobs/:id/force-stop', async (req, res) => {
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid job ID' });
+
+  try {
+    const result = await db.query(
+      `UPDATE "CrawlerJobs"
+          SET status = 'failed',
+              "errorMessage" = COALESCE("errorMessage", '') || ' [Force-stopped by admin]',
+              "completedAt" = now()
+        WHERE id = $1 AND status IN ('running', 'queued')
+        RETURNING id, status`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Job not found or already completed/failed' });
+    }
+    res.json({ message: 'Job force-stopped', id });
+  } catch (err) {
+    console.error('Error force-stopping job:', err.message);
+    res.status(500).json({ error: 'Failed to force-stop job' });
   }
 });
 

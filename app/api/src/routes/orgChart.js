@@ -80,8 +80,8 @@ async function hasManagerColumn(pool, res) {
     const result = await timedRequest(pool, 'org-col-check-managerId', res)
       .input('tableName', table)
       .query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = '"managerId"'
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = @tableName AND column_name = 'managerId'
       `);
     return result.recordset.length > 0;
   } catch {
@@ -95,8 +95,8 @@ async function hasRiskColumns(pool, res) {
     const result = await timedRequest(pool, 'org-col-check-risk', res)
       .input('tableName', table)
       .query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo' AND COLUMN_NAME = '"riskScore"'
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = @tableName AND column_name = 'riskScore'
       `);
     return result.recordset.length > 0;
   } catch {
@@ -110,9 +110,9 @@ async function hasHierarchyColumns(pool, res) {
     const result = await timedRequest(pool, 'org-col-check-hierarchy', res)
       .input('tableName', table)
       .query(`
-        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'
-          AND COLUMN_NAME = 'riskHierarchyDirectReports'
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = @tableName
+          AND column_name = 'riskHierarchyDirectReports'
       `);
     return result.recordset.length > 0;
   } catch {

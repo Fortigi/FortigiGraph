@@ -34,7 +34,7 @@ async function checkContexts(pool) {
   if (hasContextsTable !== null && now - contextsCheckTime < 300000) return hasContextsTable;
   try {
     const r = await pool.request().query(`
-      SELECT to_regclass('"Contexts"') AS contextsExists
+      SELECT to_regclass('"Contexts"') AS "contextsExists"
     `);
     hasContextsTable = !!r.recordset[0].contextsExists;
     contextsCheckTime = now;
@@ -145,8 +145,11 @@ router.get('/contexts/:id', async (req, res) => {
       return res.status(404).json({ error: 'Context not found' });
     }
 
-    // 2. Members — resolved through Identities (contextId lives on Identity, not Principal)
+    // 2. Members — try two paths:
+    //    a) Through Identities → IdentityMembers → Principals (when account correlation has run)
+    //    b) Direct match: Principals where department = context.department (derived contexts)
     let members = [];
+    const ctx = attrResult.recordset[0];
     try {
       const membersResult = await timedRequest(p, 'context-members', res)
         .input('id', req.params.id)
@@ -160,6 +163,25 @@ router.get('/contexts/:id', async (req, res) => {
         `);
       members = membersResult.recordset;
     } catch { /* IdentityMembers table may not exist yet */ }
+
+    // Fallback: for derived contexts (sourceType='derived'), look up principals
+    // directly by department name. This works even without account correlation.
+    if (members.length === 0 && ctx.department) {
+      try {
+        const directResult = await timedRequest(p, 'context-members-direct', res)
+          .input('dept', ctx.department)
+          .input('sysId', ctx.systemId)
+          .query(`
+            SELECT id, "displayName", email, "jobTitle", "accountEnabled", "principalType"
+            FROM "Principals"
+            WHERE department = @dept
+              AND ("systemId" = @sysId OR "systemId" IS NULL)
+            ORDER BY "displayName"
+            LIMIT 500
+          `);
+        members = directResult.recordset;
+      } catch { /* ignore */ }
+    }
 
     // 3. Sub-contexts
     let subContexts = [];

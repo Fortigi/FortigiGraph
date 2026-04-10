@@ -234,6 +234,31 @@ router.post('/ingest/sync-log', async (req, res) => {
 // mounted under the ingest router so the worker can call it with its
 // X-API-Key (crawler auth) instead of needing a UI session. Idempotent:
 // rebuilds Contexts from Principals.department on every call.
+// POST /api/ingest/classify-business-role-assignments — reclassify Direct
+// assignments to BusinessRole resources as Governed. Called by the CSV crawler
+// after all data is imported so it doesn't need to know resource types at
+// assignment-import time.
+router.post('/ingest/classify-business-role-assignments', async (req, res) => {
+  if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
+  if (!crawlerHasPermission(req, 'ingest')) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  try {
+    const r = await db.query(`
+      UPDATE "ResourceAssignments" ra
+         SET "assignmentType" = 'Governed'
+        FROM "Resources" r
+       WHERE ra."resourceId" = r.id
+         AND r."resourceType" = 'BusinessRole'
+         AND ra."assignmentType" = 'Direct'
+    `);
+    return res.json({ ok: true, reclassified: r.rowCount || 0 });
+  } catch (err) {
+    console.error('classify-business-role-assignments failed:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/ingest/refresh-contexts', async (req, res) => {
   if (!useSql) return res.status(503).json({ error: 'SQL not configured' });
   if (!crawlerHasPermission(req, 'admin') && !crawlerHasPermission(req, 'ingest')) {

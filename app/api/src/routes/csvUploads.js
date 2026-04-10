@@ -21,16 +21,19 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT || '/data/uploads';
 // File names recognised by the CSV crawler. The wizard auto-maps uploaded files to
 // these slots based on filename match (case-insensitive). Users can manually fix
 // mismatches in the wizard before saving.
+// Identity Atlas canonical CSV schema. Each slot matches a file defined in
+// tools/csv-templates/schema/. The filenames and column names are fixed —
+// source-specific mapping happens via a pre-import transform script.
 export const CSV_FILE_SLOTS = [
-  { key: 'systems',           file: 'Systems.csv',           label: 'Systems',                  required: false },
-  { key: 'resourceSystem',    file: 'ResourceSystem.csv',    label: 'Resource → System mapping', required: false },
-  { key: 'orgUnits',          file: 'Orgunits.csv',          label: 'Org Units / Contexts',     required: false },
-  { key: 'permissions',       file: 'Permissions.csv',       label: 'Resources (Permissions)',  required: true  },
-  { key: 'permissionNesting', file: 'Permission-Nesting.csv',label: 'Resource Relationships',   required: false },
-  { key: 'users',             file: 'Users.csv',             label: 'Principals (Users)',       required: true  },
-  { key: 'accountPermission', file: 'Account-Permission.csv',label: 'Resource Assignments',     required: true  },
-  { key: 'identities',        file: 'Identities.csv',        label: 'Identities',               required: false },
-  { key: 'cras',              file: 'CRAs.csv',              label: 'Certifications (CRAs)',    required: false },
+  { key: 'systems',              file: 'Systems.csv',              label: 'Systems',                required: false },
+  { key: 'contexts',             file: 'Contexts.csv',             label: 'Contexts (Org Units)',   required: false },
+  { key: 'resources',            file: 'Resources.csv',            label: 'Resources',              required: true  },
+  { key: 'resourceRelationships',file: 'ResourceRelationships.csv',label: 'Resource Relationships', required: false },
+  { key: 'users',                file: 'Users.csv',                label: 'Users',                  required: true  },
+  { key: 'assignments',          file: 'Assignments.csv',          label: 'Assignments',            required: true  },
+  { key: 'identities',           file: 'Identities.csv',           label: 'Identities',             required: false },
+  { key: 'identityMembers',      file: 'IdentityMembers.csv',      label: 'Identity Members',       required: false },
+  { key: 'certifications',       file: 'Certifications.csv',       label: 'Certifications',         required: false },
 ];
 
 function configFolder(configId) {
@@ -191,5 +194,47 @@ export async function deleteConfigFolder(configId) {
 export function getCsvFolderPath(configId) {
   return configFolder(configId);
 }
+
+// GET /api/admin/csv-schema — serves the schema template CSV files as a
+// single concatenated response. The UI uses this for the "Download templates"
+// button. Each file is separated by a header line so the user can split them
+// or just read the column names as documentation.
+// Schema headers embedded directly so they're available in the Docker image
+// without needing to COPY the tools/ folder into the backend container.
+const SCHEMA_HEADERS = {
+  'Systems.csv':              'ExternalId;DisplayName;SystemType;Description',
+  'Contexts.csv':             'ExternalId;DisplayName;ContextType;Description;ParentExternalId;SystemName',
+  'Resources.csv':            'ExternalId;DisplayName;ResourceType;Description;SystemName;Enabled',
+  'ResourceRelationships.csv':'ParentExternalId;ChildExternalId;RelationshipType;SystemName',
+  'Users.csv':                'ExternalId;DisplayName;Email;PrincipalType;JobTitle;Department;ManagerExternalId;SystemName;Enabled',
+  'Assignments.csv':          'ResourceExternalId;UserExternalId;AssignmentType;SystemName',
+  'Identities.csv':           'ExternalId;DisplayName;Email;EmployeeId;Department;JobTitle',
+  'IdentityMembers.csv':      'IdentityExternalId;UserExternalId;AccountType',
+  'Certifications.csv':       'ExternalId;ResourceExternalId;UserDisplayName;Decision;ReviewerDisplayName;ReviewedDateTime',
+};
+
+router.get('/admin/csv-schema', (_req, res) => {
+  const lines = [];
+  for (const slot of CSV_FILE_SLOTS) {
+    const header = SCHEMA_HEADERS[slot.file] || '(unknown)';
+    lines.push(`# ${slot.file} — ${slot.label}${slot.required ? ' (REQUIRED)' : ' (optional)'}`);
+    lines.push(header);
+    lines.push('');
+  }
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="identity-atlas-csv-schema.txt"');
+  res.send(lines.join('\n'));
+});
+
+router.get('/admin/csv-schema/:filename', (req, res) => {
+  const filename = basename(req.params.filename);
+  const slot = CSV_FILE_SLOTS.find(s => s.file.toLowerCase() === filename.toLowerCase());
+  if (!slot) return res.status(404).json({ error: 'Unknown template file' });
+  const header = SCHEMA_HEADERS[slot.file];
+  if (!header) return res.status(404).json({ error: 'Schema not available' });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${slot.file}"`);
+  res.send(header + '\n');
+});
 
 export default router;

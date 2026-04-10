@@ -131,17 +131,30 @@ export async function ingest(_pool, tableName, keyColumns, records, options = {}
       await client.query(`CREATE TEMP TABLE "${tempName}" (${colDefs}) ON COMMIT DROP`);
     }
 
-    // Bulk insert via COPY FROM STDIN
+    // Bulk insert via COPY FROM STDIN. Respects backpressure: when write()
+    // returns false, we wait for 'drain' before writing more. Without this,
+    // large batches (3000+ records) overflow the write buffer and crash
+    // pg-copy-streams with "Cannot read properties of null (reading 'stream')".
     const colList = activeColumns.map(c => `"${c.name}"`).join(', ');
     const copyStream = client.query(copyFrom(`COPY "${tempName}" (${colList}) FROM STDIN`));
 
     await new Promise((resolve, reject) => {
       copyStream.on('error', reject);
       copyStream.on('finish', resolve);
-      for (const rec of records) {
-        copyStream.write(buildCopyRow(rec, activeColumns));
+      let i = 0;
+      function writeNext() {
+        let ok = true;
+        while (i < records.length && ok) {
+          ok = copyStream.write(buildCopyRow(records[i], activeColumns));
+          i++;
+        }
+        if (i < records.length) {
+          copyStream.once('drain', writeNext);
+        } else {
+          copyStream.end();
+        }
       }
-      copyStream.end();
+      writeNext();
     });
 
     // Upsert from temp into target. xmax = 0 detects fresh inserts.

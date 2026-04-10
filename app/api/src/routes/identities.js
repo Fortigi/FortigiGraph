@@ -24,11 +24,12 @@ if (useSql) {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function hasTable(pool, tableName) {
-  const result = await pool.request()
-    .input('tableName', tableName)
-    .query(`SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName AND TABLE_SCHEMA = 'dbo'`);
-  return result.recordset[0].cnt > 0;
+async function hasTable(_pool, tableName) {
+  const r = await db.queryOne(
+    `SELECT to_regclass($1) AS t`,
+    [`public."${tableName}"`]
+  );
+  return !!r?.t;
 }
 
 // GET /api/identities — summary + paginated list
@@ -49,8 +50,8 @@ router.get('/identities', async (req, res) => {
     // Build summary
     // Check if HR columns exist (schema may be pre-1.1)
     const colCheck = await p.request().query(`
-      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = '"Identities"' AND COLUMN_NAME IN ('"isHrAnchored"', '"orphanStatus"')
+      SELECT column_name AS "COLUMN_NAME" FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'Identities' AND column_name IN ('isHrAnchored', 'orphanStatus')
     `);
     const hasHrCols = colCheck.recordset.length >= 2;
 
@@ -64,9 +65,9 @@ router.get('/identities', async (req, res) => {
           SUM(CASE WHEN "analystVerified" = TRUE THEN 1 ELSE 0 END) AS verifiedCount,
           AVG(CAST("correlationConfidence" AS FLOAT)) AS avgConfidence,
           MAX("correlatedAt") AS lastCorrelatedAt
-          ${hasHrCols ? `, SUM(CASE WHEN isHrAnchored = 1 THEN 1 ELSE 0 END) AS hrAnchoredCount,
-          SUM(CASE WHEN orphanStatus IS NOT NULL THEN 1 ELSE 0 END) AS orphanCount` : ''}
-        FROM dbo.Identities
+          ${hasHrCols ? `, SUM(CASE WHEN "isHrAnchored" = true THEN 1 ELSE 0 END) AS "hrAnchoredCount",
+          SUM(CASE WHEN "orphanStatus" IS NOT NULL THEN 1 ELSE 0 END) AS "orphanCount"` : ''}
+        FROM "Identities"
       `);
     const summary = summaryResult.recordset[0];
 
@@ -85,46 +86,42 @@ router.get('/identities', async (req, res) => {
     const inputs = {};
 
     if (search) {
-      where += ' AND (displayName LIKE @search OR email LIKE @search OR jobTitle LIKE @search OR employeeId LIKE @search)';
+      where += ` AND ("displayName" ILIKE @search OR email ILIKE @search OR "jobTitle" ILIKE @search OR "employeeId" ILIKE @search)`;
       inputs.search = `%${search}%`;
     }
 
     if (minAccounts) {
       const min = parseInt(minAccounts);
       if (min > 1) {
-        where += ' AND accountCount >= @minAccounts';
+        where += ' AND "accountCount" >= @minAccounts';
         inputs.minAccounts = min;
       }
     }
 
-    if (accountType) {
-      // accountTypes column not available in v3.0 Identities table; filter skipped
-    }
-
     if (confidence) {
-      where += ' AND correlationConfidence >= @confidence';
+      where += ' AND "correlationConfidence" >= @confidence';
       inputs.confidence = parseInt(confidence);
     }
 
     if (verified === 'true') {
-      where += ' AND analystVerified = 1';
+      where += ' AND "analystVerified" = true';
     } else if (verified === 'false') {
-      where += ' AND analystVerified = 0';
+      where += ' AND "analystVerified" = false';
     }
 
     if (hasHrCols) {
       if (hrAnchored === 'true') {
-        where += ' AND isHrAnchored = 1';
+        where += ' AND "isHrAnchored" = true';
       } else if (hrAnchored === 'false') {
-        where += ' AND isHrAnchored = 0';
+        where += ' AND ("isHrAnchored" = false OR "isHrAnchored" IS NULL)';
       }
 
       if (orphanStatus === 'any') {
-        where += ' AND orphanStatus IS NOT NULL';
+        where += ' AND "orphanStatus" IS NOT NULL';
       } else if (orphanStatus === 'none') {
-        where += ' AND orphanStatus IS NULL';
+        where += ' AND "orphanStatus" IS NULL';
       } else if (orphanStatus) {
-        where += ' AND orphanStatus = @orphanStatus';
+        where += ' AND "orphanStatus" = @orphanStatus';
         inputs.orphanStatus = orphanStatus;
       }
     }
@@ -137,13 +134,13 @@ router.get('/identities', async (req, res) => {
 
     // Sort
     const ALLOWED_SORTS = {
-      'accountCount': 'accountCount DESC',
-      'confidence': 'correlationConfidence DESC',
-      'displayName': 'displayName ASC',
+      'accountCount': '"accountCount" DESC',
+      'confidence': '"correlationConfidence" DESC',
+      'displayName': '"displayName" ASC',
       'department': 'department ASC',
-      'correlatedAt': 'correlatedAt DESC',
+      'correlatedAt': '"correlatedAt" DESC',
     };
-    const orderBy = ALLOWED_SORTS[sort] || 'accountCount DESC, displayName ASC';
+    const orderBy = ALLOWED_SORTS[sort] || '"displayName" ASC';
 
     // Paginated data
     const dataReq = timedRequest(p, 'identity-list', res);

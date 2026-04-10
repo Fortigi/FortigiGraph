@@ -994,7 +994,7 @@ function ValidationAndDeploy({ validation, credentials, onDeploy, onCancel, load
 }
 
 // ─── Configured Crawler Card (display-only — Configure opens wizard in edit mode) ──
-function CrawlerConfigCard({ config, onRunNow, onEdit, onRemove, runningJob }) {
+function CrawlerConfigCard({ config, onRunNow, onEdit, onRemove, onForceStop, runningJob }) {
   const cfg = config.config || {};
 
   const objectLabels = [];
@@ -1030,13 +1030,21 @@ function CrawlerConfigCard({ config, onRunNow, onEdit, onRemove, runningJob }) {
           <span className="text-xs text-gray-500">{config.crawlerType}</span>
         </div>
         <div className="flex gap-1">
-          <button
-            onClick={() => onRunNow(config.id)}
-            disabled={isRunning}
-            className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {isRunning ? 'Running...' : 'Run Now'}
-          </button>
+          {isRunning ? (
+            <button
+              onClick={() => onForceStop(runningJob.id)}
+              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Force Stop
+            </button>
+          ) : (
+            <button
+              onClick={() => onRunNow(config.id)}
+              className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            >
+              Run Now
+            </button>
+          )}
           <button onClick={() => onEdit(config)}
             className="px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200">
             Configure
@@ -1213,7 +1221,7 @@ function JobProgress({ job, onNavigateToMatrix, onDismiss }) {
 }
 
 // ─── Recent Jobs Table ────────────────────────────────────────────────────────
-function RecentJobs({ jobs }) {
+function RecentJobs({ jobs, onForceStop }) {
   if (!jobs || jobs.length === 0) return null;
   const statusColors = {
     queued: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
@@ -1247,7 +1255,11 @@ function RecentJobs({ jobs }) {
                   <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[j.status] || ''}`}>{j.status}</span></td>
                   <td className="p-3 text-gray-500">{new Date(j.createdAt).toLocaleString()}</td>
                   <td className="p-3 text-gray-500">{duration}</td>
-                  <td className="p-3 text-red-500 text-xs truncate max-w-64">{j.errorMessage || '—'}</td>
+                  <td className="p-3 text-red-500 text-xs truncate max-w-64">
+                    {j.status === 'running' || j.status === 'queued' ? (
+                      <button onClick={() => onForceStop?.(j.id)} className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200">Force Stop</button>
+                    ) : (j.errorMessage || '—')}
+                  </td>
                 </tr>
               );
             })}
@@ -1346,16 +1358,18 @@ function GettingStarted({ onAddCrawler }) {
 
 // Expected CSV files. Must stay in sync with CSV_FILE_SLOTS in csvUploads.js and
 // the file names that Start-CSVCrawler.ps1 reads.
+// Identity Atlas canonical CSV schema. Must stay in sync with CSV_FILE_SLOTS in
+// csvUploads.js and the schema templates in tools/csv-templates/schema/.
 const CSV_SLOTS = [
-  { key: 'systems',           file: 'Systems.csv',            label: 'Systems',                 required: false, hint: 'Optional. Columns: _DISPLAYNAME (or DisplayName), _ID, DESCRIPTION, SYSTEMCATEGORY_VALUE. Defines the available systems.', aliases: ['system.csv'] },
-  { key: 'resourceSystem',    file: 'ResourceSystem.csv',     label: 'Resource → System',       required: false, hint: 'Optional. Maps resources to systems. Columns: Id, SystemName. After resources are imported, this file updates each resource\'s system link based on SystemName.' },
-  { key: 'orgUnits',          file: 'Orgunits.csv',           label: 'Org Units / Contexts',    required: false },
-  { key: 'permissions',       file: 'Permissions.csv',        label: 'Resources (Permissions)', required: true  },
-  { key: 'permissionNesting', file: 'Permission-Nesting.csv', label: 'Resource Relationships',  required: false },
-  { key: 'users',             file: 'Users.csv',              label: 'Principals (Users)',      required: true  },
-  { key: 'accountPermission', file: 'Account-Permission.csv', label: 'Resource Assignments',    required: true  },
-  { key: 'identities',        file: 'Identities.csv',         label: 'Identities',              required: false },
-  { key: 'cras',              file: 'CRAs.csv',               label: 'Certifications (CRAs)',   required: false },
+  { key: 'systems',              file: 'Systems.csv',              label: 'Systems',                required: false, hint: 'Optional. Columns: ExternalId, DisplayName, SystemType, Description' },
+  { key: 'contexts',             file: 'Contexts.csv',             label: 'Contexts (Org Units)',   required: false, hint: 'Optional. Columns: ExternalId, DisplayName, ContextType, Description, ParentExternalId, SystemName' },
+  { key: 'resources',            file: 'Resources.csv',            label: 'Resources',              required: true,  hint: 'Required. Columns: ExternalId, DisplayName, ResourceType, Description, SystemName, Enabled' },
+  { key: 'resourceRelationships',file: 'ResourceRelationships.csv',label: 'Resource Relationships', required: false, hint: 'Optional. Columns: ParentExternalId, ChildExternalId, RelationshipType, SystemName' },
+  { key: 'users',                file: 'Users.csv',                label: 'Users',                  required: true,  hint: 'Required. Columns: ExternalId, DisplayName, Email, PrincipalType, JobTitle, Department, SystemName, Enabled' },
+  { key: 'assignments',          file: 'Assignments.csv',          label: 'Assignments',            required: true,  hint: 'Required. Columns: ResourceExternalId, UserExternalId, AssignmentType, SystemName' },
+  { key: 'identities',           file: 'Identities.csv',           label: 'Identities',             required: false, hint: 'Optional. Columns: ExternalId, DisplayName, Email, EmployeeId, Department, JobTitle' },
+  { key: 'identityMembers',      file: 'IdentityMembers.csv',      label: 'Identity Members',       required: false, hint: 'Optional. Columns: IdentityExternalId, UserExternalId, AccountType' },
+  { key: 'certifications',       file: 'Certifications.csv',       label: 'Certifications',         required: false, hint: 'Optional. Columns: ExternalId, ResourceExternalId, UserDisplayName, Decision, ReviewerDisplayName, ReviewedDateTime' },
 ];
 
 function fmtBytes(n) {
@@ -1575,8 +1589,13 @@ function CsvWizard({ onComplete, onCancel, initialConfig, isEdit, authFetch }) {
       {step === 2 && (
         <div className="space-y-4">
           <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
-            Pick the folder containing your CSV exports, or drop individual files.
-            File names are auto-mapped to expected object types — you can adjust mismatches before saving.
+            <div>Upload CSV files in the <strong>Identity Atlas schema</strong>. Files are auto-mapped by name.</div>
+            <div className="mt-1">
+              <a href="/api/admin/csv-schema" download className="text-indigo-700 underline hover:text-indigo-900">
+                Download schema templates
+              </a>
+              <span className="text-blue-600 ml-2">— empty CSVs with the expected column headers. Use a transform script to convert your source data to this format.</span>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -1903,6 +1922,16 @@ export default function CrawlersPage({ onNavigate }) {
     if (cfg) submitJob(cfg.crawlerType, null, configId);
   };
 
+  const handleForceStop = async (jobId) => {
+    if (!confirm('Force-stop this running job? Any partially imported data will remain.')) return;
+    try {
+      await authFetch(`/api/admin/crawler-jobs/${jobId}/force-stop`, { method: 'POST' });
+      fetchJobs();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const handleRemoveConfig = async (configId) => {
     if (!confirm('Remove this crawler configuration?')) return;
     try {
@@ -2019,6 +2048,7 @@ export default function CrawlersPage({ onNavigate }) {
                 onRunNow={handleRunNow}
                 onEdit={handleEditConfig}
                 onRemove={handleRemoveConfig}
+                onForceStop={handleForceStop}
                 runningJob={activeJob?.jobType === c.crawlerType ? activeJob : null}
               />
             ))}
@@ -2027,7 +2057,7 @@ export default function CrawlersPage({ onNavigate }) {
       )}
 
       {/* Recent jobs */}
-      <RecentJobs jobs={jobs} />
+      <RecentJobs jobs={jobs} onForceStop={handleForceStop} />
 
       {/* External crawlers (API key-based, excluding Built-in Worker) */}
       <ExternalCrawlers
