@@ -98,7 +98,7 @@ export default function MatrixGroupRow({
       {/* Type column - sticky left */}
       <td
         className={`sticky ${nestedBg} border-r border-b border-gray-200 px-2 py-0.5 text-xs text-gray-500 truncate`}
-        style={{ left: '299px', minWidth: '90px', maxWidth: '90px', zIndex: 10 }}
+        style={{ left: '299px', minWidth: '180px', maxWidth: '180px', zIndex: 10 }}
         title={group.groupType}
       >
         {group.groupType}

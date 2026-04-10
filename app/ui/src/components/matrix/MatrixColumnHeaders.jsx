@@ -170,7 +170,7 @@ export default function MatrixColumnHeaders({ users, infoColumnCount, onSortByCo
           Resource Name
         </th>
         <th className={`sticky z-30 border-b border-r border-gray-300 px-2 py-1 text-xs text-left font-medium cursor-pointer select-none relative ${isTypeFiltered ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            style={{ left: '299px', minWidth: '90px' }}
+            style={{ left: '299px', minWidth: '180px' }}
             ref={typeFilterRef}>
           <div onClick={() => setTypeFilterOpen(prev => !prev)}>
             Type {isTypeFiltered ? '\u25BC' : '\u25BD'}

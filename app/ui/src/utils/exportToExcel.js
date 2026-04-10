@@ -34,10 +34,10 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   wb.created = new Date();
 
   const ws = wb.addWorksheet('Role Mining Matrix', {
-    views: [{ state: 'frozen', xSplit: 4, ySplit: 2 }],
+    views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }],
   });
 
-  const infoColCount = 4; // (empty) | Category | Group Name | GUID
+  const infoColCount = 3; // Resource Name | Type | GUID (matching UI left columns)
   const userCount = users.length;
   const apCount = accessPackages.length;
 
@@ -46,10 +46,9 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
   const metaColStart = apColStart + apCount;       // 1-based
 
   // ---------- Column widths ----------
-  ws.getColumn(1).width = 4;   // empty / drag handle
-  ws.getColumn(2).width = 14;  // Category
-  ws.getColumn(3).width = 38;  // Group Name
-  ws.getColumn(4).width = 38;  // GUID
+  ws.getColumn(1).width = 38;  // Resource Name
+  ws.getColumn(2).width = 24;  // Type
+  ws.getColumn(3).width = 38;  // GUID
   for (let u = 0; u < userCount; u++) {
     ws.getColumn(infoColCount + u + 1).width = 4;
   }
@@ -57,8 +56,7 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     ws.getColumn(apColStart + a).width = 4;
   }
   ws.getColumn(metaColStart).width = 5;     // #
-  ws.getColumn(metaColStart + 1).width = 10; // Type
-  ws.getColumn(metaColStart + 2).width = 30; // Description
+  ws.getColumn(metaColStart + 1).width = 30; // Description
 
   // ===== ROW 1: Job titles (merged) =====
   const row1 = ws.getRow(1);
@@ -113,19 +111,17 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     apBanner.border = thinBorder();
   }
 
-  // Row 1 meta headers
+  // Row 1 meta headers (right side)
   setHeaderCell(ws.getCell(1, metaColStart), '#', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 1), 'Type', true);
-  setHeaderCell(ws.getCell(1, metaColStart + 2), 'Description', true);
+  setHeaderCell(ws.getCell(1, metaColStart + 1), 'Description', true);
 
   // ===== ROW 2: User display names =====
   const row2 = ws.getRow(2);
   row2.height = 80;
 
-  setHeaderCell(ws.getCell(2, 1), '');
-  setHeaderCell(ws.getCell(2, 2), 'Category');
-  setHeaderCell(ws.getCell(2, 3), 'Resource Name');
-  setHeaderCell(ws.getCell(2, 4), 'GUID');
+  setHeaderCell(ws.getCell(2, 1), 'Resource Name');
+  setHeaderCell(ws.getCell(2, 2), 'Type');
+  setHeaderCell(ws.getCell(2, 3), 'GUID');
 
   for (let u = 0; u < userCount; u++) {
     const cell = ws.getCell(2, infoColCount + u + 1);
@@ -160,21 +156,20 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
     const row = ws.getRow(rowNum);
     row.height = 18;
 
-    // Info columns
-    ws.getCell(rowNum, 1).border = thinBorder();
-    const catCell = ws.getCell(rowNum, 2);
-    catCell.value = group.category;
-    catCell.font = { size: 11 };
-    catCell.border = thinBorder();
-
-    const nameCell = ws.getCell(rowNum, 3);
+    // Info columns: Resource Name | Type | GUID
+    const nameCell = ws.getCell(rowNum, 1);
     nameCell.value = group.displayName;
     nameCell.font = { size: 11 };
     nameCell.border = thinBorder();
 
-    const guidCell = ws.getCell(rowNum, 4);
+    const typeCell = ws.getCell(rowNum, 2);
+    typeCell.value = group.groupType || '';
+    typeCell.font = { size: 11, color: { argb: 'FF6B7280' } };
+    typeCell.border = thinBorder();
+
+    const guidCell = ws.getCell(rowNum, 3);
     guidCell.value = group.realGroupId || group.id;
-    guidCell.font = { size: 11 };
+    guidCell.font = { size: 11, color: { argb: 'FF9CA3AF' } };
     guidCell.border = thinBorder();
 
     // Intersection cells
@@ -235,21 +230,14 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
       excelCell.border = thinBorder();
     }
 
-    // Meta columns
-    const memberCount = group.memberCount;
-
+    // Meta columns (right side): # | Description
     const countCell = ws.getCell(rowNum, metaColStart);
-    countCell.value = memberCount;
+    countCell.value = group.memberCount;
     countCell.font = { size: 11 };
     countCell.alignment = { horizontal: 'center' };
     countCell.border = thinBorder();
 
-    const typeCell = ws.getCell(rowNum, metaColStart + 1);
-    typeCell.value = group.groupType || '';
-    typeCell.font = { size: 11 };
-    typeCell.border = thinBorder();
-
-    const descCell = ws.getCell(rowNum, metaColStart + 2);
+    const descCell = ws.getCell(rowNum, metaColStart + 1);
     descCell.value = group.description;
     descCell.font = { size: 11 };
     descCell.border = thinBorder();
