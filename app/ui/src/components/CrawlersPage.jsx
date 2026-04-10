@@ -1347,6 +1347,8 @@ function GettingStarted({ onAddCrawler }) {
 // Expected CSV files. Must stay in sync with CSV_FILE_SLOTS in csvUploads.js and
 // the file names that Start-CSVCrawler.ps1 reads.
 const CSV_SLOTS = [
+  { key: 'systems',           file: 'Systems.csv',            label: 'Systems',                 required: false, hint: 'Optional. Columns: _DISPLAYNAME (or DisplayName), _ID, DESCRIPTION, SYSTEMCATEGORY_VALUE. Defines the available systems.', aliases: ['system.csv'] },
+  { key: 'resourceSystem',    file: 'ResourceSystem.csv',     label: 'Resource → System',       required: false, hint: 'Optional. Maps resources to systems. Columns: Id, SystemName. After resources are imported, this file updates each resource\'s system link based on SystemName.' },
   { key: 'orgUnits',          file: 'Orgunits.csv',           label: 'Org Units / Contexts',    required: false },
   { key: 'permissions',       file: 'Permissions.csv',        label: 'Resources (Permissions)', required: true  },
   { key: 'permissionNesting', file: 'Permission-Nesting.csv', label: 'Resource Relationships',  required: false },
@@ -1371,8 +1373,12 @@ function matchSlot(filename) {
   for (const s of CSV_SLOTS) {
     const target = s.file.toLowerCase().replace(/[\s_-]+/g, '');
     if (lower === target) return s.key;
+    // Check aliases (e.g. "System.csv" → systems slot)
+    for (const alias of (s.aliases || [])) {
+      if (lower === alias.toLowerCase().replace(/[\s_-]+/g, '')) return s.key;
+    }
   }
-  // Looser fallback: contains the key
+  // Looser fallback: contains the stem
   for (const s of CSV_SLOTS) {
     const stem = s.file.toLowerCase().replace('.csv', '').replace(/[\s_-]+/g, '');
     if (lower.includes(stem)) return s.key;
@@ -1384,8 +1390,8 @@ function CsvWizard({ onComplete, onCancel, initialConfig, isEdit, authFetch }) {
   // Steps: 1=info, 2=files, 3=review
   const [step, setStep] = useState(1);
   const [displayName, setDisplayName] = useState(initialConfig?.displayName || 'CSV Import');
-  const [systemType, setSystemType] = useState(initialConfig?.systemType || 'Omada');
-  const [systemName, setSystemName] = useState(initialConfig?.systemName || 'Omada Identity');
+  const [systemType, setSystemType] = useState(initialConfig?.systemType || 'CSV');
+  const [systemName, setSystemName] = useState(initialConfig?.systemName || 'CSV Import');
   const [delimiter, setDelimiter] = useState(initialConfig?.delimiter || ';');
 
   // Files staged in the browser before upload (only on create)
@@ -1643,7 +1649,7 @@ function CsvWizard({ onComplete, onCancel, initialConfig, isEdit, authFetch }) {
                 return (
                   <span key={slot.key} className={`px-2 py-1 rounded text-xs ${
                     filled ? 'bg-green-100 text-green-800' : (slot.required ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600')
-                  }`}>
+                  }`} title={slot.hint || ''}>
                     {filled ? '✓ ' : (slot.required ? '✗ ' : '○ ')}{slot.label}{slot.required ? ' *' : ''}
                   </span>
                 );

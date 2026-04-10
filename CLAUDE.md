@@ -94,12 +94,11 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - CRUD operations for Azure AD/Entra ID resources
 - Required permissions: `User.Read.All`, `Group.Read.All`, `GroupMember.Read.All`, `Directory.Read.All`, `EntitlementManagement.Read.All`, `AccessReview.Read.All`, `AuditLog.Read.All`
 
-### 3. Azure SQL Integration
-- **Temporal Tables**: Automatic version history tracking for all data changes
-- **Point-in-Time Queries**: Query data as it existed at any time
-- **High-Performance Sync**: SqlBulkCopy-based operations (20-50x faster than row-by-row)
-- **Automatic Schema Evolution**: Add new columns without recreating tables
-- **ConfigFile Support**: All SQL functions support config files
+### 3. PostgreSQL Database (v5)
+- **Audit History**: Trigger-based change tracking via shared `_history` table with JSONB snapshots
+- **Automatic Migrations**: Versioned `.sql` files in `app/api/src/db/migrations/` applied on startup
+- **High-Performance Sync**: Bulk upsert operations via the Ingest API
+- **Legacy PowerShell SQL functions**: Still available for backward compatibility but no longer used in Docker deployment
 
 ### 4. Identity Governance & Compliance Sync
 - **Complete Access Package Sync**: Catalogs → GovernanceCatalogs, packages → Resources (`resourceType='BusinessRole'`), assignments → ResourceAssignments (`assignmentType='Governed'`), resource scopes → ResourceRelationships (`relationshipType='Contains'`), policies → AssignmentPolicies, requests → AssignmentRequests, reviews → CertificationDecisions
@@ -110,7 +109,7 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Analytical Views**: 12+ SQL views for IST vs SOLL analysis, approval metrics, access reviews
 
 ### 5. Docker Deployment
-- All services run in Docker containers: SQL Server, web (Node.js API + React frontend), worker (PowerShell crawlers + scheduler)
+- All services run in Docker containers: PostgreSQL 16, web (Node.js API + React frontend), worker (PowerShell crawlers + scheduler)
 - Crawler scheduling lives in the `CrawlerConfigs` SQL table; the worker polls every minute and queues jobs
 - See [docker-setup.md](docs/architecture/docker-setup.md) for full architecture and operations
 
@@ -131,7 +130,7 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Column Header Filters**: Type and Tags columns have filter dropdowns; Tags includes a "(Blank)" option (sentinel `BLANK_TAG`) to show groups without tags
 - **Server-Side User Limit**: Slider (default 25) limits data at the SQL level for large environments
 - **Excel Export**: Full matrix export with AP columns next to users (matching on-screen layout), AP-colored cells, rich-text multi-type badges, and multi-AP notes
-- **Entity Detail Pages**: Click any user, group, or access package name to open a detail tab. Shows all SQL attributes, group memberships/members with type badges, access package assignments, and version history diffs from temporal tables. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id` / `#access-package:id`) supports bookmarking. Drill-through navigation between user and group details.
+- **Entity Detail Pages**: Click any user, group, or access package name to open a detail tab. Shows all attributes, group memberships/members with type badges, access package assignments, and version history diffs from the `_history` audit table. Multiple detail tabs can be open simultaneously; each has a close button. Hash-based routing (`#user:id` / `#group:id` / `#access-package:id`) supports bookmarking. Drill-through navigation between user and group details.
 - **Access Package Detail Page**: Lazy-loaded collapsible sections: Assignments (active users with UPN and assigned date), Resource Assignments (groups/resources with Member/Owner role badges), Assignment Policies (auto-assigned vs request-based with scope), Access Reviews (decisions with auto-review indicator for AAD Access Reviews), Pending Requests, Version History. Review status differentiates "Not required" (no review configured) from "Pending first review" (review configured but no instance yet).
 - **Performance Monitoring**: ON by default (Performance page in Admin); `PERF_METRICS_ENABLED=false` opts out at startup. Server-side middleware captures per-request timing with per-SQL-query breakdowns. `Server-Timing` HTTP headers appear in browser DevTools. Performance sub-tab shows endpoint summaries (P50/P95/P99), recent requests, and slowest requests. Export JSON for offline analysis. Ring buffer (1000 entries) — zero overhead when disabled.
 - **Deployment**: `docker compose up -d` — all services run in containers, configured via the in-browser wizard (Admin → Crawlers)
@@ -300,10 +299,10 @@ FortigiGraph/
 │   │   ├── Initialize-FGSyncTable.ps1           # Shared table lifecycle helper
 │   │   └── New-FGDataTableFromGraphObjects.ps1  # Shared DataTable builder
 │   │
-│   ├── SQL/                    # Azure SQL operations (31)
+│   ├── SQL/                    # SQL operations (31) — legacy, used outside Docker
 │   │   ├── Invoke-FGSQLCommand.ps1       # Helper for connection lifecycle
 │   │   ├── Connect-FGSQLServer.ps1       # Connect with firewall & ConfigFile
-│   │   ├── Initialize-FGSQLTable.ps1     # Create temporal tables
+│   │   ├── Initialize-FGSQLTable.ps1     # Create SQL tables (legacy)
 │   │   ├── Initialize-FGSystemTables.ps1 # Create Systems, Resources, Principals, OrgUnits, Identities tables
 │   │   ├── Initialize-FGResourceViews.ps1     # Resource-based permission views (v3.1)
 │   │   ├── Initialize-FGResourceIndexes.ps1   # Resource-based indexes (v3.1)
@@ -361,7 +360,7 @@ FortigiGraph/
 │   │       ├── middleware/perfMetrics.js  # Request timing + Server-Timing headers
 │   │       ├── perf/collector.js      # Ring buffer metrics collector with aggregation
 │   │       ├── perf/sqlTimer.js       # SQL query timer wrapper (per-query instrumentation)
-│   │       ├── db/connection.js       # Azure SQL (mssql) connection pool + graceful shutdown
+│   │       ├── db/connection.js       # PostgreSQL (pg) connection pool + graceful shutdown
 │   │       ├── db/columnCache.js      # Shared column discovery cache (5-min TTL)
 │   │       └── mock/data.js           # Mock data for local dev
 │   └── frontend/           # React + Vite + Tailwind
@@ -449,9 +448,9 @@ foreach ($import in @($base + $generic + $specific + $SQL + $sync + $automation)
 - `$Global:DebugMode` - Debug flag ('T', 'G', 'P', 'D' or combinations)
 
 #### SQL State
-- `$Global:FGSQLConnectionString` - SQL Server connection string
-- `$Global:FGSQLServerName` - Connected server name
-- `$Global:FGSQLDatabaseName` - Connected database name
+- `$Global:FGSQLConnectionString` - SQL connection string (legacy — Docker uses `DATABASE_URL` env var for PostgreSQL)
+- `$Global:FGSQLServerName` - Connected server name (legacy)
+- `$Global:FGSQLDatabaseName` - Connected database name (legacy)
 
 ### 3. `principalType` Conventions
 
@@ -618,8 +617,7 @@ function Get-FGSQLResource {
 - Don't use `Write-Output` (use `return` directly)
 - Don't add comments in Dutch (use English only)
 - Don't commit test configuration files (protected by .gitignore)
-- Don't modify temporal tables without disabling versioning first
-- Don't use `TRUNCATE` on temporal tables (use `DELETE` instead)
+- Don't modify database schema manually — use migration files in `app/api/src/db/migrations/`
 
 ### 4. When Extending the Module
 

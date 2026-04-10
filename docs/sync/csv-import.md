@@ -1,6 +1,6 @@
 # CSV Import
 
-FortigiGraph can ingest authorization data from any system that can produce a CSV export — HR platforms, PAM tools, SIEMs, IGA platforms such as Omada or SailPoint, ticketing systems, or custom applications. CSV sync uses the same SQL bulk merge engine as the Entra ID sync, giving you consistent change tracking, temporal versioning, and IST/SOLL analysis across all your identity sources.
+FortigiGraph can ingest authorization data from any system that can produce a CSV export — HR platforms, PAM tools, SIEMs, IGA platforms such as Omada or SailPoint, ticketing systems, or custom applications. CSV sync uses the same ingestion pipeline as the Entra ID sync, giving you consistent change tracking, audit history, and IST/SOLL analysis across all your identity sources.
 
 ---
 

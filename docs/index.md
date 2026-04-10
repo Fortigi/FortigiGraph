@@ -4,7 +4,7 @@
 
 Most organizations operate with authorization data siloed in Active Directory, Entra ID, SAP, SharePoint, DevOps, and a dozen more systems — each with its own data model, no shared history, and no way to answer the question _"what can this person actually do?"_
 
-Identity Atlas solves this by pulling authorization data from every connected system into a unified, temporal SQL model. It runs as a Docker stack and provides a role mining web UI for analysts and LLM-assisted risk scoring for security teams — all configurable from the browser.
+Identity Atlas solves this by pulling authorization data from every connected system into a unified PostgreSQL data model with full audit history. It runs as a Docker stack and provides a role mining web UI for analysts and LLM-assisted risk scoring for security teams — all configurable from the browser.
 
 ---
 
@@ -14,7 +14,7 @@ Identity Atlas solves this by pulling authorization data from every connected sy
 
 Every system's permissions land in the same schema: **Systems → Resources → ResourceAssignments → Principals**. Business roles, directory roles, app roles, SharePoint site permissions, and SAP authorizations all map to the same tables.
 
-- Temporal tables capture the full change history — query any table as it existed at any point in time
+- Audit triggers capture the full change history — query any table's changes over time via the shared `_history` table
 - Data from Entra ID syncs via the Microsoft Graph API; any other system imports via CSV
 - Schema evolves automatically as new attributes appear; no manual migrations needed
 
@@ -35,7 +35,7 @@ A 4-layer scoring engine that classifies principals by risk without sending sens
 - **Phase 2 (local)**: generates industry-specific regex classifiers tuned to your organization
 - **Phase 3 (local)**: scores every principal via direct match → membership analysis → structural hygiene → cross-entity propagation
 - **AI agent detection**: automatically identifies Copilot Studio agents, managed identities, workload identities, and other non-human principals
-- **Analyst overrides**: humans-in-the-loop score adjustments (−50 to +50) with mandatory reasoning, stored in temporal tables for audit
+- **Analyst overrides**: humans-in-the-loop score adjustments (−50 to +50) with mandatory reasoning, stored with full audit trail
 
 ---
 

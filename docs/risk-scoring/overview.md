@@ -81,7 +81,7 @@ Analysts can adjust any entity's score by −50 to +50 points with a required ju
 
 - Via UI: Risk Scoring page → click Override button
 - Overrides are stored in `RiskScores` and preserved across re-scoring runs
-- Override history is tracked via temporal table
+- Override history is preserved across re-scoring runs
 
 ## Data Privacy
 

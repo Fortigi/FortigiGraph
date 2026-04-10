@@ -105,9 +105,9 @@ All errors return a JSON body with a `message` field. SQL schema details are nev
 | `429` | Rate limit exceeded |
 | `500` | Internal server error |
 
-### Temporal History Format
+### Version History Format
 
-Endpoints that return version history (e.g. `GET /api/user/:id/history`) query SQL temporal tables using `FOR SYSTEM_TIME ALL`. Each entry includes `SysStartTime` and `SysEndTime` and a `diff` object showing which columns changed from the previous version.
+Endpoints that return version history (e.g. `GET /api/user/:id/history`) query the `_history` audit table. Each entry includes a `changedAt` timestamp and a `diff` object showing which columns changed from the previous version.
 
 ```json
 {

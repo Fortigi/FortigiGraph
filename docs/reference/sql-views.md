@@ -98,38 +98,34 @@ Sync-FGMaterializedViews
 
 ---
 
-## Temporal Queries
+## Historical Queries
 
-All core tables (`Principals`, `Resources`, `ResourceAssignments`, etc.) are SQL Server temporal tables. This means every row change is automatically versioned and you can query any past state with standard SQL syntax.
+All core tables (`Principals`, `Resources`, `ResourceAssignments`, etc.) are tracked by the `_history` audit table via PostgreSQL triggers. Every insert, update, and delete is recorded as a JSONB snapshot, enabling full change history queries.
 
 ```sql
 -- Current data (standard query, no change needed)
-SELECT * FROM Principals WHERE department = 'Finance';
-
--- Point-in-time: who had access to a resource on January 15th?
-SELECT principalId, assignmentType, ValidFrom
-FROM ResourceAssignments
-FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00'
-WHERE resourceId = 'your-resource-guid';
+SELECT * FROM "Principals" WHERE department = 'Finance';
 
 -- Full change history for a specific principal
-SELECT email, department, jobTitle, ValidFrom, ValidTo
-FROM Principals FOR SYSTEM_TIME ALL
-WHERE email = 'john.doe@contoso.com'
-ORDER BY ValidFrom DESC;
+SELECT "changedAt", operation, "rowData", "prevData"
+FROM "_history"
+WHERE "tableName" = 'Principals'
+  AND "rowId" = 'principal-guid-here'
+ORDER BY "changedAt" DESC;
 
 -- All assignment changes in the last 30 days
-SELECT resourceId, principalId, assignmentType, ValidFrom, ValidTo
-FROM ResourceAssignments FOR SYSTEM_TIME ALL
-WHERE ValidFrom >= DATEADD(DAY, -30, GETDATE())
-ORDER BY ValidFrom DESC;
+SELECT "rowId", operation, "changedAt", "rowData"
+FROM "_history"
+WHERE "tableName" = 'ResourceAssignments'
+  AND "changedAt" >= now() - interval '30 days'
+ORDER BY "changedAt" DESC;
 
--- Resources that existed at a point in time but no longer exist
-SELECT id, displayName, ValidFrom, ValidTo
-FROM Resources FOR SYSTEM_TIME ALL
-WHERE ValidTo < '9999-12-31'
-  AND ValidFrom < '2025-06-01'
-ORDER BY ValidTo DESC;
+-- Deleted resources (no longer in the current table)
+SELECT "rowId", "changedAt", "rowData"->>'displayName' AS name
+FROM "_history"
+WHERE "tableName" = 'Resources'
+  AND operation = 'D'
+ORDER BY "changedAt" DESC;
 ```
 
-For more on temporal table usage and constraints, see [Temporal Tables & Historical Queries](temporal-tables.md).
+For more on audit history usage and query patterns, see [Audit History & Historical Queries](temporal-tables.md).

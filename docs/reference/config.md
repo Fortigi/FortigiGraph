@@ -90,6 +90,6 @@ The correlation ruleset is generated once with `New-FGCorrelationRuleset` (optio
 | Schedules | `CrawlerConfigs.config.schedules` — set via the wizard |
 | Risk scoring on/off | `WorkerConfig.FEATURE_RISK_SCORING` — set via the Admin → Risk Scoring toggle |
 | Performance monitoring on/off | Runtime flag — set via the Admin → Performance toggle |
-| SQL connection | Backend env vars (`SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PASSWORD`) |
+| Database connection | Backend env var `DATABASE_URL` (PostgreSQL connection string) |
 
 The legacy JSON config file is only needed if you want to run a crawler script (`Start-EntraIDCrawler.ps1`, `Start-CSVCrawler.ps1`) on a machine outside the Docker worker.

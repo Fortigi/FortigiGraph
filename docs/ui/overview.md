@@ -140,7 +140,7 @@ The detail tab contains collapsible sections:
 | Assignment Policies | Auto-assigned vs. request-based policies with scope and filter rules |
 | Certification Reviews | Review decisions with auto-review indicator |
 | Pending Requests | Outstanding requests with requestor details |
-| Version History | Temporal table diffs — every change since first sync |
+| Version History | Audit history diffs — every change since first sync |
 
 !!! note
     The **Review Status** field differentiates "Not required" (no review configured) from "Pending first review" (review configured but no instance has run yet).
@@ -185,7 +185,7 @@ Displays recent sync operations from the `GraphSyncLog` table:
 | Minimal | 1–19 |
 | None | 0 |
 
-**Analyst Overrides:** Adjust a score by −50 to +50 with a required justification. Overrides are stored in the temporal table for audit.
+**Analyst Overrides:** Adjust a score by −50 to +50 with a required justification. Overrides are stored in the `RiskScores` table for audit.
 
 **Classifier Matches:** Expand any entity to see exactly which regex patterns triggered its score.
 
@@ -268,7 +268,7 @@ Click the user avatar in the top-right corner to open the settings dropdown. Tog
 flowchart LR
     Browser -->|MSAL JWT| Auth[Auth Middleware\nEntra ID v1 + v2]
     Auth -->|validated identity| Routes[API Routes]
-    Routes -->|parameterized queries| SQL[(Azure SQL)]
+    Routes -->|parameterized queries| SQL[(PostgreSQL)]
     Auth -->|reject| Error[401 Unauthorized]
 ```
 

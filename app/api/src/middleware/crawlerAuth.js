@@ -86,7 +86,13 @@ export async function crawlerAuthMiddleware(req, res, next) {
     return res.status(401).json({ error: 'API key has expired' });
   }
 
-  if (!checkRateLimit(crawler.id, crawler.rateLimit || 100)) {
+  // The built-in worker (created by bootstrap) needs a very high limit because
+  // the CSV crawler makes many small batches (one per system × entity type).
+  // Override the DB value for the built-in worker; external crawlers keep their
+  // configured limit (default 100) to prevent accidental DoS.
+  let effectiveLimit = crawler.rateLimit || 100;
+  if (crawler.displayName === 'Built-in Worker') effectiveLimit = Math.max(effectiveLimit, 2000);
+  if (!checkRateLimit(crawler.id, effectiveLimit)) {
     await logAudit(crawler.id, 'rate_limited', req.originalUrl, 429, req.ip);
     return res.status(429).json({ error: 'Rate limit exceeded' });
   }

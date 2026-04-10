@@ -64,6 +64,26 @@ export function normalizeRecords(records, coreColumns, options = {}) {
       normalized.externalId = String(rec.externalId);
     }
 
+    // Handle external-ID-based references for resource-relationships and
+    // resource-assignments. When the caller sends parentExternalId /
+    // childExternalId / resourceExternalId / principalExternalId, convert
+    // them to deterministic UUIDs using the same prefix namespace so the FKs
+    // match the IDs generated for the parent/child entities.
+    if (idGeneration === 'deterministic') {
+      if (rec.parentExternalId && !normalized.parentResourceId) {
+        normalized.parentResourceId = deterministicGuid(idPrefix.replace(/resource-relationships$/, 'resources'), String(rec.parentExternalId));
+      }
+      if (rec.childExternalId && !normalized.childResourceId) {
+        normalized.childResourceId = deterministicGuid(idPrefix.replace(/resource-relationships$/, 'resources'), String(rec.childExternalId));
+      }
+      if (rec.resourceExternalId && !normalized.resourceId) {
+        normalized.resourceId = deterministicGuid(idPrefix.replace(/resource-assignments$/, 'resources'), String(rec.resourceExternalId));
+      }
+      if (rec.principalExternalId && !normalized.principalId) {
+        normalized.principalId = deterministicGuid(idPrefix.replace(/resource-assignments$/, 'principals'), String(rec.principalExternalId));
+      }
+    }
+
     // Set systemId if provided, the record doesn't override it, AND the table has the column
     if (systemId !== undefined && normalized.systemId === undefined && coreSet.has('systemId')) {
       normalized.systemId = systemId;

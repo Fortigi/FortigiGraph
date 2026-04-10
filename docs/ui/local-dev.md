@@ -1,42 +1,41 @@
 # Local Development with Docker
 
-FortigiGraph includes a Docker Compose setup that runs a complete local stack — SQL Server 2022 + the UI backend (serving the built frontend) — with no Azure subscription required. This is useful for development, testing, and demos.
+Identity Atlas includes a Docker Compose setup that runs a complete local stack — PostgreSQL 16 + the UI backend (serving the built frontend) + a PowerShell worker — with no cloud subscription required. This is useful for development, testing, and demos.
 
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or any Docker Engine + Compose v2)
-- PowerShell 7+ (for running the sync script)
-- A FortigiGraph config file with valid **Graph API credentials** (Azure SQL fields are not used in local mode)
+- A browser (the in-browser wizard handles all configuration)
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Browser -->|port 3001| Backend["Backend + Frontend\n(Docker)"]
-    Backend -->|internal network| SQL["SQL Server 2022\n(Docker)"]
-    PS["PowerShell\nStart-FGSync"] -->|localhost:1433| SQL
-    PS -->|HTTPS| Graph["Microsoft Graph API"]
+    Browser -->|port 3001| Web["Web container\n(API + Frontend)"]
+    Web -->|internal network| PG["PostgreSQL 16\n(Docker)"]
+    Worker["Worker container\n(PowerShell crawlers)"] -->|HTTP| Web
+    Worker -->|HTTPS| Graph["Microsoft Graph API"]
 ```
 
-The SQL Server port `1433` is exposed to the host so the PowerShell sync can connect from outside the Docker network — no need to run PowerShell inside a container.
+The PostgreSQL port `5432` is exposed to the host for direct database access during development. The worker container has no database driver — it talks to the web container's API for everything (job pickup, data ingestion, progress reporting).
 
 ## Start the Stack
 
 ```bash
-docker compose -f docker-compose.yml up -d
+docker compose up -d
 ```
 
 This starts:
 
 | Service | What it does |
 |---|---|
-| `sql` | SQL Server 2022 Developer Edition (persisted in `sql_data` volume) |
-| `sql-init` | Creates the `GraphData` database on first start (runs once, then exits) |
-| `web` | Builds frontend + starts Express API; auth disabled by default |
+| `postgres` | PostgreSQL 16 Alpine (persisted in `postgres_data` volume) |
+| `web` | Runs database migrations on startup, builds frontend + starts Express API; auth disabled by default |
+| `worker` | PowerShell container that polls for crawler jobs and executes them |
 
-Wait ~30 seconds for SQL Server to be ready, then open **http://localhost:3001**.
+Wait for the health check to pass (~10 seconds), then open **http://localhost:3001**.
 
-The UI will show an empty matrix until you run a sync.
+The UI will show an empty matrix until you load demo data or run a sync.
 
 !!! warning "Auth is disabled in local mode"
     `AUTH_ENABLED=false` is set by default in `docker-compose.yml`. The amber warning banner will appear in the UI — this is expected.
@@ -54,23 +53,23 @@ The worker runs every minute and picks up queued jobs. Live progress is shown on
 ## Stopping and Resetting
 
 ```bash
-# Stop the stack (data persists in the sql_data volume)
-docker compose -f docker-compose.yml down
+# Stop the stack (data persists in the postgres_data volume)
+docker compose down
 
 # Stop and delete all data (full reset)
-docker compose -f docker-compose.yml down -v
+docker compose down -v
 ```
 
 ## Building the Image Manually
 
-The `UI/backend/Dockerfile` does a multi-stage build: builds the React frontend in stage 1, then copies the compiled output into the Express backend in stage 2. Both are served by the same Node.js process on port 3001.
+The `app/api/Dockerfile` does a multi-stage build: builds the React frontend in stage 1, then copies the compiled output into the Express backend in stage 2. Both are served by the same Node.js process on port 3001.
 
 ```bash
-# Build from the UI/ directory (backend Dockerfile expects this context)
-docker build -f UI/backend/Dockerfile -t fortigraph-backend ./UI
+# Build from the app/ directory
+docker build -f app/api/Dockerfile -t identity-atlas-web ./app
 
-# Or use the root Dockerfile (same result, different build context)
-docker build -t fortigraph-backend .
+# Or use docker compose to build all services
+docker compose build
 ```
 
 ### Frontend-only dev container
@@ -78,8 +77,8 @@ docker build -t fortigraph-backend .
 For frontend-only development with hot reload:
 
 ```bash
-docker build -t fortigraph-frontend ./UI/frontend
-docker run -p 5173:5173 -v $(pwd)/UI/frontend/src:/app/src fortigraph-frontend
+docker build -t identity-atlas-frontend ./app/ui
+docker run -p 5173:5173 -v $(pwd)/app/ui/src:/app/src identity-atlas-frontend
 ```
 
 This mounts `src/` from your host for live reload while the container watches for changes.
@@ -93,8 +92,9 @@ Override any setting in `docker-compose.yml` by creating a `.env` file in the re
 | `AUTH_ENABLED` | `false` | Enable/disable Entra ID auth |
 | `AUTH_CLIENT_ID` | — | App registration client ID (required if auth enabled) |
 | `AUTH_TENANT_ID` | — | Entra ID tenant ID (required if auth enabled) |
-| `SQL_TRUST_SERVER_CERT` | `true` | Trust SQL Server's self-signed cert (local only) |
-| `SQL_PASSWORD` | `FortigiGraph_Local1!` | SA password |
+| `POSTGRES_DB` | `identity_atlas` | PostgreSQL database name |
+| `POSTGRES_USER` | `identity_atlas` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | `identity_atlas_local` | PostgreSQL password |
 | `PORT` | `3001` | Backend port |
 
 !!! tip "Enabling auth locally"

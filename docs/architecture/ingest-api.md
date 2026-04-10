@@ -2,7 +2,7 @@
 
 > **Status:** Draft | **Date:** 2026-03-30
 
-The Ingest API decouples data ingestion from the FortigiGraph core. Instead of crawlers writing directly to SQL, they POST data to REST endpoints. The API handles all complexity: validation, bulk merge, scoped delete detection, temporal versioning, and sync logging.
+The Ingest API decouples data ingestion from the FortigiGraph core. Instead of crawlers writing directly to the database, they POST data to REST endpoints. The API handles all complexity: validation, bulk merge, scoped delete detection, audit history, and sync logging.
 
 ---
 
@@ -69,7 +69,7 @@ graph TB
         HE --> RS[Risk Scores]
     end
 
-    API --> DB[(Database<br/>Azure SQL + Temporal Tables)]
+    API --> DB[(Database<br/>PostgreSQL + Audit History)]
     Analytics <--> DB
 
     DB --> ReadAPI["Read API<br/>GET /api/*"]
@@ -80,7 +80,7 @@ The architecture has four layers:
 
 1. **Source Systems & Crawlers** — Each source system has a dedicated crawler. Crawlers are lightweight HTTP clients that fetch data from their source and POST it to the Ingest API. They can be written in any language.
 
-2. **Ingest API** — Receives data via REST endpoints. Handles validation, bulk merge, scoped delete detection, temporal versioning. Authenticates crawlers via self-contained API keys.
+2. **Ingest API** — Receives data via REST endpoints. Handles validation, bulk merge, scoped delete detection, and audit history recording. Authenticates crawlers via self-contained API keys.
 
 3. **Analytics Engines** — Account Correlation and Risk Scoring run independently against the database. The Correlation Engine uses rulesets to link principals to identities. The Heuristics Engine uses risk profiles and classifiers to compute risk scores.
 
@@ -319,7 +319,7 @@ The engine preserves the same scoping patterns used by the current PowerShell sy
 
 - **System-scoped:** `WHERE systemId = @systemId`
 - **Attribute-scoped:** `WHERE resourceType = @scope` (if provided)
-- **Temporal-scoped:** `WHERE ValidTo = '9999-12-31 23:59:59.9999999'`
+- **Current-state scoped:** operates on the current table rows (no temporal filtering needed in v5)
 - **Batch-scoped:** `AND NOT EXISTS (SELECT 1 FROM #temp WHERE ...)`
 
 ### Validation Rules

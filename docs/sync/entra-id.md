@@ -172,7 +172,7 @@ Sync-FGAppRoleActivity
 ```
 
 !!! note
-    `PrincipalActivity` is intentionally **not** a temporal table. It uses an upsert pattern to avoid polluting the version history with daily timestamp changes. Use `FOR SYSTEM_TIME` on `Principals` and `ResourceAssignments` for historical queries.
+    `PrincipalActivity` is intentionally **not** tracked by audit triggers. It uses an upsert pattern to avoid polluting the audit history with daily timestamp changes. Query the `_history` table for `Principals` and `ResourceAssignments` to see historical changes.
 
 ---
 

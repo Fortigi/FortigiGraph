@@ -1,225 +1,150 @@
-# Temporal Tables & Historical Queries
+# Audit History & Historical Queries
 
-FortigiGraph uses SQL Server **system-versioned temporal tables** on all core tables. Every insert, update, and delete is automatically versioned, giving you a complete, tamper-evident history of every identity and permission change — with no extra code.
+Identity Atlas v5 uses a shared `_history` audit table populated by PostgreSQL triggers. Every insert, update, and delete on tracked tables is recorded as a JSONB snapshot — giving you a complete, queryable change history without any application-level code.
+
+!!! note "v4 to v5 change"
+    v4 used SQL Server system-versioned temporal tables (`FOR SYSTEM_TIME` syntax). v5 replaced these with a single `_history` table and trigger-based recording after the migration to PostgreSQL. The concept is the same — automatic change tracking — but the query syntax is different.
 
 ---
 
-## What Are Temporal Tables
+## How It Works
 
-A SQL Server temporal table maintains two tables under the hood:
+A generic PostgreSQL trigger function (`fg_record_history`) fires on INSERT, UPDATE, and DELETE. It writes one row to `_history` per actual change:
 
-- The **current table** — contains only the current state of each row
-- The **history table** (auto-created, named `<Table>History`) — contains every previous version of each row
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | `bigserial` | Auto-incrementing primary key |
+| `tableName` | `text` | Name of the source table (e.g. `Principals`, `Resources`) |
+| `rowId` | `text` | The `id` value of the changed row |
+| `operation` | `char(1)` | `I` = insert, `U` = update, `D` = delete |
+| `changedAt` | `timestamptz` | Timestamp of the change |
+| `rowData` | `jsonb` | Full row snapshot after the change (or the deleted row for `D`) |
+| `prevData` | `jsonb` | Previous row state (NULL for inserts) |
 
-Each row has two system-managed columns:
+### Tracked Tables
 
-| Column | Type | Meaning |
-|--------|------|---------|
-| `ValidFrom` | `datetime2` | When this version became current |
-| `ValidTo` | `datetime2` | When this version was superseded (`9999-12-31...` means still current) |
-
-SQL Server manages these columns automatically. You never write to them directly.
-
-### Tables with temporal versioning
-
-| Table | Versioned |
-|-------|-----------|
-| `Resources` | Yes |
+| Table | Tracked |
+|-------|---------|
 | `Principals` | Yes |
+| `Resources` | Yes |
 | `ResourceAssignments` | Yes |
 | `ResourceRelationships` | Yes |
-| `Contexts` | Yes |
-| `Identities` | Yes |
-| `IdentityMembers` | Yes |
-| `RiskScores` | Yes |
-| `GovernanceCatalogs` | Yes |
 | `AssignmentPolicies` | Yes |
-| `AssignmentRequests` | Yes |
-| `CertificationDecisions` | Yes |
-| `PrincipalActivity` | **No** — upsert-based; daily sign-in timestamps would generate excessive version noise |
+| `GovernanceCatalogs` | Yes |
+| `Systems` | Yes |
+| `PrincipalActivity` | **No** — upsert-based; daily sign-in timestamps would generate excessive audit noise |
+| `RiskScores` | **No** — recalculated on each scoring run |
+
+### No-op Filtering
+
+The UPDATE trigger uses a `WHEN (OLD IS DISTINCT FROM NEW)` clause, so re-ingesting unchanged rows during a sync does not generate audit entries. This is critical because the crawler upserts every row on every run.
 
 ---
 
 ## Query Patterns
 
-### Current state (no change needed)
-
-Standard queries work as usual on temporal tables — they always return the current state:
+### Full change history for a single entity
 
 ```sql
-SELECT id, displayName, department, jobTitle
-FROM Principals
-WHERE department = 'Finance';
-```
-
-### Point-in-time query
-
-Query what the data looked like at any specific moment in the past:
-
-```sql
--- Who had access to this resource on January 15, 2025 at 10:00 UTC?
-SELECT principalId, assignmentType, ValidFrom
-FROM ResourceAssignments
-FOR SYSTEM_TIME AS OF '2025-01-15 10:00:00'
-WHERE resourceId = 'your-resource-guid';
-
--- What did a principal's profile look like six months ago?
-SELECT displayName, email, department, jobTitle, ValidFrom
-FROM Principals
-FOR SYSTEM_TIME AS OF '2025-09-01 00:00:00'
-WHERE id = 'principal-guid-here';
-```
-
-### Full version history for a row
-
-```sql
--- All versions of a principal's record, newest first
-SELECT email, department, jobTitle, ValidFrom, ValidTo
-FROM Principals FOR SYSTEM_TIME ALL
-WHERE email = 'john.doe@contoso.com'
-ORDER BY ValidFrom DESC;
-
--- All assignment changes for a specific resource
-SELECT principalId, assignmentType, ValidFrom, ValidTo
-FROM ResourceAssignments FOR SYSTEM_TIME ALL
-WHERE resourceId = 'your-resource-guid'
-ORDER BY ValidFrom DESC;
+-- All versions of a principal, newest first
+SELECT "changedAt", operation, "rowData", "prevData"
+FROM "_history"
+WHERE "tableName" = 'Principals'
+  AND "rowId" = 'principal-guid-here'
+ORDER BY "changedAt" DESC;
 ```
 
 ### Changes within a time range
 
 ```sql
--- All assignment changes in the last 30 days
-SELECT resourceId, principalId, assignmentType, ValidFrom, ValidTo
-FROM ResourceAssignments FOR SYSTEM_TIME ALL
-WHERE ValidFrom >= DATEADD(DAY, -30, GETDATE())
-ORDER BY ValidFrom DESC;
-
--- Principals whose department changed this quarter
-SELECT id, email, department, ValidFrom, ValidTo
-FROM Principals FOR SYSTEM_TIME ALL
-WHERE ValidFrom >= '2025-01-01'
-  AND ValidTo   <= '2025-03-31'
-ORDER BY ValidFrom DESC;
+-- All resource assignment changes in the last 30 days
+SELECT "rowId", operation, "changedAt", "rowData"
+FROM "_history"
+WHERE "tableName" = 'ResourceAssignments'
+  AND "changedAt" >= now() - interval '30 days'
+ORDER BY "changedAt" DESC;
 ```
 
-### Rows that existed in a range but may no longer exist
-
-`FOR SYSTEM_TIME BETWEEN` returns rows that were active at any point during the range:
+### Detecting what changed in an update
 
 ```sql
--- All access package assignments that were active during Q1 2025
-SELECT resourceId, principalId, assignmentType, ValidFrom, ValidTo
-FROM ResourceAssignments
-FOR SYSTEM_TIME BETWEEN '2025-01-01' AND '2025-03-31'
-WHERE assignmentType = 'Governed';
+-- Compare rowData vs prevData to see what fields changed
+SELECT
+  "changedAt",
+  "prevData"->>'department' AS old_department,
+  "rowData"->>'department'  AS new_department
+FROM "_history"
+WHERE "tableName" = 'Principals'
+  AND "rowId" = 'principal-guid-here'
+  AND operation = 'U'
+  AND "prevData"->>'department' IS DISTINCT FROM "rowData"->>'department'
+ORDER BY "changedAt" DESC;
 ```
 
-### Rows that have since been deleted
+### Deleted entities
 
 ```sql
--- Resources that existed at some point but no longer exist
-SELECT id, displayName, resourceType, ValidFrom, ValidTo
-FROM Resources FOR SYSTEM_TIME ALL
-WHERE ValidTo < '9999-12-31'
-ORDER BY ValidTo DESC;
+-- Resources that were deleted (no longer in the current table)
+SELECT "rowId", "changedAt", "rowData"->>'displayName' AS name
+FROM "_history"
+WHERE "tableName" = 'Resources'
+  AND operation = 'D'
+ORDER BY "changedAt" DESC;
 ```
 
-### Comparing two points in time (access drift)
+### Point-in-time reconstruction
+
+To reconstruct the state of an entity at a specific point in time, find the most recent history row at or before that timestamp:
 
 ```sql
--- Permissions held on Jan 1 but NOT on Jul 1 (access that was removed)
-SELECT r.principalId, r.resourceId, r.assignmentType
-FROM ResourceAssignments FOR SYSTEM_TIME AS OF '2025-01-01' r
-WHERE NOT EXISTS (
-    SELECT 1 FROM ResourceAssignments FOR SYSTEM_TIME AS OF '2025-07-01' c
-    WHERE c.principalId = r.principalId
-      AND c.resourceId  = r.resourceId
-      AND c.assignmentType = r.assignmentType
-);
-
--- Permissions on Jul 1 that did NOT exist on Jan 1 (new access granted)
-SELECT c.principalId, c.resourceId, c.assignmentType
-FROM ResourceAssignments FOR SYSTEM_TIME AS OF '2025-07-01' c
-WHERE NOT EXISTS (
-    SELECT 1 FROM ResourceAssignments FOR SYSTEM_TIME AS OF '2025-01-01' r
-    WHERE r.principalId = c.principalId
-      AND r.resourceId  = c.resourceId
-      AND r.assignmentType = c.assignmentType
-);
+-- What did this principal look like on January 15, 2026?
+SELECT "rowData"
+FROM "_history"
+WHERE "tableName" = 'Principals'
+  AND "rowId" = 'principal-guid-here'
+  AND "changedAt" <= '2026-01-15 23:59:59+00'
+ORDER BY "changedAt" DESC
+LIMIT 1;
 ```
 
 ---
 
-## Important Constraints
+## How the UI Uses History
 
-### No TRUNCATE on temporal tables
-
-SQL Server does not permit `TRUNCATE` on system-versioned temporal tables. Always use `DELETE` or the FortigiGraph helper:
-
-```powershell
-# Safe: uses DELETE internally, handles versioning state automatically
-Clear-FGSQLTable -TableName "ResourceAssignments"
-```
-
-```sql
--- Safe: standard DELETE
-DELETE FROM ResourceAssignments;
-
--- Not allowed on temporal tables:
--- TRUNCATE TABLE ResourceAssignments;  ← will error
-```
-
-### Schema changes require disabling versioning
-
-SQL Server does not allow adding, altering, or dropping columns on a temporal table while versioning is active. FortigiGraph handles this automatically when you use `Sync-FGPrincipal -AdditionalAttributes` or any function that evolves the schema:
-
-1. Versioning is disabled (history table detached)
-2. Column is added
-3. Versioning is re-enabled (history table re-attached)
-
-You should never need to do this manually, but if you do:
-
-```sql
--- Disable versioning
-ALTER TABLE Principals SET (SYSTEM_VERSIONING = OFF);
-
--- Make schema changes
-ALTER TABLE Principals ADD myNewColumn NVARCHAR(200);
-ALTER TABLE PrincipalsHistory ADD myNewColumn NVARCHAR(200);
-
--- Re-enable versioning
-ALTER TABLE Principals SET (
-    SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.PrincipalsHistory)
-);
-```
-
-!!! warning
-    When you add a column to the main table, you **must** add the same column to the history table before re-enabling versioning. FortigiGraph does this automatically. If you are altering tables manually, always update both.
-
-### History table is read-only
-
-The `*History` tables (e.g. `PrincipalsHistory`, `ResourceAssignmentsHistory`) are managed exclusively by SQL Server. You cannot insert, update, or delete rows in them directly.
-
-### PrincipalActivity is not temporal
-
-`PrincipalActivity` uses an upsert (MERGE) pattern rather than temporal versioning. Sign-in timestamps change daily for active users; recording every change would bloat the history table with low-value versions. For historical queries about when a principal was last active, compare timestamps across `PrincipalActivity` snapshots taken at different sync dates.
+The entity detail pages (User Detail, Resource Detail, Business Role Detail) query `_history` to build a **Version History** section that shows diffs between sync runs. The API endpoint compares consecutive `rowData` / `prevData` snapshots and highlights changed fields.
 
 ---
 
 ## Retention
 
-By default, history is retained indefinitely. SQL Server supports a `HISTORY_RETENTION_PERIOD` if you want to cap storage:
+By default, history is retained indefinitely. For environments with high churn, add a periodic cleanup job:
 
 ```sql
--- Keep 2 years of history on Principals
-ALTER TABLE Principals SET (
-    SYSTEM_VERSIONING = ON (
-        HISTORY_TABLE = dbo.PrincipalsHistory,
-        HISTORY_RETENTION_PERIOD = 2 YEARS
-    )
-);
+-- Delete history older than 2 years
+DELETE FROM "_history"
+WHERE "changedAt" < now() - interval '2 years';
 ```
 
-!!! note
-    Retention cleanup runs during a SQL Server background task, not immediately. Rows older than the retention period may persist for a short time after the threshold passes.
+The Admin page provides a **History Retention** setting (`Admin > History Retention`) to configure automatic cleanup.
+
+---
+
+## Adding History to a New Table
+
+To track a new table, create triggers that call the existing `fg_record_history` function:
+
+```sql
+-- INSERT and DELETE: always record
+CREATE TRIGGER trg_history_ins_del
+AFTER INSERT OR DELETE ON "MyNewTable"
+FOR EACH ROW EXECUTE FUNCTION fg_record_history();
+
+-- UPDATE: only when something actually changed
+CREATE TRIGGER trg_history_upd
+AFTER UPDATE ON "MyNewTable"
+FOR EACH ROW
+WHEN (OLD IS DISTINCT FROM NEW)
+EXECUTE FUNCTION fg_record_history();
+```
+
+The trigger function is generic — it works with any table that has an `id` column.

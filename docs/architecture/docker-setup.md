@@ -231,7 +231,6 @@ cp setup/config/.env.example .env
 |---|---|---|
 | `app/api/src/` | `/app/backend/src/` | web |
 | `app/ui/` (built) | `/app/frontend/dist/` | web (static) |
-| `app/db/` | `/app/app/db/` | sql-table-init, worker |
 | `tools/` | `/app/tools/` | worker |
 | `setup/docker/crontab` | `/app/setup/docker/crontab` | worker |
 | `job_data` (named volume) | `/data/uploads/` | web (writes), worker (reads) — CSV crawler uploads |

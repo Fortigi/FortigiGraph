@@ -1,6 +1,6 @@
 # Data Model
 
-FortigiGraph uses a unified data model (v3.2) that stores all authorization entities — from any source system — in a consistent structure backed by SQL Server temporal tables.
+FortigiGraph uses a unified data model (v3.2) that stores all authorization entities — from any source system — in a consistent structure backed by PostgreSQL with trigger-based audit history.
 
 ---
 
@@ -11,11 +11,11 @@ Four principles drive the data model design:
 **Universal**
 Any authorization source maps to the same tables. Entra ID groups, SAP roles, Omada business roles, and custom CSV imports all become `Resources` and `Principals` in the same schema. No source-specific tables.
 
-**Temporal**
-All core tables are SQL Server temporal tables. Every insert, update, and delete is automatically versioned with a system-maintained history table. Point-in-time queries are available for any entity at any date.
+**Audited**
+All core tables are tracked by a shared `_history` audit table populated by PostgreSQL triggers. Every insert, update, and delete is recorded as a JSONB snapshot, giving you a complete change history for any entity. The trigger skips unchanged rows during re-syncs to avoid bloating the audit log.
 
 **Core + JSON**
-Frequently queried attributes (`displayName`, `resourceType`, `department`) are real SQL columns with indexes. System-specific fields that vary by source live in an `extendedAttributes` NVARCHAR(MAX) JSON column. This gives you index performance on hot paths without a rigid, source-specific schema.
+Frequently queried attributes (`displayName`, `resourceType`, `department`) are real SQL columns with indexes. System-specific fields that vary by source live in an `extendedAttributes` TEXT (JSON) column. This gives you index performance on hot paths without a rigid, source-specific schema.
 
 **Unified business roles**
 Business roles are not stored in a separate table. They are `Resources` with `resourceType = 'BusinessRole'`. Their assignments are `ResourceAssignments` with `assignmentType = 'Governed'`. Their resource grants are `ResourceRelationships` with `relationshipType = 'Contains'`. The result is a single set of views, risk scores, and queries that apply to all resource types equally.
@@ -155,8 +155,8 @@ Identities carry the `contextId` because organizational context (department, tea
 | Property | Value |
 |---|---|
 | Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `displayName`, `contextId`, `riskScore`.
 
@@ -169,8 +169,8 @@ The join table between Identities and Principals. One identity links to one or m
 | Property | Value |
 |---|---|
 | Primary Key | Composite: `identityId` + `principalId` |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | No |
+| Created by | Migration `001_core_schema.sql` |
 
 ---
 
@@ -202,8 +202,8 @@ Each entity has a single `contextId` column. If an entity needs to participate i
 | Property | Value |
 |---|---|
 | Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | No |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `displayName`, `contextType`, `systemId`, `parentContextId` (self-referencing for hierarchy).
 
@@ -217,9 +217,9 @@ Represents a connected authorization source. Every resource and principal is own
 
 | Property | Value |
 |---|---|
-| Primary Key | `id` INT IDENTITY |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Primary Key | `id` SERIAL |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `displayName`, `systemType` (e.g. `EntraID`, `Omada`, `SAP`, `CSV`), `enabled`.
 
@@ -232,8 +232,8 @@ Any permission-granting entity: Entra ID groups, directory roles, application ro
 | Property | Value |
 |---|---|
 | Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `displayName`, `resourceType`, `systemId`, `contextId` (optional — classification or grouping context), `extendedAttributes` (JSON), `catalogId`, `isHidden`, `riskScore`.
 
@@ -246,8 +246,8 @@ Captures who has access to what, and how. The `assignmentType` column distinguis
 | Property | Value |
 |---|---|
 | Primary Key | Composite: `resourceId` + `principalId` + `assignmentType` |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `assignmentType`, `policyId`, `state`, `assignmentStatus`, `expirationDateTime`.
 
@@ -260,8 +260,8 @@ Resource-to-resource links. Used for two purposes: `Contains` links a business r
 | Property | Value |
 |---|---|
 | Primary Key | Composite: `parentResourceId` + `childResourceId` + `relationshipType` |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `relationshipType`, `roleName`, `roleOriginSystem`.
 
@@ -274,8 +274,8 @@ All identity types from any system. The `principalType` column distinguishes hum
 | Property | Value |
 |---|---|
 | Primary Key | `id` GUID |
-| Temporal | Yes |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | Yes (via `_history` trigger) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `displayName`, `principalType`, `systemId`, `contextId` (optional — source system org structure, e.g. AD OU), `extendedAttributes` (JSON), `riskScore`.
 
@@ -283,13 +283,13 @@ Key columns: `displayName`, `principalType`, `systemId`, `contextId` (optional �
 
 ### PrincipalActivity
 
-High-frequency activity signals: sign-ins, per-app usage, AI agent invocations. This table is intentionally **not** temporal. See [Activity Data](#activity-data-principalactivity) below for the reason.
+High-frequency activity signals: sign-ins, per-app usage, AI agent invocations. This table is intentionally **not** tracked by audit triggers. See [Activity Data](#activity-data-principalactivity) below for the reason.
 
 | Property | Value |
 |---|---|
 | Primary Key | Composite: `principalId` + `resourceId` + `systemId` + `activityType` |
-| Temporal | No (upsert-based) |
-| Created by | `Initialize-FGSystemTables` |
+| Audit history | No (upsert-based) |
+| Created by | Migration `001_core_schema.sql` |
 
 Key columns: `activityType`, `lastActivityDateTime`, `activityCount`.
 
@@ -302,8 +302,8 @@ Risk assessment results for any entity type (Principal, Resource, Identity, Cont
 | Property | Value |
 |---|---|
 | Primary Key | Composite: `entityId` + `entityType` |
-| Temporal | Yes |
-| Created by | `Initialize-FGRiskScoreTables` |
+| Audit history | No |
+| Created by | Migration `004_risk_scoring.sql` |
 
 Key columns: `riskScore`, `riskTier`, `riskDirectScore`, `riskMembershipScore`, `riskStructuralScore`, `riskPropagatedScore`, `riskClassifierMatches` (JSON), `riskOverride`, `riskOverrideReason`.
 
@@ -345,7 +345,7 @@ The `resourceType` column on the Resources table is a free-form string. These ar
 | Custom | Any string — fully extensible for any authorization source |
 
 !!! tip "Extending resourceType"
-    You can use any string value for custom source systems. The model does not enforce an enum — `resourceType` is NVARCHAR(100). Use a consistent naming convention such as `SystemPrefix_TypeName` (e.g., `SAP_Role`, `Pathlock_Permission`) so queries and views remain readable.
+    You can use any string value for custom source systems. The model does not enforce an enum — `resourceType` is TEXT. Use a consistent naming convention such as `SystemPrefix_TypeName` (e.g., `SAP_Role`, `Pathlock_Permission`) so queries and views remain readable.
 
 ---
 
@@ -385,7 +385,7 @@ PrincipalActivity is physically separated from Principals by design, even though
 
 **Why not store activity in Principals?**
 
-Principals is a temporal table. SQL Server temporal tables record a new history row every time any column value changes. Sign-in timestamps change daily — sometimes hourly — for active accounts. Storing `lastSignInDateTime` on Principals would generate enormous version history for data that is not meaningful to audit. A user's last sign-in two minutes ago is not a material change that anyone needs to review.
+Principals is tracked by the `_history` audit trigger, which records a JSONB snapshot every time a row changes. Sign-in timestamps change daily — sometimes hourly — for active accounts. Storing `lastSignInDateTime` on Principals would generate enormous audit history for data that is not meaningful to review. A user's last sign-in two minutes ago is not a material change that anyone needs to audit.
 
 **What PrincipalActivity does instead:**
 

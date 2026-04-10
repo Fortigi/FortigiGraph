@@ -135,7 +135,7 @@ Business role (access package) assignments for a user. Only returns active gover
 
 #### GET /api/user/:id/history
 
-Temporal version history for a user principal. Each entry represents one version of the row and includes a `diff` showing what changed from the previous version.
+Version history for a user principal. Each entry represents one version of the row and includes a `diff` showing what changed from the previous version.
 
 **Response**
 
@@ -153,7 +153,7 @@ Temporal version history for a user principal. Each entry represents one version
 }
 ```
 
-**Reads From:** `Principals FOR SYSTEM_TIME ALL`
+**Reads From:** `Principals via `_history` audit table`
 
 ---
 
@@ -248,9 +248,9 @@ Paginated list of principals assigned to this resource, with membership type bad
 
 #### GET /api/resources/:id/history
 
-Temporal version history for a resource. Same format as [`GET /api/user/:id/history`](#get-apiuseridhistory).
+Version history for a resource. Same format as [`GET /api/user/:id/history`](#get-apiuseridhistory).
 
-**Reads From:** `Resources FOR SYSTEM_TIME ALL`
+**Reads From:** `Resources via `_history` audit table`
 
 ---
 
@@ -410,9 +410,9 @@ Pending (open) assignment requests for a business role.
 
 ### GET /api/access-package/:id/history
 
-Temporal version history for the business role resource record. Same format as [`GET /api/user/:id/history`](#get-apiuseridhistory).
+Version history for the business role resource record. Same format as [`GET /api/user/:id/history`](#get-apiuseridhistory).
 
-**Reads From:** `Resources FOR SYSTEM_TIME ALL`
+**Reads From:** `Resources via `_history` audit table`
 
 ---
 

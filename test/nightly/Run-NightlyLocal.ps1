@@ -317,18 +317,25 @@ if (-not $SkipIntegration) {
         # PowerShell → cmd → docker → sh → psql chain on Windows. The -c flag
         # with embedded single quotes inside double quotes breaks ~50% of the
         # time depending on which shell layer strips them.
+        # Use dollar-quoting ($$public$$) instead of single quotes ('public')
+        # because PowerShell strips single quotes from strings piped through
+        # docker compose exec, causing psql to interpret 'public' as a column
+        # reference instead of a string literal. The SQL is in a single-quoted
+        # string so PowerShell won't try to expand $$ as a variable.
         $env:MSYS_NO_PATHCONV = '1'
-        $sql = "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+        $sql = 'SELECT tablename FROM pg_tables WHERE schemaname=$$public$$ ORDER BY tablename'
         $listOutput = $sql | & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
             psql -U $pgUser -d $pgDatabase -A -t 2>&1
         Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
         # Coerce each line to a string before .Trim() — if `docker compose exec`
         # itself errored we get ErrorRecord objects mixed in, and ErrorRecord
-        # doesn't have a Trim() method.
+        # doesn't have a Trim() method. Also filter out lines that look like
+        # psql error messages so they don't fake a non-empty result set.
         $existingTables = @($listOutput |
+            Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
             ForEach-Object { [string]$_ } |
             ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' })
+            Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' -and $_ -notmatch '^(ERROR|LINE |DETAIL|HINT)' })
 
         if ($existingTables.Count -eq 0) {
             # Fallback: try the -c approach in case piping didn't work
@@ -336,12 +343,13 @@ if (-not $SkipIntegration) {
             $env:MSYS_NO_PATHCONV = '1'
             $listOutput = & docker compose exec -T -e PGPASSWORD=$pgPassword postgres `
                 psql -U $pgUser -d $pgDatabase -A -t `
-                -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" 2>&1
+                -c 'SELECT tablename FROM pg_tables WHERE schemaname=$$public$$ ORDER BY tablename' 2>&1
             Remove-Item Env:MSYS_NO_PATHCONV -ErrorAction SilentlyContinue
             $existingTables = @($listOutput |
+                Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
                 ForEach-Object { [string]$_ } |
                 ForEach-Object { $_.Trim() } |
-                Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' })
+                Where-Object { $_ -ne '' -and $_ -notmatch '^[\(\)]' -and $_ -notmatch '^(ERROR|LINE |DETAIL|HINT)' })
         }
 
         if ($existingTables.Count -eq 0) {

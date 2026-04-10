@@ -67,10 +67,19 @@ const SCHEMAS = {
     },
   },
   'resource-assignments': {
-    required: ['resourceId', 'principalId', 'assignmentType'],
+    required: ['assignmentType'],
+    // resourceId + principalId are required, but can also be supplied as
+    // resourceExternalId + principalExternalId when using deterministic IDs.
+    // The normalization layer converts them before they hit the database.
+    requiredOneOf: [
+      { fields: ['resourceId', 'resourceExternalId'] },
+      { fields: ['principalId', 'principalExternalId'] },
+    ],
     fields: {
       resourceId: { type: 'uuid' },
       principalId: { type: 'uuid' },
+      resourceExternalId: { type: 'string', maxLength: 500 },
+      principalExternalId: { type: 'string', maxLength: 500 },
       principalType: { type: 'string', maxLength: 50 },
       assignmentType: { type: 'string', enum: ASSIGNMENT_TYPES },
       complianceState: { type: 'string', maxLength: 50 },
@@ -82,10 +91,16 @@ const SCHEMAS = {
     },
   },
   'resource-relationships': {
-    required: ['parentResourceId', 'childResourceId', 'relationshipType'],
+    required: ['relationshipType'],
+    requiredOneOf: [
+      { fields: ['parentResourceId', 'parentExternalId'] },
+      { fields: ['childResourceId', 'childExternalId'] },
+    ],
     fields: {
       parentResourceId: { type: 'uuid' },
       childResourceId: { type: 'uuid' },
+      parentExternalId: { type: 'string', maxLength: 500 },
+      childExternalId: { type: 'string', maxLength: 500 },
       relationshipType: { type: 'string', enum: RELATIONSHIP_TYPES },
       roleName: { type: 'string', maxLength: 255 },
       roleOriginSystem: { type: 'string', maxLength: 255 },
@@ -306,6 +321,18 @@ export function validateRecords(records, entityType, idGeneration) {
     for (const field of schema.required) {
       if (rec[field] === undefined || rec[field] === null || rec[field] === '') {
         errors.push(`Record ${i}: missing required field '${field}'`);
+      }
+    }
+
+    // Check requiredOneOf — at least one of the listed fields must be present.
+    // Used by resource-assignments and resource-relationships to accept either
+    // the UUID field (resourceId) or the external-ID alias (resourceExternalId).
+    if (schema.requiredOneOf) {
+      for (const group of schema.requiredOneOf) {
+        const hasAny = group.fields.some(f => rec[f] !== undefined && rec[f] !== null && rec[f] !== '');
+        if (!hasAny) {
+          errors.push(`Record ${i}: one of [${group.fields.join(', ')}] is required`);
+        }
       }
     }
 

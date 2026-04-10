@@ -31,11 +31,10 @@ Debug output writes to the host (not the pipeline), so it does not interfere wit
 
 | Issue | Solution |
 |-------|---------|
-| **SQL connection fails** | Run `Connect-FGSQLServer -ConfigFile config.json`. This re-establishes the connection and automatically updates the SQL Server firewall rule with your current public IP. |
+| **Database connection fails** | Check that the `postgres` container is healthy (`docker compose ps`). Verify `DATABASE_URL` in the web container's environment. For direct access, connect to `localhost:5432` with the credentials from your `.env` file or `docker-compose.yml`. |
 | **"No Access Token found"** | Run `Get-FGAccessToken -ConfigFile config.json`. Tokens expire after approximately one hour in interactive sessions. |
 | **Permission errors after changing the App Registration** | `Start-FGSync` always acquires a fresh token at the start of each run. For manual commands, run `Get-FGAccessToken -ConfigFile config.json` again to pick up new permissions. Allow up to 15 minutes for Graph API permission grants to propagate. |
-| **"Temporal table schema error" / cannot ALTER table** | Do not modify temporal tables directly in SQL. Use the `Sync-FG*` functions, which detect schema changes and handle versioning safely. If a column must be added, use `Add-FGSQLTableColumn`. |
-| **Cannot TRUNCATE a temporal table** | SQL Server forbids `TRUNCATE` on system-versioned tables. Use `DELETE FROM dbo.TableName` or `Clear-FGSQLTable -TableName dbo.TableName` instead. |
+| **Migration errors on startup** | Check the web container logs (`docker compose logs web`). Migrations run automatically and are idempotent. If a migration fails, fix the underlying issue and restart the web container. |
 | **Sync skips expected data** | Check two things: (1) confirm the entity type is enabled in the config (`Sync.EntityType.Enabled = true`), and (2) verify the App Registration has the required Graph API permission (see [Required Permissions](#required-permissions) below). |
 | **UI shows a blank or empty matrix** | Run `Sync-FGMaterializedViews -ConfigFile config.json` to refresh the materialized view tables that the matrix reads from. This is normally run automatically at the end of `Start-FGSync`. |
 | **Risk scores not visible in the UI** | Run `Invoke-FGRiskScoring -ConfigFile config.json` to populate the `RiskScores` table. Risk scoring does not run as part of `Start-FGSync` — it is a separate step. |

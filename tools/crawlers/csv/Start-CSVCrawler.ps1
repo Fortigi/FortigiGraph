@@ -230,52 +230,17 @@ $systemLookup[$SystemName] = $fallbackSystemId
 
 $syncStart = Get-Date
 
-Update-CrawlerProgress -Step 'Reading CSV files' -Pct 8 -Detail "Folder: $CsvFolder"
-
-# ─── Systems.csv (optional — additional systems) ─────────────────
-# Expected columns: DisplayName, SystemType, Description (all optional except DisplayName)
-# Each row becomes a System record. The systemId is returned by the ingest API.
-# Resources/principals can reference a system by name (SystemName column);
-# unmatched ones fall back to the Step 1 system.
-Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking for Systems.csv..." -ForegroundColor Cyan
-Update-CrawlerProgress -Step 'Processing systems' -Pct 10 -Detail 'Reading Systems.csv'
-$systemsCsv = Read-CsvFile 'Systems.csv'
-if ($systemsCsv) {
-    Write-Host "  Found $($systemsCsv.Count) system(s) in Systems.csv" -ForegroundColor Gray
-    foreach ($sysRow in $systemsCsv) {
-        $sName = if ($sysRow.PSObject.Properties.Name -contains 'DisplayName') { $sysRow.DisplayName } else { $null }
-        $sType = if ($sysRow.PSObject.Properties.Name -contains 'SystemType') { $sysRow.SystemType } else { $SystemType }
-        $sDesc = if ($sysRow.PSObject.Properties.Name -contains 'Description') { $sysRow.Description } else { $null }
-        if (-not $sName) { continue }
-
-        try {
-            $sResult = Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
-                syncMode = 'delta'
-                records  = @(@{
-                    systemType  = $sType
-                    displayName = $sName
-                    description = $sDesc
-                    enabled     = $true
-                    syncEnabled = $true
-                })
-            }
-            $sId = $null
-            if ($sResult -and $sResult.systemIds -and $sResult.systemIds.Count -gt 0) {
-                $sId = [int]$sResult.systemIds[0]
-            }
-            if ($sId) {
-                $systemLookup[$sName] = $sId
-                Write-Host "  System '$sName' → ID $sId" -ForegroundColor Gray
-            } else {
-                Write-Host "  System '$sName' registered (no ID returned — will use fallback)" -ForegroundColor Yellow
-            }
-        } catch {
-            Write-Host "  System '$sName' registration failed: $($_.Exception.Message)" -ForegroundColor Yellow
+# ─── Helper: resolve a column by checking multiple candidate names ─
+# Returns the first non-empty value found, or $null if none match.
+function Get-Col {
+    param($Row, [string[]]$Names)
+    foreach ($n in $Names) {
+        if ($Row.PSObject.Properties.Name -contains $n) {
+            $v = $Row.$n
+            if ($null -ne $v -and "$v" -ne '') { return "$v" }
         }
     }
-    Write-Host "  System lookup: $($systemLookup.Count) system(s) available" -ForegroundColor Gray
-} else {
-    Write-Host "  No Systems.csv — all data scoped to fallback system ($SystemName)" -ForegroundColor Gray
+    return $null
 }
 
 # Helper: resolve a system name from a CSV row to a systemId. Falls back to the
@@ -285,8 +250,116 @@ function Resolve-SystemId {
     $sName = $null
     if ($Row.PSObject.Properties.Name -contains 'SystemName') { $sName = $Row.SystemName }
     elseif ($Row.PSObject.Properties.Name -contains 'System') { $sName = $Row.System }
+    elseif ($Row.PSObject.Properties.Name -contains 'SYSTEMREF_VALUE') { $sName = $Row.SYSTEMREF_VALUE }
     if ($sName -and $systemLookup.ContainsKey($sName)) { return $systemLookup[$sName] }
     return $fallbackSystemId
+}
+
+# ─── Helper: group records by systemId and send per-system batches ──
+function Send-GroupedBySystem {
+    param(
+        [string]$Endpoint,
+        [string]$SyncMode = 'full',
+        [hashtable]$Scope = @{},
+        [array]$Records,
+        [int]$BatchSize = 10000
+    )
+    $grouped = @{}
+    foreach ($rec in $Records) {
+        $sid = $rec['_systemId']
+        if (-not $sid) { $sid = $fallbackSystemId }
+        $rec.Remove('_systemId')
+        if (-not $grouped.ContainsKey($sid)) { $grouped[$sid] = @() }
+        $grouped[$sid] += $rec
+    }
+    foreach ($sid in $grouped.Keys) {
+        $batch = $grouped[$sid]
+        $seen = @{}
+        foreach ($r in $batch) {
+            $key = $r['externalId']
+            if (-not $key) {
+                $key = "$($r['resourceExternalId'])|$($r['principalExternalId'])|$($r['parentExternalId'])|$($r['childExternalId'])"
+            }
+            $seen[$key] = $r
+        }
+        $deduped = @($seen.Values)
+        if ($deduped.Count -ne $batch.Count) {
+            Write-Host "    Deduped: $($batch.Count) → $($deduped.Count) records" -ForegroundColor DarkGray
+        }
+        if ($grouped.Count -gt 1) {
+            Write-Host "    System $sid`: $($deduped.Count) records" -ForegroundColor DarkGray
+        }
+        Send-IngestBatch -Endpoint $Endpoint -SystemId $sid -SyncMode $SyncMode `
+            -Scope $Scope -Records $deduped -BatchSize $BatchSize
+    }
+}
+
+Update-CrawlerProgress -Step 'Reading CSV files' -Pct 8 -Detail "Folder: $CsvFolder"
+
+# ─── Systems.csv (optional — additional systems) ─────────────────
+# Expected columns: DisplayName, SystemType, Description (all optional except DisplayName)
+# Each row becomes a System record. The systemId is returned by the ingest API.
+# Resources/principals can reference a system by name (SystemName column);
+# unmatched ones fall back to the Step 1 system.
+Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking for Systems.csv / System.csv..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Processing systems' -Pct 10 -Detail 'Reading Systems.csv'
+# Try both filenames — the Omada export uses "System.csv", the generic format uses "Systems.csv"
+$systemsCsv = Read-CsvFile 'Systems.csv'
+if (-not $systemsCsv) { $systemsCsv = Read-CsvFile 'System.csv' }
+if ($systemsCsv) {
+    Write-Host "  Found $($systemsCsv.Count) system(s) in CSV" -ForegroundColor Gray
+
+    # Build all system records first, then send as one batch to avoid rate limiting
+    $sysRecords = @()
+    $sysNames = @()
+    foreach ($sysRow in $systemsCsv) {
+        $sName = Get-Col $sysRow '_DISPLAYNAME','DisplayName','Name'
+        $sType = Get-Col $sysRow 'SystemType','Type'
+        if (-not $sType) { $sType = $SystemType }
+        $sDesc = Get-Col $sysRow 'DESCRIPTION','Description'
+        if (-not $sName) { continue }
+        # Deduplicate by name
+        if ($sysNames -contains $sName) { continue }
+        $sysNames += $sName
+        $sysRecords += @{
+            systemType  = $sType
+            displayName = $sName
+            description = $sDesc
+            enabled     = $true
+            syncEnabled = $true
+        }
+    }
+
+    if ($sysRecords.Count -gt 0) {
+        # Send all systems in one batch call (avoids 429 rate limiting)
+        $sResult = Invoke-IngestAPI -Endpoint 'ingest/systems' -Body @{
+            syncMode = 'delta'
+            records  = $sysRecords
+        }
+        # Map system names → IDs from the response
+        if ($sResult -and $sResult.systemIds) {
+            for ($i = 0; $i -lt [Math]::Min($sysNames.Count, $sResult.systemIds.Count); $i++) {
+                $systemLookup[$sysNames[$i]] = [int]$sResult.systemIds[$i]
+                Write-Host "  System '$($sysNames[$i])' → ID $($sResult.systemIds[$i])" -ForegroundColor DarkGray
+            }
+        }
+        # For any systems that didn't get an ID back, look them up individually
+        foreach ($sName in $sysNames) {
+            if (-not $systemLookup.ContainsKey($sName)) {
+                try {
+                    $lookup = Invoke-RestMethod -Uri "$ApiBaseUrl/systems" -Headers @{ 'Authorization' = "Bearer $ApiKey" } -TimeoutSec 30
+                    $found = $lookup | Where-Object { $_.displayName -eq $sName } | Select-Object -First 1
+                    if ($found) {
+                        $systemLookup[$sName] = [int]$found.id
+                        Write-Host "  System '$sName' → ID $($found.id) (via lookup)" -ForegroundColor DarkGray
+                    }
+                } catch { }
+            }
+        }
+    }
+    Write-Host "  System lookup: $($systemLookup.Count) system(s) available" -ForegroundColor Gray
+} else {
+    Write-Host "  No Systems.csv / System.csv — all data scoped to fallback system ($SystemName)" -ForegroundColor Gray
 }
 
 # For backward compat, $systemId points to the fallback
@@ -299,14 +372,15 @@ $orgUnits = Read-CsvFile 'Orgunits.csv'
 if ($orgUnits) {
     $records = @($orgUnits | ForEach-Object {
         @{
-            externalId       = $_.OU_KEY
-            displayName      = $_.OU_Name
+            _systemId        = Resolve-SystemId $_
+            externalId       = Get-Col $_ 'OU_KEY','_ID','Id','ExternalId'
+            displayName      = Get-Col $_ 'OU_Name','_DISPLAYNAME','DisplayName','Name'
             contextType      = 'OrgUnit'
-            department       = $_.OU_Description
-            parentExternalId = $_.Parent_OU_Key
+            department       = Get-Col $_ 'OU_Description','Description','Department'
+            parentExternalId = Get-Col $_ 'Parent_OU_Key','ParentId','ParentExternalId'
         }
     })
-    Send-IngestBatch -Endpoint 'ingest/contexts' -SystemId $systemId -SyncMode 'full' `
+    Send-GroupedBySystem -Endpoint 'ingest/contexts' -SyncMode 'full' `
         -Scope @{ contextType = 'OrgUnit' } -Records $records
 }
 
@@ -314,18 +388,72 @@ if ($orgUnits) {
 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing resources (permissions)..." -ForegroundColor Cyan
 Update-CrawlerProgress -Step 'Syncing resources' -Pct 28 -Detail 'Reading Permissions.csv'
 $permissions = Read-CsvFile 'Permissions.csv'
+if (-not $permissions) { $permissions = Read-CsvFile 'Permission-full-details.csv' }
 if ($permissions) {
     $records = @($permissions | ForEach-Object {
-        $type = $_.ResourceTypeName
+        $type = Get-Col $_ 'ResourceTypeName','ROLETYPEREF_VALUE','ResourceType','Type'
         if ($type -eq 'Business Role') { $type = 'BusinessRole' }
+        $deleted = Get-Col $_ 'Deleted','RESOURCESTATUS_ENGLISH'
+        $isActive = -not ($deleted -eq 'True' -or $deleted -eq '1' -or $deleted -eq 'Deleted')
         @{
-            externalId   = $_._ID
-            displayName  = $_.DisplayName
+            _systemId    = Resolve-SystemId $_
+            externalId   = Get-Col $_ '_ID','Id','ExternalId','_UID'
+            displayName  = Get-Col $_ 'DisplayName','_DISPLAYNAME','NAME','Name'
+            description  = Get-Col $_ 'Description','DESCRIPTION'
             resourceType = $type
-            enabled      = ($_.Deleted -ne 'True')
+            enabled      = $isActive
         }
     })
-    Send-IngestBatch -Endpoint 'ingest/resources' -SystemId $systemId -SyncMode 'full' -Records $records
+    Send-GroupedBySystem -Endpoint 'ingest/resources' -SyncMode 'full' -Records $records
+}
+
+# ─── Resource → System mapping (ResourceSystem.csv) ─────────────
+# This file links resources to systems by name. Each row has an Id (the
+# resource's external ID) and a SystemName. After resources have been imported
+# above (all scoped to the fallback system), we re-ingest them grouped by
+# their real system so the systemId FK gets set correctly.
+Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Checking for ResourceSystem.csv..." -ForegroundColor Cyan
+Update-CrawlerProgress -Step 'Linking resources to systems' -Pct 33 -Detail 'Reading ResourceSystem.csv'
+$resourceSystem = Read-CsvFile 'ResourceSystem.csv'
+if ($resourceSystem) {
+    Write-Host "  Found $($resourceSystem.Count) resource-system mapping(s)" -ForegroundColor Gray
+
+    # Group by SystemName and re-ingest each group under the correct systemId.
+    # Records whose SystemName doesn't match any known system stay on the fallback.
+    $reRecords = @($resourceSystem | Where-Object { $_.Deleted -ne '1' -and $_.Deleted -ne 'True' } | ForEach-Object {
+        $cols = $_.PSObject.Properties.Name
+        $extId = if ($cols -contains 'Id') { $_.Id }
+                 elseif ($cols -contains '_ID') { $_._ID }
+                 else { $null }
+        $name  = if ($cols -contains 'DisplayName') { $_.DisplayName }
+                 elseif ($cols -contains 'TechName')  { $_.TechName }
+                 else { $null }
+        $rType = if ($cols -contains 'ResourceType') { $_.ResourceType }
+                 elseif ($cols -contains 'ResourceTypeName') { $_.ResourceTypeName }
+                 else { $null }
+        if ($rType -eq 'Business Role') { $rType = 'BusinessRole' }
+        if (-not $extId) { return }
+
+        $sysName = if ($cols -contains 'SystemName') { $_.SystemName } else { $null }
+        $sid = if ($sysName -and $systemLookup.ContainsKey($sysName)) { $systemLookup[$sysName] } else { $fallbackSystemId }
+
+        @{
+            _systemId    = $sid
+            externalId   = $extId
+            displayName  = $name
+            resourceType = $rType
+            enabled      = $true
+        }
+    } | Where-Object { $_ })
+
+    if ($reRecords.Count -gt 0) {
+        # Use delta mode — we're updating existing resources, not replacing them.
+        # This preserves any resources that aren't in ResourceSystem.csv.
+        Send-GroupedBySystem -Endpoint 'ingest/resources' -SyncMode 'delta' -Records $reRecords
+    }
+    Write-Host "  Linked $($reRecords.Count) resources to their systems" -ForegroundColor Green
+} else {
+    Write-Host "  No ResourceSystem.csv — resources stay on fallback system" -ForegroundColor Gray
 }
 
 # ─── Resource Relationships (Nesting) ────────────────────────────
@@ -335,12 +463,13 @@ $nesting = Read-CsvFile 'Permission-Nesting.csv'
 if ($nesting) {
     $records = @($nesting | ForEach-Object {
         @{
-            parentExternalId = $_.ParentPermissionID
-            childExternalId  = $_.ChildPermissionID
+            _systemId        = Resolve-SystemId $_
+            parentExternalId = Get-Col $_ 'ParentPermissionID','ParentUID','ParentId'
+            childExternalId  = Get-Col $_ 'ChildPermissionID','ChildUID','ChildId'
             relationshipType = 'Contains'
         }
-    })
-    Send-IngestBatch -Endpoint 'ingest/resource-relationships' -SystemId $systemId -SyncMode 'full' `
+    } | Where-Object { $_.parentExternalId -and $_.childExternalId })
+    Send-GroupedBySystem -Endpoint 'ingest/resource-relationships' -SyncMode 'full' `
         -Scope @{ relationshipType = 'Contains' } -Records $records
 }
 
@@ -350,15 +479,25 @@ Update-CrawlerProgress -Step 'Syncing users' -Pct 48 -Detail 'Reading Users.csv'
 $users = Read-CsvFile 'Users.csv'
 if ($users) {
     $records = @($users | ForEach-Object {
+        $empId = Get-Col $_ '_ID','EmployeeNumber','Employee_ID','Id','ExternalId'
         @{
-            externalId     = $_._ID
-            displayName    = $_.DisplayName
-            email          = $_.EmailAddress
-            principalType  = 'User'
-            accountEnabled = ($_.Deleted -ne 'True')
+            _systemId      = Resolve-SystemId $_
+            externalId     = $empId
+            displayName    = Get-Col $_ 'DisplayName','_DISPLAYNAME','Employee_fullname','Name'
+            email          = Get-Col $_ 'EmailAddress','EMAIL','Email'
+            jobTitle       = Get-Col $_ 'Job_Title','JobTitle','JOBTITLE'
+            department     = Get-Col $_ 'Department','OU_KEY'
+            principalType  = Get-Col $_ 'Employee_Type','PrincipalType','Type'
+            accountEnabled = -not ((Get-Col $_ 'Deleted','Status') -in @('True','1','Deleted','Inactive'))
         }
-    })
-    Send-IngestBatch -Endpoint 'ingest/principals' -SystemId $systemId -SyncMode 'full' `
+    } | Where-Object { $_.externalId -and $_.displayName })
+    # Normalise principalType — map Omada Employee_Type to our conventions
+    foreach ($r in $records) {
+        if (-not $r.principalType -or $r.principalType -notin @('User','ServicePrincipal','ManagedIdentity','WorkloadIdentity','AIAgent','ExternalUser','SharedMailbox')) {
+            $r.principalType = 'User'
+        }
+    }
+    Send-GroupedBySystem -Endpoint 'ingest/principals' -SyncMode 'full' `
         -Scope @{ principalType = 'User' } -Records $records
 }
 
@@ -369,12 +508,13 @@ $assignments = Read-CsvFile 'Account-Permission.csv'
 if ($assignments) {
     $records = @($assignments | ForEach-Object {
         @{
-            resourceExternalId = $_.PermissionID
-            principalExternalId = $_.AccountID
-            assignmentType = 'Direct'
+            _systemId           = Resolve-SystemId $_
+            resourceExternalId  = Get-Col $_ 'PermissionID','ResouceUID','ResourceUID','ResourceId','_ID'
+            principalExternalId = Get-Col $_ 'AccountID','Employee_ID','Account','UserId','PrincipalId'
+            assignmentType      = 'Direct'
         }
-    })
-    Send-IngestBatch -Endpoint 'ingest/resource-assignments' -SystemId $systemId -SyncMode 'full' `
+    } | Where-Object { $_.resourceExternalId -and $_.principalExternalId })
+    Send-GroupedBySystem -Endpoint 'ingest/resource-assignments' -SyncMode 'full' `
         -Scope @{ assignmentType = 'Direct' } -Records $records
 }
 
@@ -383,15 +523,25 @@ Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Syncing identities..." -Foregroun
 Update-CrawlerProgress -Step 'Syncing identities' -Pct 68 -Detail 'Reading Identities.csv'
 $identities = Read-CsvFile 'Identities.csv'
 if ($identities) {
-    $records = @($identities | Where-Object { $_.IdentityType -eq 'Primary' } | ForEach-Object {
+    # Filter to primary identities only if the IdentityType column exists
+    $filtered = $identities
+    $hasTypeCol = $identities | Select-Object -First 1 | ForEach-Object { $_.PSObject.Properties.Name -contains 'IDENTITYTYPE_ENGLISH' -or $_.PSObject.Properties.Name -contains 'IdentityType' }
+    if ($hasTypeCol) {
+        $filtered = @($identities | Where-Object {
+            $t = Get-Col $_ 'IdentityType','IDENTITYTYPE_ENGLISH'
+            (-not $t) -or ($t -eq 'Primary') -or ($t -eq 'Person')
+        })
+    }
+    $records = @($filtered | ForEach-Object {
         @{
-            externalId  = $_._ID
-            displayName = $_.DisplayName
-            email       = $_.EmailAddress
-            employeeId  = $_.EMPLOYEEID
+            _systemId   = Resolve-SystemId $_
+            externalId  = Get-Col $_ '_ID','Id','ExternalId','IDENTITYID'
+            displayName = Get-Col $_ 'DisplayName','_DISPLAYNAME','Name'
+            email       = Get-Col $_ 'EmailAddress','EMAIL','Email'
+            employeeId  = Get-Col $_ 'EMPLOYEEID','EmployeeID','EmployeeId','Employee_ID'
         }
-    })
-    Send-IngestBatch -Endpoint 'ingest/identities' -SystemId $systemId -SyncMode 'full' -Records $records
+    } | Where-Object { $_.externalId })
+    Send-GroupedBySystem -Endpoint 'ingest/identities' -SyncMode 'full' -Records $records
 }
 
 # ─── Certifications ──────────────────────────────────────────────
@@ -401,12 +551,13 @@ $cras = Read-CsvFile 'CRAs.csv'
 if ($cras) {
     $records = @($cras | ForEach-Object {
         @{
+            _systemId  = Resolve-SystemId $_
             externalId = $_._ID
             decision   = $_.Decision
             reviewedBy = $_.ReviewerDisplayName
         }
     })
-    Send-IngestBatch -Endpoint 'ingest/governance/certifications' -SystemId $systemId -SyncMode 'full' -Records $records
+    Send-GroupedBySystem -Endpoint 'ingest/governance/certifications' -SyncMode 'full' -Records $records
 }
 
 # ─── Refresh Views ───────────────────────────────────────────────
@@ -422,6 +573,29 @@ if ($RefreshViews) {
     }
 }
 
+# ─── Refresh Contexts ────────────────────────────────────────────
+Update-CrawlerProgress -Step 'Refreshing contexts' -Pct 82 -Detail 'Rebuilding derived OrgUnit contexts'
+try {
+    $ctxResult = Invoke-IngestAPI -Endpoint 'ingest/refresh-contexts' -Body @{}
+    Write-Host "  Contexts refreshed: $($ctxResult.contextsCreated) row(s)" -ForegroundColor Green
+} catch {
+    Write-Host "  Context refresh failed (non-critical): $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 $elapsed = (Get-Date) - $syncStart
 Write-Host "`n=== CSV Sync Complete ===" -ForegroundColor Green
 Write-Host "Duration: $([Math]::Round($elapsed.TotalSeconds)) seconds" -ForegroundColor Gray
+
+# Write a full-sync log entry for the Sync Log page
+try {
+    Invoke-IngestAPI -Endpoint 'ingest/sync-log' -Body @{
+        syncType    = 'CSV-FullCrawl'
+        tableName   = $null
+        startTime   = $syncStart.ToString('o')
+        endTime     = (Get-Date).ToString('o')
+        recordCount = 0
+        status      = 'Success'
+    } | Out-Null
+} catch {
+    Write-Host "  (sync log write failed: $($_.Exception.Message))" -ForegroundColor DarkGray
+}
