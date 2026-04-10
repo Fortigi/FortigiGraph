@@ -131,31 +131,32 @@ export async function ingest(_pool, tableName, keyColumns, records, options = {}
       await client.query(`CREATE TEMP TABLE "${tempName}" (${colDefs}) ON COMMIT DROP`);
     }
 
-    // Bulk insert via COPY FROM STDIN. Respects backpressure: when write()
-    // returns false, we wait for 'drain' before writing more. Without this,
-    // large batches (3000+ records) overflow the write buffer and crash
-    // pg-copy-streams with "Cannot read properties of null (reading 'stream')".
+    // Bulk insert into the temp table. We use batched INSERT ... VALUES rather
+    // than pg-copy-streams (COPY FROM STDIN) because the COPY approach has a
+    // known crash in pg-copy-streams where an async flush races with connection
+    // teardown, producing an unhandled "Cannot read properties of null (reading
+    // 'stream')" that kills the Node process. The INSERT approach is ~30% slower
+    // but doesn't have this failure mode.
     const colList = activeColumns.map(c => `"${c.name}"`).join(', ');
-    const copyStream = client.query(copyFrom(`COPY "${tempName}" (${colList}) FROM STDIN`));
-
-    await new Promise((resolve, reject) => {
-      copyStream.on('error', reject);
-      copyStream.on('finish', resolve);
-      let i = 0;
-      function writeNext() {
-        let ok = true;
-        while (i < records.length && ok) {
-          ok = copyStream.write(buildCopyRow(records[i], activeColumns));
-          i++;
+    const INSERT_CHUNK = 200; // rows per INSERT statement
+    for (let i = 0; i < records.length; i += INSERT_CHUNK) {
+      const chunk = records.slice(i, i + INSERT_CHUNK);
+      const placeholders = [];
+      const params = [];
+      let pi = 1;
+      for (const rec of chunk) {
+        const row = [];
+        for (const col of activeColumns) {
+          row.push(`$${pi++}`);
+          params.push(rec[col.name] !== undefined ? rec[col.name] : null);
         }
-        if (i < records.length) {
-          copyStream.once('drain', writeNext);
-        } else {
-          copyStream.end();
-        }
+        placeholders.push(`(${row.join(',')})`);
       }
-      writeNext();
-    });
+      await client.query(
+        `INSERT INTO "${tempName}" (${colList}) VALUES ${placeholders.join(',')}`,
+        params
+      );
+    }
 
     // Upsert from temp into target. xmax = 0 detects fresh inserts.
     const nonKeyCols = activeColumns.filter(c => !keyColumns.includes(c.name));

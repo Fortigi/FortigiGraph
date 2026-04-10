@@ -128,6 +128,10 @@ export function normalizeRecords(records, coreColumns, options = {}) {
 
 function coerceValue(value) {
   if (value === null || value === undefined) return null;
+  // Empty strings → null. Postgres rejects '' for typed columns (uuid,
+  // timestamptz, integer, boolean). Treating them as null is always safe and
+  // matches the intent of "this field was not supplied".
+  if (value === '') return null;
   if (typeof value === 'boolean') return value ? 1 : 0;
   if (typeof value === 'object' && !(value instanceof Date)) return JSON.stringify(value);
   return value;

@@ -55,26 +55,28 @@ function buildCopyRow(record, activeColumns) {
 }
 
 async function copyRows(client, tempTable, activeColumns, records) {
+  // Batched INSERT instead of COPY FROM STDIN. The COPY approach had a crash
+  // in pg-copy-streams at high row counts (see engine.js for details).
   const colList = activeColumns.map(c => `"${c.name}"`).join(', ');
-  const stream = client.query(copyFrom(`COPY "${tempTable}" (${colList}) FROM STDIN`));
-  await new Promise((resolve, reject) => {
-    stream.on('error', reject);
-    stream.on('finish', resolve);
-    let i = 0;
-    function writeNext() {
-      let ok = true;
-      while (i < records.length && ok) {
-        ok = stream.write(buildCopyRow(records[i], activeColumns));
-        i++;
+  const CHUNK = 200;
+  for (let i = 0; i < records.length; i += CHUNK) {
+    const chunk = records.slice(i, i + CHUNK);
+    const placeholders = [];
+    const params = [];
+    let pi = 1;
+    for (const rec of chunk) {
+      const row = [];
+      for (const col of activeColumns) {
+        row.push(`$${pi++}`);
+        params.push(rec[col.name] !== undefined ? rec[col.name] : null);
       }
-      if (i < records.length) {
-        stream.once('drain', writeNext);
-      } else {
-        stream.end();
-      }
+      placeholders.push(`(${row.join(',')})`);
     }
-    writeNext();
-  });
+    await client.query(
+      `INSERT INTO "${tempTable}" (${colList}) VALUES ${placeholders.join(',')}`,
+      params
+    );
+  }
 }
 
 export async function startSession(_pool, tableName, keyColumns, records, options = {}) {
