@@ -1,19 +1,20 @@
 # SQL Views
 
-FortigiGraph creates a set of SQL views automatically during sync. These views handle the heavy lifting — recursive membership resolution, IST/SOLL gap analysis, approval timeline metrics — so your queries stay simple.
+Identity Atlas creates SQL views automatically via the migration system. These views handle the heavy lifting — recursive membership resolution and permission assignment aggregation — so your queries stay simple.
 
-Views are created by the relevant `Initialize-FG*Views` function and refreshed automatically by `Start-FGSync`. You can also run the initializers directly after a schema change.
+Views are created by migration files in `app/api/src/db/migrations/` and applied automatically when the web container starts.
 
 ---
 
 ## Resource Permission Views
 
-Created by `Initialize-FGResourceViews`.
+Created by migrations `005_views.sql` and `011_governed_in_matrix_view.sql`.
 
 | View | Purpose |
 |------|---------|
 | `vw_ResourceMembersRecursive` | All memberships (direct + indirect via nested groups) using a recursive CTE. Cycle-safe, max 10 levels deep. Includes the full membership path. |
 | `vw_ResourceUserPermissionAssignments` | All assignment types (Direct, Indirect, Owner, Eligible, CrossResourceIndirect) in a single queryable surface. Includes the `managedByAccessPackage` flag for IST vs SOLL analysis. |
+| `vw_UserPermissionAssignments` | Simplified permission view used by the matrix UI — one row per user-resource-type combination. |
 
 ```sql
 -- Who has access to a specific resource, including indirect memberships?
@@ -36,65 +37,30 @@ ORDER BY permissionCount DESC;
 
 ---
 
-## Governance Analysis Views
+## Governance View
 
-Created by `Initialize-FGAccessPackageViews`.
+Created by migration `005_views.sql`.
 
 | View | Purpose |
 |------|---------|
 | `vw_UserPermissionAssignmentViaBusinessRole` | Maps users through business roles to the resources those roles grant |
-| `vw_DirectGroupMemberships` | Direct memberships that are **not** governed by a business role (IST vs SOLL gap) |
-| `vw_DirectGroupOwnerships` | Direct ownerships that are not governed by a business role |
-| `vw_UnmanagedPermissions` | Union of unmanaged memberships and ownerships — the full IST/SOLL gap |
-| `vw_BusinessRoleAssignmentDetails` | How each business role was assigned: automatic, requested, or admin-assigned |
-| `vw_BusinessRoleLastReview` | Most recent certification review per business role |
-| `vw_ApprovedRequestTimeline` | Approved requests with full response time metrics and time-bucket breakdown |
-| `vw_DeniedRequestTimeline` | Denied requests with response time analysis |
-| `vw_PendingRequestTimeline` | Pending requests with aging metrics and an `isOverdue` flag (threshold: 7 days) |
-| `vw_RequestResponseMetrics` | Aggregate approval statistics per business role (avg, min, max response hours) |
 
 ```sql
--- Find all permissions that exist outside of business role governance
-SELECT principalId, displayName, resourceId, resourceName, assignmentType
-FROM vw_UnmanagedPermissions
-ORDER BY displayName;
-
--- Average approval time per business role
-SELECT resourceId, resourceName, avgResponseHours, totalApproved
-FROM vw_RequestResponseMetrics
-ORDER BY avgResponseHours DESC;
-
--- Pending requests older than 24 hours
-SELECT resourceId, resourceName, principalId, requestedDateTime, hoursPending, isOverdue
-FROM vw_PendingRequestTimeline
-WHERE hoursPending > 24
-ORDER BY hoursPending DESC;
-
--- Last review date per business role
-SELECT resourceId, resourceName, lastReviewDateTime, lastDecision
-FROM vw_BusinessRoleLastReview
-ORDER BY lastReviewDateTime ASC;
+-- Which resources does a user reach via business role governance?
+SELECT principalId, displayName, resourceId, resourceName, businessRoleName
+FROM "vw_UserPermissionAssignmentViaBusinessRole"
+WHERE principalId = 'user-guid-here';
 ```
+
+!!! note "Planned governance views"
+    Additional governance analysis views (IST/SOLL gap analysis, approval timelines, request metrics) are planned for a future release. The current v5 migration focused on core permission views.
 
 ---
 
 ## Materialized Views
 
-For large environments, the recursive and multi-join views above can be slow to query on every page load. `Sync-FGMaterializedViews` pre-computes the most expensive views into indexed tables that the UI queries directly.
-
-| Materialized Table | Source View | Why It Exists |
-|---|---|---|
-| `mat_UserPermissionAssignmentViaBusinessRole` | `vw_UserPermissionAssignmentViaBusinessRole` | Eliminates multi-table join on every business role lookup |
-| `mat_UserPermissionAssignments` | `vw_ResourceUserPermissionAssignments` | Eliminates recursive CTE on every matrix page load |
-| `mat_UserCounts` | Aggregation over assignments | "Top N users by permission count" becomes an instant index scan |
-
-```powershell
-# Refresh all materialized views manually (also runs at end of Start-FGSync)
-Sync-FGMaterializedViews
-```
-
-!!! note
-    Materialized tables contain a point-in-time snapshot. They are refreshed at the end of each sync run. For real-time accuracy, query the underlying views directly.
+!!! note "v5 status"
+    Materialized views are planned for a future release to improve query performance in large environments. The current v5 views are standard PostgreSQL views. For large deployments, consider adding PostgreSQL materialized views manually if needed.
 
 ---
 

@@ -1,8 +1,8 @@
 # Risk Scoring Data Model
 
-FortigiGraph stores risk intelligence in a set of dedicated SQL tables that sit alongside the core data model. These tables hold the inputs that drive scoring (org context, classifier patterns, correlation rules) and the outputs (per-entity scores, clusters, overrides).
+Identity Atlas stores risk intelligence in a set of dedicated SQL tables that sit alongside the core data model. These tables hold the inputs that drive scoring (org context, classifier patterns, correlation rules) and the outputs (per-entity scores, clusters, overrides).
 
-None of these tables are created by `Initialize-FGSystemTables`. They are created on demand by the risk scoring functions the first time each is used.
+These tables are created by migration `004_risk_scoring.sql` when the web container starts.
 
 ---
 

@@ -4,7 +4,7 @@
 
 AI agent identities appear automatically as organizations adopt Azure OpenAI, Copilot Studio, Logic Apps with AI calls, and custom agent frameworks. These non-human identities accumulate permissions automatically — often without explicit governance review.
 
-FortigiGraph treats AI agent identities as first-class citizens: syncing them into the Principals table with dedicated `principalType` values, tracking their invocation activity, and scoring them with agent-specific risk signals.
+Identity Atlas treats AI agent identities as first-class citizens: syncing them into the Principals table with dedicated `principalType` values, tracking their invocation activity, and scoring them with agent-specific risk signals.
 
 ## How AI Agents Are Detected
 

@@ -1,40 +1,58 @@
 # Syncing from Entra ID
 
-FortigiGraph provides deep integration with Microsoft Entra ID (Azure AD). A single orchestrator command syncs all identity and governance data into Azure SQL, or you can run individual sync functions to target specific entity types.
+Identity Atlas provides deep integration with Microsoft Entra ID (Azure AD). The Entra ID crawler fetches data from the Microsoft Graph API and posts it to the Ingest API — no direct database access required.
 
 ---
 
-## Orchestrated Sync
+## How It Works
 
-The recommended way to run a full sync is through the `Start-FGSync` orchestrator:
+In v5, sync is **API-driven**. The crawler script (`tools/crawlers/entra-id/Start-EntraIDCrawler.ps1`) runs inside the worker container (or standalone) and:
+
+1. Authenticates to Microsoft Graph using credentials from the config file or the Crawlers admin page
+2. Fetches each entity type via the Graph API
+3. POSTs the data to the Ingest API on the web container
+4. The web container validates, deduplicates, and persists the data to PostgreSQL
+
+This architecture means the worker container has **no database driver** — all persistence flows through the API.
+
+---
+
+## Running a Sync
+
+### Via the UI (recommended)
+
+Navigate to **Admin → Crawlers** and configure an Entra ID crawler. The wizard walks you through:
+
+1. Enter your Tenant ID, Client ID, and Client Secret
+2. Validate permissions (the wizard checks each required Graph permission)
+3. Select which entity types to sync
+4. Configure optional identity filters and custom attributes
+5. Set a schedule (or run immediately)
+
+### Via the command line
 
 ```powershell
-Start-FGSync -ConfigFile '.\Config\mycompany.json'
+.\tools\crawlers\entra-id\Start-EntraIDCrawler.ps1 `
+    -ApiBaseUrl "http://localhost:3001/api" `
+    -ApiKey "fgc_abc123..." `
+    -ConfigFile ".\setup\config\mycompany.json"
 ```
 
-`Start-FGSync` handles the entire sync lifecycle:
-
-- **Fresh authentication** — acquires a new Graph API token at the start of every run, so stale tokens from previous sessions never cause failures
-- **SQL connection and firewall** — connects to Azure SQL and adds the current IP to the firewall if needed
-- **Parallel execution** — runs up to 6 entity types concurrently via a runspace pool
-- **Schema evolution** — creates tables, adds missing columns, and builds indexes automatically
-- **View creation** — creates or refreshes all analytical SQL views after data sync completes
-- **Summary report** — prints a table of what was synced and how long each step took
-
-### Optional flags
+### Crawler flags
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `-SyncServicePrincipals $true` | Off | Sync managed identities, AI agents, and service principals |
-| `-SyncPrincipalActivity $true` | Off | Populate PrincipalActivity table from sign-in data |
-| `-SyncAppRoleActivity $true` | Off | Sync per-app sign-in events from the audit log (last 30 days) |
-| `-ParallelExecution $false` | On | Disable parallel execution for sequential debugging |
-| `-UserFilter "accountEnabled eq true"` | All enabled | OData filter applied to user sync |
-| `-UserAdditionalAttributes @(...)` | Standard columns | Extra Graph attributes to capture |
-| `-SkipServerValidation` | Off | Skip SQL Server existence check (speeds up repeat runs) |
-
-!!! tip
-    All flags can also be set in the config file under the `Sync` section, so you do not need to pass them every time. Command-line flags always override the config file.
+| `-SyncPrincipals` | On | Sync user principals |
+| `-SyncServicePrincipals` | Off | Sync managed identities, AI agents, and service principals |
+| `-SyncResources` | On | Sync groups, directory roles, app roles |
+| `-SyncAssignments` | On | Sync group memberships, owners, eligible members |
+| `-SyncGovernance` | On | Sync catalogs, access packages, policies, reviews |
+| `-SyncContexts` | On | Sync calculated department contexts |
+| `-SyncPim` | Off | Sync PIM eligible members |
+| `-RefreshViews` | On | Refresh SQL views after sync |
+| `-CustomUserAttributes` | Empty | Extra Graph attributes to capture for users |
+| `-CustomGroupAttributes` | Empty | Extra Graph attributes to capture for groups |
+| `-IdentityFilter` | None | Filter which users are treated as identities |
 
 ---
 
@@ -57,122 +75,7 @@ flowchart TD
     EntraID --> APP[AP Policies → AssignmentPolicies]
     EntraID --> APQ[AP Requests → AssignmentRequests]
     EntraID --> APV[AP Reviews → CertificationDecisions]
-    EntraID --> PA[Sign-in Activity → PrincipalActivity]
 ```
-
----
-
-## Individual Sync Commands
-
-You can run any sync function individually. This is useful for incremental refreshes, troubleshooting, or building custom orchestration scripts.
-
-### Principals
-
-Sync human user accounts from Entra ID:
-
-```powershell
-# Standard sync — maps core attributes to dedicated columns
-Sync-FGPrincipal
-
-# Add extra Graph attributes — new columns are created automatically
-Sync-FGPrincipal -AdditionalAttributes @('extensionAttribute1', 'officeLocation', 'employeeType')
-```
-
-Sync non-human identities (off by default in `Start-FGSync`):
-
-```powershell
-# All enabled service principals, managed identities, and AI agents
-Sync-FGServicePrincipal
-
-# Skip built-in Microsoft first-party service principals
-Sync-FGServicePrincipal -ExcludeFirstPartyMicrosoft
-
-# Add custom AI agent detection patterns (regex applied to displayName)
-Sync-FGServicePrincipal -AINamePatterns @('(?i)mycompany.*bot', '(?i).*-agent$')
-```
-
-`Sync-FGServicePrincipal` automatically classifies each principal into one of:
-`ServicePrincipal`, `ManagedIdentity`, `WorkloadIdentity`, or `AIAgent`.
-See [principalType conventions](../concepts/data-model.md) for the full detection rules.
-
-### Resources
-
-```powershell
-# Groups → Resources (resourceType = 'EntraGroup')
-Sync-FGGroup
-
-# Directory roles → Resources (resourceType = 'EntraDirectoryRole')
-Sync-FGEntraDirectoryRole
-
-# App role assignments → Resources (resourceType = 'EntraAppRole') + ResourceAssignments
-Sync-FGEntraAppRoleAssignment
-```
-
-### Memberships
-
-```powershell
-# Direct group members → ResourceAssignments (assignmentType = 'Direct')
-Sync-FGGroupMember
-
-# PIM eligible members → ResourceAssignments (assignmentType = 'Eligible')
-Sync-FGGroupEligibleMember
-
-# Group owners → ResourceAssignments (assignmentType = 'Owner')
-Sync-FGGroupOwner
-```
-
-### Relationships and Org Structure
-
-```powershell
-# Resource-to-resource nesting and grants → ResourceRelationships
-Sync-FGResourceRelationship
-
-# Calculate Contexts from department/org data in Identities
-Sync-FGContext
-```
-
-### Governance
-
-Sync the full Entra ID entitlement management model:
-
-```powershell
-# Catalogs → GovernanceCatalogs
-Sync-FGCatalog
-
-# Access packages → Resources (resourceType = 'BusinessRole')
-Sync-FGAccessPackage
-
-# AP assignments → ResourceAssignments (assignmentType = 'Governed')
-Sync-FGAccessPackageAssignment
-
-# AP resource role scopes → ResourceRelationships (relationshipType = 'Contains')
-Sync-FGAccessPackageResourceRoleScope
-
-# Assignment policies → AssignmentPolicies
-Sync-FGAccessPackageAssignmentPolicy
-
-# Assignment requests → AssignmentRequests
-Sync-FGAccessPackageAssignmentRequest
-
-# Access reviews → CertificationDecisions
-Sync-FGAccessPackageAccessReview
-```
-
-### Activity Data
-
-```powershell
-# Migrate lastSignIn from Principals.extendedAttributes → PrincipalActivity (no Graph call)
-Sync-FGPrincipalActivity
-
-# Fetch fresh sign-in data directly from Graph API
-Sync-FGPrincipalActivity -FetchFromGraph
-
-# Per-app sign-in events from the audit log (last 30 days) → AppRoleActivity
-Sync-FGAppRoleActivity
-```
-
-!!! note
-    `PrincipalActivity` is intentionally **not** tracked by audit triggers. It uses an upsert pattern to avoid polluting the audit history with daily timestamp changes. Query the `_history` table for `Principals` and `ResourceAssignments` to see historical changes.
 
 ---
 
@@ -191,20 +94,15 @@ Sync-FGAppRoleActivity
 | `PrivilegedEligibilitySchedule.Read.AzureADGroup` | Read PIM group eligibility schedules |
 
 !!! tip
-    `New-FGConfig` sets up all these permissions automatically when creating the App Registration. You do not need to configure them manually.
+    The in-browser wizard validates all these permissions automatically — it shows a green/red checklist of which ones are granted.
 
 ---
 
 ## Schema Evolution
 
-FortigiGraph adds columns to existing tables without dropping or recreating them. This means you can extend what gets synced at any time without losing historical data.
+The Ingest API adds columns to existing tables without dropping or recreating them. Any attribute returned by the Graph API can be captured:
 
-```powershell
-# Initial sync with default columns
-Sync-FGPrincipal
+- **Core attributes** get dedicated SQL columns (indexed, filterable)
+- **All remaining attributes** are stored in the `extendedAttributes` JSON column
 
-# Six months later — add new attributes; columns are added automatically
-Sync-FGPrincipal -AdditionalAttributes @('employeeType', 'officeLocation', 'city')
-```
-
-Any attribute returned by the Graph API can be captured. Core attributes get dedicated SQL columns (indexed, filterable). All remaining attributes are stored in the `extendedAttributes` JSON column.
+To capture additional Graph attributes, add them via `-CustomUserAttributes` or `-CustomGroupAttributes` on the crawler, or configure them in the UI wizard.

@@ -2,9 +2,9 @@
 
 ## Introduction
 
-The FortigiGraph UI is backed by a Node.js + Express REST API that queries the Azure SQL database. All endpoints are prefixed with `/api/` and require Entra ID JWT authentication unless explicitly noted below.
+The Identity Atlas UI is backed by a Node.js + Express REST API that queries the PostgreSQL database. All endpoints are prefixed with `/api/` and require Entra ID JWT authentication unless explicitly noted below.
 
-The backend runs on **port 3001** and connects to Azure SQL using a connection pool. In development, it can run against mock data (set `USE_MOCK=true`).
+The backend runs on **port 3001** and connects to PostgreSQL using a connection pool. In development, it can run against mock data (set `USE_MOCK=true`).
 
 ```mermaid
 flowchart LR

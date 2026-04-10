@@ -1,211 +1,128 @@
 # CSV Import
 
-FortigiGraph can ingest authorization data from any system that can produce a CSV export — HR platforms, PAM tools, SIEMs, IGA platforms such as Omada or SailPoint, ticketing systems, or custom applications. CSV sync uses the same ingestion pipeline as the Entra ID sync, giving you consistent change tracking, audit history, and IST/SOLL analysis across all your identity sources.
+Identity Atlas can ingest authorization data from any system that can produce a CSV export — HR platforms, PAM tools, SIEMs, IGA platforms such as Omada or SailPoint, ticketing systems, or custom applications. CSV sync uses the same Ingest API as the Entra ID sync, giving you consistent change tracking, audit history, and IST/SOLL analysis across all your identity sources.
 
 ---
 
-## Overview
+## How It Works
 
-The CSV orchestrator dispatches a folder of CSV files to the correct sync function for each entity type:
+In v5, CSV import is **API-driven**. The CSV crawler script (`tools/crawlers/csv/Start-CSVCrawler.ps1`) reads CSV files in the Identity Atlas canonical schema and POSTs them to the Ingest API. Source-specific transformations (e.g., Omada to Identity Atlas format) happen **before** the crawler runs via a separate transform script.
 
 ```powershell
-Start-FGCSVSync -ConfigFile '.\Config\mycompany.json' -CSVFolder '.\exports\acme-hr'
+.\tools\crawlers\csv\Start-CSVCrawler.ps1 `
+    -ApiBaseUrl "http://localhost:3001/api" `
+    -ApiKey "fgc_abc123..." `
+    -CsvFolder ".\TransformedData"
 ```
 
-You can also run individual CSV sync functions directly for targeted imports or custom pipelines.
+### Crawler flags
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `-ApiBaseUrl` | Required | Base URL of the Ingest API |
+| `-ApiKey` | Required | Crawler API key (`fgc_...`) |
+| `-CsvFolder` | Required | Path to folder containing Identity Atlas schema CSV files |
+| `-SystemName` | `CSV Import` | Display name for the fallback system |
+| `-SystemType` | `CSV` | System type identifier (e.g., `CSV`, `Omada`) |
+| `-Delimiter` | `;` | CSV delimiter character |
+| `-RefreshViews` | On | Refresh SQL views after sync |
 
 !!! tip
-    Columns not explicitly mapped by the sync function are automatically collected into the `extendedAttributes` JSON column. You do not need to pre-process or strip your exports — just pass the file as-is.
+    Columns not explicitly mapped are automatically collected into the `extendedAttributes` JSON column. You do not need to pre-process or strip your exports — just pass the file as-is.
 
 ---
 
-## CSV Functions
+## CSV Schema
 
-### Sync-FGCSVSystem
+CSV files must follow the Identity Atlas canonical schema. See [CSV Import Schema](../architecture/csv-import-schema.md) for the full specification.
 
-Create or update system records that identify the source of the data.
+### Supported entity types
 
-```powershell
-Sync-FGCSVSystem -FilePath ".\exports\systems.csv"
-```
+The crawler looks for these files in the CSV folder (filename must match the entity type):
 
-| Column | Required | Description |
-|--------|----------|-------------|
-| `id` | No | Stable system GUID; auto-generated if omitted |
-| `displayName` | Yes | Human-readable system name |
-| `systemType` | Yes | Type identifier (e.g. `HR`, `PAM`, `IGA`, `SIEM`) |
-| `enabled` | No | `true` / `false`; defaults to `true` |
+| File | Entity | Target Table |
+|------|--------|-------------|
+| `systems.csv` | Systems | Systems |
+| `principals.csv` | User/service accounts | Principals |
+| `resources.csv` | Roles, groups, permissions | Resources |
+| `assignments.csv` | Who has access to what | ResourceAssignments |
+| `business-roles.csv` | Business roles | Resources (`resourceType='BusinessRole'`) |
+| `identities.csv` | Real persons | Identities + IdentityMembers |
+| `certifications.csv` | Review decisions | CertificationDecisions |
 
----
+### Key columns per entity
 
-### Sync-FGCSVPrincipal
-
-Import user and identity accounts from any system.
-
-```powershell
-Sync-FGCSVPrincipal -FilePath ".\exports\users.csv" -SystemId 2
-```
+**Systems:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | Yes | Stable principal GUID in the source system |
-| `displayName` | Yes | Full name |
-| `email` | No | Primary email address |
-| `principalType` | No | `User`, `ExternalUser`, `SharedMailbox`, etc. Defaults to `User` |
-| `department` | No | Department name |
-| `jobTitle` | No | Job title |
-| *extra columns* | No | Stored in `extendedAttributes` JSON |
+| `ExternalId` | Yes | Stable system identifier |
+| `DisplayName` | Yes | Human-readable system name |
+| `SystemType` | Yes | Type identifier (e.g. `HR`, `PAM`, `IGA`, `SIEM`) |
 
----
-
-### Sync-FGCSVResource
-
-Import permission-granting resources (roles, groups, application permissions, SharePoint sites, etc.).
-
-```powershell
-Sync-FGCSVResource -FilePath ".\exports\resources.csv" -SystemId 2
-```
+**Principals:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | Yes | Stable resource GUID in the source system |
-| `displayName` | Yes | Resource name |
-| `resourceType` | No | Type label (e.g. `SharePointSite`, `AppRole`, `DevOpsGroup`) |
-| `description` | No | Free-text description |
-| *extra columns* | No | Stored in `extendedAttributes` JSON |
+| `ExternalId` | Yes | Stable principal ID in the source system |
+| `DisplayName` | Yes | Full name |
+| `Email` | No | Primary email address |
+| `PrincipalType` | No | `User`, `ExternalUser`, `SharedMailbox`, etc. Defaults to `User` |
+| `Department` | No | Department name |
+| `JobTitle` | No | Job title |
 
----
-
-### Sync-FGCSVResourceAssignment
-
-Import who has access to what.
-
-```powershell
-Sync-FGCSVResourceAssignment -FilePath ".\exports\assignments.csv"
-```
+**Resources:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `resourceId` | Yes | Matches `Resources.id` |
-| `principalId` | Yes | Matches `Principals.id` |
-| `assignmentType` | No | `Direct`, `Governed`, `Eligible`, etc. Defaults to `Direct` |
+| `ExternalId` | Yes | Stable resource ID in the source system |
+| `DisplayName` | Yes | Resource name |
+| `ResourceType` | No | Type label (e.g. `SharePointSite`, `AppRole`, `DevOpsGroup`) |
 
----
-
-### Sync-FGCSVBusinessRole
-
-Import business roles from IGA platforms such as Omada or SailPoint. Business roles are stored in the `Resources` table with `resourceType = 'BusinessRole'`, making them first-class participants in views, risk scoring, and clustering alongside Entra ID access packages.
-
-```powershell
-Sync-FGCSVBusinessRole -FilePath ".\exports\business-roles.csv"
-```
+**Resource Assignments:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | Yes | Stable role GUID |
-| `displayName` | Yes | Role name |
-| `catalogId` | No | Links the role to a `GovernanceCatalogs` entry |
-| `isHidden` | No | Exclude from UI listings |
-| *extra columns* | No | Stored in `extendedAttributes` JSON |
+| `ResourceExternalId` | Yes | Matches resource ExternalId |
+| `PrincipalExternalId` | Yes | Matches principal ExternalId |
+| `AssignmentType` | No | `Direct`, `Governed`, `Eligible`, etc. Defaults to `Direct` |
 
----
-
-### Sync-FGCSVIdentity
-
-Import real-person identities that aggregate accounts from multiple systems (the result of account correlation).
-
-```powershell
-Sync-FGCSVIdentity -FilePath ".\exports\identities.csv"
-```
+**Business Roles:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | Yes | Stable identity GUID |
-| `displayName` | Yes | Person's name |
-| `email` | No | Canonical email address |
-| `principalIds` | No | Semicolon-separated list of `Principals.id` values to link |
+| `ExternalId` | Yes | Stable role ID |
+| `DisplayName` | Yes | Role name |
+| `CatalogExternalId` | No | Links the role to a GovernanceCatalogs entry |
 
----
-
-### Sync-FGCSVCertification
-
-Import certification or review decisions from external IGA platforms.
-
-```powershell
-Sync-FGCSVCertification -FilePath ".\exports\certifications.csv"
-```
+**Certifications:**
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | Yes | Decision GUID |
-| `resourceId` | Yes | Business role or resource being reviewed |
-| `principalId` | Yes | Subject of the review |
-| `decision` | Yes | `Approved`, `Denied`, `NotReviewed` |
-| `reviewedDateTime` | No | ISO 8601 timestamp |
-| `reviewedBy` | No | Reviewer identity |
-
----
-
-### Sync-FGCSVPrincipalActivity
-
-Import sign-in or activity data from a SIEM, PAM tool, or any custom source.
-
-```powershell
-Sync-FGCSVPrincipalActivity -FilePath ".\exports\siem-logins.csv" -DefaultActivityType "SIEMSignIn"
-```
-
-| Column | Required | Description |
-|--------|----------|-------------|
-| `principalId` | Yes | Matches `Principals.id` |
-| `lastActivityDateTime` | Yes | ISO 8601 last observed activity |
-| `activityType` | No | Activity label; falls back to `-DefaultActivityType` |
-| `activityCount` | No | Number of events in the period |
-| `periodStart` | No | ISO 8601 start of aggregation window |
-| `periodEnd` | No | ISO 8601 end of aggregation window |
-
----
-
-### Sync-FGCSVAgentActivity
-
-Import AI agent invocation data from Azure Monitor, APIM, Copilot Studio Analytics, or any custom telemetry pipeline.
-
-```powershell
-Sync-FGCSVAgentActivity -FilePath ".\exports\copilot-invocations.csv"
-Sync-FGCSVAgentActivity -FilePath ".\exports\apim-calls.csv" -DefaultActivityType "ToolCall"
-```
-
-| Column | Required | Description |
-|--------|----------|-------------|
-| `principalId` | Yes | Agent GUID matching a `Principals.id` (`AIAgent` or `ManagedIdentity`) |
-| `resourceId` | No | Resource the agent accessed; nil GUID for general invocation |
-| `lastActivityDateTime` | Yes | ISO 8601 last invocation timestamp |
-| `activityCount` | No | Total invocations in the period |
-| `activityType` | No | See activity types below; falls back to `-DefaultActivityType` |
-| `periodStart` | No | ISO 8601 start of aggregation window |
-| `periodEnd` | No | ISO 8601 end of aggregation window |
-| `extendedAttributes` | No | JSON string for agent context |
-
-**Activity types for agents:**
-
-| Type | Meaning |
-|------|---------|
-| `Invocation` | Agent was called (default) |
-| `ToolCall` | Agent invoked a tool or plugin |
-| `DataAccess` | Agent read from a data source |
-| `ExternalCall` | Agent made an outbound API call |
+| `ExternalId` | Yes | Decision ID |
+| `ResourceExternalId` | Yes | Business role or resource being reviewed |
+| `PrincipalExternalId` | Yes | Subject of the review |
+| `Decision` | Yes | `Approved`, `Denied`, `NotReviewed` |
+| `ReviewedDateTime` | No | ISO 8601 timestamp |
 
 ---
 
 ## CSV Format
 
-All CSV files use **semicolon delimiters** and expect an ISO 8601 format for all date/time values.
+All CSV files use **semicolon delimiters** by default (configurable via `-Delimiter`) and expect ISO 8601 format for all date/time values.
 
-Example agent activity CSV:
+---
 
-```csv
-principalId;resourceId;lastActivityDateTime;activityCount;activityType;extendedAttributes
-3f2504e0-4f89-11d3-9a0c-0305e82c3301;00000000-0000-0000-0000-000000000000;2026-03-15T14:00:00Z;142;Invocation;{"modelVersion":"gpt-4o","orchestratorType":"Copilot Studio"}
-6ba7b810-9dad-11d1-80b4-00c04fd430c8;8a1bd9e2-4712-4c9e-a0d1-c9e7f67f8b3a;2026-03-14T09:30:00Z;37;ToolCall;{"callerSystem":"APIM","gatewayRegion":"westeurope"}
+## Source-Specific Transforms
+
+For IGA platforms like Omada or SailPoint, you first transform their native export format into the Identity Atlas canonical schema, then run the CSV crawler. Example transform scripts are in `tools/csv-templates/transforms/`.
+
+```powershell
+# Step 1: Transform Omada export to Identity Atlas format
+.\tools\csv-templates\transforms\omada-to-identityatlas.ps1 -InputFolder ".\OmadaExport" -OutputFolder ".\TransformedData"
+
+# Step 2: Import transformed data
+.\tools\crawlers\csv\Start-CSVCrawler.ps1 -ApiBaseUrl "http://localhost:3001/api" -ApiKey "fgc_abc..." -CsvFolder ".\TransformedData"
 ```
 
 !!! tip

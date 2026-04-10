@@ -1,6 +1,6 @@
 # Risk Scores API
 
-These endpoints expose identity risk scoring data produced by the FortigiGraph risk scoring engine (`Invoke-FGRiskScoring`) and allow analysts to apply score adjustments with audit trails. All endpoints require `Authorization: Bearer <JWT>`.
+These endpoints expose identity risk scoring data and allow analysts to apply score adjustments with audit trails. In v5, scoring is driven from the UI (Admin > Risk Scoring) via the Node.js scoring engine. All endpoints require `Authorization: Bearer <JWT>`.
 
 ---
 

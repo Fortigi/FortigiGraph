@@ -74,7 +74,7 @@ docker compose up -d --build
 
 # Verify
 docker compose ps
-# Expected: sql (healthy), web (up), worker (up)
+# Expected: postgres (healthy), web (up), worker (up)
 
 # Open the UI — click "Load Demo Data" on the Crawlers page
 Start-Process http://localhost:3001
@@ -218,7 +218,7 @@ cp setup/config/.env.example .env
 
 | Variable | Purpose |
 |---|---|
-| `SQL_PASSWORD` | SQL Server SA password |
+| `POSTGRES_PASSWORD` | PostgreSQL password (dev compose). Production compose still uses `SQL_PASSWORD` for SQL Server. |
 | `CRAWLER_API_KEY` | API key for the worker's crawler |
 | `GRAPH_TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` | For EntraID crawler |
 | `LLM_PROVIDER` / `LLM_API_KEY` | For risk scoring (Anthropic or OpenAI) |

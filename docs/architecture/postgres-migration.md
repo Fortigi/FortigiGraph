@@ -1,9 +1,12 @@
 # PostgreSQL Migration Plan
 
-**Status:** Planning
+**Status:** Structurally complete (April 2026). End-to-end testing in progress.
 **Branch (when started):** `feature/postgres-migration`
 **Owner:** Wim
 **Target:** Identity Atlas v5.0 — drop Microsoft SQL Server entirely, ship on PostgreSQL.
+
+!!! note "Current state"
+    The development Docker stack (`docker-compose.yml`) runs PostgreSQL 16. Schema migrations, the Ingest API, and the web container are fully ported. The production compose file (`docker-compose.prod.yml`) still uses SQL Server 2022 and has not been updated yet. See [postgres-migration-status.md](postgres-migration-status.md) for the detailed overnight migration report.
 
 ---
 

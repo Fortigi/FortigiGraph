@@ -135,7 +135,7 @@ Business role (access package) assignments for a user. Only returns active gover
 
 #### GET /api/user/:id/history
 
-Version history for a user principal. Each entry represents one version of the row and includes a `diff` showing what changed from the previous version.
+Version history for a user principal. Each entry represents a recorded change from the `_history` audit table, including the operation type and a JSONB snapshot of the row data.
 
 **Response**
 
@@ -143,17 +143,16 @@ Version history for a user principal. Each entry represents one version of the r
 {
   "history": [
     {
-      "SysStartTime": "2026-01-15T10:23:00Z",
-      "SysEndTime": "2026-02-01T08:00:00Z",
-      "displayName": "Jane Doe",
-      "department": "Finance",
-      "diff": { "department": { "from": "HR", "to": "Finance" } }
+      "changedAt": "2026-01-15T10:23:00Z",
+      "operation": "U",
+      "rowData": { "displayName": "Jane Doe", "department": "Finance" },
+      "prevData": { "displayName": "Jane Doe", "department": "HR" }
     }
   ]
 }
 ```
 
-**Reads From:** `Principals via `_history` audit table`
+**Reads From:** `_history` audit table (filtered by `tableName = 'Principals'`)
 
 ---
 

@@ -1,6 +1,6 @@
 # Governance Model
 
-FortigiGraph supports business roles, certification reviews, and access policies from any IGA platform — not just Entra ID. The governance model is unified with the resource model: business roles **are** Resources, their assignments **are** ResourceAssignments, and their resource grants **are** ResourceRelationships. Only governance-specific metadata (policies, requests, certification decisions) lives in dedicated tables.
+Identity Atlas supports business roles, certification reviews, and access policies from any IGA platform — not just Entra ID. The governance model is unified with the resource model: business roles **are** Resources, their assignments **are** ResourceAssignments, and their resource grants **are** ResourceRelationships. Only governance-specific metadata (policies, requests, certification decisions) lives in dedicated tables.
 
 ---
 
@@ -135,7 +135,7 @@ The unified model extends the three shared tables with extra columns that carry 
 
 ## IST vs SOLL Analysis
 
-FortigiGraph uses IST/SOLL terminology to express the gap between actual access and governed access.
+Identity Atlas uses IST/SOLL terminology to express the gap between actual access and governed access.
 
 **SOLL (should-be state)**
 Access granted through a business role. Rows in `ResourceAssignments` where `assignmentType = 'Governed'`. This is access that was formally requested, approved, and periodically reviewed.
