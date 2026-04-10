@@ -769,12 +769,12 @@ router.get('/admin/container-stats', async (req, res) => {
     const containers = await dockerRequest('/containers/json?all=0');
     const wanted = containers.filter(c => {
       const names = (c.Names || []).map(n => n.replace(/^\//, ''));
-      return names.some(n => /fortigigraph[-_](sql|web|worker)/i.test(n));
+      return names.some(n => /fortigigraph[-_](sql|postgres|web|worker)/i.test(n));
     });
 
     const results = await Promise.all(wanted.map(async (c) => {
       const name = (c.Names[0] || '').replace(/^\//, '');
-      const service = (name.match(/(sql|web|worker)/i) || [])[1]?.toLowerCase() || name;
+      const service = (name.match(/(postgres|sql|web|worker)/i) || [])[1]?.toLowerCase() || name;
       try {
         const stats = await dockerRequest(`/containers/${c.Id}/stats?stream=false`);
         const memUsage = stats.memory_stats?.usage || 0;
@@ -797,7 +797,7 @@ router.get('/admin/container-stats', async (req, res) => {
       }
     }));
 
-    const order = { web: 0, worker: 1, sql: 2 };
+    const order = { web: 0, worker: 1, postgres: 2, sql: 3 };
     results.sort((a, b) => (order[a.service] ?? 99) - (order[b.service] ?? 99));
     res.json({ containers: results, timestamp: new Date().toISOString() });
   } catch (err) {
