@@ -1,21 +1,10 @@
-# CSV Import Schema — Proposal
+# CSV Import Schema
 
-## Problem
+## Design principle
 
-The current CSV crawler tries to auto-detect column names from different source systems (Omada, generic exports, etc.) using cascading fallback logic (`Get-Col $_ '_ID','Id','ExternalId','_UID'`). This is:
+Identity Atlas defines **one canonical CSV schema** per entity type. Column names, types, and relationships are fixed and documented. The crawler reads exactly this format — no column-name guessing, no aliases, no auto-detection.
 
-- **Fragile** — every new source system adds another guess to the cascade
-- **Untestable** — we can't validate a file against a spec because there is no spec
-- **Opaque** — the user doesn't know what the crawler expects until it fails at runtime
-- **Omada-specific in practice** — the "generic" column mapping is really just the Omada mapping with extra aliases
-
-## Proposed design: fixed schema, user-side transformation
-
-### Principle
-
-Identity Atlas defines **one canonical CSV schema** per entity type. Column names, types, and relationships are fully documented. The crawler handles exactly this format — no guessing, no aliases, no auto-detection.
-
-Source-specific transformation (Omada → Identity Atlas, SAP → Identity Atlas, ServiceNow → Identity Atlas) happens **before import** via a lightweight pre-import script that the user writes or that we provide as a template. This is the right separation of concerns: Identity Atlas owns the target schema, the user owns the source mapping.
+Source-specific transformation (Omada → Identity Atlas, SAP → Identity Atlas, ServiceNow → Identity Atlas) happens **before import** via a lightweight pre-import script. Identity Atlas owns the target schema, the user owns the source mapping. This separation keeps the crawler simple and testable.
 
 ### CSV files and their schemas
 
@@ -248,36 +237,37 @@ Import-Csv "$SourceFolder/Account-Permission.csv" -Delimiter ";" |
 
 This is ~30 lines per source system, easily auditable, and keeps Identity Atlas clean.
 
-### Changes needed to implement this
+### Implementation details
 
-| Area | Change |
-|------|--------|
-| **CSV crawler** (`Start-CSVCrawler.ps1`) | Strip all `Get-Col` fallback logic. Read exactly the schema column names. Fail clearly on missing required columns instead of silently producing nulls. |
-| **Validation** (`validation.js`) | Already handles the schema — no changes needed |
-| **Normalization** (`normalization.js`) | Already handles ExternalId → deterministic UUID — no changes needed |
-| **File slots** (`csvUploads.js`) | Rename slots to match new filenames. Add `IdentityMembers.csv` slot. |
-| **UI wizard** | Update slot labels. Add a "Download schema templates" button that gives the user empty CSVs with just the headers. |
-| **Documentation** | This document (cleaned up) becomes the CSV import guide |
-| **Templates** | Create `tools/csv-templates/schema/*.csv` (header-only) and one example transform |
-| **Auto-classify BusinessRole assignments** | Add a post-import SQL step that updates `assignmentType='Governed'` where the resource is a BusinessRole |
+| Component | What it does |
+|-----------|-------------|
+| **CSV crawler** (`tools/crawlers/csv/Start-CSVCrawler.ps1`) | Reads exactly the schema column names. `Assert-Columns` validates required columns upfront with clear error messages. No `Get-Col` fallback logic. |
+| **Validation** (`app/api/src/ingest/validation.js`) | `requiredOneOf` supports both UUID and ExternalId forms (e.g. `resourceId` or `resourceExternalId`). |
+| **Normalization** (`app/api/src/ingest/normalization.js`) | Converts `*ExternalId` fields to deterministic UUIDs using `${sysPrefix}-resources` / `${sysPrefix}-principals` / `${sysPrefix}-identities` prefixes. |
+| **File slots** (`app/api/src/routes/csvUploads.js`) | 9 slots matching the schema files. Schema headers embedded for the download endpoint. |
+| **UI wizard** (`app/ui/src/components/CrawlersPage.jsx`) | Updated slot labels + tooltips. "Download schema templates" link in the upload step. |
+| **Schema templates** (`tools/csv-templates/schema/*.csv`) | Header-only CSV files — the canonical spec. |
+| **Omada transform** (`tools/csv-templates/transforms/omada-to-identityatlas.ps1`) | Example transform: ~160 lines mapping Omada columns to Identity Atlas schema. |
+| **Auto-classify** (`POST /api/ingest/classify-business-role-assignments`) | Post-import: reclassifies Direct assignments to BusinessRole resources as Governed. |
+| **Backpressure fix** (`app/api/src/ingest/engine.js`, `sessions.js`) | `pg-copy-streams` COPY FROM STDIN now respects write backpressure. |
 
-### What we DON'T do
+### Design rules
 
-- ❌ No column-name guessing or auto-detection
-- ❌ No source-specific logic in the crawler
-- ❌ No post-processing that silently fixes data shape
-- ❌ No "smart" mapping that tries to figure out what the user meant
-- ✅ One schema, clearly documented, user transforms their data to match
-- ✅ Extra columns preserved automatically (no data loss)
-- ✅ Subset imports supported (only provide what you have)
-- ✅ Multi-system supported via optional SystemName column
+- No column-name guessing or auto-detection in the crawler
+- No source-specific logic in the crawler
+- One schema, clearly documented — user transforms their data to match
+- Extra columns preserved automatically in `extendedAttributes` (no data loss)
+- Subset imports supported (only provide what your source has)
+- Multi-system supported via optional `SystemName` column
 
-### Migration from the current Omada-specific crawler
+### Using the Omada transform
 
-The existing Omada data is already imported. Going forward:
-1. Write the Omada transform script (template provided above)
-2. Run it: `pwsh omada-to-identityatlas.ps1 -SourceFolder ./OmadaExport -OutputFolder ./ForImport`
-3. Upload the transformed files to the CSV wizard
-4. The crawler reads them without any special logic
+```powershell
+# Transform Omada exports to Identity Atlas schema
+pwsh tools/csv-templates/transforms/omada-to-identityatlas.ps1 `
+    -SourceFolder ./OmadaExport -OutputFolder ./ForImport
 
-The user's colleague who provides the Omada export just runs the transform script once and uploads the result. If the Omada export format changes, the transform script is the only thing that needs updating — the crawler and Identity Atlas schema stay stable.
+# Upload the transformed files to the CSV crawler wizard in the UI
+```
+
+To support a new source system, copy the Omada transform and adapt the column mappings. The crawler and Identity Atlas schema stay stable.

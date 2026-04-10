@@ -105,7 +105,7 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 - **Group Membership Sync**: Direct, transitive, eligible (PIM), and owner relationships
 - **Orchestrated Sync**: `Start-FGSync` orchestrates all Entra ID operations; `Start-FGCSVSync` orchestrates CSV-based imports for external systems
 - **Parallel Execution**: Up to 6 entity types concurrently via runspace pool
-- **CSV Import**: `Sync-FGCSV*` functions import data from any system via CSV files (systems, principals, resources, assignments, identities, business roles, certifications)
+- **CSV Import**: Canonical schema with 9 file types (Systems, Resources, Users, Assignments, ResourceRelationships, Contexts, Identities, IdentityMembers, Certifications). Source-specific transforms happen outside the crawler — see `tools/csv-templates/transforms/`. Schema templates downloadable from Admin → Crawlers. Auto-classifies Direct assignments to BusinessRole resources as Governed. See [docs/architecture/csv-import-schema.md](docs/architecture/csv-import-schema.md)
 - **Analytical Views**: 12+ SQL views for IST vs SOLL analysis, approval metrics, access reviews
 
 ### 5. Docker Deployment
@@ -399,6 +399,34 @@ FortigiGraph/
 │   └── CreatePSD.ps1       # Module manifest generation
 │
 ├── _Test/                  # Testing scripts and documentation
+│
+├── tools/
+│   ├── crawlers/
+│   │   ├── entra-id/Start-EntraIDCrawler.ps1  # Entra ID crawler (runs in worker container)
+│   │   └── csv/Start-CSVCrawler.ps1           # CSV crawler (canonical schema, runs in worker)
+│   └── csv-templates/
+│       ├── schema/              # Header-only CSV files defining the Identity Atlas schema
+│       │   ├── Systems.csv, Resources.csv, Users.csv, Assignments.csv,
+│       │   ├── ResourceRelationships.csv, Contexts.csv, Identities.csv,
+│       │   ├── IdentityMembers.csv, Certifications.csv
+│       └── transforms/          # Source-specific transform scripts
+│           └── omada-to-identityatlas.ps1  # Omada Identity → Identity Atlas schema
+│
+├── test/
+│   └── nightly/
+│       ├── Run-NightlyLocal.ps1           # Full nightly test suite
+│       ├── Run-NightlyAndReview.ps1       # Wrapper with Claude auto-review on failure
+│       ├── Test-EntraIdCrawler.ps1        # Entra crawler scenarios + deep assertions
+│       ├── Test-LLMSubstrate.ps1          # LLM/secrets/risk-profile smoke test
+│       ├── Register-ReviewSchedule.ps1    # Windows Task Scheduler registration
+│       └── claude-review-prompt.md        # Prompt template for the Claude review agent
+│
+├── docs/
+│   └── architecture/
+│       ├── csv-import-schema.md           # CSV import canonical schema specification
+│       ├── llm-and-risk-scoring.md        # LLM, secrets vault, risk scoring design
+│       ├── postgres-migration.md          # PostgreSQL migration plan
+│       └── docker-setup.md               # Docker deployment architecture
 │
 ├── FortigiGraph.psm1       # Module entry point (auto-loads all functions)
 ├── FortigiGraph.psd1       # Module manifest
