@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useAuth } from '../auth/AuthGate';
 
 function fmtBytes(n) {
   if (!n) return '0 B';
@@ -24,6 +25,7 @@ const SERVICE_LABELS = {
 };
 
 export default function ContainerStatsPage() {
+  const { authFetch } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const prevNet = useRef({});
@@ -32,7 +34,7 @@ export default function ContainerStatsPage() {
 
   const fetchStats = async () => {
     try {
-      const r = await fetch('/api/admin/container-stats');
+      const r = await authFetch('/api/admin/container-stats');
       const j = await r.json();
       if (!r.ok) { setError(j.error || `HTTP ${r.status}`); setData(null); return; }
       setError(null);
