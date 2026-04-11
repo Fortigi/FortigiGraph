@@ -1,0 +1,351 @@
+{
+  "timestamp": "2026-04-11T19:51:40.3827579+02:00",
+  "apiBaseUrl": "http://localhost:3001/api",
+  "inventory": {
+    "systems": 126,
+    "resources": 80000,
+    "businessRoles": 13225,
+    "users": 80000,
+    "identities": 25000,
+    "assignments": 1499932,
+    "governedAssignments": 437354,
+    "relationships": 99998,
+    "contexts": 70229,
+    "certifications": 300000,
+    "syncLogEntries": 343,
+    "lastSyncAt": "2026-04-11T15:21:51.168Z",
+    "riskScores": 0,
+    "activeRiskProfile": 0,
+    "activeClassifiers": 0,
+    "enabledCrawlers": 1,
+    "runningJobs": 0,
+    "llmConfigured": false,
+    "hasData": true
+  },
+  "runsPerEndpoint": 5,
+  "clientTimings": {
+    "systems": {
+      "p50Ms": 4821.9,
+      "path": "/systems",
+      "p95Ms": 18427.6,
+      "respBytes": 47891,
+      "runs": 5,
+      "avgMs": 7759.7
+    },
+    "access-packages": {
+      "p50Ms": 6360.0,
+      "path": "/access-package-resources",
+      "p95Ms": 12788.6,
+      "respBytes": 7794160,
+      "runs": 5,
+      "avgMs": 6901.8
+    },
+    "users-page1": {
+      "p50Ms": 125.2,
+      "path": "/users?limit=25&offset=0",
+      "p95Ms": 140.9,
+      "respBytes": 7907,
+      "runs": 5,
+      "avgMs": 124.4
+    },
+    "dashboard-stats": {
+      "p50Ms": 2926.9,
+      "path": "/admin/dashboard-stats",
+      "p95Ms": 4075.2,
+      "respBytes": 395,
+      "runs": 5,
+      "avgMs": 3101.3
+    },
+    "sync-log": {
+      "p50Ms": 113.4,
+      "path": "/sync-log?limit=25",
+      "p95Ms": 183.4,
+      "respBytes": 6867,
+      "runs": 5,
+      "avgMs": 128.1
+    },
+    "resources-page1": {
+      "p50Ms": 127.1,
+      "path": "/resources?limit=25&offset=0",
+      "p95Ms": 880.4,
+      "respBytes": 10604,
+      "runs": 5,
+      "avgMs": 275.2
+    },
+    "matrix-benchmark-tag": {
+      "p50Ms": 385.9,
+      "path": "/permissions?userLimit=500&filters=%7B%22__userTag%22%3A%22Benchmark%22%7D",
+      "p95Ms": 1346.7,
+      "respBytes": 199998,
+      "runs": 5,
+      "avgMs": 614.4
+    },
+    "users-search": {
+      "p50Ms": 470.8,
+      "path": "/users?limit=25&offset=0&search=user",
+      "p95Ms": 515.9,
+      "respBytes": 7907,
+      "runs": 5,
+      "avgMs": 434.7
+    },
+    "identities-page1": {
+      "p50Ms": 330.6,
+      "path": "/identities?limit=25&offset=0",
+      "p95Ms": 528.1,
+      "respBytes": 16247,
+      "runs": 5,
+      "avgMs": 330.0
+    },
+    "matrix-unfiltered": {
+      "p50Ms": 66737.2,
+      "path": "/permissions?userLimit=25",
+      "p95Ms": 68629.2,
+      "respBytes": 87936518,
+      "runs": 5,
+      "avgMs": 49773.6
+    },
+    "resources-business": {
+      "p50Ms": 84.0,
+      "path": "/resources?limit=25&offset=0&resourceType=BusinessRole",
+      "p95Ms": 131.8,
+      "respBytes": 10795,
+      "runs": 5,
+      "avgMs": 91.1
+    }
+  },
+  "serverSummary": {
+    "totalRecorded": 66,
+    "bufferSize": 66,
+    "endpoints": [
+      {
+        "method": "GET",
+        "route": "/api/permissions",
+        "count": 10,
+        "avg": 20828,
+        "min": 248.3,
+        "max": 58264.1,
+        "p50": 1231,
+        "p95": 58264.1,
+        "p99": 58264.1,
+        "sqlBreakdown": [
+          {
+            "label": "perm-mat-check",
+            "count": 10,
+            "avg": 13.6,
+            "p50": 5.1,
+            "p95": 41.7,
+            "max": 41.7
+          },
+          {
+            "label": "perm-combined-limited",
+            "count": 10,
+            "avg": 5036.1,
+            "p50": 206.3,
+            "p95": 16231.4,
+            "max": 16231.4
+          },
+          {
+            "label": "perm-total-users",
+            "count": 10,
+            "avg": 106.2,
+            "p50": 39.5,
+            "p95": 587.8,
+            "max": 587.8
+          },
+          {
+            "label": "perm-ap-mapping",
+            "count": 10,
+            "avg": 7347.5,
+            "p50": 15.5,
+            "p95": 20582.4,
+            "max": 20582.4
+          },
+          {
+            "label": "perm-tag-resolve",
+            "count": 5,
+            "avg": 381.7,
+            "p50": 199.8,
+            "p95": 959,
+            "max": 959
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "route": "/api/systems",
+        "count": 5,
+        "avg": 7708.1,
+        "min": 4033.9,
+        "max": 18399.7,
+        "p50": 4768.6,
+        "p95": 18399.7,
+        "p99": 18399.7,
+        "sqlBreakdown": [
+          {
+            "label": "systems-list",
+            "count": 5,
+            "avg": 7703.3,
+            "p50": 4765.1,
+            "p95": 18393.9,
+            "max": 18393.9
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "route": "/api/access-package-resources",
+        "count": 5,
+        "avg": 6281.3,
+        "min": 3539.4,
+        "max": 12351.2,
+        "p50": 5637.4,
+        "p95": 12351.2,
+        "p99": 12351.2,
+        "sqlBreakdown": [
+          {
+            "label": "ap-groups",
+            "count": 5,
+            "avg": 5240,
+            "p50": 4209.3,
+            "p95": 11505,
+            "max": 11505
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "route": "/api/admin/dashboard-stats",
+        "count": 5,
+        "avg": 2901.2,
+        "min": 1892.9,
+        "max": 3953.9,
+        "p50": 2678.6,
+        "p95": 3953.9,
+        "p99": 3953.9,
+        "sqlBreakdown": []
+      },
+      {
+        "method": "POST",
+        "route": "/api/crawlers/jobs/claim",
+        "count": 10,
+        "avg": 1339.4,
+        "min": 198.4,
+        "max": 2843.6,
+        "p50": 693.2,
+        "p95": 2843.6,
+        "p99": 2843.6,
+        "sqlBreakdown": []
+      },
+      {
+        "method": "GET",
+        "route": "/api/resources",
+        "count": 10,
+        "avg": 134.2,
+        "min": 30,
+        "max": 821.6,
+        "p50": 48.4,
+        "p95": 821.6,
+        "p99": 821.6,
+        "sqlBreakdown": []
+      },
+      {
+        "method": "GET",
+        "route": "/api/identities",
+        "count": 5,
+        "avg": 279.9,
+        "min": 120.1,
+        "max": 499.1,
+        "p50": 270.4,
+        "p95": 499.1,
+        "p99": 499.1,
+        "sqlBreakdown": [
+          {
+            "label": "identity-summary",
+            "count": 5,
+            "avg": 70.5,
+            "p50": 40.1,
+            "p95": 209.2,
+            "max": 209.2
+          },
+          {
+            "label": "identity-type-dist",
+            "count": 5,
+            "avg": 165.7,
+            "p50": 94.3,
+            "p95": 346.3,
+            "max": 346.3
+          },
+          {
+            "label": "identity-count",
+            "count": 5,
+            "avg": 14.5,
+            "p50": 12.2,
+            "p95": 27,
+            "max": 27
+          },
+          {
+            "label": "identity-list",
+            "count": 5,
+            "avg": 52.5,
+            "p50": 52.2,
+            "p95": 63.7,
+            "max": 63.7
+          }
+        ]
+      },
+      {
+        "method": "GET",
+        "route": "/api/users",
+        "count": 10,
+        "avg": 225.9,
+        "min": 74.4,
+        "max": 424.9,
+        "p50": 111.4,
+        "p95": 424.9,
+        "p99": 424.9,
+        "sqlBreakdown": []
+      },
+      {
+        "method": "GET",
+        "route": "/api/sync-log",
+        "count": 5,
+        "avg": 29.7,
+        "min": 10.2,
+        "max": 74.7,
+        "p50": 19,
+        "p95": 74.7,
+        "p99": 74.7,
+        "sqlBreakdown": [
+          {
+            "label": "sync-log-check",
+            "count": 5,
+            "avg": 6.2,
+            "p50": 5.3,
+            "p95": 11.9,
+            "max": 11.9
+          },
+          {
+            "label": "sync-log-data",
+            "count": 5,
+            "avg": 17.9,
+            "p50": 10.9,
+            "p95": 53.6,
+            "max": 53.6
+          }
+        ]
+      },
+      {
+        "method": "POST",
+        "route": "/api/perf/clear",
+        "count": 1,
+        "avg": 7.6,
+        "min": 7.6,
+        "max": 7.6,
+        "p50": 7.6,
+        "p95": 7.6,
+        "p99": 7.6,
+        "sqlBreakdown": []
+      }
+    ]
+  }
+}
