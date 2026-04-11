@@ -86,7 +86,6 @@ Every feature branch must maintain a `CHANGES.md` file at the repo root. This fi
 ### 1. In-Browser Crawler Wizard
 - The Crawlers page in Admin walks the user through Microsoft Graph credentials → permission validation → object type selection → identity filter → custom attributes → schedules
 - Works against any Entra ID tenant without leaving the browser
-- The legacy `New-FGConfig` PowerShell wizard is still available for users running scripts outside Docker
 
 ### 2. Microsoft Graph API Integration
 - Easy authentication (service principal & interactive)
@@ -247,8 +246,7 @@ The governance model supports business roles, certifications, and access policie
 ```
 FortigiGraph/
 ├── Functions/                  # All PowerShell functions
-│   ├── Base/                   # Core authentication and HTTP request functions (20)
-│   │   ├── New-FGConfig.ps1              # Setup wizard
+│   ├── Base/                   # Core authentication and HTTP request functions (19)
 │   │   ├── Get-FGAccessToken*.ps1        # Token acquisition (3 variants)
 │   │   ├── Invoke-FGGetRequest.ps1       # HTTP GET with auto-pagination
 │   │   ├── Invoke-FGPostRequest.ps1      # HTTP POST wrapper
@@ -564,9 +562,8 @@ Debug output controlled via `$Global:DebugMode`:
 
 | Folder | Purpose | Example |
 |--------|---------|---------|
-| **Functions/Base/** | Core HTTP operations, authentication, setup wizard | `Invoke-FGGetRequest.ps1`, `New-FGConfig.ps1` |
+| **Functions/Base/** | Core HTTP operations, authentication | `Invoke-FGGetRequest.ps1`, `Get-FGAccessToken.ps1` |
 | **Functions/Generic/** | Direct Microsoft Graph API wrappers (1:1 mapping) | `Get-FGUser.ps1`, `Get-FGGroup.ps1` |
-| **Functions/SQL/** | SQL database operations | `Connect-FGSQLServer.ps1`, `Initialize-FGSQLTable.ps1` |
 | **Functions/Sync/** | Data sync operations | `Sync-FGUser.ps1`, `Start-FGSync.ps1` |
 | **Functions/Specific/** | Business logic combining multiple functions | `Confirm-FGGroup.ps1` |
 
@@ -662,7 +659,7 @@ function Get-FGSQLResource {
 
 ## Graph API Permissions
 
-`New-FGConfig` automatically sets up these permissions when creating an App Registration:
+The Crawlers wizard validates these permissions on the App Registration during setup:
 
 | Permission | ID | Purpose |
 |---|---|---|
@@ -795,10 +792,6 @@ All 9 sync functions refactored to use these helpers. Remaining opportunity:
 - **Group fetching** duplicated across 4 group-based syncs (~40 lines × 4). Create `Get-FGGroupsForSync` helper.
 
 ### High-Priority: Massive Functions to Break Down
-
-| Function | Lines | Suggested Split |
-|----------|-------|----------------|
-| `New-FGConfig.ps1` | 836 | Now mostly obsolete in the Docker-only world — the in-browser wizard handles config creation. Keep only the Graph-credentials path for users running scripts outside Docker. |
 
 ### High-Priority: Generic Functions Consolidation
 

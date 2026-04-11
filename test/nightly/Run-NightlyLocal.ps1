@@ -180,7 +180,6 @@ if (-not $SkipPowerShellUnit) {
     # Files we deliberately allow to mention removed functions (legacy help
     # text or migration notes that explain what was removed).
     $allowedLegacyFiles = @(
-        'New-FGConfig.ps1',           # interactive wizard, references removed functions in user-facing prompts
         'Start-EntraIDCrawler.ps1',   # docstring mentions "replaces Start-FGSync"
         'Start-CSVCrawler.ps1'        # docstring mentions "replaces Start-FGCSVSync"
     )

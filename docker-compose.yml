@@ -4,6 +4,8 @@ services:
   # Replaced SQL Server in v5. Postgres has no licensing issues, no DB size cap,
   # and no per-core licensing. The migrations runner inside the web container
   # creates all tables on first startup, so there is no separate init step.
+  # NOTE: Default credentials are for local development only.
+  #       For networked/production use, override via .env file.
   postgres:
     image: postgres:16-alpine
     environment:

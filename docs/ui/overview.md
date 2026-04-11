@@ -12,10 +12,12 @@ The Role Mining UI is a web application that visualizes your synced permission d
 
 The navigation bar has two groups of tabs:
 
-- **Always visible:** Matrix, Users, Resources, Systems, Business Roles, Sync Log
-- **Optional (hidden by default):** Risk Scores, Identities, Org Chart, Performance
+- **Always visible:** Matrix, Users, Resources, Systems, Business Roles, Sync Log, Admin
+- **Optional (hidden by default):** Risk Scores, Identities, Org Chart
 
 Optional tabs are enabled per-user via the settings dropdown (click the user avatar in the top-right corner).
+
+The **Admin** page contains sub-tabs: **Crawlers** (configure and schedule data sync), **Performance** (backend metrics), and **Auth** (authentication settings).
 
 ---
 
@@ -178,9 +180,9 @@ Displays recent sync operations from the `GraphSyncLog` table:
 
 | Tier | Score Range |
 |------|-------------|
-| Critical | 80–100 |
-| High | 60–79 |
-| Medium | 40–59 |
+| Critical | 90–100 |
+| High | 70–89 |
+| Medium | 40–69 |
 | Low | 20–39 |
 | Minimal | 1–19 |
 | None | 0 |
@@ -207,10 +209,9 @@ Manager hierarchy visualization with risk propagation.
 
 ---
 
-### Performance *(optional)*
+### Performance *(Admin sub-tab)*
 
-!!! note "Prerequisite"
-    Requires the UI to be deployed or updated with `-PerformanceMetrics`. See [UI Deployment](deployment.md#performance-monitoring).
+Available under Admin > Performance. Enabled by default (`PERF_METRICS_ENABLED=true`); set `PERF_METRICS_ENABLED=false` to disable.
 
 Backend performance metrics collected via a ring buffer (1000 entries).
 

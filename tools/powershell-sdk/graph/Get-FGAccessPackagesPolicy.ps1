@@ -12,6 +12,6 @@ function Get-FGAccessPackagesPolicy {
         $URI = $URI + "?`$filter=accessPackageId eq '$AccessPackageId'"
     }
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 }

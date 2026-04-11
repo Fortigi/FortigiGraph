@@ -1,26 +1,5 @@
 import ExcelJS from 'exceljs';
-
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function thinBorder(omitBottom = false, omitTop = false) {
-  return {
-    top:    omitTop    ? undefined : { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    left:   { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    bottom: omitBottom ? undefined : { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    right:  { style: 'thin', color: { argb: 'FFD1D5DB' } },
-  };
-}
-
-function setHeaderCell(cell, value) {
-  cell.value = value;
-  cell.font = { size: 11, bold: true, color: { argb: 'FF374151' } };
-  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
-  cell.border = thinBorder();
-}
+import { formatDate, thinBorder, setHeaderCell } from './excelHelpers';
 
 // Fetch all APs matching current filters (up to 2000)
 async function fetchAllPackages(authFetch, { search, categoryFilter, sortCol, sortDir }) {

@@ -96,10 +96,9 @@ if (-not $moduleLoaded) {
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 2: Function Availability
 # ══════════════════════════════════════════════════════════════════════
-Write-TestHeader "2. Function Availability — Base (21 functions)"
+Write-TestHeader "2. Function Availability — Base (20 functions)"
 
 $baseFunctions = @(
-    "New-FGConfig",
     "Get-FGAccessToken", "Get-FGAccessTokenInteractive", "Get-FGAccessTokenWithRefreshToken",
     "Get-FGAccessTokenDetail", "Confirm-FGAccessTokenValidity",
     "Update-FGAccessTokenIfExpired",
@@ -135,24 +134,8 @@ foreach ($func in $genericSample) {
     Add-TestResult -Category "Functions-Generic" -TestName "$func exists" -Passed $exists -Message $(if (-not $exists) { "Function not found" })
 }
 
-Write-TestHeader "2c. Function Availability — SQL (24 functions)"
-
-$sqlFunctions = @(
-    "Connect-FGSQLServer", "New-FGSQLConnection", "Test-FGSQLConnection",
-    "Initialize-FGSQLTable", "Invoke-FGSQLCommand", "Invoke-FGSQLQuery",
-    "Invoke-FGSQLBulkMerge", "Invoke-FGSQLBulkDelete",
-    "New-FGAzureSQLServer", "Remove-FGAzureSQLServer",
-    "Get-FGSQLTable", "Get-FGSQLTableSchema", "Clear-FGSQLTable",
-    "Add-FGSQLTableColumn", "New-FGSQLReadOnlyUser",
-    "Write-FGSyncLog", "Get-FGSyncLog",
-    "Initialize-FGAccessPackageViews", "Initialize-FGGroupMembershipViews",
-    "Initialize-FGGroupMembershipIndexes"
-)
-
-foreach ($func in $sqlFunctions) {
-    $exists = $null -ne (Get-Command $func -ErrorAction SilentlyContinue)
-    Add-TestResult -Category "Functions-SQL" -TestName "$func exists" -Passed $exists -Message $(if (-not $exists) { "Function not found" })
-}
+# v5: SQL helper functions were removed in the postgres migration. The worker
+# container has no DB driver — all persistence flows through the REST API.
 
 Write-TestHeader "2d. Function Availability — Sync (16 functions)"
 
@@ -266,9 +249,6 @@ $aliasPairs = @(
     @{ Function = "Get-FGUser";           Alias = "Get-User" },
     @{ Function = "Get-FGGroup";          Alias = "Get-Group" },
     @{ Function = "Get-FGAccessToken";    Alias = "Get-AccessToken" },
-    @{ Function = "New-FGConfig";         Alias = "New-Config" },
-    @{ Function = "Connect-FGSQLServer";  Alias = "Connect-SQLServer" },
-    @{ Function = "Start-FGSync";         Alias = "Start-Sync" },
     @{ Function = "Invoke-FGGetRequest";  Alias = "Invoke-GetRequest" },
     @{ Function = "Invoke-FGPostRequest"; Alias = "Invoke-PostRequest" },
     @{ Function = "Invoke-FGPutRequest";  Alias = "Invoke-PutRequest" }
@@ -311,7 +291,7 @@ foreach ($folder in $expectedFolders) {
 
     $files = Get-ChildItem -Path $folderPath -Filter "*.ps1"
     # Known exceptions: large orchestrators that intentionally contain private helper functions
-    $knownMultiFunctionExceptions = @("New-FGConfig.ps1", "Start-FGSync.ps1")
+    $knownMultiFunctionExceptions = @("Start-FGSync.ps1")
 
     foreach ($file in $files) {
         if ($file.Name -in $knownMultiFunctionExceptions) { continue }

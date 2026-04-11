@@ -13,4 +13,5 @@ RUN npm ci
 COPY . .
 
 EXPOSE 5173
+USER node
 CMD ["npm", "run", "dev", "--", "--host", "--port", "5173"]

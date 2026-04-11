@@ -10,10 +10,10 @@ function Get-FGGroupTransitiveMemberAll {
     [int]$Count = 0
 
     #Export Group Memberships
-    [array]$GroupMembership = $null
+    $GroupMembership = [System.Collections.Generic.List[hashtable]]::new()
 
     Foreach ($Group in $Groups) {
-        
+
         $Count++
         $Completed = ($Count/$GroupCount) * 100
         Write-Progress -Activity "Getting All Group Transitive Members" -Status "Progress:" -PercentComplete $Completed
@@ -27,10 +27,10 @@ function Get-FGGroupTransitiveMemberAll {
                 "memberId"   = $Member.id
                 "memberType" = $Member.'@odata.type'
             }
-            $GroupMembership += $Row
+            $GroupMembership.Add($Row)
         }
-    
+
     }
 
-    Return $GroupMembership
+    Return $GroupMembership.ToArray()
 }

@@ -120,19 +120,15 @@ if ($issues.Count -gt 0) {
     Write-Host "  ✓ Configuration validated" -ForegroundColor Green
 }
 
-# Test 5: Check SQL functions are available
-Write-Host "`n[5/5] Checking SQL functions..." -ForegroundColor Yellow
+# Test 5: Check Graph SDK functions are available (v5: no SQL helpers)
+Write-Host "`n[5/5] Checking Graph SDK functions..." -ForegroundColor Yellow
 $functions = @(
-    "Connect-FGSQLServer",
-    "New-FGSQLConnection",
-    "Test-FGSQLConnection",
-    "Initialize-FGSQLTable",
-    "Invoke-FGSQLCommand",
-    "Invoke-FGSQLQuery",
-    "New-FGAzureSQLServer",
-    "Remove-FGAzureSQLServer",
-    "Get-FGSQLTable",
-    "Clear-FGSQLTable"
+    "Get-FGAccessToken",
+    "Invoke-FGGetRequest",
+    "Invoke-FGPostRequest",
+    "Get-FGUser",
+    "Get-FGGroup",
+    "Get-FGAccessPackage"
 )
 
 $missing = @()

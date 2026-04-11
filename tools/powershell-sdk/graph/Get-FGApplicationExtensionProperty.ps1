@@ -14,7 +14,7 @@
         $URI = 'https://graph.microsoft.com/beta/applications/' + "$($id)" + "/extensionProperties"
     }
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 
 

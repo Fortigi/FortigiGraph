@@ -73,12 +73,13 @@ function Get-FGServicePrincipalWithSync {
 
     # Strategy: first try to get only provisioning-tagged SPs (fast), then fall back to
     # well-known HR/sync app names. Avoids iterating over all 3000+ SPs in large tenants.
-    $AllServicePrincipals = @()
+    $spList = [System.Collections.Generic.List[PSObject]]::new()
 
     if ($Filter) {
         # User-specified filter — use as-is
         $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=$Filter"
-        $AllServicePrincipals = Invoke-FGGetRequest -URI $URI
+        $filterResult = Invoke-FGGetRequest -URI $URI
+        if ($filterResult) { foreach ($r in $filterResult) { $spList.Add($r) } }
     } else {
         # Query only SPs likely to have provisioning configured:
         # 1. Known provisioning app IDs (Cloud Sync, Workday, SuccessFactors, etc.)
@@ -93,7 +94,7 @@ function Get-FGServicePrincipalWithSync {
         foreach ($appId in $knownProvisioningAppIds) {
             $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=appId eq '$appId'"
             $result = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
-            if ($result) { $AllServicePrincipals += $result }
+            if ($result) { foreach ($r in $result) { $spList.Add($r) } }
         }
 
         # Query by common HR provisioning display name patterns
@@ -101,29 +102,32 @@ function Get-FGServicePrincipalWithSync {
         foreach ($pattern in $hrNamePatterns) {
             $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=startswith(displayName,'$pattern')"
             $result = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
-            if ($result) { $AllServicePrincipals += $result }
+            if ($result) { foreach ($r in $result) { $spList.Add($r) } }
         }
 
         # Query SPs tagged as provisioning-enabled gallery apps
         $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=tags/any(t:t eq 'WindowsAzureActiveDirectoryGalleryApplicationNonPrimaryV1')"
         $galleryApps = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
-        if ($galleryApps) { $AllServicePrincipals += $galleryApps }
+        if ($galleryApps) { foreach ($r in $galleryApps) { $spList.Add($r) } }
 
         # Also check SCIM-provisioned apps (custom SCIM apps often have this tag)
         $URI = "https://graph.microsoft.com/beta/servicePrincipals?`$select=id,displayName,appId,tags&`$filter=tags/any(t:t eq 'WindowsAzureActiveDirectoryCustomSingleSignOnApplication')"
         $customApps = Invoke-FGGetRequest -URI $URI -ErrorAction SilentlyContinue
-        if ($customApps) { $AllServicePrincipals += $customApps }
+        if ($customApps) { foreach ($r in $customApps) { $spList.Add($r) } }
 
         # Deduplicate by id
         $seen = @{}
-        $AllServicePrincipals = @($AllServicePrincipals | Where-Object {
-            if ($seen[$_.id]) { $false } else { $seen[$_.id] = $true; $true }
-        })
+        $spList = [System.Collections.Generic.List[PSObject]]::new(
+            @($spList | Where-Object {
+                if ($seen[$_.id]) { $false } else { $seen[$_.id] = $true; $true }
+            })
+        )
     }
 
+    $AllServicePrincipals = $spList.ToArray()
     Write-Host "  Found $($AllServicePrincipals.Count) candidate service principal(s) to check" -ForegroundColor Cyan
 
-    $Results = @()
+    $ResultsList = [System.Collections.Generic.List[PSObject]]::new()
     $Count = 0
     $TotalCount = $AllServicePrincipals.Count
 
@@ -206,7 +210,7 @@ function Get-FGServicePrincipalWithSync {
                     $ResultObject | Add-Member -NotePropertyName "Schemas" -NotePropertyValue $Schemas
                 }
 
-                $Results += $ResultObject
+                $ResultsList.Add($ResultObject)
             }
         }
         catch {
@@ -215,6 +219,7 @@ function Get-FGServicePrincipalWithSync {
         }
     }
 
+    $Results = $ResultsList.ToArray()
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Discovery complete: Found $($Results.Count) service principal(s) with synchronization" -ForegroundColor Green
 
     return $Results

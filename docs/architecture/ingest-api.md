@@ -10,7 +10,7 @@ The Ingest API decouples data ingestion from the FortigiGraph core. Instead of c
 
 Today, FortigiGraph has two tightly-coupled sync paths:
 
-1. **`Start-FGSync`** — runs inside the PowerShell module, calls Graph API directly, writes to SQL via `Invoke-FGSQLBulkMerge`.
+1. **`Start-FGSync`** — runs inside the PowerShell module, calls Graph API directly, writes to the database via `Invoke-FGSQLBulkMerge` (legacy) or the Ingest API (v5).
 2. **`Start-FGCSVSync`** — runs inside the PowerShell module, reads CSV files from disk, writes to SQL via the same bulk merge.
 
 Both paths require the crawler logic to run **inside** the PowerShell module with direct SQL access.
@@ -399,7 +399,7 @@ npx @openapitools/openapi-generator-cli generate \
 
 ### Phase 1: Ingest Engine Core
 
-- Port `Invoke-FGSQLBulkMerge` pattern to JavaScript
+- Port `Invoke-FGSQLBulkMerge` pattern to JavaScript (PostgreSQL `INSERT ... ON CONFLICT`)
 - Implement JSON Schema validation, normalization, sync sessions
 
 ### Phase 2: Ingest Endpoints
@@ -484,7 +484,7 @@ FROM dbo.Principals WHERE ValidTo = '9999-12-31 23:59:59.9999999'
 
 | Risk | Mitigation |
 |------|------------|
-| JS bulk merge slower than PowerShell | Benchmark early; `mssql` BulkLoad is native TDS |
+| JS bulk merge slower than PowerShell | Benchmark early; PostgreSQL `COPY` via `pg-copy-streams` is the native fast path |
 | Data corruption during migration | Never run both paths against same system |
 | Deadlocks from concurrent crawlers | Each crawler scoped to own system; row-level locks |
 | Secret leakage | Never log keys; only store hashes |

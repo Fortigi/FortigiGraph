@@ -28,7 +28,7 @@ function Get-FGUserMail {
         $URI = "https://graph.microsoft.com/beta/users/$id/messages"
     }
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 
 

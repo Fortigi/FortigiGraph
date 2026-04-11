@@ -82,7 +82,7 @@ function Get-FGUser {
         }
     }
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 
 

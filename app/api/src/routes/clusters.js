@@ -42,33 +42,33 @@ router.get('/risk-scores/clusters', async (req, res) => {
     const pageLimit = Math.min(parseInt(limit) || 50, 200);
     const pageOffset = parseInt(offset) || 0;
 
-    let where = 'WHERE memberCount > 0';
+    let where = 'WHERE "memberCount" > 0';
     const inputs = {};
 
     if (tier) {
-      where += ' AND riskTier = @tier';
+      where += ' AND "riskTier" = @tier';
       inputs.tier = tier;
     }
     if (search) {
-      where += ' AND (displayName LIKE @search OR description LIKE @search OR sourceClassifierId LIKE @search)';
+      where += ' AND ("displayName" ILIKE @search OR "description" ILIKE @search OR "sourceClassifierId" ILIKE @search)';
       inputs.search = `%${search}%`;
     }
 
     const sortOptions = {
-      name: 'displayName ASC',
-      'name-desc': 'displayName DESC',
-      type: 'clusterType ASC',
-      'type-desc': 'clusterType DESC',
-      members: 'memberCount DESC',
-      'members-asc': 'memberCount ASC',
-      score: 'aggregateRiskScore DESC',
-      'score-asc': 'aggregateRiskScore ASC',
-      tier: 'aggregateRiskScore DESC',
-      'tier-asc': 'aggregateRiskScore ASC',
-      owner: 'ownerDisplayName ASC',
-      'owner-desc': 'ownerDisplayName DESC',
+      name: '"displayName" ASC',
+      'name-desc': '"displayName" DESC',
+      type: '"clusterType" ASC',
+      'type-desc': '"clusterType" DESC',
+      members: '"memberCount" DESC',
+      'members-asc': '"memberCount" ASC',
+      score: '"aggregateRiskScore" DESC',
+      'score-asc': '"aggregateRiskScore" ASC',
+      tier: '"aggregateRiskScore" DESC',
+      'tier-asc': '"aggregateRiskScore" ASC',
+      owner: '"ownerDisplayName" ASC',
+      'owner-desc': '"ownerDisplayName" DESC',
     };
-    let orderBy = `ORDER BY ${sortOptions[sort] || 'aggregateRiskScore DESC'}`;
+    let orderBy = `ORDER BY ${sortOptions[sort] || '"aggregateRiskScore" DESC'}`;
 
     // Count total
     const countReq = timedRequest(p, 'cluster-count', res);
@@ -83,11 +83,11 @@ router.get('/risk-scores/clusters', async (req, res) => {
     dataReq.input('offset', pageOffset);
 
     const dataResult = await dataReq.query(`
-      SELECT id, "displayName", description, "clusterType", sourceClassifierId, sourceClassifierCategory,
-             matchPatterns, "memberCount", memberCountProd, memberCountNonProd,
-             aggregateRiskScore, maxMemberRiskScore, avgMemberRiskScore,
-             "riskTier", tierDistribution,
-             ownerUserId, ownerDisplayName, "ownerAssignedAt", "ownerAssignedBy", scoredAt
+      SELECT "id", "displayName", "description", "clusterType", "sourceClassifierId", "sourceClassifierCategory",
+             "matchPatterns", "memberCount", "memberCountProd", "memberCountNonProd",
+             "aggregateRiskScore", "maxMemberRiskScore", "avgMemberRiskScore",
+             "riskTier", "tierDistribution",
+             "ownerUserId", "ownerDisplayName", "ownerAssignedAt", "ownerAssignedBy", "scoredAt"
       FROM "GraphResourceClusters"
       ${where}
       ${orderBy}
@@ -125,7 +125,7 @@ router.get('/risk-scores/clusters/:id', async (req, res) => {
     // Fetch cluster
     const clusterResult = await timedRequest(p, 'cluster-detail', res)
       .input('id', clusterId)
-      .query('SELECT * FROM "GraphResourceClusters" WHERE id = @id');
+      .query('SELECT * FROM "GraphResourceClusters" WHERE "id" = @id');
 
     if (clusterResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Cluster not found' });
@@ -142,7 +142,7 @@ router.get('/risk-scores/clusters/:id', async (req, res) => {
     if (await hasTable(p, 'GraphResourceClusterMembers')) {
       const memberResult = await timedRequest(p, 'cluster-members', res)
         .input('clusterId', clusterId)
-        .query('SELECT * FROM "GraphResourceClusterMembers" WHERE clusterId = @clusterId ORDER BY resourceRiskScore DESC');
+        .query('SELECT * FROM "GraphResourceClusterMembers" WHERE "clusterId" = @clusterId ORDER BY "resourceRiskScore" DESC');
       members = memberResult.recordset;
     }
 
@@ -176,11 +176,11 @@ router.put('/risk-scores/clusters/:id/owner', async (req, res) => {
       .input('ownerAssignedBy', assignedBy)
       .query(`
         UPDATE "GraphResourceClusters"
-        SET ownerUserId = @ownerUserId,
-            ownerDisplayName = @ownerDisplayName,
+        SET "ownerUserId" = @ownerUserId,
+            "ownerDisplayName" = @ownerDisplayName,
             "ownerAssignedAt" = now() AT TIME ZONE 'utc',
             "ownerAssignedBy" = @ownerAssignedBy
-        WHERE id = @id
+        WHERE "id" = @id
       `);
 
     if (result.rowsAffected[0] === 0) {
@@ -206,11 +206,11 @@ router.delete('/risk-scores/clusters/:id/owner', async (req, res) => {
       .input('id', clusterId)
       .query(`
         UPDATE "GraphResourceClusters"
-        SET ownerUserId = NULL,
-            ownerDisplayName = NULL,
+        SET "ownerUserId" = NULL,
+            "ownerDisplayName" = NULL,
             "ownerAssignedAt" = NULL,
             "ownerAssignedBy" = NULL
-        WHERE id = @id
+        WHERE "id" = @id
       `);
 
     if (result.rowsAffected[0] === 0) {
@@ -238,8 +238,8 @@ router.get('/risk-scores/cluster-summary', async (req, res) => {
     const stats = await timedRequest(p, 'cluster-summary', res).query(`
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN ownerUserId IS NULL THEN 1 ELSE 0 END) AS unowned,
-        MAX(scoredAt) AS lastScoredAt
+        SUM(CASE WHEN "ownerUserId" IS NULL THEN 1 ELSE 0 END) AS unowned,
+        MAX("scoredAt") AS "lastScoredAt"
       FROM "GraphResourceClusters"
       WHERE "memberCount" > 0
     `);

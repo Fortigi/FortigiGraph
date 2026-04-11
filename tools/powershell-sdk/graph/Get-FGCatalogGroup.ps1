@@ -9,6 +9,6 @@ function Get-FGCatalogGroup {
 
     $URI = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$CatalogId/accessPackageResources"
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 }

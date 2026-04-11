@@ -234,7 +234,7 @@ router.get('/group/:id', async (req, res) => {
     if (attributes.extendedAttributes) {
       try {
         attributes.extendedAttributesParsed = JSON.parse(attributes.extendedAttributes);
-      } catch { /* ignore bad JSON */ }
+      } catch (err) { console.warn('Failed to parse extendedAttributes for resource', groupId, ':', err.message); }
     }
 
     // 2. Tags (support both 'resource' and 'group' entity types)

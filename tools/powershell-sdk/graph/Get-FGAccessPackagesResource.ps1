@@ -10,6 +10,6 @@ function Get-FGAccessPackagesResource {
     #https://docs.microsoft.com/en-us/graph/api/accesspackage-list-accesspackageresourcerolescopes?view=graph-rest-beta&tabs=http
     $URI = "https://graph.microsoft.com/beta/identityGovernance/entitlementManagement/accessPackages/" + $AccessPackageID + '?$expand=accessPackageResourceRoleScopes($expand=accessPackageResourceRole,accessPackageResourceScope)'
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 }

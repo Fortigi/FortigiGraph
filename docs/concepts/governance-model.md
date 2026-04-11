@@ -57,23 +57,34 @@ erDiagram
         guid id PK
         guid resourceId FK
         string displayName
-        string policyConditions
-        bool autoAssignment
+        jsonb policyConditions
+        bool hasAutoAddRule
+        bool hasAutoRemoveRule
+        bool hasAccessReview
     }
     AssignmentRequests {
         guid id PK
         guid resourceId FK
         guid requestorId
-        string state
-        datetime requestedDateTime
+        string requestType
+        string requestState
+        string requestStatus
+        string justification
+        datetime createdDateTime
+        datetime completedDateTime
     }
     CertificationDecisions {
         guid id PK
         guid resourceId FK
+        guid principalId
         string decision
-        string reviewedBy
+        string recommendation
+        string justification
+        guid reviewedBy
         datetime reviewedDateTime
-        string certificationScopeType
+        guid reviewDefinitionId
+        guid reviewInstanceId
+        string reviewInstanceStatus
     }
 
     GovernanceCatalogs ||--o{ Resources : "contains (BusinessRole)"

@@ -57,9 +57,16 @@ erDiagram
     Identities {
         guid id PK
         string displayName
+        string email
+        string employeeId
         string department
+        string jobTitle
         guid contextId FK
-        decimal riskScore
+        guid primaryPrincipalId FK
+        guid managerIdentityId FK
+        bool isHrAnchored
+        int correlationConfidence
+        bool analystVerified
     }
     IdentityMembers {
         guid identityId FK
@@ -101,8 +108,12 @@ erDiagram
         guid resourceId FK
         guid principalId FK
         string assignmentType
+        int systemId FK
+        string principalType
+        string complianceState
         string policyId
         string state
+        string extendedAttributes
     }
     ResourceRelationships {
         guid parentResourceId FK
@@ -158,7 +169,9 @@ Identities carry the `contextId` because organizational context (department, tea
 | Audit history | Yes (via `_history` trigger) |
 | Created by | Migration `001_core_schema.sql` |
 
-Key columns: `displayName`, `contextId`, `riskScore`.
+Key columns: `displayName`, `email`, `employeeId`, `department`, `jobTitle`, `contextId`, `primaryPrincipalId`, `managerIdentityId`.
+
+Identity correlation columns: `isHrAnchored`, `hrAccountId`, `accountCount`, `accountTypes` (JSONB), `correlationSignals` (JSONB), `correlationConfidence`, `correlatedAt`, `orphanStatus`, `analystVerified`, `analystNotes`.
 
 ---
 
@@ -249,7 +262,7 @@ Captures who has access to what, and how. The `assignmentType` column distinguis
 | Audit history | Yes (via `_history` trigger) |
 | Created by | Migration `001_core_schema.sql` |
 
-Key columns: `assignmentType`, `policyId`, `state`, `assignmentStatus`, `expirationDateTime`.
+Key columns: `assignmentType`, `systemId`, `principalType`, `complianceState`, `policyId`, `state`, `assignmentStatus`, `expirationDateTime`, `extendedAttributes` (JSONB).
 
 ---
 

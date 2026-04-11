@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { TYPE_COLORS as TYPE_COLORS_SRC, AP_COLORS } from './colors';
+import { hexToArgb, thinBorder, setHeaderCell } from './excelHelpers';
 
 /**
  * Exports the matrix view to an Excel workbook matching the on-screen layout.
@@ -11,14 +12,6 @@ import { TYPE_COLORS as TYPE_COLORS_SRC, AP_COLORS } from './colors';
  *
  * Plus a "Legend" sheet showing membership types and active filters.
  */
-
-function hexToArgb(hex) {
-  // Strip # and convert to ARGB (FF prefix for full opacity)
-  const clean = hex.replace('#', '');
-  if (clean.length === 6) return 'FF' + clean.toUpperCase();
-  if (clean.length === 8) return clean.toUpperCase();
-  return 'FFFFFFFF';
-}
 
 // Derive Excel-friendly color format (no # prefix, uppercase) from shared TYPE_COLORS
 const TYPE_COLORS = Object.fromEntries(
@@ -356,29 +349,6 @@ export async function exportToExcel({ users, orderedGroups, memberships, managed
 }
 
 // ---------- Helpers ----------
-
-function thinBorder() {
-  return {
-    top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-    right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-  };
-}
-
-function setHeaderCell(cell, value, rotated = false) {
-  cell.value = value;
-  cell.font = { size: 11, bold: true, color: { argb: 'FF374151' } };
-  cell.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFF3F4F6' },
-  };
-  cell.border = thinBorder();
-  if (rotated) {
-    cell.alignment = { textRotation: 90, vertical: 'bottom', horizontal: 'center' };
-  }
-}
 
 function getApColorHex(index) {
   return AP_COLORS[index % AP_COLORS.length];

@@ -18,9 +18,9 @@ function Bar({ percent, color }) {
 }
 
 const SERVICE_LABELS = {
-  web: { label: 'Web (API + UI)', icon: '🌐' },
-  worker: { label: 'Worker (Crawlers)', icon: '⚙️' },
-  sql: { label: 'SQL Server', icon: '🗄️' },
+  web:      { label: 'Web (API + UI)',    icon: '🌐' },
+  worker:   { label: 'Worker (Crawlers)', icon: '⚙️' },
+  postgres: { label: 'PostgreSQL',        icon: '🗄️' },
 };
 
 export default function ContainerStatsPage() {

@@ -19,4 +19,9 @@ COPY api/src ./src
 COPY --from=frontend-build /app/frontend/dist ../frontend/dist
 
 EXPOSE 3001
+# Create the uploads directory with node ownership BEFORE switching user.
+# The job_data volume mounts here; Docker creates the mount-point as root
+# if it doesn't exist, and the node user can't write to it.
+RUN mkdir -p /data/uploads && chown -R node:node /data
+USER node
 CMD ["node", "src/index.js"]

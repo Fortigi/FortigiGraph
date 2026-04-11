@@ -54,7 +54,6 @@ Describe 'Module Import' {
 
 Describe 'Function Availability — Graph / Base' {
     It 'exports <_>' -ForEach @(
-        'New-FGConfig',
         'Get-FGAccessToken', 'Get-FGAccessTokenInteractive', 'Get-FGAccessTokenWithRefreshToken',
         'Get-FGAccessTokenDetail', 'Confirm-FGAccessTokenValidity',
         'Update-FGAccessTokenIfExpired',
@@ -140,7 +139,6 @@ Describe 'Alias Verification' {
         @{ Function = 'Get-FGUser';           Alias = 'Get-User' },
         @{ Function = 'Get-FGGroup';          Alias = 'Get-Group' },
         @{ Function = 'Get-FGAccessToken';    Alias = 'Get-AccessToken' },
-        @{ Function = 'New-FGConfig';         Alias = 'New-Config' },
         @{ Function = 'Invoke-FGGetRequest';  Alias = 'Invoke-GetRequest' },
         @{ Function = 'Invoke-FGPostRequest'; Alias = 'Invoke-PostRequest' }
     ) {

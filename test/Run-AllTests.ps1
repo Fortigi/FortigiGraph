@@ -15,9 +15,6 @@
 #   # Skip phases you don't need:
 #   pwsh -File _Test\Run-AllTests.ps1 -ConfigFile _Test\config.test.json -SkipIntegration -SkipE2E
 #
-#   # First-time run (creates SQL Server):
-#   pwsh -File _Test\Run-AllTests.ps1 -ConfigFile _Test\config.test.json -FirstRun
-#
 # Prerequisites:
 #   - PowerShell 7.2+
 #   - Az PowerShell module (for integration tests)

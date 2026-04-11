@@ -3,8 +3,18 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import http from 'http';
+import rateLimit from 'express-rate-limit';
 import * as db from '../db/connection.js';
 import { getAuthState } from '../config/authConfig.js';
+
+// Rate limiter for destructive admin operations (5 requests per minute)
+const adminDestructiveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { error: 'Too many admin requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -487,7 +497,7 @@ router.post('/admin/import/curated', async (req, res) => {
 // Deletes all rows from data tables (Principals, Resources, Identities, etc.)
 // but preserves crawler configs, risk profiles, and audit log so the user can
 // re-sync from a clean slate without losing their setup.
-router.post('/admin/clean-database', async (req, res) => {
+router.post('/admin/clean-database', adminDestructiveLimiter, async (req, res) => {
   if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
 
   // Tables to wipe (data only — configs/profiles/audit preserved)
@@ -515,26 +525,29 @@ router.post('/admin/clean-database', async (req, res) => {
     const wiped = [];
     const skipped = [];
 
-    for (const table of TABLES_TO_WIPE) {
-      try {
-        // Check if table exists (postgres: to_regclass returns null when missing)
-        const check = await db.queryOne(
-          `SELECT to_regclass($1) AS t`,
-          [`public."${table}"`]
-        );
-        if (!check?.t) {
-          skipped.push({ table, reason: 'does not exist' });
-          continue;
-        }
+    // Batch check: discover which tables actually exist (1 query instead of N)
+    const existResult = await db.query(
+      `SELECT t AS tbl, to_regclass('public."' || t || '"') AS oid
+       FROM unnest($1::text[]) AS t`,
+      [TABLES_TO_WIPE]
+    );
+    const existingTables = new Set(
+      (existResult.rows || []).filter(r => r.oid).map(r => r.tbl)
+    );
 
-        // v5 postgres — no temporal tables. Also clear any related _history rows.
+    for (const table of TABLES_TO_WIPE) {
+      if (!existingTables.has(table)) {
+        skipped.push({ table, reason: 'does not exist' });
+        continue;
+      }
+      try {
         const result = await db.query(`DELETE FROM "${table}"`);
         wiped.push({ table, rowsAffected: result.rowCount || 0 });
 
         // Clean the _history audit table for this table too
         try {
           await db.query(`DELETE FROM "_history" WHERE "tableName" = $1`, [table]);
-        } catch { /* _history may not exist on older deployments */ }
+        } catch (err) { console.warn('Could not clean _history for', table, ':', err.message); }
       } catch (err) {
         skipped.push({ table, reason: err.message });
       }
@@ -543,7 +556,9 @@ router.post('/admin/clean-database', async (req, res) => {
     // Reset lastRunAt on crawler configs so the UI shows them as "never run"
     try {
       await db.query(`UPDATE "CrawlerConfigs" SET "lastRunAt" = NULL, "lastRunStatus" = NULL`);
-    } catch {}
+    } catch (err) {
+      console.warn('Could not reset CrawlerConfigs during cleanup:', err.message);
+    }
 
     res.json({ message: 'Database cleaned', wiped, skipped });
   } catch (err) {
@@ -687,7 +702,7 @@ router.put('/admin/history-retention', async (req, res) => {
   }
 });
 
-router.post('/admin/history-retention/prune', async (_req, res) => {
+router.post('/admin/history-retention/prune', adminDestructiveLimiter, async (_req, res) => {
   if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
   try {
     const r = await db.queryOne(
@@ -769,12 +784,12 @@ router.get('/admin/container-stats', async (req, res) => {
     const containers = await dockerRequest('/containers/json?all=0');
     const wanted = containers.filter(c => {
       const names = (c.Names || []).map(n => n.replace(/^\//, ''));
-      return names.some(n => /fortigigraph[-_](sql|postgres|web|worker)/i.test(n));
+      return names.some(n => /fortigigraph[-_](postgres|web|worker)/i.test(n));
     });
 
     const results = await Promise.all(wanted.map(async (c) => {
       const name = (c.Names[0] || '').replace(/^\//, '');
-      const service = (name.match(/(postgres|sql|web|worker)/i) || [])[1]?.toLowerCase() || name;
+      const service = (name.match(/(postgres|web|worker)/i) || [])[1]?.toLowerCase() || name;
       try {
         const stats = await dockerRequest(`/containers/${c.Id}/stats?stream=false`);
         const memUsage = stats.memory_stats?.usage || 0;
@@ -797,7 +812,7 @@ router.get('/admin/container-stats', async (req, res) => {
       }
     }));
 
-    const order = { web: 0, worker: 1, postgres: 2, sql: 3 };
+    const order = { web: 0, worker: 1, postgres: 2 };
     results.sort((a, b) => (order[a.service] ?? 99) - (order[b.service] ?? 99));
     res.json({ containers: results, timestamp: new Date().toISOString() });
   } catch (err) {

@@ -52,18 +52,14 @@ Write-Host "--- 1. Docker Infrastructure ---" -ForegroundColor Yellow
 $ps = docker compose -f (Join-Path $repoRoot 'docker-compose.yml') ps --format json 2>&1
 $containers = $ps | ConvertFrom-Json -ErrorAction SilentlyContinue
 
-$sqlRunning = $containers | Where-Object { $_.Service -eq 'sql' -and $_.State -eq 'running' }
-Test-Check 'Infrastructure' 'SQL Server container running' ($null -ne $sqlRunning)
+$postgresRunning = $containers | Where-Object { $_.Service -eq 'postgres' -and $_.State -eq 'running' }
+Test-Check 'Infrastructure' 'PostgreSQL container running' ($null -ne $postgresRunning)
 
 $webRunning = $containers | Where-Object { $_.Service -eq 'web' -and $_.State -eq 'running' }
 Test-Check 'Infrastructure' 'Web container running' ($null -ne $webRunning)
 
 $workerRunning = $containers | Where-Object { $_.Service -eq 'worker' -and $_.State -eq 'running' }
 Test-Check 'Infrastructure' 'Worker container running' ($null -ne $workerRunning)
-
-# Check table init completed
-$initStatus = docker ps -a --filter "name=fortigigraph-sql-table-init" --format "{{.Status}}" 2>&1
-Test-Check 'Infrastructure' 'Table init completed (exit 0)' ($initStatus -match 'Exited \(0\)') $initStatus
 
 # ═══════════════════════════════════════════════════════════════════
 # 2. API HEALTH & ENDPOINTS
@@ -425,17 +421,17 @@ try {
     }
     Test-Check 'Module' "Functions loaded (>50)" ($cmdCount -ge 50) "count=$cmdCount"
 
-    # Check key functions exist
-    $keyFunctions = @('Initialize-FGSystemTables','Initialize-FGGovernanceTables','Initialize-FGCrawlerTables',
-        'Invoke-FGGetRequest','Get-FGAccessToken','Invoke-FGSQLCommand','Connect-FGSQLServer',
-        'New-FGRiskProfile','Invoke-FGRiskScoring')
+    # Check key functions exist (v5 — Graph SDK only, no SQL helpers)
+    $keyFunctions = @('Invoke-FGGetRequest','Get-FGAccessToken','Get-FGUser','Get-FGGroup')
     foreach ($fn in $keyFunctions) {
         $exists = $null -ne (Get-Command $fn -ErrorAction SilentlyContinue)
         Test-Check 'Module' "Function exists: $fn" $exists
     }
 
-    # Check deleted functions DON'T exist
-    $deletedFunctions = @('Start-FGSync','Start-FGCSVSync','Sync-FGPrincipal','Sync-FGGroup')
+    # Check deleted functions DON'T exist (v5: SQL helpers + monolithic syncs were removed)
+    $deletedFunctions = @('Start-FGSync','Start-FGCSVSync','Sync-FGPrincipal','Sync-FGGroup',
+        'Connect-FGSQLServer','Initialize-FGSystemTables','Initialize-FGGovernanceTables',
+        'Initialize-FGCrawlerTables','Invoke-FGSQLCommand','New-FGConfig')
     foreach ($fn in $deletedFunctions) {
         $exists = $null -ne (Get-Command $fn -ErrorAction SilentlyContinue)
         Test-Check 'Module' "Deleted function removed: $fn" (-not $exists) $(if ($exists) { "STILL EXISTS" })

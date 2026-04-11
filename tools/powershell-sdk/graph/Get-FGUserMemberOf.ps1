@@ -14,7 +14,7 @@ function Get-FGUserMemberOf {
 
     $URI = "https://graph.microsoft.com/beta/users/$userPrincipalName/memberOf"
 
-    $ReturnValue = Invoke-FGGetRequest -URi $URI
+    $ReturnValue = Invoke-FGGetRequest -URI $URI
     return $ReturnValue
 
 

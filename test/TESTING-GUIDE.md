@@ -75,7 +75,7 @@ End users can skip cloning entirely — see [docker-compose.prod.yml](../docker-
 docker compose up -d --build
 ```
 
-Wait ~30 seconds for SQL Server to be ready, then open [http://localhost:3001](http://localhost:3001).
+Wait ~30 seconds for PostgreSQL to be ready, then open [http://localhost:3001](http://localhost:3001).
 
 ### Step 3: Add a Microsoft Graph crawler (for tenant-backed tests)
 
@@ -235,16 +235,14 @@ Run the Microsoft Graph crawler against a real test tenant via the UI:
 ### Manual Sync Verification
 
 ```bash
-# Open a SQL shell into the SQL container
-docker exec -it fortigigraph-sql-1 /opt/mssql-tools18/bin/sqlcmd \
-  -S localhost -U sa -P 'FortigiGraph_Local1!' -d GraphData -No
+# Open a psql shell into the postgres container
+docker compose exec postgres psql -U identity_atlas -d identity_atlas
 
 # Row counts
-SELECT (SELECT COUNT(*) FROM dbo.Principals) AS Users,
-       (SELECT COUNT(*) FROM dbo.Resources)  AS Resources,
-       (SELECT COUNT(*) FROM dbo.ResourceAssignments) AS Assignments,
-       (SELECT COUNT(*) FROM dbo.Identities) AS Identities;
-GO
+SELECT (SELECT count(*) FROM "Principals") AS users,
+       (SELECT count(*) FROM "Resources")  AS resources,
+       (SELECT count(*) FROM "ResourceAssignments") AS assignments,
+       (SELECT count(*) FROM "Identities") AS identities;
 ```
 
 ---
@@ -499,8 +497,6 @@ test/
 ├── nightly/
 │   ├── Register-NightlySchedule.ps1
 │   └── Run-NightlyLocal.ps1
-└── automation/
-    └── github-nightly-tests.yml  # Nightly GitHub Actions workflow
 
 app/
 ├── api/
@@ -576,20 +572,9 @@ Runs on every pull request to `main` or `dev`. No Docker, no external credential
 
 **Typical duration:** 3–5 minutes.
 
-### Nightly Pipeline (`test/automation/github-nightly-tests.yml`)
+### Nightly Pipeline
 
-Runs at 02:00 UTC daily and on-demand. Brings up the Docker stack inside the runner, runs the integration suite + Playwright E2E, then tears it down.
-
-**Required secrets** (Settings → Secrets → Actions):
-
-| Secret | Required | Value |
-|--------|----------|-------|
-| `GRAPH_TENANT_ID` | Optional | Tenant ID for crawler tests |
-| `GRAPH_CLIENT_ID` | Optional | Graph App Registration client ID |
-| `GRAPH_CLIENT_SECRET` | Optional | Graph API client secret |
-| `LLM_API_KEY` | Optional | Anthropic or OpenAI key (for risk scoring tests) |
-
-**Artifacts retained 30 days:** Pester JUnit XML, Playwright HTML report, failure screenshots.
+The nightly suite runs locally on a dedicated test VM via Windows Task Scheduler. See `test/nightly/Register-ReviewSchedule.ps1` and `docs/operations/nightly-review.md` for setup. The legacy GitHub Actions nightly workflow has been removed in v5 — running Docker-in-Docker with PostgreSQL inside a runner was unreliable, and the local-VM approach gives the Claude review hook full access to fix-and-rerun.
 
 ### Cost Considerations
 
