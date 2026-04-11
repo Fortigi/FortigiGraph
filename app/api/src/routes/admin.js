@@ -649,6 +649,60 @@ function isAdminRequest(req) {
   return !!req.user; // any signed-in UI user
 }
 
+// ─── Dashboard stats — one-shot overview of loaded data ────────────────────
+//
+// Used by the Dashboard / landing page to show a summary of what's in the
+// system. Returns counts for every entity type, plus the risk-scoring
+// feature status and a flag indicating whether any crawler has ever run.
+//
+// Single round-trip to the database: one multi-value SELECT. If any table
+// doesn't exist yet (fresh install before migrations fully land) each
+// subquery falls back to zero via COALESCE.
+router.get('/admin/dashboard-stats', async (_req, res) => {
+  if (process.env.USE_SQL !== 'true') return res.status(503).json({ error: 'SQL not configured' });
+  try {
+    const stats = await db.queryOne(`
+      SELECT
+        (SELECT COUNT(*)::int FROM "Systems")                                 AS "systems",
+        (SELECT COUNT(*)::int FROM "Resources")                               AS "resources",
+        (SELECT COUNT(*)::int FROM "Resources" WHERE "resourceType"='BusinessRole') AS "businessRoles",
+        (SELECT COUNT(*)::int FROM "Principals")                              AS "users",
+        (SELECT COUNT(*)::int FROM "Identities")                              AS "identities",
+        (SELECT COUNT(*)::int FROM "ResourceAssignments")                     AS "assignments",
+        (SELECT COUNT(*)::int FROM "ResourceAssignments" WHERE "assignmentType"='Governed') AS "governedAssignments",
+        (SELECT COUNT(*)::int FROM "ResourceRelationships")                   AS "relationships",
+        (SELECT COUNT(*)::int FROM "Contexts")                                AS "contexts",
+        (SELECT COUNT(*)::int FROM "CertificationDecisions")                  AS "certifications",
+        (SELECT COUNT(*)::int FROM "GraphSyncLog")                            AS "syncLogEntries",
+        (SELECT MAX("StartTime") FROM "GraphSyncLog")                         AS "lastSyncAt",
+        (SELECT COUNT(*)::int FROM "RiskScores")                              AS "riskScores",
+        (SELECT COUNT(*)::int FROM "RiskProfiles" WHERE "isActive")           AS "activeRiskProfile",
+        (SELECT COUNT(*)::int FROM "RiskClassifiers" WHERE "isActive")        AS "activeClassifiers",
+        (SELECT COUNT(*)::int FROM "CrawlerConfigs" WHERE enabled)            AS "enabledCrawlers",
+        (SELECT COUNT(*)::int FROM "CrawlerJobs" WHERE status='running')      AS "runningJobs"
+    `);
+
+    // Is the LLM configured? (needed for risk-scoring readiness)
+    let llmConfigured = false;
+    try {
+      const cfg = await db.queryOne(
+        `SELECT 1 FROM "WorkerConfig" WHERE "configKey" = 'LLM_CONFIG'`
+      );
+      const key = await db.queryOne(`SELECT 1 FROM "Secrets" WHERE id = 'llm.apikey'`);
+      llmConfigured = !!(cfg && key);
+    } catch { /* Secrets table may not exist on very old deployments */ }
+
+    res.json({
+      ...stats,
+      llmConfigured,
+      hasData: (stats.users || 0) + (stats.resources || 0) > 0,
+    });
+  } catch (err) {
+    console.error('dashboard-stats failed:', err.message);
+    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+  }
+});
+
 // ─── History retention setting ──────────────────────────────────────────────
 // Controls how long rows in the `_history` audit table are kept before being
 // pruned. Default is 180 days. Setting to 0 disables pruning entirely.

@@ -98,8 +98,21 @@ nav:
       - SQL Views: reference/sql-views.md
       - Temporal Tables: reference/temporal-tables.md
       - Troubleshooting: reference/troubleshooting.md
+  - About:
+      - About Identity Atlas: about.md
+      - History: history.md
 
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/Fortigi/FortigiGraph
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/wimvdheijkant/
+      name: Wim van den Heijkant (lead developer)
+    - icon: fontawesome/solid/globe
+      link: https://www.fortigi.nl
+      name: Fortigi
+
+copyright: >
+  Created by <a href="https://www.fortigi.nl">Maatschap Fortigi</a> —
+  lead developer <a href="https://www.linkedin.com/in/wimvdheijkant/">Wim van den Heijkant</a>

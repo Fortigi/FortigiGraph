@@ -4,6 +4,7 @@ import { useAuth } from './auth/AuthGate';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Lazy-load page components (route-based code splitting)
+const DashboardPage = lazy(() => import('./components/DashboardPage'));
 const MatrixView = lazy(() => import('./components/MatrixView'));
 const SyncLogPage = lazy(() => import('./components/SyncLogPage'));
 const UsersPage = lazy(() => import('./components/UsersPage'));
@@ -27,7 +28,7 @@ const AdminPage = lazy(() => import('./components/AdminPage'));
 // ─── URL helpers ──────────────────────────────────────────────────
 
 function parseHash() {
-  const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'matrix');
+  const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'dashboard');
   const qIndex = raw.indexOf('?');
   const page = qIndex >= 0 ? raw.substring(0, qIndex) : raw;
   const params = new URLSearchParams(qIndex >= 0 ? raw.substring(qIndex + 1) : '');
@@ -69,7 +70,7 @@ export function buildMatrixUrl(state) {
 
 function useHashRoute() {
   const getPage = () => {
-    const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'matrix');
+    const raw = decodeURIComponent(window.location.hash.replace('#', '') || 'dashboard');
     const qIndex = raw.indexOf('?');
     return qIndex >= 0 ? raw.substring(0, qIndex) : raw;
   };
@@ -84,6 +85,7 @@ function useHashRoute() {
 }
 
 const ALL_NAV_TABS = [
+  { key: 'dashboard',        label: 'Dashboard' },
   { key: 'matrix',           label: 'Matrix' },
   { key: 'users',            label: 'Users' },
   { key: 'resources',        label: 'Resources' },
@@ -134,20 +136,10 @@ export default function App() {
     [features]
   );
 
-  // First-visit redirect: send user to Crawlers page when no data exists (runs once)
-  const firstVisitRef = useRef(false);
-  useEffect(() => {
-    if (firstVisitRef.current) return;
-    firstVisitRef.current = true;
-    fetch('/api/admin/status')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d && !d.hasData && window.location.hash.replace('#', '') === 'matrix') {
-          window.location.hash = 'admin?sub=crawlers';
-        }
-      })
-      .catch(() => {});
-  }, []);
+  // The Dashboard page handles the no-data case with its own "Configure a
+  // crawler" CTA. In v5 the default landing page is the Dashboard — the old
+  // first-visit redirect that jumped to Admin → Crawlers is no longer needed
+  // because the Dashboard IS the onboarding surface.
 
   useEffect(() => {
     fetch('/api/version').then(r => r.json()).then(d => setModuleVersion(d.version)).catch(() => {});
@@ -461,6 +453,8 @@ export default function App() {
         <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-gray-500">Loading...</div></div>}>
           {isDetailPage ? (
             renderDetailPage()
+          ) : page === 'dashboard' ? (
+            <DashboardPage onNavigate={navigate} />
           ) : page === 'sync-log' ? (
             <SyncLogPage />
           ) : page === 'users' ? (
