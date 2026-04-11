@@ -9,16 +9,19 @@ theme:
   name: material
   logo: assets/logo.png
   favicon: assets/logo.png
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - scheme: default
-      primary: green
-      accent: green
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: green
-      accent: green
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -61,6 +64,8 @@ markdown_extensions:
 plugins:
   - search
 
+extra_css:
+  - assets/extra.css
 
 nav:
   - Home: index.md
