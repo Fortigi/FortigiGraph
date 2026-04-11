@@ -19,6 +19,7 @@ import { dirname } from 'path';
 import * as db from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
 import { selfTest as vaultSelfTest } from './secrets/vault.js';
+import { startScheduler } from './scheduler.js';
 
 const WORKER_KEY_FILE = process.env.WORKER_KEY_FILE || '/data/uploads/.builtin-worker-key';
 
@@ -199,6 +200,7 @@ export async function bootstrapWorker() {
     await runMigrations(pool);
     await ensureBuiltinCrawler();
     startHistoryPruneJob();
+    startScheduler();
     // Reap stale jobs: on every web container start, mark ALL jobs stuck in
     // 'running' or 'queued' as failed. After a container restart, no worker
     // process is continuing these jobs — they're dead. The old 2-hour
