@@ -5,7 +5,7 @@ const router = Router();
 const useSql = process.env.USE_SQL === 'true';
 
 // Optional tabs that can be toggled. Default = hidden.
-const OPTIONAL_TABS = ['risk-scores', 'identities', 'org-chart', 'performance'];
+const OPTIONAL_TABS = ['risk-scores', 'identities', 'org-chart', 'performance', 'admin'];
 
 let tableEnsured = false;
 

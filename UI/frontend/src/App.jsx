@@ -17,6 +17,7 @@ const RiskScoringPage = lazy(() => import('./components/RiskScoringPage'));
 const OrgChartPage = lazy(() => import('./components/OrgChartPage'));
 const DepartmentDetailPage = lazy(() => import('./components/DepartmentDetailPage'));
 const IdentitiesPage = lazy(() => import('./components/IdentitiesPage'));
+const AdminPage = lazy(() => import('./components/AdminPage'));
 // const GovernancePage = lazy(() => import('./components/GovernancePage')); // temporarily disabled
 
 // ─── URL helpers ──────────────────────────────────────────────────
@@ -88,6 +89,7 @@ const ALL_NAV_TABS = [
   { key: 'identities',       label: 'Identities',   feature: 'accountCorrelation', optional: true },
   { key: 'org-chart',        label: 'Org Chart',     feature: 'riskScoring',        optional: true },
   { key: 'performance',      label: 'Performance',                                  optional: true },
+  { key: 'admin',            label: 'Admin',                                        optional: true },
 ];
 
 export default function App() {
@@ -427,6 +429,8 @@ export default function App() {
             <IdentitiesPage onOpenDetail={openDetailTab} />
           ) : page === 'org-chart' ? (
             <OrgChartPage onOpenDetail={openDetailTab} onCacheData={onCacheData} />
+          ) : page === 'admin' ? (
+            <AdminPage />
           ) : page === 'performance' ? (
             <PerfPage />
           ) : loading ? (
