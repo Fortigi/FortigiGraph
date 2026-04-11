@@ -188,7 +188,7 @@ export default function DashboardPage({ onNavigate }) {
           </div>
           <div className="mt-3 text-xs">
             <a href={`${GITHUB_BASE}/blob/main/CHANGES.md`} target="_blank" rel="noopener noreferrer" className="text-lime-700 hover:text-lime-800 font-medium hover:underline inline-flex items-center gap-1">
-              What's new in this branch →
+              What is new →
             </a>
           </div>
         </div>
